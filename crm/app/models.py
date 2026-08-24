@@ -32,9 +32,7 @@ class SalesTask(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-    # Intentionally missing on the starter: due_date.
-    # Hidden graders expect an optional date stored as ISO 8601 UTC.
 
     customer: Mapped[Customer] = relationship(back_populates="tasks")
