@@ -8,12 +8,13 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.dates import parse_due_date, serialize_due_date, utc_today
 from app.db import Base, get_engine, get_session
 from app.models import Customer, SalesTask
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-app = FastAPI(title="Northwind Field CRM", version="0.1.0")
+app = FastAPI(title="Northwind Field CRM", version="0.2.0")
 
 
 @app.on_event("startup")
@@ -40,7 +41,6 @@ def customers_page(
 ):
     stmt = select(Customer).order_by(Customer.name)
     rows = session.scalars(stmt).all()
-    # Known bug (ticket T002): search is case-sensitive exact match on full name.
     if q:
         rows = [row for row in rows if row.name == q]
     return TEMPLATES.TemplateResponse(
@@ -55,14 +55,11 @@ def tasks_page(
     request: Request,
     status: str | None = None,
     customer_id: int | None = None,
+    due_before: str | None = None,
+    overdue: str | None = None,
     session: Session = Depends(get_session),
 ):
-    stmt = select(SalesTask).order_by(SalesTask.id.desc())
-    if status:
-        stmt = stmt.where(SalesTask.status == status)
-    if customer_id:
-        stmt = stmt.where(SalesTask.customer_id == customer_id)
-    tasks = session.scalars(stmt).all()
+    tasks = _query_tasks(session, status, customer_id, due_before, overdue)
     customers = session.scalars(select(Customer).order_by(Customer.name)).all()
     return TEMPLATES.TemplateResponse(
         request,
@@ -72,6 +69,8 @@ def tasks_page(
             "customers": customers,
             "status": status or "",
             "customer_id": customer_id or "",
+            "due_before": due_before or "",
+            "overdue": overdue or "",
         },
     )
 
@@ -92,6 +91,7 @@ def create_task_form(
     title: str = Form(...),
     notes: str = Form(""),
     status: str = Form("open"),
+    due_date: str = Form(""),
     session: Session = Depends(get_session),
 ):
     task = SalesTask(
@@ -99,6 +99,7 @@ def create_task_form(
         title=title.strip(),
         notes=notes.strip(),
         status=status,
+        due_date=parse_due_date(due_date),
     )
     session.add(task)
     session.commit()
@@ -125,14 +126,12 @@ def api_customers(
 def api_tasks(
     status: str | None = Query(default=None),
     customer_id: int | None = Query(default=None),
+    due_before: str | None = Query(default=None),
+    overdue: str | None = Query(default=None),
     session: Session = Depends(get_session),
 ):
-    stmt = select(SalesTask).order_by(SalesTask.id)
-    if status:
-        stmt = stmt.where(SalesTask.status == status)
-    if customer_id:
-        stmt = stmt.where(SalesTask.customer_id == customer_id)
-    return [_task_payload(row) for row in session.scalars(stmt).all()]
+    tasks = _query_tasks(session, status, customer_id, due_before, overdue)
+    return [_task_payload(row) for row in tasks]
 
 
 @app.post("/api/customers")
@@ -155,6 +154,7 @@ def api_create_task(payload: dict, session: Session = Depends(get_session)):
         title=payload["title"],
         notes=payload.get("notes", ""),
         status=payload.get("status", "open"),
+        due_date=parse_due_date(payload.get("due_date")),
     )
     session.add(row)
     session.commit()
@@ -170,9 +170,36 @@ def api_patch_task(task_id: int, payload: dict, session: Session = Depends(get_s
     for key in ("title", "notes", "status"):
         if key in payload:
             setattr(row, key, payload[key])
+    if "due_date" in payload:
+        row.due_date = parse_due_date(payload.get("due_date"))
     session.commit()
     session.refresh(row)
     return _task_payload(row)
+
+
+def _query_tasks(session: Session, status, customer_id, due_before, overdue):
+    stmt = select(SalesTask).order_by(SalesTask.id)
+    if status:
+        stmt = stmt.where(SalesTask.status == status)
+    if customer_id:
+        stmt = stmt.where(SalesTask.customer_id == customer_id)
+    rows = list(session.scalars(stmt).all())
+    if due_before:
+        cutoff = parse_due_date(due_before)
+        if cutoff is not None:
+            rows = [
+                row
+                for row in rows
+                if row.due_date is not None and row.due_date.date() < cutoff.date()
+            ]
+    if overdue and overdue.lower() in {"1", "true", "yes", "on"}:
+        today = utc_today()
+        rows = [
+            row
+            for row in rows
+            if row.status == "open" and row.due_date is not None and row.due_date.date() < today
+        ]
+    return rows
 
 
 def _customer_payload(row: Customer) -> dict:
@@ -191,4 +218,5 @@ def _task_payload(row: SalesTask) -> dict:
         "title": row.title,
         "status": row.status,
         "notes": row.notes,
+        "due_date": serialize_due_date(row.due_date),
     }
