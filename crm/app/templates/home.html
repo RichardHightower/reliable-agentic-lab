@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="muted">Small sales CRM for the workshop. Customers and follow-up tasks.</p>
+<p>{{ customers|length }} customers. {{ tasks|length }} tasks.</p>
+<p><a href="/tasks/new">Add a task</a></p>
+{% endblock %}
