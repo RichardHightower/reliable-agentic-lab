@@ -11,6 +11,8 @@ Start here:
 
 - [SETUP.md](SETUP.md)
 - [INSTRUCTIONS.md](INSTRUCTIONS.md)
+- [slides/README.md](slides/README.md) Marp decks and session notes
+- [slides/FEATURE-MAP.md](slides/FEATURE-MAP.md) which loop feature each hour proves
 
 ## Layout
 
@@ -22,6 +24,7 @@ solutions/m2-harness       Maker, Checker, rubric, hidden grader, gates
 solutions/m3-research      report loop. Fact-check. Style enforcer.
 solutions/m4-production    unattended runner plus GitHub Actions
 labs/                      exercises later. Empty until solutions pass.
+slides/                    four session decks plus narrative notes
 ```
 
 Every solutions package has `README.md`, `SETUP.md`, `INSTRUCTIONS.md`,
