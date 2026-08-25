@@ -1,12 +1,20 @@
 # Module 2 solution: evaluation harness
 
-Wraps the Ticket Implementer. Maker writes CRM files. Checker has no write tools.
-Python holds the loop. Hidden pytest is the grader.
+Locked title: Harness Engineering. Center of gravity. Do not cut this.
 
-```bash
-PYTHONPATH=solutions/m2-harness python -m loops.implementer --maker none
-PYTHONPATH=solutions/m2-harness python -m loops.implementer --maker reference
-pytest solutions/m2-harness/tests solutions/m2-harness/graders -q
-```
+Wraps the Module 1 implementer.
 
-Exit: pass, max loops, repeated failure signature.
+- Orchestrator holds the budget.
+- Maker edits CRM files. Limited tools.
+- Checker reads grader output. No write tools.
+- Rubric loads success criteria from the ready ticket.
+- Grader is hidden pytest.
+- Quality gates: pass, retry, escalate.
+- Traces write to local JSON. Same schema if Langfuse joins later.
+
+## Docs
+
+- [SETUP.md](SETUP.md)
+- [INSTRUCTIONS.md](INSTRUCTIONS.md)
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
