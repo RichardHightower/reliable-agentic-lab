@@ -1,6 +1,5 @@
 __pycache__/
 *.py[cod]
-*.egg-info/
 .venv/
 venv/
 .env
@@ -8,14 +7,11 @@ venv/
 *.sqlite
 .pytest_cache/
 .mypy_cache/
-.ruff_cache/
 .coverage
-htmlcov/
-.langfuse/
-harness/traces/*.json
-!harness/traces/.gitkeep
+solutions/m2-harness/traces/*.json
+!solutions/m2-harness/traces/.gitkeep
+solutions/m1-implementer/work/
+solutions/m1-implementer/PR.md
+solutions/m3-research/work/
+solutions/m4-production/state.json
 .DS_Store
-.idea/
-.vscode/
-worktrees/
-*.log

@@ -1,0 +1,35 @@
+name: unattended-loop
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: m2 harness or m3 research
+        default: m2
+        type: choice
+        options: [m2, m3]
+  pull_request:
+  schedule:
+    - cron: "0 15 * * 1-5"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -r solutions/crm/requirements.txt
+      - name: Run unattended loop
+        run: python solutions/m4-production/run_unattended.py --target ${{ github.event.inputs.target || 'm2' }}
+      - name: Upload state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unattended-state
+          path: |
+            solutions/m4-production/state.json
+            solutions/m2-harness/traces
+            solutions/m3-research/work

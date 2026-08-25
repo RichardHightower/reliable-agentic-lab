@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>New sales task</h2>
+<form method="post" action="/tasks/new">
+  <label>Customer
+    <select name="customer_id" required>
+      {% for row in customers %}
+      <option value="{{ row.id }}">{{ row.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Title
+    <input name="title" required />
+  </label>
+  <label>Due date
+    <input type="date" name="due_date" />
+  </label>
+  <label>Notes
+    <textarea name="notes" rows="3"></textarea>
+  </label>
+  <label>Status
+    <select name="status">
+      <option value="open">open</option>
+      <option value="done">done</option>
+    </select>
+  </label>
+  <p><button type="submit">Save task</button></p>
+</form>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Customers</h2>
+<form class="inline" method="get" action="/customers">
+  <label>Search
+    <input name="q" value="{{ q }}" />
+  </label>
+  <button type="submit">Find</button>
+</form>
+<table>
+  <thead><tr><th>Name</th><th>Company</th><th>Email</th></tr></thead>
+  <tbody>
+    {% for row in customers %}
+    <tr>
+      <td>{{ row.name }}</td>
+      <td>{{ row.company }}</td>
+      <td>{{ row.email }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

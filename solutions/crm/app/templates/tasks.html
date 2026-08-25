@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Sales tasks</h2>
+<form class="inline" method="get" action="/tasks">
+  <label>Status
+    <select name="status">
+      <option value="">any</option>
+      <option value="open" {% if status == "open" %}selected{% endif %}>open</option>
+      <option value="done" {% if status == "done" %}selected{% endif %}>done</option>
+    </select>
+  </label>
+  <label>Due before
+    <input type="date" name="due_before" value="{{ due_before }}" />
+  </label>
+  <label>Overdue
+    <select name="overdue">
+      <option value="">no</option>
+      <option value="true" {% if overdue == "true" %}selected{% endif %}>true</option>
+    </select>
+  </label>
+  <button type="submit">Filter</button>
+</form>
+<table>
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Customer</th>
+      <th>Status</th>
+      <th>Due</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in tasks %}
+    <tr>
+      <td>{{ row.title }}</td>
+      <td>{{ row.customer.name }}</td>
+      <td>{{ row.status }}</td>
+      <td>{{ row.due_date.date().isoformat() if row.due_date else "" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

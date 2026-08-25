@@ -1,77 +1,67 @@
 # reliable-agentic-lab
 
-Private lab repo for **Engineering Reliable Agentic AI Systems**.
+Working solutions for **Engineering Reliable Agentic AI Systems**.
+Packt workshop. Saturday 29 August 2026. 10:00 to 15:00 Central.
 
-Workshop: Saturday 29 August 2026. Teach 10:00 to 15:00 Central.
 Instructor: Rick Hightower.
 
 Do not invent a new outline. This repo maps onto the locked four modules.
 
-## What this is
-
-TicketCloser on a sample customer relationship management (CRM) app.
-Not a ticketing app.
-
-Attendees clone the CRM. They do not build it.
-
-Three loops sit on that app. Attendees do not build all three live.
-
-1. Ticket Enhancer. Vague ticket to a testable contract.
-2. Ticket Implementer. Ready ticket to a pull request.
-3. Broken PR Fixer. Failing pull request to a mergeable pull request.
-
-First graded ticket: add a due date on sales tasks.
-
 ## Layout
 
 ```
-crm/                 sample app. Docker. SQLite. Customers and sales tasks.
-harness/tickets/     markdown tickets with states
-harness/loops/       implementer, enhancer, fixer
-harness/graders/     hidden contract tests
-harness/rubrics/
-harness/contracts/   Module 2 paper contract
-harness/runbooks/    25-minute paths, added per module
+solutions/crm              known-good CRM with due dates
+solutions/tickets          markdown tickets, including the ready T001 contract
+solutions/m1-implementer   one autonomous loop. Ready ticket to a graded change and a PR body.
+solutions/m2-harness       Maker, Checker, rubric, hidden grader, quality gates, local traces.
+solutions/m3-research      v3-shaped report loop. Perplexity or fixture. Fact-check. Style enforcer.
+solutions/m4-production    unattended runner plus GitHub Actions
+labs/                      exercises later. Empty until solutions pass.
 ```
 
-## Sunday proof (23 August)
+No per-module branches. Solutions live in folders. Labs come after.
 
-Hidden due-date tests fail on `main`.
-The same tests pass on `known-good`.
+## Prove it
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r crm/requirements.txt
-export PYTHONPATH="$PWD/crm"
-pytest crm/tests -q
-pytest harness/graders/test_due_date_contract.py -q   # expected fail on main
-python harness/loops/implementer/run.py              # stub: one Claude call if keyed, then pytest
+pip install -r solutions/crm/requirements.txt
+
+# CRM + hidden grader
+export PYTHONPATH="$PWD/solutions/crm"
+pytest solutions/crm/tests solutions/m2-harness/graders -q
+
+# Module 1 loop
+python solutions/m1-implementer/loop.py
+
+# Module 2 harness (already green on the known-good CRM)
+PYTHONPATH=solutions/m2-harness python -m loops.implementer --maker none
+pytest solutions/m2-harness/tests -q
+
+# Module 3 report loop
+python solutions/m3-research/loop.py
+python solutions/m3-research/loop.py --dirty
+pytest solutions/m3-research/tests -q
+
+# Module 4 unattended
+python solutions/m4-production/run_unattended.py --target m2
+python solutions/m4-production/run_unattended.py --target m3
 ```
 
 Boot the CRM:
 
 ```bash
-cd crm
+cd solutions/crm
 docker compose up --build
 ```
 
-Or without Docker:
+## What they take home
 
-```bash
-export PYTHONPATH="$PWD/crm"
-python -m app.seed
-uvicorn app.main:app --reload --app-dir crm
-```
+1. A running loop.
+2. A reusable harness.
+3. One MCP research assistant that writes a report, fact-checks it, and enforces style.
+4. A production-ready Actions architecture.
 
-## Branches
-
-See `docs/BRANCHES.md`.
-
-Module start and done branches land through the week.
-`main` today is the failing starter plus docs.
-`known-good` is the instructor proof that the due-date contract is reachable.
-
-## Fall-behind path
-
-Stop typing. Watch Rick finish. Clone the done branch. Continue.
+Claude Agent SDK and LangChain Deep Agents are equivalent shapes for sub-agent scope.
+This reference loop is Python-owned retries, rubrics, and stop rules so Saturday does not depend on a product tour.

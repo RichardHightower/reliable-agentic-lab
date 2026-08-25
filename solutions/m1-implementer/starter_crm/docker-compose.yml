@@ -1,0 +1,12 @@
+services:
+  crm:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      CRM_DATABASE_URL: sqlite:////data/crm.db
+    volumes:
+      - crm-data:/data
+
+volumes:
+  crm-data:

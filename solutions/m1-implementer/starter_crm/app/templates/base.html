@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Northwind Field CRM</title>
+    <style>
+      :root { font-family: Georgia, serif; color: #1b1b1b; background: #f6f1e8; }
+      body { margin: 0; }
+      header, main { max-width: 920px; margin: 0 auto; padding: 1rem 1.25rem; }
+      header { display: flex; justify-content: space-between; align-items: baseline; }
+      a { color: #163f2d; }
+      table { width: 100%; border-collapse: collapse; background: #fff; }
+      th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #ddd; }
+      form.inline { display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap; }
+      label { display: flex; flex-direction: column; font-size: 0.85rem; }
+      input, select, textarea { font: inherit; padding: 0.3rem; }
+      .muted { color: #666; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Northwind Field CRM</h1>
+      <nav>
+        <a href="/">Home</a>
+        · <a href="/customers">Customers</a>
+        · <a href="/tasks">Tasks</a>
+        · <a href="/tasks/new">New task</a>
+      </nav>
+    </header>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
