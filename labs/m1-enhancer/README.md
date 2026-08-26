@@ -32,7 +32,7 @@ Pick one tool and paste its prompt.
 ## Verify
 
 ```bash
-task loop:enhancer -- --repo ../../work/northwind-field-crm --ticket T001
+task loop:enhancer -- --ticket T001
 ```
 
 ## When it stops

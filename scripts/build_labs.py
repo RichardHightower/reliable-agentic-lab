@@ -69,7 +69,7 @@ LABS_SPEC = [
             "two rounds in a row find exactly the same gaps, which means the human "
             "has not acted and another round will not help",
         ],
-        verify=["task loop:enhancer -- --repo ../../work/northwind-field-crm --ticket T001"],
+        verify=["task loop:enhancer -- --ticket T001"],
         gate_note=(
             "This lab writes no code, so the push gate does not fire. You meet it in "
             "Module 2."
@@ -141,8 +141,8 @@ def decide_next(
             "the iteration or money budget is spent",
         ],
         verify=[
-            "task loop:implementer -- --repo ../../work/northwind-field-crm --ticket T001 --doer reference",
-            "task loop:implementer -- --repo ../../work/northwind-field-crm --ticket T001 --doer none",
+            "task loop:implementer -- --ticket T001 --doer reference",
+            "task loop:implementer -- --ticket T001 --doer none",
         ],
         gate_note=(
             "You will hit the push gate in this lab. Your agent will try to push and be "
@@ -283,7 +283,7 @@ def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
             "the same tests fail twice",
             "the budget is spent, and it leaves a comment saying why",
         ],
-        verify=["task loop:fixer -- --repo ../../work/northwind-field-crm --doer reference"],
+        verify=["task loop:fixer -- --doer reference"],
         gate_note=(
             "Nobody is watching this one. Its exits matter more than its successes, and "
             "the same gate that blocks your push blocks its push."

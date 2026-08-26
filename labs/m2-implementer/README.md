@@ -32,8 +32,8 @@ Pick one tool and paste its prompt.
 ## Verify
 
 ```bash
-task loop:implementer -- --repo ../../work/northwind-field-crm --ticket T001 --doer reference
-task loop:implementer -- --repo ../../work/northwind-field-crm --ticket T001 --doer none
+task loop:implementer -- --ticket T001 --doer reference
+task loop:implementer -- --ticket T001 --doer none
 ```
 
 ## When it stops

@@ -22,22 +22,23 @@ Saturday 29 August 2026. 10:00 Central.
 <!--
 id: s1-02
 layout: split-right
-minutes: 1
+minutes: 2
 beat: talk
 image: images/four-artifacts.png
 image_prompt: >
   16:9 clean infographic. Four stacked artifacts as physical objects on a bench.
-  1 a small running loop as a glowing ring. 2 a harness as a caliper and checklist.
-  3 a research assistant as a notebook with one tool plug. 4 a factory building with
-  a GitHub-style workflow. Neutral paper, one green accent. No logos. No vendor marks.
+  1 a small running loop as a glowing ring. 2 a harness as a caliper and a
+  checklist. 3 a research assistant as a notebook with one tool plug. 4 a factory
+  building with a workflow file pinned to the wall. Neutral paper, one green
+  accent. No logos. No vendor marks.
 -->
 
 # Four artifacts. You leave with all four.
 
-- A running autonomous loop in the first hour
+- A running autonomous loop, in the first hour
 - A reusable evaluation harness
 - One live research assistant over Model Context Protocol (MCP)
-- A production architecture you can hand to your org
+- A production architecture you can hand to your team
 
 ![bg right:42%](images/four-artifacts.png)
 
@@ -45,30 +46,8 @@ image_prompt: >
 
 <!--
 id: s1-03
-layout: figure-bottom
-minutes: 2
-beat: talk
--->
-
-# Loop Engineering is making an agent repeatable.
-
-Prompting dies under volume. By 15:00 you have a loop, a harness, one research assistant, and a deploy.
-
-```mermaid
-flowchart LR
-  A[Trigger] --> B[Action]
-  B --> C[Verify]
-  C -->|fail| B
-  C -->|pass| D[Memory]
-  D --> E[Human]
-```
-
----
-
-<!--
-id: s1-04
 layout: split-right
-minutes: 1
+minutes: 2
 beat: talk
 image: images/prompting-volume.png
 image_prompt: >
@@ -79,34 +58,60 @@ image_prompt: >
 
 # Prompting dies under volume.
 
-- One clever prompt works once
-- Ten tickets a day, it drifts
-- A hundred, nobody remembers what good looked like
-- The bottleneck is not the model. It is you.
+- One clever prompt works once.
+- Ten tickets a day, it drifts.
+- A hundred, and nobody remembers what good looked like.
+- The bottleneck is not the model. It is you, reading every diff.
 
 ![bg right:42%](images/prompting-volume.png)
 
 ---
 
 <!--
-id: s1-05
-layout: split-left
-minutes: 1
+id: s1-04
+layout: figure-bottom
+minutes: 2
 beat: talk
-image: images/second-brain-point-back.png
-image_prompt: >
-  16:9 quiet diagram. A small labeled box "20 August. Repo as second brain."
-  An arrow points forward to a larger box "29 August. Grade the loop."
-  Paper background. No screenshots of the free-hour deck. No logos.
 -->
 
-# We already did architecture. Today we grade.
+# A loop is not "call the model until it says done."
 
-- 20 August. Repo as second brain. Event log as source of truth.
-- We do not rebuild that hour.
-- Today we build the missing layer. A loop you can score.
+A production loop is a state machine. Every iteration:
 
-![bg left:40%](images/second-brain-point-back.png)
+1. starts from **explicit state**, not from chat history,
+2. gets **bounded authority**, not the whole repo,
+3. produces **observable evidence**, not a claim,
+4. and passes through a transition function **you** enforce, not the model.
+
+Take away any one of the four and you have a generator with a while loop.
+
+---
+
+<!--
+id: s1-05
+layout: split-left
+minutes: 2
+beat: talk
+image: images/alphacodium-jump.png
+image_prompt: >
+  16:9. A simple bar chart drawn on graph paper, two bars only. The short bar is
+  gray and the tall bar is green, roughly double. A caliper rests beside the tall
+  bar. Hand-drawn axis, no numbers rendered as text. No logos.
+-->
+
+# The evidence for looping is not vibes.
+
+AlphaCodium, on the CodeContests validation set:
+
+| Approach | pass@5 |
+|---|---|
+| One well-designed direct prompt | 19% |
+| Plan, generate against tests, iterate | 44% |
+
+Same model. The flow did that, not the prompt.
+<br/><small>Ridnik et al., arXiv:2401.08500</small>
+
+![bg left:40%](images/alphacodium-jump.png)
 
 ---
 
@@ -115,63 +120,45 @@ id: s1-06
 layout: split-right
 minutes: 1
 beat: talk
-image: images/crm-not-tickets.png
+image: images/crm-target-repo.png
 image_prompt: >
-  16:9. Two doors. Left door labeled "Ticketing app" is marked wrong, too meta.
-  Right door labeled "Small CRM. Customers. Sales tasks." is open, green light.
-  Inside: a due date field on a paper task card. No vendor UI. No logos.
+  16:9. Two repository folders side by side on a workbench. The left one is
+  labeled ENGINE and holds gears. The right one is labeled TARGET and holds a
+  paper task card with an empty due date box. A cable joins them, labeled
+  Taskfile. Paper and green ink. No vendor UI. No logos.
 -->
 
-# The object is TicketCloser on a CRM.
+# The object is a CRM, and it lives in another repo.
 
-- Customer relationship management (CRM). Customers. Sales tasks.
+- A small customer relationship management app. Customers. Sales tasks.
 - Not a ticketing app. Too meta.
-- First ticket: add a due date. Vague on purpose until it is ready.
+- The engine never imports it. You point the loop at a path.
+- First ticket: add a due date. Vague on purpose.
 
-![bg right:42%](images/crm-not-tickets.png)
+![bg right:42%](images/crm-target-repo.png)
 
 ---
 
 <!--
 id: s1-07
-layout: figure-bottom
-minutes: 2
-beat: talk
--->
-
-# Three loops. You do not build all three live.
-
-Today you build the implementer once. The enhancer is Session 3. The fixer is Session 4.
-
-```mermaid
-flowchart LR
-  subgraph today [Session 1]
-    R[Ready ticket] --> I[Implementer]
-    I --> PR[Pull request]
-  end
-  D[Draft ticket] -.->|Session 3| R
-  PR -.->|Session 4| F[PR Fixer]
-```
-
----
-
-<!--
-id: s1-08
 layout: lab
 minutes: 1
 beat: talk
 -->
 
-# Clock. Fall behind is allowed.
+# The clock, and permission to fall behind.
 
-- 10 minutes open. 45 minutes this module. Then a break.
-- Stay on the runbook. 25 minutes of typing, not 45.
-- Stuck? Stop typing. Watch. Copy `solutions/m1-implementer`. Continue.
+- 10 minutes open. 45 this module. Then a break.
+- The lab is 25 minutes of typing, not 45.
+- Stuck? Stop typing and watch. `git checkout done-m1` and you continue with a
+  working artifact.
+
+Nobody leaves this room behind.
 
 ---
 
 <!--
-id: s1-09
+id: s1-08
 layout: section
 minutes: 0
 beat: talk
@@ -179,12 +166,12 @@ beat: talk
 
 # Anatomy of an agent loop
 
-Triggers. Actions. Verify. Memory. Human oversight.
+Trigger. Action. Verify. Memory. Human oversight.
 
 ---
 
 <!--
-id: s1-10
+id: s1-09
 layout: figure-top
 minutes: 2
 beat: talk
@@ -192,14 +179,39 @@ beat: talk
 
 ```mermaid
 flowchart TB
-  T[Trigger. Ready ticket T001] --> A[Action. Edit five CRM files]
-  A --> V[Verify. Hidden pytest]
-  V -->|fail| A
-  V -->|pass| M[Memory. Work copy and PR body]
-  M --> H[Human. Merge or not]
+  T[Trigger. A draft ticket on disk.] --> A[Action. A doer edits the ticket body.]
+  A --> V[Verify. A judge scores it against criteria.]
+  V -->|not ready| A
+  V -->|ready| M[Memory. The ticket file and the trace.]
+  M --> H[Human. Accepts the contract, or does not.]
 ```
 
-Five parts. Verify is the stage that separates self-correction from a script.
+Five parts. **Verify** is the one that separates a loop from a script that calls
+a model.
+
+---
+
+<!--
+id: s1-10
+layout: split-right
+minutes: 2
+beat: talk
+image: images/trigger-ticket.png
+image_prompt: >
+  16:9 close crop of a manila folder tab reading T001. Inside, a short list of
+  bullets, two of them blank. A faint draft page underneath is scribbled and
+  thin. Paper, brass fastener. No laptop. No logos.
+-->
+
+# Trigger
+
+- Something outside the model starts the work.
+- Ours today: a draft markdown ticket in the target repo.
+- Not a chat. Not "hey, add due dates."
+- In production it is a webhook or a schedule, and it fires only when the
+  branch head actually moved. A trigger that fires on no change burns budget.
+
+![bg right:42%](images/trigger-ticket.png)
 
 ---
 
@@ -208,66 +220,73 @@ id: s1-11
 layout: split-right
 minutes: 2
 beat: talk
-image: images/trigger-ticket.png
+image: images/scope-is-a-type.png
 image_prompt: >
-  16:9 close crop of a manila folder tab reading T001 READY. Inside, a short
-  list of testable bullets. A faint draft page underneath is scribbled and thin.
-  Paper, brass fastener. No laptop. No logos.
+  16:9. A desk with a single drawer open, holding exactly one file. Every other
+  drawer has no handle at all, so it cannot be opened. A small label reads
+  write scope. Graphite and green. No logos.
 -->
 
-# Trigger
+# Action, inside a scope you declared
 
-- Something outside the model starts the work.
-- Ours: a ready markdown ticket on disk.
-- Not a chat. Not "hey, add due dates."
-- If the trigger is vague, the loop guesses. That is Session 3's problem.
+- A **doer** writes files. Only inside a declared scope.
+- The scope lives in `.loop.yml`, in the target repo.
+- It is enforced at the tool boundary, not in the prompt.
 
-![bg right:42%](images/trigger-ticket.png)
+An agent can argue its way past an instruction. It cannot argue its way past a
+tool it was never given.
+
+![bg right:42%](images/scope-is-a-type.png)
 
 ---
 
 <!--
 id: s1-12
-layout: split-right
+layout: split-left
 minutes: 2
 beat: talk
-image: images/action-scoped-files.png
+image: images/judge-no-hands.png
 image_prompt: >
-  16:9. Five file cards only: dates.py, models.py, main.py, task_form.html,
-  tasks.html. A red stamp "out of scope" on graders and tickets. Workshop table.
-  No IDE screenshot. No logos.
+  16:9. A figure at a lectern reading a scorecard aloud. The lectern has no
+  keyboard, no pen, no drawer. Behind it, a locked cabinet labeled files.
+  Calm workshop poster style. No logos.
 -->
 
-# Action
+# Verify
 
-- Smallest change that can pass the contract.
-- Five files. Due date on sales tasks.
-- Not a new app. Not a rewrite.
+- A **judge** scores the result. It reports, and that is all it does.
+- The judge holds no write path. Not a rule. A missing method.
+- Today it answers: is this ticket a contract a test could fail?
 
-![bg right:42%](images/action-scoped-files.png)
+If verify is "looks good to me," you do not have a loop. You have a generator.
+
+![bg left:40%](images/judge-no-hands.png)
 
 ---
 
 <!--
 id: s1-13
-layout: split-left
+layout: split-right
 minutes: 2
 beat: talk
-image: images/verify-pytest.png
+image: images/context-middle.png
 image_prompt: >
-  16:9 terminal-adjacent illustration. A stamp PASS in green and FAIL in red
-  over a hidden-tests folder. No actual pytest traceback text. The folder is
-  labeled "grader. humans do not edit." Graphite and green.
+  16:9. A long paper scroll pinned at both ends. The text at the top and the
+  bottom is crisp. The middle third is faded almost to nothing. A small green
+  tag marks the fade. Paper texture. No readable words. No logos.
 -->
 
-# Verify
+# Memory, and why the context window is not it
 
-- A check the agent did not write.
-- Hidden pytest. Model, API, filters.
-- No hardcoded customer names.
-- If verify is "looks good to me," you do not have a loop. You have a generator.
+Liu et al. 2024 measured it. Accuracy is highest when the fact sits at the
+**start** or the **end** of the context. Move it to the middle and accuracy drops
+by more than 30%.
 
-![bg left:40%](images/verify-pytest.png)
+- Reproduced on GPT-4, Claude, MPT-30B, and Cohere Command.
+- So state goes on disk: the ticket, the trace, the plan.
+- Big output goes to a file. Only a short summary returns to the orchestrator.
+
+![bg right:42%](images/context-middle.png)
 
 ---
 
@@ -276,153 +295,130 @@ id: s1-14
 layout: split-right
 minutes: 2
 beat: talk
-image: images/memory-not-chat.png
-image_prompt: >
-  16:9. A chat bubble fading to gray. In front of it, two solid objects: a
-  git work folder and a PR.md page. Caption energy: memory lives here.
-  No logos. No Claude UI.
--->
-
-# Memory
-
-- Chat is not memory. It evaporates.
-- The work copy is memory. The PR body is memory.
-- 20 August already said the repo is the second brain. We use that. We do not reteach it.
-
-![bg right:42%](images/memory-not-chat.png)
-
----
-
-<!--
-id: s1-15
-layout: split-right
-minutes: 2
-beat: talk
 image: images/human-merges.png
 image_prompt: >
-  16:9. A merge box with a human hand on the lid. The agent stands aside
-  holding a completed PR. The hand is the only thing that can close the box.
+  16:9. A merge box with a human hand resting on the lid. The agent stands aside
+  holding a finished document. The hand is the only thing that can open the box.
   Calm. No violence. No logos.
 -->
 
 # Human oversight
 
-- The loop opens a PR. It does not merge.
-- A human still owns production.
-- Oversight is a designed step, not a hope.
+- The loop proposes. A human accepts.
+- Today: the loop rewrites the ticket. You decide it is a contract.
+- In Module 2 the loop opens a pull request. It still does not merge.
+
+Oversight is a designed step, not a hope.
 
 ![bg right:42%](images/human-merges.png)
 
 ---
 
 <!--
-id: s1-16
+id: s1-15
 layout: figure-bottom
 minutes: 2
 beat: talk
 -->
 
-# The ready contract. This is what we grade.
-
-If a bullet is not testable, the enhancer is not done. You do not implement from the draft.
+# Three parts, and the object is the only variable.
 
 ```mermaid
 flowchart TB
-  Draft["Draft. Add due dates."] --> Ready
-  Ready["Ready. optional UTC ISO due_date. due_before. overdue. null stays valid."]
-  Ready --> Tests["Hidden tests. Model. API. Filter. Form."]
+  O[Orchestrator. Owns the budget and the exits. Writes nothing.]
+  O --> D[Doer. Writes inside a declared scope.]
+  O --> J[Judge. Scores. Holds no write path.]
 ```
+
+| Module | Object |
+|---|---|
+| 1 | A draft ticket |
+| 2 | A ready ticket, and the code that satisfies it |
+| 3 | A question |
+| 4 | A failing pull request |
+
+Same graph, four times. Learn it once.
+
+---
+
+<!--
+id: s1-16
+layout: lab
+minutes: 25
+beat: lab
+-->
+
+# Lab 1. The Ticket Enhancer. 25 minutes.
+
+```bash
+cd labs/m1-enhancer
+claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
+
+task loop:enhancer -- --ticket T001           # it escalates. that is correct.
+task loop:enhancer -- --ticket T001 --incorporate
+```
+
+Fill `loop.py`. Two functions: `judge_ticket` and `decide_next`.
+
+This lab writes no code, so the push gate stays quiet. You meet it in Module 2.
+
+Falling behind is fine: `git checkout done-m1`.
 
 ---
 
 <!--
 id: s1-17
-layout: lab
-minutes: 1
+layout: figure-bottom
+minutes: 2
 beat: lab
 -->
 
-# Lab. 25 minutes. One pass. No harness UI.
+# Read the trace. The interesting run is the one that stops.
 
-```bash
-export PYTHONPATH="$PWD/solutions/crm"
-pytest solutions/m2-harness/graders -q          # green on known-good
-python solutions/m1-implementer/loop.py         # starter copy, patch, PR.md
+```
+round 1: feature, not ready
+  missing: why it is worth doing
+  missing: acceptance criteria a test can fail
+round 2: feature, not ready
+  missing: why it is worth doing
+  missing: acceptance criteria a test can fail
+
+gate: escalate
+reason: the same rows failed twice. The loop is not converging.
 ```
 
-Stuck? Stop. Watch. Copy `solutions/m1-implementer`.
+An iteration that burns tokens and reproduces the identical failure is not
+progress. Stopping is the feature.
 
 ---
 
 <!--
 id: s1-18
 layout: split-right
-minutes: 3
-beat: lab
-image: images/starter-crm-fail.png
-image_prompt: >
-  16:9. A simple CRM task list on paper. The due column is a blank hole.
-  A red tag "hidden tests: fail." Same table later with dates filled and a
-  green tag, shown as a ghost overlay. No browser chrome. No logos.
--->
-
-# What fail then pass looks like
-
-- Starter CRM has customers and tasks. No due date.
-- Hidden tests fail. That is the point.
-- After the loop: field, form, `due_before`, `overdue`.
-- Seed rows stay valid with null.
-
-![bg right:42%](images/starter-crm-fail.png)
-
----
-
-<!--
-id: s1-19
-layout: figure-bottom
 minutes: 2
-beat: lab
--->
-
-# You just ran a loop. Name the five parts.
-
-If you cannot point to verify, you built a script that calls a model.
-
-```mermaid
-flowchart LR
-  T[Ready ticket] --> A[Edit five files]
-  A --> V[Hidden pytest]
-  V --> M[work/ plus PR.md]
-  M --> H[You still merge]
-```
-
----
-
-<!--
-id: s1-20
-layout: split-right
-minutes: 3
 beat: bridge
 image: images/oneshot-breaks.png
 image_prompt: >
-  16:9 triptych. Panel 1 empty contract. Panel 2 a loop that never stops,
-  a snake eating itself. Panel 3 a context window stuffed with whole files
-  until it tears. Same gray-green palette. No logos. No product UI.
+  16:9 triptych. Panel 1, an empty contract form. Panel 2, a loop that never
+  stops, drawn as a ring with no exit. Panel 3, a context window stuffed with
+  whole files until the seam tears. Same gray-green palette. No logos.
 -->
 
-# Where one-shot loops break
+# Where this breaks at scale
 
-- No contract. The agent invents the field type.
-- No stop. It keeps editing.
-- Context rot. The whole repo goes in the window.
-- That is why Session 2 exists.
+- **No contract.** The doer invents the field type, and you find out in review.
+- **No stop.** It edits forever, and the bill arrives on Monday.
+- **No scope.** It weakens the test instead of fixing the code.
+- **Context rot.** The whole repo goes into the window and quality falls.
+
+Each one has a fix. All four fixes are Module 2.
 
 ![bg right:42%](images/oneshot-breaks.png)
 
 ---
 
 <!--
-id: s1-21
+id: s1-19
 layout: title
 minutes: 1
 beat: bridge
@@ -430,5 +426,7 @@ beat: bridge
 
 # Break. 15 minutes.
 
-Next: wrap this loop. Maker. Checker. Rubric. Gates. Stop conditions.
-Do not cut Session 2.
+Next: the harness. Two doers, a red gate, ten rubric rows, and a gate that
+refuses to let you push.
+
+Module 2 is the one that does not get cut.

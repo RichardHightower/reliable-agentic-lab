@@ -42,7 +42,7 @@ There are three exits and no fourth: pass, retry, escalate.
 ## Verify
 
 ```bash
-task loop:enhancer -- --repo ../../work/northwind-field-crm --ticket T001
+task loop:enhancer -- --ticket T001
 ```
 
 ## The gate

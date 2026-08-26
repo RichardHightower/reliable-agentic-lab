@@ -42,7 +42,7 @@ There are three exits and no fourth: pass, retry, escalate.
 ## Verify
 
 ```bash
-task loop:fixer -- --repo ../../work/northwind-field-crm --doer reference
+task loop:fixer -- --doer reference
 ```
 
 ## The gate
