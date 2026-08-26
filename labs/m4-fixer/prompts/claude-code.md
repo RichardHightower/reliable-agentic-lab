@@ -1,5 +1,15 @@
 # Prompt for Claude Code
 
+Claude Code is not required. See [labs/HOW-TO-RUN.md](../../HOW-TO-RUN.md).
+
+Headless (no TUI):
+
+```bash
+claude -p "$(cat labs/m4-fixer/prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
+```
+
+Interactive: run `claude` at the repo root and paste everything below this line.
+
 Fill `labs/m4-fixer/loop.py`.
 
 Seed a broken PR from `solutions/m1-implementer/starter_crm`.

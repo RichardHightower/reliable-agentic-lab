@@ -11,7 +11,8 @@ Saturday order:
 | `labs/m3-enhancer` | Ticket Enhancer as the research assistant | `solutions/loops/enhancer.py` |
 | `labs/m4-fixer` | Broken PR Fixer as the production pattern | `solutions/loops/fixer.py` |
 
-Each lab has `prompts/claude-code.md`, `prompts/agent-sdk.md`, and `prompts/langgraph.md`.
-Paste one prompt into your tool. Do not fill all three approaches.
+Each lab has prompts for Claude Code, OpenCode, Codex, Grok Build, the Agent Software Development Kit, and LangGraph.
+Claude Code is not required. Headless commands: [HOW-TO-RUN.md](HOW-TO-RUN.md).
+Pick one tool. Do not fill every approach.
 
 Polling is the default discovery mechanism. Webhooks stay pinned for later.

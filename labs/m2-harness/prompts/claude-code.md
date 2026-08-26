@@ -1,6 +1,14 @@
 # Prompt for Claude Code
 
-Paste this into Claude Code.
+Claude Code is not required. See [labs/HOW-TO-RUN.md](../../HOW-TO-RUN.md).
+
+Headless (no TUI):
+
+```bash
+claude -p "$(cat labs/m2-harness/prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
+```
+
+Interactive: run `claude` at the repo root and paste everything below this line.
 
 Fill `labs/m2-harness/harness.py`.
 

@@ -16,7 +16,8 @@ The repo is private. Rick adds attendees as collaborators. Fork it onto your acc
 
 Docker Desktop is optional. It boots the CRM in a container. Graders do not need it.
 
-Claude, Codex, Cursor, or Gemini as a coding tool is the Saturday default.
+A coding agent CLI is optional. Claude Code is not required.
+Use Claude Code, OpenCode, Codex, or Grok Build. Headless commands live in [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md).
 The Agent Software Development Kit and LangGraph are optional tracks.
 
 ## 1. Clone or fork
@@ -134,7 +135,18 @@ python -m solutions.loops implementer --maker reference
 python -m solutions.loops fixer --maker reference
 ```
 
-Saturday labs are stubs. Open one folder under `labs/`. Paste one file from that folder's `prompts/` into Claude Code, the Agent SDK, or LangGraph.
+Saturday labs are stubs. Claude Code is not required.
+From the repo root, run one prompt headless:
+
+```bash
+claude -p "$(cat labs/m1-implementer/prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
+opencode run --dir . "$(cat labs/m1-implementer/prompts/claude-code.md)"
+codex exec "$(cat labs/m1-implementer/prompts/claude-code.md)"
+grok -p "$(cat labs/m1-implementer/prompts/claude-code.md)" --no-auto-update
+```
+
+Or start the tool interactively and paste the same file.
+Details: [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md).
 
 | Lab | Stub | Working example |
 |---|---|---|
@@ -151,7 +163,8 @@ If you stall: stop typing, watch Rick, copy from `solutions/`.
 |---|---|---|
 | `GITHUB_TOKEN` | live GitHub polling | No. Local board is the fallback. |
 | `ANTHROPIC_API_KEY` | Claude calls | No |
-| `OPENAI_API_KEY` | OpenAI calls | No |
+| `OPENAI_API_KEY` | OpenAI / Codex | No |
+| `XAI_API_KEY` | Grok Build | No |
 | `PERPLEXITY_API_KEY` | Module 3 live search | No. Fixture is the fallback. |
 | `LANGFUSE_*` | cloud traces | No. Local JSON traces are the fallback. |
 

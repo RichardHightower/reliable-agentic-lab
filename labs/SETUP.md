@@ -16,7 +16,7 @@ Then:
 
 1. Activate `.venv`.
 2. Open one lab folder.
-3. Paste one prompt from that lab's `prompts/` directory.
+3. Paste one prompt from that lab's `prompts/` directory, or run it headless. Claude Code is not required. See [HOW-TO-RUN.md](HOW-TO-RUN.md).
 4. Keep graders read-only.
 
 ```bash

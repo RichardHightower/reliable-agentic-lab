@@ -1,5 +1,15 @@
 # Prompt for Claude Code
 
+Claude Code is not required. See [labs/HOW-TO-RUN.md](../../HOW-TO-RUN.md).
+
+Headless (no TUI):
+
+```bash
+claude -p "$(cat labs/m3-enhancer/prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
+```
+
+Interactive: run `claude` at the repo root and paste everything below this line.
+
 Fill `labs/m3-enhancer/loop.py`.
 
 This is the Ticket Enhancer. It is also the Module 3 research assistant.

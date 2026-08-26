@@ -10,6 +10,7 @@ Do not invent a new outline. This repo maps onto the locked four modules.
 Start here:
 
 - [SETUP.md](SETUP.md) clone or fork, venv, `.env`, verify script
+- [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md) Claude Code is not required. Headless for Claude Code, OpenCode, Codex, Grok Build
 - [INSTRUCTIONS.md](INSTRUCTIONS.md)
 - [slides/README.md](slides/README.md) Marp decks and session notes
 - [slides/FEATURE-MAP.md](slides/FEATURE-MAP.md) which loop feature each hour proves
