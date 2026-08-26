@@ -11,12 +11,13 @@ grok -p "$(cat labs/extra-credit/prompts/claude-code.md)" --no-auto-update
 
 This is extra credit. Not Saturday.
 
-Fill `labs/extra-credit/scripts/groom_ticket.py` and `labs/extra-credit/scripts/fix_pr.py`.
+Fill `labs/extra-credit/scripts/groom_ticket.py`, `labs/extra-credit/scripts/fix_pr.py`, and `labs/extra-credit/scripts/webhook_server.py`.
 
 Requirements:
 
-- Trigger is GitHub Actions, not a polling loop.
-- Reuse the same criteria, ready label, retry budget, and hidden grader as the PRD loops.
+- Trigger may be GitHub Actions, ngrok, or a DigitalOcean Droplet. Not a polling loop.
+- One FastAPI `POST /github-webhook`. Verify `X-Hub-Signature-256`.
+- Route `issues` opened to the groomer, `ready` labeled to the fulfiller, failed `check_suite` to the fixer.
 - Set and clear `agent-in-progress`. Increment `agent-attempts-N`. Stop at `AGENT_MAX_ATTEMPTS`.
 - Log JSON. Comment when you give up.
 - Copy YAML from `labs/extra-credit/workflows/` onto a fork. Do not enable it on the instructor repo.

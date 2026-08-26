@@ -71,3 +71,60 @@ Required Actions secrets on the fork:
 This is excellent practice for production event-driven agent design.
 It is still extra credit. Module 2 stays the center of Saturday.
 If you stall on extra credit, stop and return to the polling labs.
+
+## 5. Extra credit. ngrok for local webhook triggers
+
+This path lets students run the agents on their own laptop while still getting real GitHub webhooks.
+
+ngrok creates a public HTTPS URL that tunnels to a local server. GitHub sends issue and PR events to that URL. The local agent handles them immediately.
+
+Free tier as of August 2026: up to 3 online endpoints, 1 GB transfer per month, 20,000 HTTP requests per month, interstitial page on free endpoints. Good enough for class demos. Paid plans start around $8 per month for a reserved domain. Free URLs change on every restart.
+
+How it fits the three agents:
+
+1. Ticket Groomer: webhook on `issues` opened or labeled → ngrok URL → local FastAPI `/github-webhook` → grooming logic → `ready` label or suggested edits.
+2. Ticket Fulfiller: webhook on issues labeled `ready` → same endpoint → implementation plan, tests, PR.
+3. PR Fixer: webhook on `check_suite` failure or `pull_request` synchronize → same endpoint → fix within budget, comment if it stops.
+
+Minimal setup:
+
+1. Install ngrok and authenticate. A free account is fine.
+2. Run `python solutions/extra_credit/webhook.py --port 8765`
+3. `ngrok http 8765`
+4. Copy the public HTTPS URL.
+5. GitHub, Settings, Webhooks. Payload URL `https://…/github-webhook`. Events: issues, check_suite, pull_request.
+6. Verify the GitHub webhook secret, then call the same agent logic as polling.
+
+Student notes: [labs/extra-credit/NGROK.md](../labs/extra-credit/NGROK.md)
+
+## 6. Extra credit. DigitalOcean VPS plus webhooks
+
+A permanent public endpoint on a cheap Droplet. Same FastAPI receiver as ngrok.
+
+Goal: Ubuntu 24.04 Droplet, about $6 per month, Nginx plus Let's Encrypt, systemd, GitHub events routed to Groomer, Fulfiller, or Fixer.
+
+`AGENT_BACKEND` selects the implementation behind the same entry point:
+
+- `python` working extra-credit loops
+- `claude` headless `claude -p`
+- `opencode` / `codex` / `grok`
+- `agent-sdk` / `langgraph` lab stubs
+
+Student notes: [labs/extra-credit/deploy/DIGITALOCEAN.md](../labs/extra-credit/deploy/DIGITALOCEAN.md)
+Nginx sample: [labs/extra-credit/deploy/nginx.conf](../labs/extra-credit/deploy/nginx.conf)
+systemd sample: [labs/extra-credit/deploy/agent-webhook.service](../labs/extra-credit/deploy/agent-webhook.service)
+
+Do not run this on the shared instructor Droplet during class unless Rick says so. Students use their own account.
+
+## 7. Shared webhook safety
+
+These rules apply to Actions, ngrok, and the Droplet:
+
+- Always verify `X-Hub-Signature-256`.
+- Use `agent-in-progress` or a lock file so the same ticket is not processed twice.
+- Enforce the same max-iteration budget as polling.
+- Log every decision (`last-groom.json`, `last-fix.json`, `last-webhook.json`).
+- Store secrets in `.env` or systemd `EnvironmentFile`. Never commit them.
+
+This is still extra credit. Students implement the core loop once. Only the trigger changes: poll, Actions, ngrok, or a VPS.
+

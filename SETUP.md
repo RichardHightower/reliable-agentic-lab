@@ -176,8 +176,11 @@ Copy YAML from `labs/extra-credit/workflows/` onto your fork. Leave it off the i
 ```bash
 python solutions/extra_credit/groom_ticket.py --issue T001 --incorporate
 python solutions/extra_credit/fix_pr.py --pr T001 --maker reference
+python solutions/extra_credit/webhook.py --port 8765
 ```
 
+ngrok path: [labs/extra-credit/NGROK.md](labs/extra-credit/NGROK.md)
+Droplet path: [labs/extra-credit/deploy/DIGITALOCEAN.md](labs/extra-credit/deploy/DIGITALOCEAN.md)
 Details: [docs/PRD-extra-credit.md](docs/PRD-extra-credit.md).
 
 ## Docs in every package
