@@ -42,7 +42,20 @@ tasks:
     desc: Run the end-to-end tests.
     cmds:
       - mkdir -p reports
-      - '{{.PY}} -m pytest loops/tests -q -m e2e --junitxml=reports/junit-e2e.xml'
+      # pytest exits 5 when it collects nothing. An empty e2e suite is a real
+      # state, not a failure: the engine has no interface, and a target repo has
+      # no interface test until the feature exists. The rubric's ui_has_e2e row
+      # is what judges that, by reading the report. This exit code is not.
+      - |
+        set +e
+        {{.PY}} -m pytest loops/tests -q -m e2e --junitxml=reports/junit-e2e.xml
+        code=$?
+        set -e
+        if [ $code -eq 5 ]; then
+          echo "no e2e tests here. ui_has_e2e in the rubric is what checks for them."
+          exit 0
+        fi
+        exit $code
 
   lint:
     cmds: ['{{.PY}} -m ruff check loops scripts solutions labs']

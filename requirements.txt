@@ -7,6 +7,6 @@ sqlalchemy==2.0.41
 httpx==0.28.1
 pytest==8.3.5
 pytest-cov==6.0.0
-ruff==0.8.4
+ruff==0.16.4
 PyYAML==6.0.2
 python-dotenv==1.1.1
