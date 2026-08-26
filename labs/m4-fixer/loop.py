@@ -1,30 +1,33 @@
-#!/usr/bin/env python3
-"""Module 4 stub. Broken PR Fixer. Fill repair_until_green()."""
+"""Lab 4. The Broken PR Fixer.
+
+Fill the two functions below.
+
+This loop runs unattended. Nobody is watching to stop it, so the exits matter
+more than the successes, and giving up silently is the one thing it may not do.
+
+Read `loops/fixer.py` only if you stall.
+"""
+
 from __future__ import annotations
 
-import argparse
-import json
-import sys
-from pathlib import Path
+import _root  # noqa: F401  (puts the repo root on sys.path)
 
-REPO = Path(__file__).resolve().parents[1].parent
-if str(REPO) not in sys.path:
-    sys.path.insert(0, str(REPO))
+from loops.contract import Contract, RunResult
 
 
-def repair_until_green(*, maker: str, budget: int) -> dict:
-    raise NotImplementedError("fill repair_until_green() - see prompts/")
+def summarize_failure(run_result: RunResult) -> str:
+    """Say what is broken, in a few lines a human can act on.
+
+    The orchestrator sees this, not the whole log. Name the failing tests and
+    the first real error line.
+    """
+    raise NotImplementedError("fill me in")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--maker", choices=["none", "reference"], default="none")
-    parser.add_argument("--budget", type=int, default=3)
-    args = parser.parse_args()
-    payload = repair_until_green(maker=args.maker, budget=args.budget)
-    print(json.dumps(payload, indent=2))
-    return 0 if payload.get("passed") else 1
+def repair_until_green(contract: Contract, budget: int = 3) -> dict:
+    """Repair until the suite is green, or stop and explain.
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    Stopping is designed. Stopping without an explanation is a bug: the next
+    person to look at this pull request has to know why the agent walked away.
+    """
+    raise NotImplementedError("fill me in")

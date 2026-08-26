@@ -6,7 +6,7 @@ You do not need Claude Code. Any of the four tools works. See
 Run it from this folder:
 
 ```bash
-cd labs/m4-fixer
+cd labs/m3-research
 claude -p "$(cat prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
 ```
 
@@ -16,16 +16,16 @@ Interactive: run `claude` here and paste everything below the line.
 
 Fill `loop.py` in this folder. Fill only that file.
 
-A failing branch in, a green one out, or an honest explanation of why not.
+A question in, a cited brief out. Same graph, different object.
 
 ## What to implement
 
-- `summarize_failure(run_result)`
-- `repair_until_green(contract, budget)`
+- `plan_questions(question)`
+- `check_brief(body, sources)`
 
 ## The roles
 
-This loop has orchestrator owns the budget, a code implementer repairs inside its scope, and a judge reads the suite.
+This loop has orchestrator owns the budget, a researcher calls the tool boundary, a writer assembles the brief, and a judge checks grounding and style without a model.
 
 Write scope is not advice. It is declared in `.loop.yml` in the target repo and
 enforced at the tool boundary. The code implementer cannot weaken a test to
@@ -35,28 +35,29 @@ reach green, because it holds no write path to one.
 
 There are three exits and no fourth: pass, retry, escalate.
 
-1. the suite is green
-2. the same tests fail twice
-3. the budget is spent, and it leaves a comment saying why
+1. the brief is grounded and clean
+2. the search budget is spent
+3. no source could be found, which escalates rather than shipping an uncited brief
 
 ## Verify
 
 ```bash
-task loop:fixer -- --repo ../../work/northwind-field-crm --doer reference
+task loop:research -- --question "sqlalchemy nullable datetime column" --backend fixture
 ```
 
 ## The gate
 
-Nobody is watching this one. Its exits matter more than its successes, and the same gate that blocks your push blocks its push.
+The boundary is the lesson. This loop can search and write into its own output folder. It cannot merge, deploy, or touch the repo.
 
 ## Rules
 
 - Fill only `loop.py`. Do not edit anything under `loops/`.
 - Do not edit the target repo's tests to make something pass.
 - Stop at the documented exit. Do not add a fourth one.
-- If you stall, read loops/fixer.py. It is the answer, not a hint.
+- If you stall, read loops/researcher.py, loops/research.py, and loops/brief.py. It is the answer, not a hint.
 
 ## Worth reading
 
-- `loops/fixer.py`
-- `loops/gates.py`
+- `loops/brief.py`
+- `loops/research.py`
+- `MCP.md`

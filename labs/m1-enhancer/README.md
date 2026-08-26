@@ -1,13 +1,13 @@
-# Lab 4. Broken PR Fixer, unattended
+# Lab 1. Ticket Enhancer
 
-A failing branch in, a green one out, or an honest explanation of why not.
+A vague ticket in, a ready contract out.
 
-**18 minutes. Artifact: A production-ready architecture you can hand to your engineering org.**
+**25 minutes. Artifact: A working autonomous loop, running on your machine.**
 
 ## Work from this folder
 
 ```bash
-cd labs/m4-fixer
+cd labs/m1-enhancer
 ```
 
 Your coding agent runs here, not at the repo root. This folder has its own
@@ -32,25 +32,25 @@ Pick one tool and paste its prompt.
 ## Verify
 
 ```bash
-task loop:fixer -- --repo ../../work/northwind-field-crm --doer reference
+task loop:enhancer -- --repo ../../work/northwind-field-crm --ticket T001
 ```
 
 ## When it stops
 
-- the suite is green
-- the same tests fail twice
-- the budget is spent, and it leaves a comment saying why
+- the ticket is ready
+- the budget is spent
+- two rounds in a row find exactly the same gaps, which means the human has not acted and another round will not help
 
 ## The gate
 
-Nobody is watching this one. Its exits matter more than its successes, and the same gate that blocks your push blocks its push.
+This lab writes no code, so the push gate does not fire. You meet it in Module 2.
 
 ## If you fall behind
 
 Stop typing and watch. Then:
 
 ```bash
-git checkout done-m4
+git checkout done-m1
 ```
 
 You continue the next module with a working artifact. See `FALL-BEHIND.md`.

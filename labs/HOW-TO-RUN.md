@@ -1,113 +1,61 @@
-# How to run a lab prompt
+# How to run a lab
 
-Claude Code is not required.
+You need one coding agent. You choose which.
 
-Pick one coding agent you already use. Interactive paste works. Headless is better for a repeatable loop.
+## The one rule that changed
 
-Do this from the repo root, with `.venv` active.
+**Work from the lab folder, not the repo root.**
 
-| Tool | Interactive | Headless |
+```bash
+cd labs/m2-implementer
+```
+
+Each lab is its own project. Running there means that lab's `.claude/` applies:
+its tool scope, and nothing from the other three.
+
+## The four tools
+
+| Tool | Headless | Interactive |
 |---|---|---|
-| Claude Code | `claude` then paste the prompt | `claude -p "$(cat PROMPT)"` |
-| OpenCode | `opencode` then paste | `opencode run "$(cat PROMPT)"` |
-| Codex | `codex` then paste | `codex exec "$(cat PROMPT)"` |
-| Grok Build | `grok` then paste | `grok -p "$(cat PROMPT)"` |
+| Claude Code | `claude -p "$(cat prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"` | `claude` |
+| Codex | `codex exec "$(cat prompts/codex.md)"` | `codex` |
+| Grok Build | `grok -p "$(cat prompts/grok-build.md)" --no-auto-update` | `grok` |
+| OpenCode | `opencode run "$(cat prompts/opencode.md)"` | `opencode` |
 
-`PROMPT` is the lab file, for example `labs/m1-implementer/prompts/claude-code.md`.
-The task is the same for every tool. Do not fill Agent SDK and LangGraph unless that is your chosen track.
+For interactive mode, start the tool in the lab folder and paste everything
+below the line in the prompt file.
 
-The hidden grader and `python -m solutions.loops ...` still run with no coding-agent CLI at all.
+## No coding agent at all
 
-## Claude Code headless
-
-Install and log in however you already do (`claude`, or `ANTHROPIC_API_KEY`).
-
-Print mode is headless. No TUI. The agent runs, prints, and exits.
+You can still do every lab. The loops run with no model key:
 
 ```bash
-cd /path/to/reliable-agentic-lab
-
-claude -p "$(cat labs/m1-implementer/prompts/claude-code.md)" \
-  --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
+task loop:enhancer    -- --repo work/northwind-field-crm --ticket T001 --incorporate
+task loop:implementer -- --repo work/northwind-field-crm --ticket T001 --doer reference
+task loop:research    -- --question "..." --backend fixture
+task loop:fixer       -- --repo work/northwind-field-crm --doer reference
 ```
 
-Useful flags:
+Fill the stub by hand and check it against the same commands.
 
-- `-p` / `--print` non-interactive
-- `--allowedTools` so it does not stall on a permission prompt
-- `--output-format json` if you want to log the run
-- `--dangerously-skip-permissions` only on a throwaway worktree, never on a repo you care about
+## Four rules, whichever tool you picked
 
-Pipe the file instead of `$(cat ...)` if your shell prefers stdin. Check `claude -h` for current stdin behavior.
+1. Fill only the stub named in your lab's README. Nothing under `loops/`.
+2. Never edit a test in the target repo to make something pass. The harness
+   catches it, and catching it is the lesson.
+3. Stop at the documented exit. Do not invent a fourth one.
+4. When you stall, read the solution named in your prompt. It is the answer, not
+   a hint, and reading it costs you nothing.
 
-Swap the path for Module 2, 3, or 4.
+## The gate
 
-```bash
-claude -p "$(cat labs/m2-harness/prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
-claude -p "$(cat labs/m3-enhancer/prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
-claude -p "$(cat labs/m4-fixer/prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
+In Module 2 your agent will try to push and be refused:
+
+```
+BLOCKED by pre-tool hook: git push
+Last run: FAILED (3 tests).
+  first failure: tests.test_due_date::test_model_has_optional_due_date
+Run `task test` first.
 ```
 
-After it exits, run the stub yourself and confirm pytest.
-
-## OpenCode headless
-
-```bash
-opencode run --dir . "$(cat labs/m1-implementer/prompts/claude-code.md)"
-```
-
-Attach the prompt file if your build supports `--file`:
-
-```bash
-opencode run --dir . --file labs/m1-implementer/prompts/claude-code.md "Follow the attached lab prompt. Fill the stub. Do not edit graders."
-```
-
-Headless server (optional, avoids cold start):
-
-```bash
-opencode serve
-opencode run --attach http://localhost:4096 "$(cat labs/m1-implementer/prompts/claude-code.md)"
-```
-
-## Codex headless
-
-```bash
-codex exec "$(cat labs/m1-implementer/prompts/claude-code.md)"
-```
-
-`codex exec` is the non-interactive path. No TUI. Use it in a script or in class when you do not want the editor chrome.
-
-If your Codex build wants a working directory flag, pass the repo root. Stay inside this clone.
-
-## Grok Build headless
-
-```bash
-grok -p "$(cat labs/m1-implementer/prompts/claude-code.md)" --no-auto-update
-```
-
-`-p` is print / headless, same idea as Claude Code. `--no-auto-update` keeps CI and class machines from stalling on an updater.
-
-Log in with your SuperGrok account, or set `XAI_API_KEY` in `.env`.
-
-Streaming JSON if you want a machine-readable trace:
-
-```bash
-grok -p "$(cat labs/m1-implementer/prompts/claude-code.md)" --output-format streaming-json --no-auto-update
-```
-
-## Rules that apply to every tool
-
-- Work from the repo root.
-- Fill only the lab stub. Do not edit `solutions/m2-harness/graders/`.
-- Stop on the documented exit (grader green, ready label, budget).
-- If the agent stalls, copy the matching folder from `solutions/` and continue.
-
-## If you have none of these CLIs
-
-Run the working examples:
-
-```bash
-python -m solutions.loops implementer --maker reference
-```
-
-Then paste a prompt later, or type the stub by hand. The loop is the lesson. The CLI is optional.
+That is working as designed. Run `task test`, make it green, push again.

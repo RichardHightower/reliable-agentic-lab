@@ -1,12 +1,23 @@
-# Fall behind
+# If you fall behind
 
-Stop typing. Watch Rick finish.
+Nobody is graded here. Falling behind on one lab must not cost you the next one.
 
-Then copy the matching working example:
+## Do this
 
-```bash
-# from repo root
-cp -R solutions/loops labs/m4-fixer
-```
+1. Stop typing and watch Rick finish the build.
+2. When he is done, run:
 
-Or run the solution in place and continue to the next module.
+   ```bash
+   git checkout done-m4
+   ```
+
+3. You now have a working broken pr fixer, unattended. Continue with the next module.
+
+## What you get
+
+A production-ready architecture you can hand to your engineering org.
+
+## Coming back later
+
+`start-m4` is this lab with the stub empty again. Everything you need
+is in `prompts/`, and `loops/fixer.py` is the answer whenever you want it.

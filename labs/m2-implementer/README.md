@@ -1,13 +1,13 @@
-# Lab 4. Broken PR Fixer, unattended
+# Lab 2. Ticket Implementer and the harness
 
-A failing branch in, a green one out, or an honest explanation of why not.
+A ready ticket in, a green rubric out. This is the centre of the workshop.
 
-**18 minutes. Artifact: A production-ready architecture you can hand to your engineering org.**
+**25 minutes. Artifact: A reusable evaluation harness that plans, executes, verifies, and iterates.**
 
 ## Work from this folder
 
 ```bash
-cd labs/m4-fixer
+cd labs/m2-implementer
 ```
 
 Your coding agent runs here, not at the repo root. This folder has its own
@@ -16,7 +16,7 @@ else does.
 
 ## Fill one file
 
-`loop.py`. Nothing else.
+`harness.py`. Nothing else.
 
 ## Start
 
@@ -32,25 +32,26 @@ Pick one tool and paste its prompt.
 ## Verify
 
 ```bash
-task loop:fixer -- --repo ../../work/northwind-field-crm --doer reference
+task loop:implementer -- --repo ../../work/northwind-field-crm --ticket T001 --doer reference
+task loop:implementer -- --repo ../../work/northwind-field-crm --ticket T001 --doer none
 ```
 
 ## When it stops
 
-- the suite is green
-- the same tests fail twice
-- the budget is spent, and it leaves a comment saying why
+- every rubric row passes
+- the same rows fail twice
+- the iteration or money budget is spent
 
 ## The gate
 
-Nobody is watching this one. Its exits matter more than its successes, and the same gate that blocks your push blocks its push.
+You will hit the push gate in this lab. Your agent will try to push and be refused until `task test` is green. Read the refusal. It is the lesson.
 
 ## If you fall behind
 
 Stop typing and watch. Then:
 
 ```bash
-git checkout done-m4
+git checkout done-m2
 ```
 
 You continue the next module with a working artifact. See `FALL-BEHIND.md`.

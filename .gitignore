@@ -30,3 +30,4 @@ labs/**/traces/*.json
 work/
 .harness/
 reports/
+labs/**/__pycache__/

@@ -1,25 +1,24 @@
-# Labs setup
+# Lab setup
 
-Finish the root [SETUP.md](../SETUP.md) first.
-
-```bash
-git clone https://github.com/RichardHightower/reliable-agentic-lab.git
-cd reliable-agentic-lab
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python scripts/verify_setup.py
-```
-
-Then:
-
-1. Activate `.venv`.
-2. Open one lab folder.
-3. Paste one prompt from that lab's `prompts/` directory, or run it headless. Claude Code is not required. See [HOW-TO-RUN.md](HOW-TO-RUN.md).
-4. Keep graders read-only.
+Everything is in the root [SETUP.md](../SETUP.md). Run it once.
 
 ```bash
-source .venv/bin/activate
-export PYTHONPATH="$PWD:$PWD/solutions/crm:$PWD/solutions/m2-harness"
+task setup
 ```
+
+That creates the virtualenv, installs dependencies, clones the target repo into
+`work/`, and verifies the result.
+
+## Then work from a lab folder
+
+```bash
+cd labs/m1-enhancer
+task test
+```
+
+`task` works from any lab folder. Each lab's `Taskfile.yml` reaches the root one.
+
+## No PYTHONPATH
+
+Each lab folder carries a copy of `_root.py`. Your stub imports it and the repo
+root lands on `sys.path`. Nothing to export, nothing to remember.
