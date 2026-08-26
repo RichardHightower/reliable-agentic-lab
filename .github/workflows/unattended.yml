@@ -37,11 +37,14 @@ jobs:
       - name: Install the engine
         run: pip install -r requirements.txt
 
+      # `task setup` in the target, not pip in this one. The target's Taskfile
+      # runs .venv/bin/python, so installing into the system python leaves every
+      # `task test` unable to start.
       - name: Clone and set up the target repo
         run: |
           git clone --quiet https://github.com/RichardHightower/northwind-field-crm.git \
             work/northwind-field-crm
-          python -m pip install --quiet -r work/northwind-field-crm/requirements.txt
+          cd work/northwind-field-crm && task setup
 
       # Exit 0 is a pass, 2 is an escalation a human must read, 1 is a crash.
       # The fixer starts on broken-pr. Pointed at a green branch it reports a

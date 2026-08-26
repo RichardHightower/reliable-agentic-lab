@@ -98,3 +98,30 @@ def test_checkout_fails_loudly_on_a_branch_that_does_not_exist(tmp_path):
     with pytest.raises(SystemExit) as caught:
         checkout(tmp_path, "no-such-branch")
     assert "no-such-branch" in str(caught.value)
+
+
+def test_a_suite_that_never_ran_is_not_a_test_failure(tmp_path, monkeypatch):
+    """The bug this catches: two rounds of a missing report used to escalate as
+    'the same rows failed twice: unknown', which reads as a flaky test.
+    """
+    repo = tmp_path / "target"
+    (repo / "app").mkdir(parents=True)
+    (repo / "tests").mkdir()
+    (repo / "Taskfile.yml").write_text(
+        "version: '3'\ntasks:\n"
+        + "".join(
+            f"  {name}:\n    cmds: ['true']\n"
+            for name in ("setup", "test", "e2e", "lint", "format-check")
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+
+    # `task test` exits 0 and writes no report. That is the silent skip.
+    trace = run(repo=repo, doer="none", budget=3, write_trace=False)
+
+    assert trace["gate"] == gates.ESCALATE
+    assert "never ran" in trace["reason"]
+    assert "unknown" not in trace["reason"]
+    # It stops on the first round. Iterating proves nothing.
+    assert len(trace["attempts"]) == 1

@@ -107,6 +107,26 @@ def run(  # noqa: PLR0913, PLR0912, PLR0915
         before = contract.run("test")
         signature = tuple(sorted(before.junit.failed_ids))
 
+        # A suite that could not run is not a suite that failed. Without this,
+        # two rounds of a missing report escalate as "the same rows failed
+        # twice: unknown", which sends the reader looking for a flaky test that
+        # does not exist. Name the real problem and stop on the first round.
+        if not before.junit.exists or (not before.junit.green and not signature):
+            decision = gates.Decision(
+                gates.ESCALATE,
+                f"the suite never ran (`task test` exited {before.exit_code}, no usable "
+                f"report at reports/junit.xml). Nothing here is a test failure.",
+            )
+            trace["attempts"].append(
+                {
+                    "iteration": iteration,
+                    "failing": [],
+                    "gate": decision.gate,
+                    "summary": (before.output or "").strip()[-600:],
+                }
+            )
+            break
+
         if before.junit.green:
             decision = gates.Decision(gates.PASS, "the suite is green")
             trace["attempts"].append({"iteration": iteration, "failing": [], "gate": decision.gate})
