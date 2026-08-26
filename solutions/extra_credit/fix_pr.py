@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Extra credit. Repair a broken PR from a check_suite failure, or locally."""
+# ruff: noqa: E402
+# The imports below come after the sys.path bootstrap that makes them
+# resolvable. Moving them up breaks the script when it is run directly.
+
 from __future__ import annotations
 
 import argparse
@@ -13,8 +17,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from solutions.extra_credit import github_api as gh
-from solutions.loops import fixer
+from loops import fixer
+from solutions.extra_credit import (
+    github_api as gh,
+)
 
 HERE = Path(__file__).resolve().parent
 WORK = HERE / "work"
@@ -61,7 +67,9 @@ def run_github(pr_number: int, *, budget: int, doer: str, client: gh.GitHub | No
         _log("last-fix.json", trace)
         return trace
     if attempts >= budget:
-        api.comment(pr_number, f"PR Fixer stopped. Max attempts ({budget}) reached. Human needs this PR.")
+        api.comment(
+            pr_number, f"PR Fixer stopped. Max attempts ({budget}) reached. Human needs this PR."
+        )
         trace["actions"].append("comment:gave-up")
         trace["exit"] = "budget"
         _log("last-fix.json", trace)
@@ -72,7 +80,11 @@ def run_github(pr_number: int, *, budget: int, doer: str, client: gh.GitHub | No
     try:
         api.add_label(pr_number, gh.next_attempt_label(attempts))
         local = run_local("T001", doer=doer, budget=budget)
-        trace["local"] = {"passed": local.get("passed"), "gate": local.get("gate"), "exit": local.get("exit")}
+        trace["local"] = {
+            "passed": local.get("passed"),
+            "gate": local.get("gate"),
+            "exit": local.get("exit"),
+        }
         if local.get("passed"):
             api.comment(
                 pr_number,
@@ -106,7 +118,11 @@ def main() -> int:
     parser.add_argument("--pr", default=os.environ.get("PR_NUMBER", "T001"))
     parser.add_argument("--github", action="store_true")
     parser.add_argument("--doer", choices=["none", "reference"], default="reference")
-    parser.add_argument("--apply", action="store_true", help="Use the reference doer. Still extra credit. No force-push.")
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Use the reference doer. Still extra credit. No force-push.",
+    )
     parser.add_argument("--budget", type=int, default=MAX_ATTEMPTS)
     args = parser.parse_args()
     doer = args.doer if not args.apply else "reference"
@@ -117,7 +133,12 @@ def main() -> int:
         return 0 if payload.get("exit") in {"PR green", "skipped concurrent run"} else 1
     ticket = str(args.pr) if str(args.pr).startswith("T") else "T001"
     payload = run_local(ticket, doer=doer, budget=args.budget)
-    print(json.dumps({"mode": "local", "passed": payload.get("passed"), "gate": payload.get("gate")}, indent=2))
+    print(
+        json.dumps(
+            {"mode": "local", "passed": payload.get("passed"), "gate": payload.get("gate")},
+            indent=2,
+        )
+    )
     return 0 if payload.get("passed") else 1
 
 

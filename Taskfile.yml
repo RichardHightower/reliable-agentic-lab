@@ -45,10 +45,10 @@ tasks:
       - '{{.PY}} -m pytest loops/tests -q -m e2e --junitxml=reports/junit-e2e.xml'
 
   lint:
-    cmds: ['{{.PY}} -m ruff check loops scripts']
+    cmds: ['{{.PY}} -m ruff check loops scripts solutions labs']
 
   format-check:
-    cmds: ['{{.PY}} -m ruff format --check loops scripts']
+    cmds: ['{{.PY}} -m ruff format --check loops scripts solutions labs']
 
   receipt:
     desc: Show whether a push would be allowed right now.

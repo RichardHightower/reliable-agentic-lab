@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from solutions.extra_credit import github_api as gh
 from solutions.extra_credit import fix_pr, groom_ticket
+from solutions.extra_credit import github_api as gh
 
 
 class FakeGitHub:
@@ -28,7 +28,11 @@ class FakeGitHub:
         return {}
 
     def remove_label(self, number: int, label: str) -> dict:
-        self.issue["labels"] = [item for item in self.issue.get("labels") or [] if (item if isinstance(item, str) else item.get("name")) != label]
+        self.issue["labels"] = [
+            item
+            for item in self.issue.get("labels") or []
+            if (item if isinstance(item, str) else item.get("name")) != label
+        ]
         self.removed.append(label)
         return {}
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import _root  # noqa: F401  (puts the repo root on sys.path)
 
-from loops import gates, rubric
+from loops import gates, rubric  # noqa: F401  (you will need gates)
 from loops.contract import Contract, RunResult
 
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Extra credit stub. Fill this. Polling labs stay the Saturday path."""
+
 from __future__ import annotations
 
 import argparse

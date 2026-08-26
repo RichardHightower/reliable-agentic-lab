@@ -6,7 +6,7 @@ Workflow never fires: it is not on the instructor repo on purpose. Copy YAML to 
 
 Action loops: check `agent-in-progress` and `agent-attempts-N`. Lower `AGENT_MAX_ATTEMPTS`.
 
-No model key: reference scripts do not need one. They reuse `solutions.loops`.
+No model key: reference scripts do not need one. They reuse `loops`.
 
 Webhook 503: set `GITHUB_WEBHOOK_SECRET`.
 Webhook 401: GitHub secret and `.env` do not match.

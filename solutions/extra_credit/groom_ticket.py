@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Extra credit. Groom one ticket from a GitHub Actions issue event, or locally."""
+# ruff: noqa: E402
+# The imports below come after the sys.path bootstrap that makes them
+# resolvable. Moving them up breaks the script when it is run directly.
+
 from __future__ import annotations
 
 import argparse
@@ -13,8 +17,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from solutions.extra_credit import github_api as gh
-from solutions.loops import criteria, enhancer
+from loops import criteria, enhancer
+from solutions.extra_credit import (
+    github_api as gh,
+)
 
 HERE = Path(__file__).resolve().parent
 WORK = HERE / "work"
@@ -120,17 +126,31 @@ def run_github(number: int, *, budget: int, client: gh.GitHub | None = None) -> 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Extra credit ticket groomer")
     parser.add_argument("--issue", default=os.environ.get("ISSUE_NUMBER", "T001"))
-    parser.add_argument("--github", action="store_true", help="Use GitHub Issues instead of the local board.")
+    parser.add_argument(
+        "--github", action="store_true", help="Use GitHub Issues instead of the local board."
+    )
     parser.add_argument("--incorporate", action="store_true")
     parser.add_argument("--budget", type=int, default=MAX_ATTEMPTS)
     args = parser.parse_args()
     github_mode = args.github or (str(args.issue).isdigit() and bool(gh.token_from_env()))
     if github_mode and str(args.issue).isdigit():
         payload = run_github(int(args.issue), budget=args.budget)
-        print(json.dumps({"mode": "github", "exit": payload.get("exit"), "issue": args.issue}, indent=2))
-        return 0 if payload.get("exit") in {"ready label", "already ready", "skipped concurrent run"} else 1
+        print(
+            json.dumps(
+                {"mode": "github", "exit": payload.get("exit"), "issue": args.issue}, indent=2
+            )
+        )
+        return (
+            0
+            if payload.get("exit") in {"ready label", "already ready", "skipped concurrent run"}
+            else 1
+        )
     payload = run_local(str(args.issue), incorporate=args.incorporate, budget=args.budget)
-    print(json.dumps({"mode": "local", "ready": payload.get("ready"), "gate": payload.get("gate")}, indent=2))
+    print(
+        json.dumps(
+            {"mode": "local", "ready": payload.get("ready"), "gate": payload.get("gate")}, indent=2
+        )
+    )
     return 0 if payload.get("ready") else 1
 
 
