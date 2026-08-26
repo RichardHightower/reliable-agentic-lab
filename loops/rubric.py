@@ -75,7 +75,7 @@ def score(  # noqa: PLR0913, PLR0912, PLR0915
     lint_run=None,
     format_run=None,
     red_ids: set[str] | None = None,
-    role_scope=None,
+    scope_violations: list[str] | None = None,
     changed: list[str] | None = None,
 ) -> Score:
     """Score one attempt. Every argument that is None becomes a failing row.
@@ -198,15 +198,20 @@ def score(  # noqa: PLR0913, PLR0912, PLR0915
             rows.append(Row(name, run.ok, "clean" if run.ok else f"exit {run.exit_code}"))
 
     # 10. Nobody wrote outside their scope.
-    if role_scope is None:
-        rows.append(Row("write_scope", True, "no scope declared for this run"))
+    #
+    # The caller attributes each change to the role that made it, because only
+    # the loop knows who wrote what. Scoring every changed file against one
+    # role's scope would flag the test implementer's own tests.
+    if scope_violations is None:
+        rows.append(Row("write_scope", False, "scope was not checked"))
     else:
-        outside = [p for p in changed if not role_scope.permits(p)]
         rows.append(
             Row(
                 "write_scope",
-                not outside,
-                "inside scope" if not outside else f"wrote outside scope: {outside[:3]}",
+                not scope_violations,
+                "every write was inside its role's scope"
+                if not scope_violations
+                else f"wrote outside scope: {scope_violations[:3]}",
             )
         )
 

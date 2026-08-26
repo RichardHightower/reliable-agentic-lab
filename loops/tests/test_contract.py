@@ -134,10 +134,12 @@ def test_the_crm_satisfies_the_contract():
 @has_crm
 def test_known_good_is_green_and_main_is_not():
     def on(branch: str):
+        # The loop leaves the target dirty on purpose. Reset before switching,
+        # or this check fails for a reason that has nothing to do with it.
+        subprocess.run(["git", "checkout", "-q", "--", "."], cwd=CRM, check=False)
+        subprocess.run(["git", "clean", "-qfd"], cwd=CRM, check=False)
         subprocess.run(["git", "checkout", "-q", branch], cwd=CRM, check=True)
-        contract = Contract(CRM)
-        result = contract.run("test")
-        return result
+        return Contract(CRM).run("test")
 
     try:
         good = on("known-good")
@@ -149,6 +151,8 @@ def test_known_good_is_green_and_main_is_not():
         assert start.coverage.line_rate < 78, "the starter must sit below the floor"
         assert not any("due_date" in i for i in start.junit.passed_ids)
     finally:
+        subprocess.run(["git", "checkout", "-q", "--", "."], cwd=CRM, check=False)
+        subprocess.run(["git", "clean", "-qfd"], cwd=CRM, check=False)
         subprocess.run(["git", "checkout", "-q", "main"], cwd=CRM, check=False)
 
 

@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from loops.contract import Contract, CoverageReport, RunResult, SuiteReport
-from loops.roles import WriteScope
 from loops.rubric import score
 from loops.steps import Plan, Step
 
@@ -71,7 +70,7 @@ def full(contract, **over):
         "lint_run": run("lint"),
         "format_run": run("format-check"),
         "red_ids": {"tests.t::a"},
-        "role_scope": WriteScope(allow=["**"]),
+        "scope_violations": [],
         "changed": ["app/models.py"],
     }
     args.update(over)
@@ -153,11 +152,13 @@ def test_touching_a_template_with_a_green_e2e_test_passes(contract):
 
 
 def test_writing_outside_scope_fails(contract):
-    result = full(
-        contract,
-        changed=["app/models.py", "tests/test_a.py"],
-        role_scope=WriteScope(allow=["app/**"], deny=["tests/**"]),
-    )
+    result = full(contract, scope_violations=["tests/test_a.py"])
+    assert "write_scope" in result.signature()
+
+
+def test_an_unchecked_scope_is_a_failure_not_a_pass(contract):
+    """Forgetting to check is not the same as finding nothing."""
+    result = full(contract, scope_violations=None)
     assert "write_scope" in result.signature()
 
 
