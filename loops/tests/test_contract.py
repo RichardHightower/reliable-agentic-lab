@@ -67,7 +67,9 @@ def test_missing_junit_is_not_a_pass(tmp_path: Path):
 
 def test_empty_suite_is_not_green(tmp_path: Path):
     path = tmp_path / "junit.xml"
-    path.write_text('<testsuites><testsuite name="pytest" tests="0" failures="0" errors="0"/></testsuites>')
+    path.write_text(
+        '<testsuites><testsuite name="pytest" tests="0" failures="0" errors="0"/></testsuites>'
+    )
     report = parse_junit(path)
     assert report.empty is True
     assert report.green is False
@@ -101,7 +103,9 @@ def test_a_repo_with_no_taskfile_is_rejected(tmp_path: Path):
 
 
 def test_a_repo_missing_tasks_is_rejected(tmp_path: Path):
-    (tmp_path / "Taskfile.yml").write_text("version: '3'\ntasks:\n  test:\n    cmds:\n      - echo hi\n")
+    (tmp_path / "Taskfile.yml").write_text(
+        "version: '3'\ntasks:\n  test:\n    cmds:\n      - echo hi\n"
+    )
     contract = Contract(tmp_path)
     assert set(contract.missing_tasks()) == {"setup", "e2e", "lint", "format-check"}
     with pytest.raises(ContractError):
@@ -120,7 +124,11 @@ def test_the_crm_satisfies_the_contract():
     contract = Contract(CRM)
     contract.validate()
     assert contract.rubric["coverage_floor"] == 78
-    assert contract.role("code_implementer")["write_deny"] == ["tests/**", ".loop.yml", "Taskfile.yml"]
+    assert contract.role("code_implementer")["write_deny"] == [
+        "tests/**",
+        ".loop.yml",
+        "Taskfile.yml",
+    ]
 
 
 @has_crm

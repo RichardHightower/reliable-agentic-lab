@@ -15,16 +15,19 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.receipt import check, write  # noqa: E402
+from scripts.receipt import check, write
 
 
 def put_junit(repo: Path, *, failed: list[str] | None = None) -> None:
     """Write a junit report into the repo. Evidence the receipt can read."""
     failed = failed or []
-    cases = ''.join(
-        f'<testcase classname="tests.t" name="{n}"><failure>boom</failure></testcase>'
-        for n in failed
-    ) + '<testcase classname="tests.t" name="ok"/>'
+    cases = (
+        "".join(
+            f'<testcase classname="tests.t" name="{n}"><failure>boom</failure></testcase>'
+            for n in failed
+        )
+        + '<testcase classname="tests.t" name="ok"/>'
+    )
     out = repo / "reports"
     out.mkdir(parents=True, exist_ok=True)
     (out / "junit.xml").write_text(
@@ -84,7 +87,7 @@ def test_a_new_untracked_file_blocks(repo: Path):
     put_junit(repo)
     write(repo, 0)
     (repo / "sneaky.py").write_text("import os\n")
-    allowed, reason = check(repo)
+    allowed, _ = check(repo)
     assert allowed is False
 
 

@@ -21,8 +21,8 @@ import hashlib
 import json
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 RECEIPT = ".harness/receipt.json"
@@ -30,9 +30,7 @@ SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", "reports", ".harnes
 
 
 def _git(repo: Path, *args: str) -> str:
-    out = subprocess.run(
-        ["git", *args], cwd=repo, text=True, capture_output=True, check=False
-    )
+    out = subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, check=False)
     return out.stdout.strip()
 
 
@@ -115,8 +113,12 @@ def write(repo: Path, exit_code: int, failed_ids: list[str] | None = None) -> di
     return payload
 
 
-def check(repo: Path) -> tuple[bool, str]:
-    """Return (allowed, reason). The reason is what the room reads."""
+def check(repo: Path) -> tuple[bool, str]:  # noqa: PLR0911
+    """Return (allowed, reason). The reason is what the room reads.
+
+    One return per way a receipt can fail to prove its case. Collapsing them
+    would save a branch and cost the reader the reason.
+    """
     target = repo / RECEIPT
     if not target.exists():
         return False, "No receipt. The test suite has not run against this tree."

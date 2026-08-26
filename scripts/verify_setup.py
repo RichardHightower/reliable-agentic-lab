@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Confirm clone, GitHub token, and model key. Prints a ready checklist."""
+
 from __future__ import annotations
 
 import json
@@ -57,7 +58,7 @@ def github_get(url: str, token: str) -> tuple[int, object]:
             return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         return exc.code, {"message": str(exc)}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return 0, {"message": str(exc)}
 
 
@@ -75,9 +76,15 @@ def check_github() -> tuple[str, str]:
         token,
     )
     if issues_status == 404:
-        return "warn", f"token works as {login}, but cannot see {repo} yet. Ask Rick for collaborator access."
+        return (
+            "warn",
+            f"token works as {login}, but cannot see {repo} yet. Ask Rick for collaborator access.",
+        )
     if issues_status != 200:
-        return "fail", f"cannot list issues on {repo} ({issues_status}). Need contents, issues, pull requests."
+        return (
+            "fail",
+            f"cannot list issues on {repo} ({issues_status}). Need contents, issues, pull requests.",
+        )
     count = len(issues) if isinstance(issues, list) else 0
     return "pass", f"{login} can list issues on {repo} ({count} returned)"
 
@@ -114,7 +121,7 @@ def check_anthropic() -> tuple[str, str]:
         return "pass", f"Anthropic call ok ({text[:40] or 'empty'})"
     except urllib.error.HTTPError as exc:
         return "fail", f"Anthropic call failed ({exc.code})"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return "fail", f"Anthropic call failed ({exc})"
 
 
@@ -141,16 +148,11 @@ def check_openai() -> tuple[str, str]:
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        text = (
-            payload.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
+        text = payload.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         return "pass", f"OpenAI call ok ({text[:40] or 'empty'})"
     except urllib.error.HTTPError as exc:
         return "fail", f"OpenAI call failed ({exc.code})"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return "fail", f"OpenAI call failed ({exc})"
 
 
@@ -164,8 +166,22 @@ def main() -> int:
     rows.append(("pass" if ok else "fail", "git", detail))
     ok, detail = check_tickets()
     rows.append(("pass" if ok else "fail", "crm tickets", detail))
-    rows.append(("pass" if (REPO_ROOT / ".venv").exists() else "warn", "venv", ".venv found" if (REPO_ROOT / ".venv").exists() else "no .venv yet. Run python -m venv .venv"))
-    rows.append(("pass" if (REPO_ROOT / ".env").exists() else "warn", ".env", ".env found" if (REPO_ROOT / ".env").exists() else "copy .env.example to .env"))
+    rows.append(
+        (
+            "pass" if (REPO_ROOT / ".venv").exists() else "warn",
+            "venv",
+            ".venv found"
+            if (REPO_ROOT / ".venv").exists()
+            else "no .venv yet. Run python -m venv .venv",
+        )
+    )
+    rows.append(
+        (
+            "pass" if (REPO_ROOT / ".env").exists() else "warn",
+            ".env",
+            ".env found" if (REPO_ROOT / ".env").exists() else "copy .env.example to .env",
+        )
+    )
     gh_status, gh_detail = check_github()
     rows.append((gh_status, "github", gh_detail))
     an_status, an_detail = check_anthropic()

@@ -44,8 +44,8 @@ class ContractError(RuntimeError):
 
 
 @dataclass
-class TestReport:
-    """One parsed junit file."""
+class SuiteReport:
+    """One parsed junit file. Named SuiteReport so pytest does not collect it."""
 
     exists: bool = False
     tests: int = 0
@@ -79,7 +79,7 @@ class RunResult:
     task: str
     exit_code: int
     output: str
-    junit: TestReport
+    junit: SuiteReport
     coverage: CoverageReport
 
     @property
@@ -91,9 +91,9 @@ class RunResult:
         return self.exit_code in NO_TESTS_COLLECTED or self.junit.empty
 
 
-def parse_junit(path: Path) -> TestReport:
+def parse_junit(path: Path) -> SuiteReport:
     """Read a junit XML file. A missing file is not a pass."""
-    report = TestReport(path=path)
+    report = SuiteReport(path=path)
     if not path.exists():
         return report
     report.exists = True
@@ -150,7 +150,7 @@ def _load_yaml(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        import yaml  # type: ignore
+        import yaml  # type: ignore  # noqa: PLC0415  (optional dependency, imported on use)
 
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except ImportError:
@@ -167,7 +167,7 @@ def _mini_yaml(text: str) -> dict:
     root: dict = {}
     stack: list[tuple[int, dict]] = [(-1, root)]
 
-    def scalar(raw: str):
+    def scalar(raw: str):  # noqa: PLR0911  (a type dispatcher; one return per type)
         raw = raw.strip()
         if raw.startswith("[") and raw.endswith("]"):
             inner = raw[1:-1].strip()
@@ -266,7 +266,9 @@ class Contract:
         """Return the required tasks the target does not define."""
         if not self.taskfile.exists():
             return list(REQUIRED_TASKS)
-        declared = set(re.findall(r"^  ([A-Za-z][\w:-]*):\s*$", self.taskfile.read_text(), re.M))
+        declared = set(
+            re.findall(r"^  ([A-Za-z][\w:-]*):\s*$", self.taskfile.read_text(), re.MULTILINE)
+        )
         return [name for name in REQUIRED_TASKS if name not in declared]
 
     def validate(self) -> None:
@@ -303,7 +305,7 @@ class Contract:
     def reports_dir(self) -> Path:
         return self.repo / "reports"
 
-    def junit(self, name: str = "junit.xml") -> TestReport:
+    def junit(self, name: str = "junit.xml") -> SuiteReport:
         return parse_junit(self.reports_dir / name)
 
     def coverage(self) -> CoverageReport:
@@ -324,6 +326,7 @@ class Contract:
             capture_output=True,
             timeout=timeout,
             env={**os.environ, "FORCE_COLOR": "0", "NO_COLOR": "1"},
+            check=False,  # a red suite is data, not an exception
         )
         report = self.junit(junit_name)
 
