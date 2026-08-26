@@ -32,6 +32,9 @@ Pick one tool and paste its prompt.
 ## Verify
 
 ```bash
+# Module 2 left its work in the target repo. Put it away first.
+git -C ../../work/northwind-field-crm stash --include-untracked
+
 task loop:fixer -- --branch broken-pr --doer reference
 ```
 

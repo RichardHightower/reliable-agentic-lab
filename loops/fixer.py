@@ -45,12 +45,27 @@ def checkout(repo: Path, branch: str) -> None:
     A fixer pointed at a green branch reports a pass and proves nothing. That is
     the same shape as the red gate in Module 2: the interesting run needs a real
     failure to start from.
+
+    This refuses to clean the tree for you. After Module 2 the target repo holds
+    work somebody did, and a loop that quietly deletes it to make its own job
+    easier is the behaviour this workshop exists to prevent.
     """
     result = subprocess.run(
         ["git", "checkout", branch], cwd=repo, text=True, capture_output=True, check=False
     )
-    if result.returncode != 0:
-        raise SystemExit(f"cannot check out {branch} in {repo}:\n{result.stderr.strip()}")
+    if result.returncode == 0:
+        return
+
+    stderr = result.stderr.strip()
+    if "would be overwritten" in stderr or "local changes" in stderr:
+        raise SystemExit(
+            f"cannot switch to {branch}: {repo.name} still holds the work from an "
+            f"earlier lab.\n\n"
+            f"  keep it:     git -C {repo} stash --include-untracked\n"
+            f"  discard it:  git -C {repo} checkout -- . && git -C {repo} clean -fd\n\n"
+            f"Then run this again."
+        )
+    raise SystemExit(f"cannot check out {branch} in {repo}:\n{stderr}")
 
 
 def run(  # noqa: PLR0913, PLR0912, PLR0915

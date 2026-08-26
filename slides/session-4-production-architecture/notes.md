@@ -73,7 +73,11 @@ Closing line: same rule in both places, or the remote one is theater.
 
 ## s4-07. Lab 4
 
-Read both commands. `--branch broken-pr` is what makes this real: the fixer
+Say the stash line out loud before anyone types. The target repo still holds
+Module 2's work, and `git checkout broken-pr` refuses rather than deleting it.
+That refusal is on brand, but it costs 30 seconds if you let them find it.
+
+`--branch broken-pr` is what makes this real: the fixer
 starts from a branch with one genuinely failing test. Point it at a green
 branch and it reports a pass and proves nothing, which is the same shape as
 the red gate in Module 2.

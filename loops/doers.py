@@ -51,6 +51,10 @@ class NoneBackend(Backend):
         return DoerResult(output="none backend: wrote nothing on purpose")
 
 
+class RefNotFound(RuntimeError):
+    """The reference answer is not in this repo."""
+
+
 class ReferenceBackend(Backend):
     """Copies files from a known-good git ref into the working tree.
 
@@ -63,28 +67,55 @@ class ReferenceBackend(Backend):
     def __init__(self, ref: str = "known-good"):
         self.ref = ref
 
-    def _files_in_ref(self, repo: Path) -> list[str]:
+    def _resolve(self, repo: Path) -> str:
+        """The ref, or its remote-tracking twin.
+
+        A fresh `git clone` creates one local branch. `known-good` exists only
+        as `origin/known-good`, and `git ls-tree known-good` fails there. Trying
+        both is what lets an attendee run this on the clone they made this
+        morning.
+        """
+        for candidate in (self.ref, f"origin/{self.ref}"):
+            found = subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if found.returncode == 0:
+                return candidate
+        raise RefNotFound(
+            f"no ref named {self.ref!r} or 'origin/{self.ref}' in {repo}. "
+            f"The reference doer has nothing to copy from. "
+            f"Run `git -C {repo} fetch origin` and try again."
+        )
+
+    def _files_in_ref(self, repo: Path, ref: str) -> list[str]:
         listing = subprocess.run(
-            ["git", "ls-tree", "-r", "--name-only", self.ref],
+            ["git", "ls-tree", "-r", "--name-only", ref],
             cwd=repo,
             text=True,
             capture_output=True,
             check=False,
         )
+        # Returning an empty list here would make the doer report success while
+        # writing nothing, which is the exact failure this workshop is about.
         if listing.returncode != 0:
-            return []
+            raise RefNotFound(f"cannot read {ref} in {repo}: {listing.stderr.strip()}")
         return listing.stdout.splitlines()
 
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
+        ref = self._resolve(repo)
         scope = WriteScope(allow=allow)
         wrote: list[str] = []
-        for relative in self._files_in_ref(repo):
+        for relative in self._files_in_ref(repo, ref):
             # The reference answer is still bound by the role's write scope.
             # A backend that ignores scope would make the whole split cosmetic.
             if not scope.permits(relative):
                 continue
             blob = subprocess.run(
-                ["git", "show", f"{self.ref}:{relative}"],
+                ["git", "show", f"{ref}:{relative}"],
                 cwd=repo,
                 text=True,
                 capture_output=True,
@@ -98,7 +129,7 @@ class ReferenceBackend(Backend):
                 continue
             target.write_text(blob.stdout, encoding="utf-8")
             wrote.append(relative)
-        return DoerResult(wrote=wrote, output=f"copied {len(wrote)} files from {self.ref}")
+        return DoerResult(wrote=wrote, output=f"copied {len(wrote)} files from {ref}")
 
 
 class CliBackend(Backend):

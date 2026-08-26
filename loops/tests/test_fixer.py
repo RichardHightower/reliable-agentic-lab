@@ -125,3 +125,42 @@ def test_a_suite_that_never_ran_is_not_a_test_failure(tmp_path, monkeypatch):
     assert "unknown" not in trace["reason"]
     # It stops on the first round. Iterating proves nothing.
     assert len(trace["attempts"]) == 1
+
+
+def test_checkout_refuses_to_delete_an_earlier_lab_s_work(tmp_path):
+    """After Module 2 the target repo holds work somebody did.
+
+    A loop that quietly cleans the tree to make its own job easier is the
+    behaviour this workshop exists to prevent. The refusal has to name both
+    ways out, because an attendee reads it mid-lab with a clock running.
+    """
+    repo = tmp_path / "target"
+    (repo / "app").mkdir(parents=True)
+    (repo / "app" / "keep.py").write_text("A = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "--quiet", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--quiet", "-m", "one"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "checkout", "--quiet", "-b", "other"], cwd=repo, check=True)
+    (repo / "app" / "conflict.py").write_text("B = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--quiet", "-m", "two"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "checkout", "--quiet", "main"], cwd=repo, check=True)
+
+    # The untracked file an earlier lab left behind.
+    (repo / "app" / "conflict.py").write_text("MINE = 1\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as caught:
+        checkout(repo, "other")
+    message = str(caught.value)
+    assert "stash" in message
+    assert "clean -fd" in message
+    # The work is still there. The loop did not decide for the human.
+    assert (repo / "app" / "conflict.py").read_text() == "MINE = 1\n"

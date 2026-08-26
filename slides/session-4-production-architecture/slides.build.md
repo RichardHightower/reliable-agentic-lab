@@ -166,10 +166,10 @@ beat: lab
 
 ```bash
 cd labs/m4-fixer
+git -C ../../work/northwind-field-crm stash --include-untracked   # Module 2's work
 claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
 
-task loop:fixer -- --doer reference
-python -m loops.unattended --repo work/northwind-field-crm --loop fixer
+task loop:fixer -- --branch broken-pr --doer reference
 ```
 
 Fill `loop.py`. Two functions: `summarize_failure` and `repair_until_green`.
