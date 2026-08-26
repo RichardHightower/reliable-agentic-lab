@@ -11,6 +11,7 @@ reaches all four tools.
 
 from __future__ import annotations
 
+import argparse
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +47,7 @@ class Lab:
     gate_note: str
     solution: str
     stub_body: str
+    solved_body: str = ""
     reading: list[str] = field(default_factory=list)
 
 
@@ -121,6 +123,52 @@ def decide_next(
     raise NotImplementedError("fill me in")
 ''',
         reading=["loops/criteria.py", "loops/gates.py", "loops/ticket.py"],
+        solved_body='''"""Lab 1. The Ticket Enhancer. Filled in.
+
+This is the `done-m1` answer. Each function hands the work to the reference
+implementation, because that is where the lesson lives and duplicating it here
+would let the two drift apart.
+
+Read `loops/criteria.py` to see how the judge decides.
+"""
+
+from __future__ import annotations
+
+import _root  # noqa: F401  (puts the repo root on sys.path)
+
+from loops import criteria, gates
+from loops.ticket import Ticket
+
+
+def judge_ticket(ticket: Ticket) -> criteria.Verdict:
+    """Score one ticket. Return a Verdict.
+
+    `criteria.judge` classifies the ticket, looks up the parts that kind of
+    ticket needs, and reports what is missing. It writes nothing.
+    """
+    return criteria.judge(ticket)
+
+
+def decide_next(
+    verdict: criteria.Verdict,
+    iteration: int,
+    previous: tuple[str, ...] | None,
+    budget: int = 3,
+) -> gates.Decision:
+    """Choose the next move: pass, retry, or escalate.
+
+    The signature is what is missing, not how it was worded. Two equal
+    signatures mean the last round changed nothing, so the gate escalates
+    rather than spending the rest of the budget on an identical failure.
+    """
+    return gates.decide(
+        passed=verdict.ready,
+        iteration=iteration,
+        budget=budget,
+        signature=verdict.signature(),
+        previous_signature=previous,
+    )
+''',
     ),
     Lab(
         slug="m2-implementer",
@@ -197,6 +245,68 @@ def run_loop(contract: Contract, budget: int = 3) -> dict:
     raise NotImplementedError("fill me in")
 ''',
         reading=["loops/rubric.py", "loops/gates.py", "loops/roles.py", "loops/steps.py"],
+        solved_body='''"""Lab 2. The harness. Filled in.
+
+This is the `done-m2` answer. The order is the lesson:
+
+    tests first  ->  prove them red  ->  code until green  ->  judge  ->  gate
+
+Read `loops/implementer.py` for the full run, and `loops/rubric.py` for the
+ten rows.
+"""
+
+from __future__ import annotations
+
+import _root  # noqa: F401  (puts the repo root on sys.path)
+
+from loops import gates, implementer, rubric
+from loops.contract import Contract, RunResult
+
+
+def red_gate(before: RunResult, after: RunResult) -> set[str]:
+    """Return the test ids that are failing now and did not exist before.
+
+    An empty result is not a small problem. It means the new tests passed
+    against code that was never written, so they prove nothing and the loop
+    must stop rather than continue to the code implementer.
+    """
+    seen = before.junit.passed_ids | before.junit.failed_ids
+    return implementer._new_test_ids(seen, after.junit.failed_ids)
+
+
+def score_attempt(contract: Contract, **evidence) -> rubric.Score:
+    """Score one attempt against the ten rubric rows.
+
+    Every argument left out becomes a failing row. Absent evidence is never a
+    pass, which is why this forwards the keywords instead of filling defaults.
+    """
+    return rubric.score(contract=contract, **evidence)
+
+
+def run_loop(contract: Contract, budget: int = 3, ticket_id: str = "T001") -> dict:
+    """Run the harness until it passes, stalls, or runs out of budget.
+
+    Python holds the loop. `implementer.run` plans, writes the tests, checks
+    the red gate, writes the code, scores, and asks the gate what to do next.
+    """
+    return implementer.run(
+        repo=contract.repo,
+        ticket_id=ticket_id,
+        budget=budget,
+        doer="reference",
+    )
+
+
+def decide(score: rubric.Score, iteration: int, previous=None, budget: int = 3) -> gates.Decision:
+    """The gate. Kept here so the three exits stay visible in this file."""
+    return gates.decide(
+        passed=score.passed,
+        iteration=iteration,
+        budget=budget,
+        signature=score.signature(),
+        previous_signature=previous,
+    )
+''',
     ),
     Lab(
         slug="m3-research",
@@ -264,6 +374,41 @@ def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
     raise NotImplementedError("fill me in")
 ''',
         reading=["loops/brief.py", "loops/research.py", "MCP.md"],
+        solved_body='''"""Lab 3. The research assistant. Filled in.
+
+This is the `done-m3` answer.
+
+The backend does not appear anywhere in this file. That is the point of a tool
+boundary: the loop calls one function and never learns whether Perplexity, the
+built-in WebSearch tool, or a recorded fixture answered it.
+"""
+
+from __future__ import annotations
+
+import _root  # noqa: F401  (puts the repo root on sys.path)
+
+from loops import brief, researcher
+
+
+def plan_questions(question: str) -> list[str]:
+    """Break one question into the sub-questions a brief needs.
+
+    Each sub-question is one you can tell was answered or not. A plan step you
+    cannot check is a wish.
+    """
+    return researcher.plan_questions(question)
+
+
+def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
+    """Check the brief without asking a model.
+
+    `brief.check` resolves every citation marker against the sources actually
+    retrieved, and finds every claim paragraph that carries no citation. Both
+    are arithmetic. A confident sentence nobody can trace is the failure that
+    matters, and a model judge is the wrong tool for catching it.
+    """
+    return brief.check(body, sources)
+''',
     ),
     Lab(
         slug="m4-fixer",
@@ -324,6 +469,40 @@ def repair_until_green(contract: Contract, budget: int = 3) -> dict:
     raise NotImplementedError("fill me in")
 ''',
         reading=["loops/fixer.py", "loops/gates.py"],
+        solved_body='''"""Lab 4. The Broken PR Fixer. Filled in.
+
+This is the `done-m4` answer.
+
+Nobody is watching this loop, so the exits matter more than the successes.
+Giving up is allowed. Giving up silently is the bug.
+"""
+
+from __future__ import annotations
+
+import _root  # noqa: F401  (puts the repo root on sys.path)
+
+from loops import fixer
+from loops.contract import Contract, RunResult
+
+
+def summarize_failure(run_result: RunResult) -> str:
+    """Say what is broken, in a few lines a human can act on.
+
+    The orchestrator reads this, not the whole log. Sending the log would put
+    the failure in the middle of a long context, which is where accuracy is
+    worst.
+    """
+    return fixer.failure_summary(run_result)
+
+
+def repair_until_green(contract: Contract, budget: int = 3) -> dict:
+    """Repair until the suite is green, or stop and explain.
+
+    The returned trace carries the gate and the reason. The next person to open
+    this pull request has to know why the agent walked away.
+    """
+    return fixer.run(repo=contract.repo, budget=budget, doer="reference")
+''',
     ),
 ]
 
@@ -587,14 +766,27 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--solved",
+        nargs="*",
+        metavar="SLUG",
+        help=(
+            "write the filled answer instead of the stub, for these lab slugs. "
+            "No slugs means every lab. This is how done-m<n> is built."
+        ),
+    )
+    args = parser.parse_args(argv)
     written = 0
     for lab in LABS_SPEC:
         folder = LABS / lab.slug
         folder.mkdir(parents=True, exist_ok=True)
         # A copy per lab, so a stub imports it with no PYTHONPATH.
         shutil.copyfile(LABS / "_root.py", folder / "_root.py")
-        write(folder / lab.stub_file, lab.stub_body)
+        solved = args.solved is not None and (not args.solved or lab.slug in args.solved)
+        body = lab.solved_body if solved else lab.stub_body
+        write(folder / lab.stub_file, body)
         write(folder / "README.md", readme_for(lab))
         write(folder / "FALL-BEHIND.md", fall_behind_for(lab))
         write(folder / "ARCHITECTURE.md", architecture_for(lab))
@@ -608,7 +800,8 @@ def main() -> int:
             written += 1
         for stale in ("agent-sdk.md", "langgraph.md"):
             (folder / "prompts" / stale).unlink(missing_ok=True)
-    print(f"wrote {written} files across {len(LABS_SPEC)} labs")
+    filled = args.solved if args.solved else ("all" if args.solved is not None else "none")
+    print(f"wrote {written} files across {len(LABS_SPEC)} labs (solved: {filled})")
     return 0
 
 
