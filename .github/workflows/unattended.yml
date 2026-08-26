@@ -10,6 +10,10 @@ on:
         default: fixer
         type: choice
         options: [fixer, implementer, enhancer]
+      branch:
+        description: the target branch to repair. Fixer only.
+        default: broken-pr
+        type: string
   pull_request:
   schedule:
     - cron: "0 15 * * 1-5"
@@ -23,6 +27,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The loops shell out to `task test` in the target repo. The repo contract
+      # is the interface, so the runner needs the same tool your laptop has.
+      - name: Install Task
+        run: |
+          sh -c "$(curl -fsSL https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+          task --version
+
       - name: Install the engine
         run: pip install -r requirements.txt
 
@@ -33,11 +44,14 @@ jobs:
           python -m pip install --quiet -r work/northwind-field-crm/requirements.txt
 
       # Exit 0 is a pass, 2 is an escalation a human must read, 1 is a crash.
+      # The fixer starts on broken-pr. Pointed at a green branch it reports a
+      # pass and repairs nothing, which proves nothing.
       - name: Run the loop with nobody watching
         run: |
           python -m loops.unattended \
             --repo work/northwind-field-crm \
-            --loop ${{ github.event.inputs.loop || 'fixer' }}
+            --loop ${{ github.event.inputs.loop || 'fixer' }} \
+            --branch ${{ github.event.inputs.branch || 'broken-pr' }}
 
       - name: Upload the state and the reports
         if: always()

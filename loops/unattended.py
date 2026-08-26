@@ -90,9 +90,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--loop", default="fixer", choices=["fixer", "implementer", "enhancer"])
     parser.add_argument("--budget", type=int, default=3)
     parser.add_argument("--doer", default="reference")
+    parser.add_argument(
+        "--branch",
+        default=None,
+        help="fixer only. Check this branch out first, so there is a real failure to repair.",
+    )
     args = parser.parse_args(argv)
 
     extra = {} if args.loop == "enhancer" else {"doer": args.doer}
+    if args.loop == "fixer" and args.branch:
+        extra["branch"] = args.branch
     result = run(repo=args.repo, loop=args.loop, budget=args.budget, **extra)
     state = result["state"]
 
