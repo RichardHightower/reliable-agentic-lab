@@ -2,6 +2,7 @@
 marp: true
 paginate: true
 title: Session 3. Research Loops and MCP
+description: Engineering Reliable Agentic AI Systems. Packt. 29 August 2026.
 ---
 
 <!--
@@ -13,7 +14,8 @@ beat: talk
 
 # Research Loops and MCP, the execution model
 
-Session 3. 40 minutes. One research assistant. Not a survey.
+Session 3. 40 minutes. One research assistant, built end to end.
+Not a survey of nine frameworks.
 
 ---
 
@@ -24,16 +26,17 @@ minutes: 2
 beat: talk
 image: images/same-graph-new-object.png
 image_prompt: >
-  16:9. The Session 2 graph silhouette, unchanged. The object in the center
-  swaps from a PR to a short report. A small plug labeled MCP on the
-  researcher box only. No extra servers. No logos.
+  16:9. The Module 2 graph silhouette, unchanged in outline. The object at the
+  center swaps from a source file to a short cited report. One plug labeled
+  RESEARCH enters the doer box and nothing else. Paper and green ink. No logos.
 -->
 
 # Same graph. New object.
 
-- Orchestrator. Maker. Checker. Rubric. Gate. Budget.
-- Output is a report, not a pull request.
-- Mimic of the Spillwave v3 article pipeline. Cut down. No SEO. No images. No Notion.
+- Orchestrator, doer, judge. The exact three parts from Module 1.
+- The object is a question. The artifact is a cited brief.
+- The judge still holds no write path.
+- The only new thing is a tool that reaches outside the machine.
 
 ![bg right:42%](images/same-graph-new-object.png)
 
@@ -42,21 +45,24 @@ image_prompt: >
 <!--
 id: s3-03
 layout: split-left
-minutes: 3
+minutes: 2
 beat: talk
 image: images/mcp-boundary.png
 image_prompt: >
-  16:9 a single tool plug in a wall socket labeled Perplexity. Other plugs
-  (merge, deploy, seven other servers) are capped with red covers.
-  Caption: one contract. No logos beyond a generic plug shape.
+  16:9. A wall of sockets. Exactly one socket has a plug in it, labeled
+  SEARCH. Every other socket is capped with a fitted red cover and no
+  handle: merge, deploy, delete, billing. Workshop poster style. No logos.
 -->
 
-# A safe MCP tool contract
+# A safe tool boundary is narrow, and it is read-only.
 
-- Model Context Protocol (MCP) is how the agent reaches outside.
-- One server for this lab. Research. Perplexity if the key exists.
-- Allowed: read research. Write notes in the work dir.
-- Forbidden: merge. Deploy. Ticket state. Production.
+Model Context Protocol (MCP) is how the agent reaches outside itself.
+
+- **Allowed**: search, and write into this loop's own output folder.
+- **Denied**: merge, deploy, ticket state, anything in production.
+
+A narrow schema beats a broad one. `add_review_comment(issue_id, body)` is a
+tool. An HTTP client holding your credentials is a liability.
 
 ![bg left:40%](images/mcp-boundary.png)
 
@@ -64,197 +70,187 @@ image_prompt: >
 
 <!--
 id: s3-04
-layout: figure-bottom
+layout: split-right
 minutes: 2
 beat: talk
+image: images/toolprivbench.png
+image_prompt: >
+  16:9. Two tools on a pegboard: a small precise screwdriver and an enormous
+  sledgehammer. A mechanical arm reaches past the screwdriver for the
+  sledgehammer. A sign on the sledgehammer reads sufficient was smaller.
+  Graphite and green. No logos.
 -->
 
-# Research stays in a sub-agent. Orchestrator gets a summary.
+# Agents reach for the bigger tool. This is measured.
 
-Cost control is structural. Not "please don't paste the dump."
+ToolPrivBench, 2026:
 
-```mermaid
-flowchart TB
-  Topic --> R[Researcher sub-agent. MCP or fixture.]
-  R --> S[Summary only]
-  S --> O[Orchestrator]
-  R -.->|notes file, not context| F[(work/research_notes.json)]
-```
+- Mainstream agents **often chose a higher-privilege tool** when a lower one
+  was enough.
+- Transient failures made that escalation **more likely**, not less.
+- Prompt-based controls gave **only limited** mitigation.
+
+You do not fix this with a stronger sentence. You fix it by not shipping the
+sledgehammer.
+
+![bg right:42%](images/toolprivbench.png)
 
 ---
 
 <!--
 id: s3-05
-layout: split-right
-minutes: 2
+layout: figure-bottom
+minutes: 1
 beat: talk
-image: images/fixture-fallback.png
-image_prompt: >
-  16:9 two paths. Live path with a key. Fixture path with a sealed envelope
-  of notes. Both arrive at the same report desk. A sign: Saturday does not
-  depend on signup. No brand logos.
 -->
 
-# Perplexity is optional. The fixture is not.
+# What comes back from a tool is untrusted input.
 
-- `PERPLEXITY_API_KEY` set: live search, still grounded by the fixture for the lab.
-- Key missing: `fixtures/research.json`.
-- Same as Langfuse versus local traces. The lab does not die on signup.
+AgentDojo showed that content returned by a tool can carry instructions, and
+that those instructions can redirect the agent.
 
-![bg right:42%](images/fixture-fallback.png)
+Your search results are a **document the internet wrote**, not a system prompt.
+
+> Authorization is a property of the tool boundary, not a sentence in the
+> system prompt.
+
+The MCP authorization spec makes the same call: validate the token audience
+server side, and never pass a token through.
 
 ---
 
 <!--
 id: s3-06
-layout: section
-minutes: 0
+layout: split-left
+minutes: 2
 beat: talk
+image: images/three-backends.png
+image_prompt: >
+  16:9. Three roads merging into one gate. Road one carries a key. Road two
+  carries a plain compass. Road three carries a sealed envelope. The gate is
+  a single doorway labeled search(question). No brand marks. No logos.
 -->
 
-# Two quality domains. Fact, then style.
+# One boundary. Three backends. You pick.
 
-Same editor and checker shape as Session 2. New rubrics.
+| Backend | When |
+|---|---|
+| Perplexity over MCP | You set `PERPLEXITY_API_KEY` |
+| Your agent's own WebSearch | No key, but the tool is there |
+| A recorded fixture | Offline, or the wifi in this room |
+
+The loop calls one function. It never learns which one answered.
+
+Saturday does not depend on a signup form.
+
+![bg left:40%](images/three-backends.png)
 
 ---
 
 <!--
 id: s3-07
-layout: figure-bottom
-minutes: 3
-beat: talk
+layout: lab
+minutes: 25
+beat: lab
 -->
 
-# Fact-check loop. Checker has no write tools.
+# Lab 3. The research assistant. 25 minutes.
 
-Must-include facts. Forbidden contradictions. Pass means no critical, no major.
+```bash
+cd labs/m3-research
+claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
 
-```mermaid
-flowchart LR
-  Draft --> FC[Fact checker. Read only.]
-  FC -->|fail, budget left| FE[Fact editor. Writes report.]
-  FE --> FC
-  FC -->|pass| Style
-  FC -->|repeat or budget| Escalate
+task loop:research -- --question "sqlalchemy nullable datetime column" \
+  --backend fixture
 ```
+
+Fill `loop.py`. Two functions: `plan_questions` and `check_brief`.
+
+The question is boring on purpose. This is not "write my next post."
+
+Falling behind is fine: `git checkout done-m3`.
 
 ---
 
 <!--
 id: s3-08
-layout: split-right
-minutes: 3
-beat: talk
-image: images/style-enforcer.png
-image_prompt: >
-  16:9 a steel rule striking through an em dash. Beside it a tiny rubric:
-  one idea per sentence, expand MCP on first use, expand CRM on first use.
-  Deterministic tool first, judge second. No logos.
+layout: figure-bottom
+minutes: 1
+beat: lab
 -->
 
-# Style-guide enforcer
+# The judge reads the brief. It does not read it *thoughtfully*.
 
-- Deterministic first. Strip em dashes in code.
-- Then the checker scores the rest.
-- One idea per sentence. Expand MCP. Expand CRM.
-- Not the full house guide. Not SEO. Not engagement.
+```
+PASS  has_sources    2 sources retrieved
+PASS  grounded       every citation resolves
+PASS  cited          every paragraph cites a source
+PASS  style          0 em dashes
 
-![bg right:42%](images/style-enforcer.png)
+backend: fixture   budget: $0.00 / $0.20 (soft $0.10), 3/8 calls
+gate:    pass
+```
+
+Grounded and cited are **arithmetic**. No model call.
+
+A confident sentence nobody can trace is the failure that matters.
 
 ---
 
 <!--
 id: s3-09
-layout: split-left
+layout: split-right
 minutes: 2
-beat: talk
-image: images/budget-calls.png
+beat: lab
+image: images/unbounded-search.png
 image_prompt: >
-  16:9 a simple ledger. Each agent call is a coin. A hard line at 8 coins.
-  Loops stop at the line even if the report is still dirty. No dashboards.
+  16:9. A library corridor that recedes without end, shelves blurring into
+  the vanishing point. In the foreground, a small brass counter reading a
+  fixed number of steps, and a closed gate. Calm, not ominous. No logos.
 -->
 
-# Three exits, again.
+# A research loop needs a harder stop than code does.
 
-- Passing grade. No critical. No major. Minors do not block.
-- Max loops. Default 3 per domain.
-- Max budget. Each call costs 1. Cap is real.
-- Repeat failure still escalates. Unresolved tags beat a fake pass.
+"Keep searching until confident" is not a stop condition. The search space has
+no end, so the loop has to be told where the end is.
 
-![bg left:40%](images/budget-calls.png)
+- **Call budget.** Eight searches. The ninth raises.
+- **Dollar budget.** A soft warning, then a hard cap.
+- **Stable failure.** The same gaps twice means stop.
+- **No source found** escalates. It never ships an uncited brief.
+
+![bg right:42%](images/unbounded-search.png)
 
 ---
 
 <!--
 id: s3-10
-layout: lab
+layout: figure-bottom
 minutes: 1
-beat: lab
+beat: bridge
 -->
 
-# Lab. One assistant, end to end.
+# Two numbers worth remembering.
 
-```bash
-pytest solutions/m3-research/tests -q
-python solutions/m3-research/loop.py
-python solutions/m3-research/loop.py --dirty
-```
+| Number | What it says |
+|---|---|
+| **15.7%** | Share of recorded agent failures that are one step, repeated |
+| **12.4%** | Share where the agent did not know it was already done |
 
-`--dirty` is the teaching run. Fail, retry, pass. Read `work/last-loop.json`.
+And retries are not linear. A retry usually replays the whole context, so a 20%
+per-step failure rate can roughly **double** the bill, not add a fifth to it.
+
+Cost is an architecture problem, not a pricing problem.
 
 ---
 
 <!--
 id: s3-11
-layout: figure-top
-minutes: 3
-beat: lab
--->
-
-```mermaid
-flowchart TB
-  T[Topic. Optional UTC ISO due dates?] --> Res[Research]
-  Res --> Draft[Report]
-  Draft --> Fact[FACT domain]
-  Fact --> Enf[Strip em dashes]
-  Enf --> Style[STYLE domain]
-  Style --> Out[work/report.md]
-```
-
-Topic is boring on purpose. Not "write my next Substack."
-
----
-
-<!--
-id: s3-12
-layout: split-right
-minutes: 4
-beat: talk
-image: images/failure-modes-m3.png
-image_prompt: >
-  16:9 four small cards. Signup stall. Dumping the dump into context.
-  Fake pass on dirty style. Loop that ignores budget. Each card has a
-  red X and a green fix. No logos.
--->
-
-# Failure modes. Last five minutes.
-
-- Signup stall. Use the fixture.
-- Context dump. Research stays in the sub-agent.
-- Fake pass. Unresolved tags, not a green lie.
-- Budget ignored. Python stops it. The prompt does not.
-
-![bg right:42%](images/failure-modes-m3.png)
-
----
-
-<!--
-id: s3-13
 layout: title
 minutes: 1
 beat: bridge
 -->
 
-# Break.
+# Break. 15 minutes.
 
-Next: the same stack, unattended.
+Next: the same stack, with nobody at the keyboard.
