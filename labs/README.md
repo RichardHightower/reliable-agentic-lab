@@ -1,19 +1,17 @@
 # Labs
 
-Empty on purpose.
+Stubs and prompts. Working examples live in `solutions/`.
 
-Working solutions land first under `solutions/`.
-Attendee exercises land here after those solutions run clean.
+Saturday order:
 
-Planned later:
+| Lab | You fill | Working example |
+|---|---|---|
+| `labs/m1-implementer` | one autonomous loop | `solutions/m1-implementer` and `solutions/loops/implementer.py` |
+| `labs/m2-harness` | Maker, Checker, gates | `solutions/m2-harness` |
+| `labs/m3-enhancer` | Ticket Enhancer as the research assistant | `solutions/loops/enhancer.py` |
+| `labs/m4-fixer` | Broken PR Fixer as the production pattern | `solutions/loops/fixer.py` |
 
-- `labs/m1/`
-- `labs/m2/`
-- `labs/m3/`
-- `labs/m4/`
+Each lab has `prompts/claude-code.md`, `prompts/agent-sdk.md`, and `prompts/langgraph.md`.
+Paste one prompt into your tool. Do not fill all three approaches.
 
-Each lab will get the same doc set: `README.md`, `SETUP.md`,
-`INSTRUCTIONS.md`, plus a fall-behind note that points at the matching
-solution folder.
-
-See [SETUP.md](SETUP.md), [INSTRUCTIONS.md](INSTRUCTIONS.md).
+Polling is the default discovery mechanism. Webhooks stay pinned for later.

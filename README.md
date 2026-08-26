@@ -23,14 +23,16 @@ solutions/m1-implementer   one autonomous loop
 solutions/m2-harness       Maker, Checker, rubric, hidden grader, gates
 solutions/m3-research      report loop. Fact-check. Style enforcer.
 solutions/m4-production    unattended runner plus GitHub Actions
-labs/                      exercises later. Empty until solutions pass.
+solutions/loops            working PRD loops: enhancer, implementer, fixer
+labs/                      stubs plus paste-ready prompts
 slides/                    four session decks plus narrative notes
 ```
 
+`labs/` has one folder per Saturday module. Each lab has a stub and three prompts
+(Claude Code, Agent Software Development Kit, LangGraph). Pick one tool.
+
 Every solutions package has `README.md`, `SETUP.md`, `INSTRUCTIONS.md`,
 `ARCHITECTURE.md`, and `TROUBLESHOOTING.md`.
-
-No per-module branches. Solutions live in folders. Labs come after.
 
 ## What they take home
 

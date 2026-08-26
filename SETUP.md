@@ -23,8 +23,8 @@ pip install -r solutions/crm/requirements.txt
 ## Prove the machine
 
 ```bash
-export PYTHONPATH="$PWD/solutions/crm"
-pytest solutions/crm/tests solutions/m2-harness/graders solutions/m2-harness/tests solutions/m3-research/tests -q
+export PYTHONPATH="$PWD:$PWD/solutions/crm:$PWD/solutions/m2-harness"
+pytest solutions/crm/tests solutions/m2-harness/graders solutions/m2-harness/tests solutions/m3-research/tests solutions/loops/tests -q
 ```
 
 All of those should pass on `main`.

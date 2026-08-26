@@ -15,3 +15,8 @@ solutions/m1-implementer/PR.md
 solutions/m3-research/work/
 solutions/m4-production/state.json
 .DS_Store
+
+solutions/loops/work/
+labs/**/work/
+labs/**/PR.md
+labs/**/traces/*.json

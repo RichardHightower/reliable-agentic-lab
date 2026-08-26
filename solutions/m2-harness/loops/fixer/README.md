@@ -1,3 +1,5 @@
-Broken PR Fixer is a Module 4 production pattern.
+# Broken PR Fixer
 
-Ship it working on a done branch. Live build only if Saturday is on time.
+Working example: `python -m solutions.loops fixer --maker reference`
+
+Module 4 production pattern. Ship it working. Live build only if Saturday is on time.

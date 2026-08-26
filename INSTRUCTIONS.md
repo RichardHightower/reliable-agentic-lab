@@ -2,7 +2,7 @@
 
 Work from the repo root. Activate `.venv` first. See `SETUP.md`.
 
-Solutions are the instructor reference. Labs stay empty until these stay green.
+Solutions are the instructor reference. Labs are stubs and prompts.
 Talk track lives in `slides/`. Marp decks plus narrative notes. Same images.
 
 ## Order
@@ -12,6 +12,7 @@ Talk track lives in `slides/`. Marp decks plus narrative notes. Same images.
 3. `solutions/m2-harness` wraps that loop with Maker, Checker, rubric, and gates.
 4. `solutions/m3-research` writes a report, fact-checks it, and enforces style.
 5. `solutions/m4-production` runs the same stack unattended.
+6. `solutions/loops` runs the three PRD agents against a local board.
 
 ## Sessions
 
@@ -46,6 +47,11 @@ python solutions/m3-research/loop.py --dirty
 # Module 4
 python solutions/m4-production/run_unattended.py --target m2
 python solutions/m4-production/run_unattended.py --target m3
+
+# PRD loops (local board, no GitHub token)
+python -m solutions.loops enhancer --ticket T001 --incorporate
+python -m solutions.loops implementer --maker reference
+python -m solutions.loops fixer --maker reference
 ```
 
 Open the package `INSTRUCTIONS.md` for the talking points and stop rules.
