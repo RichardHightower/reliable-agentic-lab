@@ -73,7 +73,12 @@ Closing line: same rule in both places, or the remote one is theater.
 
 ## s4-07. Lab 4
 
-Read both commands. The second one is the unattended run.
+Read both commands. `--branch broken-pr` is what makes this real: the fixer
+starts from a branch with one genuinely failing test. Point it at a green
+branch and it reports a pass and proves nothing, which is the same shape as
+the red gate in Module 2.
+
+The second command is the unattended run.
 
 `loop.py`. Two functions. The line to repeat while you walk the room: giving up
 is allowed, giving up silently is the bug.

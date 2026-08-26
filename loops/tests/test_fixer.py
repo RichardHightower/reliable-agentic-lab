@@ -14,7 +14,7 @@ import pytest
 
 from loops import gates
 from loops.contract import CoverageReport, RunResult, SuiteReport
-from loops.fixer import failure_summary, run
+from loops.fixer import checkout, failure_summary, run
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -90,3 +90,11 @@ def test_a_fix_that_writes_outside_scope_is_refused(broken):
     trace = run(repo=broken, doer="reference:known-good", write_trace=False)
     assert trace["gate"] == gates.PASS
     assert all(not path.startswith("tests/") for path in trace["changed"]), trace["changed"]
+
+
+def test_checkout_fails_loudly_on_a_branch_that_does_not_exist(tmp_path):
+    """A fixer that silently stays on the wrong branch reports a false pass."""
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    with pytest.raises(SystemExit) as caught:
+        checkout(tmp_path, "no-such-branch")
+    assert "no-such-branch" in str(caught.value)

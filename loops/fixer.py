@@ -39,11 +39,26 @@ def failure_summary(run_result) -> str:
     return "\n".join(lines)
 
 
-def run(  # noqa: PLR0913, PLR0915
+def checkout(repo: Path, branch: str) -> None:
+    """Start from the branch that is actually broken.
+
+    A fixer pointed at a green branch reports a pass and proves nothing. That is
+    the same shape as the red gate in Module 2: the interesting run needs a real
+    failure to start from.
+    """
+    result = subprocess.run(
+        ["git", "checkout", branch], cwd=repo, text=True, capture_output=True, check=False
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"cannot check out {branch} in {repo}:\n{result.stderr.strip()}")
+
+
+def run(  # noqa: PLR0913, PLR0912, PLR0915
     *,
     repo: str | Path,
     doer: str = "reference",
     fix_ref: str = "known-good",
+    branch: str | None = None,
     budget: int | None = None,
     research_backend: research.Backend | None = None,
     write_trace: bool = True,
@@ -52,6 +67,8 @@ def run(  # noqa: PLR0913, PLR0915
     contract = Contract(repo)
     contract.validate()
     target = contract.repo
+    if branch:
+        checkout(target, branch)
 
     cast = roles.build(contract)
     boss: roles.Orchestrator = cast["orchestrator"]
@@ -170,6 +187,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default="work/northwind-field-crm")
     parser.add_argument("--doer", default="reference")
     parser.add_argument("--fix-ref", default="known-good")
+    parser.add_argument(
+        "--branch",
+        default=None,
+        help="check this branch out first. Use broken-pr to start from a real failure.",
+    )
     parser.add_argument("--budget", type=int, default=None)
     parser.add_argument("--research", default="fixture", choices=["off", "fixture", "auto"])
     args = parser.parse_args(argv)
@@ -185,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         repo=args.repo,
         doer=args.doer,
         fix_ref=args.fix_ref,
+        branch=args.branch,
         budget=args.budget,
         research_backend=backend,
     )

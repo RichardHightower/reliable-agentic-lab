@@ -168,7 +168,7 @@ beat: lab
 cd labs/m4-fixer
 claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
 
-task loop:fixer -- --doer reference
+task loop:fixer -- --branch broken-pr --doer reference
 python -m loops.unattended --repo work/northwind-field-crm --loop fixer
 ```
 

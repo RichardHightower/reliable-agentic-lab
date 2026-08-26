@@ -427,7 +427,7 @@ def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
             "the same tests fail twice",
             "the budget is spent, and it leaves a comment saying why",
         ],
-        verify=["task loop:fixer -- --doer reference"],
+        verify=["task loop:fixer -- --branch broken-pr --doer reference"],
         gate_note=(
             "Nobody is watching this one. Its exits matter more than its successes, and "
             "the same gate that blocks your push blocks its push."

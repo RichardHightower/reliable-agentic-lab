@@ -42,7 +42,7 @@ There are three exits and no fourth: pass, retry, escalate.
 ## Verify
 
 ```bash
-task loop:fixer -- --doer reference
+task loop:fixer -- --branch broken-pr --doer reference
 ```
 
 ## The gate
