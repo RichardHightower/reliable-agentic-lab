@@ -19,5 +19,11 @@ A working autonomous loop, running on your machine.
 
 ## Coming back later
 
-`start-m1` is this lab with the stub empty again. Everything you need
-is in `prompts/`, and `loops/enhancer.py and loops/criteria.py` is the answer whenever you want it.
+Put the empty stub back whenever you want to try it again:
+
+```bash
+git checkout main -- labs/m1-enhancer
+```
+
+That restores this lab only. Everything you need is in `prompts/`, and
+`loops/enhancer.py and loops/criteria.py` is the answer whenever you want it.

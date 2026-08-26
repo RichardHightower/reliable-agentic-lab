@@ -19,5 +19,11 @@ A working research assistant that cites what it retrieved.
 
 ## Coming back later
 
-`start-m3` is this lab with the stub empty again. Everything you need
-is in `prompts/`, and `loops/researcher.py, loops/research.py, and loops/brief.py` is the answer whenever you want it.
+Put the empty stub back whenever you want to try it again:
+
+```bash
+git checkout main -- labs/m3-research
+```
+
+That restores this lab only. Everything you need is in `prompts/`, and
+`loops/researcher.py, loops/research.py, and loops/brief.py` is the answer whenever you want it.

@@ -19,5 +19,11 @@ A production-ready architecture you can hand to your engineering org.
 
 ## Coming back later
 
-`start-m4` is this lab with the stub empty again. Everything you need
-is in `prompts/`, and `loops/fixer.py` is the answer whenever you want it.
+Put the empty stub back whenever you want to try it again:
+
+```bash
+git checkout main -- labs/m4-fixer
+```
+
+That restores this lab only. Everything you need is in `prompts/`, and
+`loops/fixer.py` is the answer whenever you want it.

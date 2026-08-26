@@ -19,5 +19,11 @@ A reusable evaluation harness that plans, executes, verifies, and iterates.
 
 ## Coming back later
 
-`start-m2` is this lab with the stub empty again. Everything you need
-is in `prompts/`, and `loops/implementer.py, loops/rubric.py, and loops/gates.py` is the answer whenever you want it.
+Put the empty stub back whenever you want to try it again:
+
+```bash
+git checkout main -- labs/m2-implementer
+```
+
+That restores this lab only. Everything you need is in `prompts/`, and
+`loops/implementer.py, loops/rubric.py, and loops/gates.py` is the answer whenever you want it.

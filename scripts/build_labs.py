@@ -656,8 +656,14 @@ Nobody is graded here. Falling behind on one lab must not cost you the next one.
 
 ## Coming back later
 
-`start-m{lab.module}` is this lab with the stub empty again. Everything you need
-is in `prompts/`, and `{lab.solution}` is the answer whenever you want it.
+Put the empty stub back whenever you want to try it again:
+
+```bash
+git checkout main -- labs/{lab.slug}
+```
+
+That restores this lab only. Everything you need is in `prompts/`, and
+`{lab.solution}` is the answer whenever you want it.
 """
 
 
