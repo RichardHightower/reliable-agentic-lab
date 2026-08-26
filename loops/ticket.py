@@ -93,14 +93,23 @@ def parse(text: str, *, ticket_id: str = "") -> Ticket:
     )
 
 
-def load(repo: Path, ticket_id: str, folder: str = "tickets") -> Ticket:
-    """Find a ticket by id. Prefers a `.ready.md` file when one exists."""
+def load(
+    repo: Path, ticket_id: str, folder: str = "tickets", *, prefer_ready: bool = True
+) -> Ticket:
+    """Find a ticket by id.
+
+    The implementer wants the ready contract, so `.ready.md` wins by default.
+    The enhancer wants the draft it is grooming, so it passes prefer_ready=False.
+    Loading the answer instead of the question makes the enhancer look like it
+    works when it has done nothing.
+    """
     root = Path(repo) / folder
     if not root.is_dir():
         raise FileNotFoundError(f"no {folder}/ directory in {repo}")
     ready = sorted(root.glob(f"{ticket_id}*.ready.md"))
     plain = sorted(p for p in root.glob(f"{ticket_id}*.md") if not p.name.endswith(".ready.md"))
-    for candidate in ready + plain:
+    order = (ready + plain) if prefer_ready else (plain + ready)
+    for candidate in order:
         ticket = parse(candidate.read_text(encoding="utf-8"), ticket_id=ticket_id)
         ticket.path = candidate
         return ticket

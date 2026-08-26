@@ -124,6 +124,11 @@ def run(  # noqa: PLR0915
     baseline = contract.run("test")
     known_ids = baseline.junit.passed_ids | baseline.junit.failed_ids
 
+    # Whatever was already dirty is not this loop's doing. The enhancer edits
+    # tickets before the implementer runs, and blaming this loop for that would
+    # fail write_scope for a change it never made.
+    preexisting = {path for path in rubric.changed_files(target) if path != steps.STEPS_FILE}
+
     # Step 3. Tests first. The test implementer owns tests/ and nothing else.
     tester = cast["test_implementer"]
     test_result = backend.run(
@@ -137,7 +142,11 @@ def run(  # noqa: PLR0915
     # during the test phase belong to the test implementer; files that appear
     # later belong to the code implementer. A backend that lies about `wrote`
     # cannot move a file out of its phase.
-    after_test_phase = {path for path in rubric.changed_files(target) if path != steps.STEPS_FILE}
+    after_test_phase = {
+        path
+        for path in rubric.changed_files(target)
+        if path != steps.STEPS_FILE and path not in preexisting
+    }
     scope_violations = tester.violations(sorted(after_test_phase))
 
     # Step 4. The red gate.
@@ -168,7 +177,11 @@ def run(  # noqa: PLR0915
         e2e_run = contract.run("e2e")
         lint_run = contract.run("lint")
         format_run = contract.run("format-check")
-        changed = [c for c in rubric.changed_files(target) if c != steps.STEPS_FILE]
+        changed = [
+            c
+            for c in rubric.changed_files(target)
+            if c != steps.STEPS_FILE and c not in preexisting
+        ]
         code_phase = [path for path in changed if path not in after_test_phase]
         violations = sorted(set(scope_violations) | set(coder.violations(code_phase)))
 

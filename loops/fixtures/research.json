@@ -1,0 +1,26 @@
+{
+  "sqlalchemy nullable datetime column mapped optional": {
+    "question": "sqlalchemy nullable datetime column mapped optional",
+    "answer": "Declare the attribute as Mapped[datetime | None] and pass nullable=True to mapped_column. SQLAlchemy 2.0 infers nullability from the Optional annotation, but stating nullable=True keeps the DDL explicit and survives a change to the annotation.",
+    "citations": [
+      "https://docs.sqlalchemy.org/en/20/orm/declarative_tables.html",
+      "https://docs.sqlalchemy.org/en/20/core/type_basics.html#sqlalchemy.types.DateTime"
+    ]
+  },
+  "AttributeError: 'SalesTask' object has no attribute 'due_date'": {
+    "question": "AttributeError: 'SalesTask' object has no attribute 'due_date'",
+    "answer": "The mapped class does not declare the column. Add the mapped_column to the model, then recreate the tables or run a migration. On SQLite an existing file keeps the old schema, so a stale database reproduces this after the model is fixed.",
+    "citations": [
+      "https://docs.sqlalchemy.org/en/20/orm/quickstart.html",
+      "https://www.sqlite.org/lang_altertable.html"
+    ]
+  },
+  "fastapi test rendered template contains value": {
+    "question": "fastapi test rendered template contains value",
+    "answer": "Use starlette's TestClient, request the route, and assert against response.text. The client runs the full stack including the Jinja render, so a template change is covered without a browser.",
+    "citations": [
+      "https://fastapi.tiangolo.com/tutorial/testing/",
+      "https://www.starlette.io/testclient/"
+    ]
+  }
+}
