@@ -1,194 +1,118 @@
 # Setup
 
-Do this once before Saturday. The goal is a laptop that can clone, grade, and call a model.
-Loop design comes after this page. Do not fight the environment during the first hour.
-
-Repo: https://github.com/RichardHightower/reliable-agentic-lab
-The repo is private. Rick adds attendees as collaborators. Fork it onto your account if you want a personal copy of issues and pull requests.
+Do this once before Saturday. The class stays on loop design, not environment
+fights. Budget 15 minutes.
 
 ## Prerequisites
 
-- A GitHub account
-- Git
-- Python 3.10 or newer. The Eventbrite page lists 3.11. Use 3.11 if you have it.
-- A personal access token with access to this repository
-- An API key for the model provider you will use (Anthropic, OpenAI, or equivalent)
+| Thing | Why | Check |
+|---|---|---|
+| Python 3.10 or newer | The loops and the demo app | `python3 --version` |
+| Git | Everything | `git --version` |
+| Task | The command spine | `task --version` |
+| A GitHub account | Module 4 only | |
+| A coding agent | Your labs. Any one of four. | |
 
-Docker Desktop is optional. It boots the CRM in a container. Graders do not need it.
+Optional, and nothing is blocked without them: Docker, an API key for a model
+provider, a Perplexity key, and a Langfuse account.
 
-A coding agent CLI is optional. Claude Code is not required.
-Use Claude Code, OpenCode, Codex, or Grok Build. Headless commands live in [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md).
-The Agent Software Development Kit and LangGraph are optional tracks.
+### Install Task
 
-## 1. Clone or fork
+```bash
+brew install go-task            # macOS
+npm install -g @go-task/cli     # any platform with Node
+scoop install task              # Windows
+```
 
-Collaborator clone:
+Anything else: <https://taskfile.dev/installation/>
+
+### Pick a coding agent
+
+Claude Code, Codex, Grok Build, or OpenCode. One is enough, and the labs do not
+care which. You can also do every lab by hand, because the loops run with no
+model key at all.
+
+## 1. Clone
 
 ```bash
 git clone https://github.com/RichardHightower/reliable-agentic-lab.git
 cd reliable-agentic-lab
 ```
 
-Fork first on GitHub, then:
+A 404 means you are not a collaborator yet. Ping Rick.
+
+## 2. Run setup
 
 ```bash
-git clone https://github.com/<your-user>/reliable-agentic-lab.git
-cd reliable-agentic-lab
+task setup
 ```
 
-If clone fails with 404, you do not have access yet. Ping Rick.
+That creates `.venv`, installs dependencies, clones the demo target repository
+into `work/`, and runs the verifier.
 
-## 2. Create and activate a virtual environment
+Windows without `make`-style tooling: the same steps run by hand are in
+`Taskfile.yml`, one command per line.
+
+## 3. Verify
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+task test
 ```
 
-Windows:
+129 checks. All of them should pass. If they do not, you have found something
+worth telling Rick about before Saturday.
+
+Then confirm the loops run with no key:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
+task loop:implementer -- --repo work/northwind-field-crm --ticket T001 --doer reference
 ```
 
-## 3. Install dependencies
+You should see ten rubric rows, all passing, and `gate: pass`.
 
-Core (graders, CRM, local loops):
+## 4. Secrets, all optional
 
-```bash
-pip install -r requirements.txt
-```
-
-Optional SDKs if you fill a lab with Claude, OpenAI, or LangGraph:
-
-```bash
-pip install -r requirements-agents.txt
-```
-
-## 4. Configure secrets
-
-`.env` is gitignored. Copy the example. Never commit keys.
+`.env` is gitignored. Copy the example and fill only what you have.
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
-
-```
-GITHUB_TOKEN=ghp_your_token_here
-GITHUB_REPO=RichardHightower/reliable-agentic-lab
-ANTHROPIC_API_KEY=your_key_here
-OPENAI_API_KEY=your_key_here
-```
-
-Fill the provider you actually use. Leave the others blank.
-`scripts/verify_setup.py` loads `.env` without printing values.
-
-If you forked, set `GITHUB_REPO` to `your-user/reliable-agentic-lab`.
-
-## 5. GitHub token
-
-1. GitHub, Settings, Developer settings, Personal access tokens.
-2. Create a fine-grained token for `RichardHightower/reliable-agentic-lab`, or for your fork.
-3. Grant repository permissions: Contents read and write, Issues read and write, Pull requests read and write.
-4. Classic tokens may use the `repo` scope instead.
-5. Paste the token into `.env` as `GITHUB_TOKEN`.
-
-The class default is polling. Webhooks stay pinned for later.
-
-## 6. Verify the setup
-
-```bash
-python scripts/verify_setup.py
-```
-
-The script checks:
-
-- Python version
-- Git on PATH
-- Local CRM tickets on disk
-- `.venv` and `.env` present
-- GitHub token can list issues (if `GITHUB_TOKEN` is set)
-- Anthropic or OpenAI can make one tiny call (if that key is set)
-
-PASS on python, git, and tickets is enough for the hidden grader and the reference loops.
-GitHub and model keys are required when you fill the live agent stubs.
-
-Then prove the graders:
-
-```bash
-export PYTHONPATH="$PWD:$PWD/solutions/crm:$PWD/solutions/m2-harness"
-pytest solutions/crm/tests solutions/m2-harness/graders solutions/m2-harness/tests solutions/m3-research/tests solutions/loops/tests solutions/extra_credit/tests -q
-```
-
-Those should pass on `main`.
-
-## 7. Run the agents
-
-Working examples (no model key):
-
-```bash
-python -m solutions.loops enhancer --ticket T001 --incorporate
-python -m solutions.loops implementer --maker reference
-python -m solutions.loops fixer --maker reference
-```
-
-Saturday labs are stubs. Claude Code is not required.
-From the repo root, run one prompt headless:
-
-```bash
-claude -p "$(cat labs/m1-implementer/prompts/claude-code.md)" --allowedTools "Read,Edit,Write,Bash,Glob,Grep"
-opencode run --dir . "$(cat labs/m1-implementer/prompts/claude-code.md)"
-codex exec "$(cat labs/m1-implementer/prompts/claude-code.md)"
-grok -p "$(cat labs/m1-implementer/prompts/claude-code.md)" --no-auto-update
-```
-
-Or start the tool interactively and paste the same file.
-Details: [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md).
-
-| Lab | Stub | Working example |
+| Variable | Needed for | Without it |
 |---|---|---|
-| Module 1 implementer | `labs/m1-implementer` | `solutions/m1-implementer` |
-| Module 2 harness | `labs/m2-harness` | `solutions/m2-harness` |
-| Module 3 enhancer | `labs/m3-enhancer` | `solutions/loops/enhancer.py` |
-| Module 4 fixer | `labs/m4-fixer` | `solutions/loops/fixer.py` |
+| `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` | Driving a loop with a model | Use `--doer reference`. Everything still runs. |
+| `PERPLEXITY_API_KEY` | Module 3 research | Use `--backend websearch` or `--backend fixture`. You choose. |
+| `GITHUB_TOKEN` | Module 4 pull requests | Modules 1 to 3 are fully offline. |
+| `LANGFUSE_*` | Take-home observability | Local JSON traces are the fallback. |
 
-If you stall: stop typing, watch Rick, copy from `solutions/`.
+Never commit a key. If you fork this repository, that includes your fork.
 
-## Optional keys
+### The GitHub token, for Module 4 only
 
-| Variable | Used by | Required to grade |
-|---|---|---|
-| `GITHUB_TOKEN` | live GitHub polling | No. Local board is the fallback. |
-| `ANTHROPIC_API_KEY` | Claude calls | No |
-| `OPENAI_API_KEY` | OpenAI / Codex | No |
-| `XAI_API_KEY` | Grok Build | No |
-| `PERPLEXITY_API_KEY` | Module 3 live search | No. Fixture is the fallback. |
-| `LANGFUSE_*` | cloud traces | No. Local JSON traces are the fallback. |
+GitHub, **Settings**, **Developer settings**, **Personal access tokens**. Grant
+**Contents**, **Issues**, and **Pull requests**. Paste it into `.env`.
 
-## Extra credit only
+## 5. On the day
 
-GitHub Actions triggers are optional. Not on the Saturday clock.
-Copy YAML from `labs/extra-credit/workflows/` onto your fork. Leave it off the instructor repo.
+Work from a lab folder, not the repo root:
 
 ```bash
-python solutions/extra_credit/groom_ticket.py --issue T001 --incorporate
-python solutions/extra_credit/fix_pr.py --pr T001 --maker reference
-python solutions/extra_credit/webhook.py --port 8765
+cd labs/m1-enhancer
 ```
 
-ngrok path: [labs/extra-credit/NGROK.md](labs/extra-credit/NGROK.md)
-Droplet path: [labs/extra-credit/deploy/DIGITALOCEAN.md](labs/extra-credit/deploy/DIGITALOCEAN.md)
-Details: [docs/PRD-extra-credit.md](docs/PRD-extra-credit.md).
+See [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md).
 
-## Docs in every package
+## Troubleshooting
 
-Each folder under `solutions/` and `labs/` has:
+**`task: command not found`.** Task is not installed. See above.
 
-- `README.md` what it is
-- `SETUP.md` how to install just this piece
-- `INSTRUCTIONS.md` how to run it and what pass looks like
-- `ARCHITECTURE.md` the loop pieces
-- `TROUBLESHOOTING.md` the failures we already hit
+**`python: command not found`.** Use `python3`. Every command in this repo goes
+through `task`, which already knows.
+
+**`task test` fails on a fresh clone.** Tell Rick. That is a real bug and it
+should not happen.
+
+**The clone in `work/` is missing.** Run `task clone`.
+
+**Your agent refuses to push.** That is the gate, working. Run `task test`, get
+it green, and push again.
