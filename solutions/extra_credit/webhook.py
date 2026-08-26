@@ -4,6 +4,10 @@
 Not Saturday. Polling stays the class default.
 Same entry point for the Python loops, Claude Code headless, Codex, OpenCode, Grok Build.
 """
+# ruff: noqa: E402
+# The imports below come after the sys.path bootstrap that makes them
+# resolvable. Moving them up breaks the script when it is run directly.
+
 from __future__ import annotations
 
 import argparse
@@ -22,8 +26,14 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from solutions.extra_credit import fix_pr, github_api as gh, groom_ticket
-from solutions.loops import implementer
+from loops import implementer
+from solutions.extra_credit import (
+    fix_pr,
+    groom_ticket,
+)
+from solutions.extra_credit import (
+    github_api as gh,
+)
 
 HERE = Path(__file__).resolve().parent
 WORK = HERE / "work"
@@ -35,7 +45,9 @@ app = FastAPI(title="reliable-agentic-lab extra-credit webhook")
 
 
 def webhook_secret() -> str:
-    return (os.environ.get("GITHUB_WEBHOOK_SECRET") or os.environ.get("WEBHOOK_SECRET") or "").strip()
+    return (
+        os.environ.get("GITHUB_WEBHOOK_SECRET") or os.environ.get("WEBHOOK_SECRET") or ""
+    ).strip()
 
 
 def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
@@ -96,7 +108,7 @@ def _label_names(payload: dict) -> list[str]:
     return names
 
 
-def route_event(event: str, payload: dict) -> str:
+def route_event(event: str, payload: dict) -> str:  # noqa: PLR0911
     """Return groom | fulfill | fix | ping | ignore."""
     if event == "ping":
         return "ping"
@@ -129,12 +141,12 @@ def run_python(kind: str, number: str) -> dict:
         return groom_ticket.run_local(ticket, incorporate=False, budget=MAX_ATTEMPTS)
     if kind == "fulfill":
         ticket = number if str(number).startswith("T") else "T001"
-        return implementer.run(ticket_id=ticket, maker="reference", budget=MAX_ATTEMPTS)
+        return implementer.run(ticket_id=ticket, doer="reference", budget=MAX_ATTEMPTS)
     if kind == "fix":
         if number.isdigit() and gh.token_from_env():
-            return fix_pr.run_github(int(number), budget=MAX_ATTEMPTS, maker="reference")
+            return fix_pr.run_github(int(number), budget=MAX_ATTEMPTS, doer="reference")
         ticket = number if str(number).startswith("T") else "T001"
-        return fix_pr.run_local(ticket, maker="reference", budget=MAX_ATTEMPTS)
+        return fix_pr.run_local(ticket, doer="reference", budget=MAX_ATTEMPTS)
     return {"ok": False, "error": f"unknown kind {kind}"}
 
 
@@ -148,15 +160,36 @@ def run_cli(kind: str, number: str, backend: str) -> dict:
         "claude": [
             "claude",
             "-p",
-            f"Extra credit. Kind={kind}. Issue or PR {number}. Follow {prompt}. Do not edit graders.",
+            f"Extra credit. Kind={kind}. Issue or PR {number}. Follow {prompt}. Do not edit the target repo's tests.",
             "--allowedTools",
             "Read,Edit,Write,Bash,Glob,Grep",
         ],
-        "opencode": ["opencode", "run", "--dir", str(ROOT), f"Extra credit {kind} for {number}. Follow {prompt}."],
+        "opencode": [
+            "opencode",
+            "run",
+            "--dir",
+            str(ROOT),
+            f"Extra credit {kind} for {number}. Follow {prompt}.",
+        ],
         "codex": ["codex", "exec", f"Extra credit {kind} for {number}. Follow {prompt}."],
-        "grok": ["grok", "-p", f"Extra credit {kind} for {number}. Follow {prompt}.", "--no-auto-update"],
-        "agent-sdk": [sys.executable, str(ROOT / "labs" / "extra-credit" / "scripts" / "groom_ticket.py"), "--issue", number],
-        "langgraph": [sys.executable, str(ROOT / "labs" / "extra-credit" / "scripts" / "groom_ticket.py"), "--issue", number],
+        "grok": [
+            "grok",
+            "-p",
+            f"Extra credit {kind} for {number}. Follow {prompt}.",
+            "--no-auto-update",
+        ],
+        "agent-sdk": [
+            sys.executable,
+            str(ROOT / "labs" / "extra-credit" / "scripts" / "groom_ticket.py"),
+            "--issue",
+            number,
+        ],
+        "langgraph": [
+            sys.executable,
+            str(ROOT / "labs" / "extra-credit" / "scripts" / "groom_ticket.py"),
+            "--issue",
+            number,
+        ],
     }
     cmd = commands.get(backend)
     if not cmd:
@@ -165,7 +198,9 @@ def run_cli(kind: str, number: str, backend: str) -> dict:
     if async_mode:
         subprocess.Popen(cmd, cwd=str(ROOT), env=env)
         return {"ok": True, "backend": backend, "async": True, "cmd": cmd[:2]}
-    result = subprocess.run(cmd, cwd=str(ROOT), env=env, text=True, capture_output=True)
+    result = subprocess.run(
+        cmd, cwd=str(ROOT), env=env, text=True, capture_output=True, check=False
+    )
     return {
         "ok": result.returncode == 0,
         "backend": backend,
@@ -187,16 +222,33 @@ def handle_event(event: str, payload: dict) -> dict:
         return {"status": "skipped", "reason": "agent-in-progress", "key": lock_key}
     try:
         backend = backend_name()
-        if backend == "python":
+        # Two named branches read better here than one long ternary.
+        if backend == "python":  # noqa: SIM108
             result = run_python(kind, number)
         else:
             result = run_cli(kind, number, backend)
         WORK.mkdir(parents=True, exist_ok=True)
         (WORK / "last-webhook.json").write_text(
-            json.dumps({"event": event, "kind": kind, "number": number, "backend": backend, "result": result}, indent=2, default=str),
+            json.dumps(
+                {
+                    "event": event,
+                    "kind": kind,
+                    "number": number,
+                    "backend": backend,
+                    "result": result,
+                },
+                indent=2,
+                default=str,
+            ),
             encoding="utf-8",
         )
-        return {"status": "accepted", "kind": kind, "number": number, "backend": backend, "result": result}
+        return {
+            "status": "accepted",
+            "kind": kind,
+            "number": number,
+            "backend": backend,
+            "result": result,
+        }
     finally:
         release_lock(lock_key)
 
@@ -231,10 +283,10 @@ def main() -> int:
     parser.add_argument("--host", default=os.environ.get("WEBHOOK_HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
-    import uvicorn
+    import uvicorn  # noqa: PLC0415  (only needed to serve)
 
     print(f"extra-credit webhook on http://{args.host}:{args.port}/github-webhook", file=sys.stderr)
-    print("ngrok: ngrok http {0}".format(args.port), file=sys.stderr)
+    print(f"ngrok: ngrok http {args.port}", file=sys.stderr)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 

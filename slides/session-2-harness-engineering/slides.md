@@ -2,6 +2,10 @@
 marp: true
 paginate: true
 title: Session 2. Harness Engineering
+style: |
+  /* Marp has no `center` image keyword. Diagrams are block images, so this
+     centers every one of them without touching the bg images. */
+  img { display: block; margin-left: auto; margin-right: auto; }
 ---
 
 <!--
@@ -13,7 +17,7 @@ beat: talk
 
 # Harness Engineering, the validation layer
 
-Session 2. Center of gravity. 55 minutes. Do not cut this.
+Session 2. The center of gravity. 55 minutes. This is the one that does not get cut.
 
 ---
 
@@ -24,8 +28,8 @@ minutes: 2
 beat: talk
 image: images/loop-without-harness.png
 image_prompt: >
-  16:9. The Session 1 five-box loop, now jittering. Verify is a shrug emoji
-  made of dust. Extra arrows spawn and never stop. Gray-green. No logos.
+  16:9. The Session 1 five-box loop, now jittering. Verify is a shrug made of
+  dust. Extra arrows spawn and never stop. Gray-green. No logos. No readable UI.
 -->
 
 # The loop you just built will lie to you.
@@ -41,107 +45,79 @@ image_prompt: >
 
 <!--
 id: s2-03
-layout: split-left
+layout: figure-bottom
 minutes: 2
 beat: talk
-image: images/maker-checker.png
-image_prompt: >
-  16:9 two desks. Left desk has a keyboard and five file cards, labeled Maker.
-  Right desk has a red pen, a test printout, no keyboard, labeled Checker.
-  A low wall between them. They cannot reach each other's tools. No logos.
 -->
 
-# Maker needs a Checker with fewer tools.
+# A true story from this repo.
 
-- Maker writes CRM files. That is the only write path.
-- Checker reads the diff and the pytest output. No write tools.
-- If one agent does both, it grades its own homework.
+Seven tests. Green on every run. They had never tested the thing they named.
 
-![bg left:40%](images/maker-checker.png)
+```python
+# tests/conftest.py
+CRM_ROOT = Path(__file__).resolve().parents[2] / "crm"
+sys.path.insert(0, str(CRM_ROOT))   # wins over the PYTHONPATH the loop sets
+```
+
+The loop pointed the tests at the work copy. The conftest pointed them at the
+finished answer. Every run was green, against anything.
+
+**A check that reports success while measuring the wrong thing is worse than no check.**
 
 ---
 
 <!--
 id: s2-04
-layout: figure-bottom
-minutes: 3
+layout: split-left
+minutes: 2
 beat: talk
+image: images/two-doers.png
+image_prompt: >
+  16:9. Two desks separated by a low wall. Left desk labeled TEST IMPLEMENTER
+  holds a red pen and a stack of test cards. Right desk labeled CODE IMPLEMENTER
+  holds a keyboard and source files, and has no reach over the wall. A third
+  figure at a lectern labeled JUDGE has no keyboard at all. No logos.
 -->
 
-# Graph nodes. Python holds the loop. The model does not count retries.
+# Two doers. Disjoint scope.
 
-```mermaid
-flowchart TB
-  O[Orchestrator. Budget. Summaries only.] --> M[Maker. Scoped write.]
-  M --> G[Grader. Hidden pytest.]
-  G --> C[Checker. Read only.]
-  C --> Q{Gate}
-  Q -->|pass| Stop[Stop]
-  Q -->|retry| M
-  Q -->|escalate| H[Human]
-```
+- The test implementer writes `tests/`. Nothing else.
+- The code implementer writes `app/`. It is **denied** `tests/`.
+- The judge writes nothing at all.
+
+The code implementer cannot weaken a test to reach green. Not because it was
+told not to. Because it holds no write path to one.
+
+![bg left:40%](images/two-doers.png)
 
 ---
 
 <!--
 id: s2-05
-layout: split-right
-minutes: 2
+layout: figure-bottom
+minutes: 1
 beat: talk
-image: images/tool-scope.png
-image_prompt: >
-  16:9 badge board. Maker badges: read CRM, write five files, run grader.
-  Checker badges: read diff, read pytest, read ticket. Forbidden strip in red:
-  edit graders, change ticket state, merge, deploy. No logos.
 -->
 
-# Sub-agent tool scope
+# Scope is a type, not a sentence.
 
-- Filesystem and long memory stay out of the orchestrator window.
-- Deep Agents or Claude Agent SDK. Same shape. One runtime on Saturday.
-- Attendees may still drive Claude Code against the same ticket and grader.
+```python
+@dataclass
+class Judge(Role):
+    """Scores work. Holds no write path.
 
-![bg right:42%](images/tool-scope.png)
+    There is deliberately no `write` method on this class.
+    """
+```
+
+A rule in a prompt is a suggestion an agent can reason its way around.
+A missing method is not.
 
 ---
 
 <!--
 id: s2-06
-layout: section
-minutes: 0
-beat: talk
--->
-
-# Spec-driven development
-
-Intent becomes a contract the agent works against.
-
----
-
-<!--
-id: s2-07
-layout: split-right
-minutes: 3
-beat: talk
-image: images/ready-ticket-rubric.png
-image_prompt: >
-  16:9. Left a ready ticket with success-criteria bullets. Right the same
-  bullets turned into a rubric checklist with empty pass boxes. A small
-  gear labeled load_ready_ticket. Paper and green ink. No logos.
--->
-
-# The ready ticket is the rubric.
-
-- `## Success criteria` loads as machine-checkable rows.
-- If a row cannot fail a test, it is not a criterion. It is a wish.
-- You do not grade tone on T001. You grade the field, the API, and the filter.
-
-![bg right:42%](images/ready-ticket-rubric.png)
-
----
-
-<!--
-id: s2-08
 layout: figure-top
 minutes: 2
 beat: talk
@@ -149,82 +125,134 @@ beat: talk
 
 ```mermaid
 flowchart LR
-  Ticket[T001 ready] --> Rubric
-  Rubric --> Grader[Hidden tests]
-  Grader --> Score[passed / failed node ids]
-  Score --> Gate
+  P[Planner<br/>steps.jsonl] --> T[Test implementer<br/>tests/ only]
+  T --> R{New tests<br/>failing?}
+  R -->|no| S[STOP<br/>nothing was proven]
+  R -->|yes| C[Code implementer<br/>app/ only]
+  C --> J[Rubric judge<br/>ten rows, no model]
+  J --> F[Final judge<br/>actually done?]
+  F --> G{Gate}
+  G -->|pass| D[Stop]
+  G -->|retry| C
+  G -->|escalate| H[Human]
 ```
 
-Graph engineering here is not a new product. It is edges with types. Ticket to rubric. Rubric to grader. Grader to gate.
+The orchestrator owns the budget and sees summaries, never the diff.
+
+Python holds the loop, so the model never counts its own retries.
+
+---
+
+<!--
+id: s2-07
+layout: section
+minutes: 0
+beat: talk
+-->
+
+# Spec-driven development
+
+Intent becomes a contract the machine can check.
+
+---
+
+<!--
+id: s2-08
+layout: split-right
+minutes: 2
+beat: talk
+image: images/ready-ticket-rubric.png
+image_prompt: >
+  16:9. Left, a ticket with bullet criteria. Right, the same bullets as a
+  checklist with empty pass boxes, each wired to a named test. Paper and green
+  ink. No logos.
+-->
+
+# If a criterion cannot fail a test, it is a wish.
+
+```markdown
+- (AC-4) `GET /api/tasks?due_before=<date>` returns only
+  tasks due before that date, and never tasks with no due date.
+```
+
+Seven criteria. Each one names a condition a test can be red about.
+"Should be intuitive" names nothing.
+
+![bg right:42%](images/ready-ticket-rubric.png)
 
 ---
 
 <!--
 id: s2-09
-layout: split-right
+layout: figure-bottom
 minutes: 2
 beat: talk
-image: images/hidden-grader.png
-image_prompt: >
-  16:9 sealed envelope stamped HIDDEN. Seven test names as thin lines, not
-  readable. A CRM silhouette behind it. Caption: the agent does not author
-  these. No pytest dump. No logos.
 -->
 
-# Grader
+# The plan is a file, and it is checkable.
 
-- Hidden tests in `solutions/m2-harness/graders`.
-- Fail on `starter_crm`. Pass on `solutions/crm`.
-- That fail-then-pass is the proof the contract is real.
+```json
+{"id":"S1T","ticket":"T001","role":"test_implementer",
+ "action":"Write a test that fails until due_date accepts null",
+ "validation":"a test covering AC-1 exists and fails before any code",
+ "criterion":"AC-1","status":"todo","evidence":null}
+```
 
-![bg right:42%](images/hidden-grader.png)
+`steps.jsonl`. Every step carries a **validation statement**.
+
+The plan is rejected when a step has none, when a criterion maps to no step, or
+when a step is marked done without naming the test that proves it.
 
 ---
 
 <!--
 id: s2-10
-layout: figure-bottom
-minutes: 3
+layout: split-left
+minutes: 2
 beat: talk
+image: images/red-gate.png
+image_prompt: >
+  16:9. A traffic gate across a road. The barrier is down. A sign reads
+  NO RED, NO ENTRY. Behind the gate, a test result card showing four failures in
+  red, being checked by a guard. Workshop poster style. No logos.
 -->
 
-# Quality gates. Three exits. No fourth.
+# The red gate. Tests first, and prove it.
 
-Pass. Retry. Escalate. Escalate on repeat signature or spent budget.
+1. The test implementer writes the tests.
+2. The orchestrator reads `junit.xml`.
+3. **If the new tests are not failing, stop.**
 
-```mermaid
-flowchart TB
-  P{Hidden grader green?}
-  P -->|yes| Pass[pass]
-  P -->|no| R{Same failed ids as last time?}
-  R -->|yes| Esc[escalate]
-  R -->|no| B{Budget left?}
-  B -->|yes| Retry[retry]
-  B -->|no| Esc
-```
+A test that passes before any code exists proves nothing. It is the most
+comfortable kind of nothing, because it is green.
+
+![bg left:40%](images/red-gate.png)
 
 ---
 
 <!--
 id: s2-11
-layout: split-left
+layout: figure-bottom
 minutes: 2
 beat: talk
-image: images/stop-conditions.png
-image_prompt: >
-  16:9 three stop signs in a row, redesigned as workshop cards.
-  PASS in green, MAX LOOPS in amber, REPEAT FAILURE in red.
-  Small subtitle: the model does not get a vote. No logos.
 -->
 
-# Stop conditions are architecture.
+# The rubric. Ten rows. No model call.
 
-- Iteration limit. Default 3.
-- Repeat detection. Same failed node ids twice. Stop.
-- Pass. Leave it alone.
-- "One more try" is how you buy a surprise bill.
+```
+PASS  tests_ran          25 tests
+PASS  tests_passed       all green
+PASS  red_first          6 tests were red first
+PASS  coverage_floor     80.42% against a floor of 78.0%
+PASS  criteria_covered   all covered
+PASS  steps_done         14 steps: done 14
+PASS  ui_has_e2e         2 interface files changed, e2e green
+PASS  format_clean       clean
+PASS  lint_clean         clean
+PASS  write_scope        every write was inside its role's scope
+```
 
-![bg left:40%](images/stop-conditions.png)
+"The tests passed" is **one row of ten**.
 
 ---
 
@@ -233,89 +261,237 @@ id: s2-12
 layout: split-right
 minutes: 2
 beat: talk
-image: images/trace-json.png
+image: images/two-judges.png
 image_prompt: >
-  16:9 a single JSON document as a physical printout with four highlighted
-  keys: inputs, tool calls, scores, gate. A small sticky note: Langfuse
-  later. Same schema. No cloud dashboard screenshot. No logos.
+  16:9. Left, a mechanical scale with exact weights, labeled DETERMINISTIC.
+  Right, a person reading a document with a thoughtful expression, labeled
+  MODEL. Between them a divider showing which questions go which way. No logos.
 -->
 
-# Traces. Local JSON is enough to teach.
+# Two judges, and only one of them guesses.
 
-- Inputs. Outputs. Tool calls. Scores. Gate.
-- Langfuse if the cloud is up. File traces if it is not.
-- Same schema. Observability is not a fifth module.
+| Question | Who answers |
+|---|---|
+| Did the tests run and pass? | Arithmetic |
+| Does coverage meet the floor? | Arithmetic |
+| Did anyone write outside scope? | Arithmetic |
+| **Is the ticket actually done?** | A model |
 
-![bg right:42%](images/trace-json.png)
+Use a model only where you must.
+
+![bg right:42%](images/two-judges.png)
 
 ---
 
 <!--
 id: s2-13
-layout: lab
-minutes: 1
-beat: lab
+layout: figure-bottom
+minutes: 2
+beat: talk
 -->
 
-# Lab. Wrap the implementer. 25 minutes.
+# Why a model judge cannot be the gate.
 
-```bash
-PYTHONPATH=solutions/m2-harness python -m loops.implementer --maker none
-PYTHONPATH=solutions/m2-harness pytest solutions/m2-harness/tests -q
-```
+Measured across 41 published articles in a production pipeline:
 
-Known-good CRM is already green. Maker `none` should pass on iteration 1.
-Then break it and use `--maker reference` if you need fail then pass.
+| Judge | Behavior |
+|---|---|
+| Deterministic tell-detector | Gates at 70. Separates good from bad. |
+| LLM quality judge | Saturates near 0.97. Flags **41 of 41**, regardless. |
+
+A judge that approves everything is not a judge. It is a rubber stamp with a
+temperature setting.
 
 ---
 
 <!--
 id: s2-14
-layout: split-right
-minutes: 3
-beat: lab
-image: images/read-the-trace.png
-image_prompt: >
-  16:9 person pointing at a trace printout. Finger on the key "gate": "pass".
-  Another finger on "failed_node_ids": []. Workshop table. No laptop brands.
+layout: figure-bottom
+minutes: 1
+beat: talk
 -->
 
-# Read the trace. Know when to stop.
+# So make the model's verdict a schema.
 
-- `gate: pass` and you are done.
-- `gate: retry` and Maker is allowed one scoped write.
-- `gate: escalate` and a human takes it. The loop is not ashamed. It is designed.
+```python
+if verdict.done and verdict.blocking_issues:
+    return synthetic_fail("says done while listing blocking issues")
+```
 
-![bg right:42%](images/read-the-trace.png)
+- A pass carrying a critical issue is not a decision. Reject it.
+- Output that will not parse is a **FAIL**, never a pass.
+- Absent evidence is never clean.
 
 ---
 
 <!--
 id: s2-15
-layout: figure-bottom
+layout: split-left
 minutes: 2
-beat: lab
+beat: talk
+image: images/push-gate.png
+image_prompt: >
+  16:9. A terminal window mid-command, with a red BLOCKED banner across it. A
+  physical turnstile in front of the screen. A small green paper receipt on the
+  desk beside it, unstamped. No logos, no readable brand names.
 -->
 
-# What you keep.
+# The gate that makes it real.
 
-A harness that can fail, iterate, and pass inside the runbook. Module 1's loop is now something this harness can score.
-
-```mermaid
-flowchart LR
-  M1[Session 1 loop] --> M2[Session 2 harness]
-  M2 --> Score[Score JSON]
 ```
+BLOCKED by pre-tool hook: git push
+Last run: FAILED (1 tests).
+  first failure: tests.test_due_date::test_model_has_optional_due_date
+Run `task test` first.
+```
+
+No push and no pull request until the suite runs green locally.
+
+Your agent will hit this today.
+
+![bg left:40%](images/push-gate.png)
 
 ---
 
 <!--
 id: s2-16
-layout: title
+layout: figure-bottom
 minutes: 1
+beat: talk
+-->
+
+# A receipt proves three things, or it proves nothing.
+
+```json
+{"green": true,
+ "tree_hash": "3da2f2dc9611...",
+ "written_at": 1787720405.98,
+ "report_usable": true}
+```
+
+1. The suite passed.
+2. It ran against **this** tree, not an older one.
+3. It ran **after** the newest source edit.
+
+A zero exit code with no test report is not green. It is the silent-skip bug
+wearing a green shirt.
+
+---
+
+<!--
+id: s2-17
+layout: figure-bottom
+minutes: 1
+beat: talk
+-->
+
+# One gate is never enough.
+
+The write scope lives in the loop. Your agent is a **subprocess**.
+
+```
+in-process scope   stops the loop's own doer
+rubric write_scope reads the diff, catches the subprocess
+```
+
+An agent that edits a test to reach green defeats the first and not the second.
+Defense at one layer is a demo. Defense at two is a harness.
+
+---
+
+<!--
+id: s2-18
+layout: lab
+minutes: 25
+beat: lab
+-->
+
+# Lab. 25 minutes.
+
+```bash
+cd labs/m2-implementer
+claude -p "$(cat prompts/claude-code.md)"
+
+task loop:implementer -- --ticket T001 --doer reference   # ten rows
+task loop:implementer -- --ticket T001 --doer none        # red gate refuses
+```
+
+Fill `harness.py`. Three functions. Nothing else.
+
+Falling behind is fine: `git checkout done-m2` and keep going.
+
+---
+
+<!--
+id: s2-19
+layout: figure-bottom
+minutes: 1
+beat: lab
+-->
+
+# Reading the output. Knowing when to stop.
+
+```
+FAIL  coverage_floor     71.4% against a floor of 78.0%
+gate: escalate
+reason: the same rows failed twice: coverage_floor. Not converging.
+```
+
+- `pass` and you are done.
+- `retry` and the doer gets one more scoped attempt.
+- `escalate` and a human takes it.
+
+**The same rows twice means stop.** Another round changes nothing, and a budget
+spent watching identical failures buys a surprise bill.
+
+---
+
+<!--
+id: s2-20
+layout: figure-bottom
+minutes: 1
+beat: lab
+-->
+
+# On the final attempt, narrow the ask.
+
+```
+FINAL ATTEMPT. Fix only what blocks: tests_passed.
+Do not refactor. Do not address anything else.
+```
+
+A doer that spends its last turn on a naming nit leaves the blocking row unfixed.
+
+---
+
+<!--
+id: s2-21
+layout: figure-bottom
+minutes: 1
+beat: lab
+-->
+
+# What you keep.
+
+A harness that fails, iterates, and passes on its own, and refuses to ship when
+it should not.
+
+```mermaid
+flowchart LR
+  M1[Session 1 loop] --> M2[Session 2 harness]
+  M2 --> Score[Ten rows<br/>and a gate]
+  Score --> PR[A pull request<br/>or an honest escalation]
+```
+
+---
+
+<!--
+id: s2-22
+layout: title
+minutes: 0
 beat: bridge
 -->
 
 # Break.
 
-Next: one research assistant. Same graph. New tools. A report, not a PR.
+Next: the same graph, pointed at a question instead of a ticket.

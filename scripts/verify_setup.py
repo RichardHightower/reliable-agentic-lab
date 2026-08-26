@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Confirm clone, GitHub token, and model key. Prints a ready checklist."""
+
 from __future__ import annotations
 
 import json
@@ -11,7 +12,8 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TICKETS = REPO_ROOT / "solutions" / "tickets"
+# Tickets live in the target repo, not in this one. `task setup` clones it.
+TARGET = REPO_ROOT / "work" / "northwind-field-crm"
 
 
 def load_dotenv() -> None:
@@ -38,9 +40,21 @@ def check_git() -> tuple[bool, str]:
     return bool(path), path or "git not on PATH"
 
 
-def check_tickets() -> tuple[bool, str]:
-    files = sorted(p.name for p in TICKETS.glob("T0*.md"))
-    return bool(files), ", ".join(files) if files else "no tickets found"
+def check_target() -> tuple[bool, str]:
+    """The target repo, and the tickets the loops work on.
+
+    A clone that is present but has no tickets is a different problem from one
+    that was never cloned. Saying which is the difference between a fix and a
+    guess at 09:55 on Saturday.
+    """
+    if not TARGET.exists():
+        return False, f"not cloned yet. Run `task clone` (expected at {TARGET.name})"
+    if not (TARGET / "Taskfile.yml").exists():
+        return False, f"{TARGET.name} has no Taskfile.yml, so no loop can run against it"
+    files = sorted(p.name for p in (TARGET / "tickets").glob("T0*.md"))
+    if not files:
+        return False, f"{TARGET.name} is cloned but holds no tickets"
+    return True, f"{TARGET.name}: {', '.join(files)}"
 
 
 def github_get(url: str, token: str) -> tuple[int, object]:
@@ -57,7 +71,7 @@ def github_get(url: str, token: str) -> tuple[int, object]:
             return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         return exc.code, {"message": str(exc)}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return 0, {"message": str(exc)}
 
 
@@ -75,9 +89,15 @@ def check_github() -> tuple[str, str]:
         token,
     )
     if issues_status == 404:
-        return "warn", f"token works as {login}, but cannot see {repo} yet. Ask Rick for collaborator access."
+        return (
+            "warn",
+            f"token works as {login}, but cannot see {repo} yet. Ask Rick for collaborator access.",
+        )
     if issues_status != 200:
-        return "fail", f"cannot list issues on {repo} ({issues_status}). Need contents, issues, pull requests."
+        return (
+            "fail",
+            f"cannot list issues on {repo} ({issues_status}). Need contents, issues, pull requests.",
+        )
     count = len(issues) if isinstance(issues, list) else 0
     return "pass", f"{login} can list issues on {repo} ({count} returned)"
 
@@ -114,7 +134,7 @@ def check_anthropic() -> tuple[str, str]:
         return "pass", f"Anthropic call ok ({text[:40] or 'empty'})"
     except urllib.error.HTTPError as exc:
         return "fail", f"Anthropic call failed ({exc.code})"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return "fail", f"Anthropic call failed ({exc})"
 
 
@@ -141,16 +161,11 @@ def check_openai() -> tuple[str, str]:
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        text = (
-            payload.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
+        text = payload.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         return "pass", f"OpenAI call ok ({text[:40] or 'empty'})"
     except urllib.error.HTTPError as exc:
         return "fail", f"OpenAI call failed ({exc.code})"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return "fail", f"OpenAI call failed ({exc})"
 
 
@@ -162,10 +177,24 @@ def main() -> int:
     rows.append(("pass" if ok else "fail", "python", detail))
     ok, detail = check_git()
     rows.append(("pass" if ok else "fail", "git", detail))
-    ok, detail = check_tickets()
-    rows.append(("pass" if ok else "fail", "crm tickets", detail))
-    rows.append(("pass" if (REPO_ROOT / ".venv").exists() else "warn", "venv", ".venv found" if (REPO_ROOT / ".venv").exists() else "no .venv yet. Run python -m venv .venv"))
-    rows.append(("pass" if (REPO_ROOT / ".env").exists() else "warn", ".env", ".env found" if (REPO_ROOT / ".env").exists() else "copy .env.example to .env"))
+    ok, detail = check_target()
+    rows.append(("pass" if ok else "fail", "target repo", detail))
+    rows.append(
+        (
+            "pass" if (REPO_ROOT / ".venv").exists() else "warn",
+            "venv",
+            ".venv found"
+            if (REPO_ROOT / ".venv").exists()
+            else "no .venv yet. Run python -m venv .venv",
+        )
+    )
+    rows.append(
+        (
+            "pass" if (REPO_ROOT / ".env").exists() else "warn",
+            ".env",
+            ".env found" if (REPO_ROOT / ".env").exists() else "copy .env.example to .env",
+        )
+    )
     gh_status, gh_detail = check_github()
     rows.append((gh_status, "github", gh_detail))
     an_status, an_detail = check_anthropic()
@@ -188,7 +217,7 @@ def main() -> int:
 
     model_ok = an_status == "pass" or oa_status == "pass"
     if not model_ok:
-        print("\nLocal graders and reference loops are ready.")
+        print("\nThe loops are ready to run with no model key.")
         print("Add ANTHROPIC_API_KEY or OPENAI_API_KEY when you fill a live-model lab.")
         return 0
 

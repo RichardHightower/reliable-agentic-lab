@@ -1,0 +1,13 @@
+# Lint and format for the loop engine. One tool, no plugins.
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "PL"]
+ignore = [
+    "E501",     # the formatter owns line length
+    "PLR2004",  # a literal in a test assertion is the point
+]
+
+[lint.per-file-ignores]
+"loops/tests/*" = ["PLR0913"]  # test helpers take many keyword arguments on purpose

@@ -25,9 +25,33 @@ def test_verify_signature_accepts_and_rejects():
 def test_route_issues_and_ready_and_checks():
     assert webhook.route_event("ping", {}) == "ping"
     assert webhook.route_event("issues", {"action": "opened", "issue": {"number": 1}}) == "groom"
-    assert webhook.route_event("issues", {"action": "labeled", "label": {"name": "ready"}, "issue": {"number": 1, "labels": [{"name": "ready"}]}}) == "fulfill"
-    assert webhook.route_event("check_suite", {"action": "completed", "check_suite": {"conclusion": "failure", "pull_requests": [{"number": 9}]}}) == "fix"
-    assert webhook.route_event("check_suite", {"action": "completed", "check_suite": {"conclusion": "success"}}) == "ignore"
+    assert (
+        webhook.route_event(
+            "issues",
+            {
+                "action": "labeled",
+                "label": {"name": "ready"},
+                "issue": {"number": 1, "labels": [{"name": "ready"}]},
+            },
+        )
+        == "fulfill"
+    )
+    assert (
+        webhook.route_event(
+            "check_suite",
+            {
+                "action": "completed",
+                "check_suite": {"conclusion": "failure", "pull_requests": [{"number": 9}]},
+            },
+        )
+        == "fix"
+    )
+    assert (
+        webhook.route_event(
+            "check_suite", {"action": "completed", "check_suite": {"conclusion": "success"}}
+        )
+        == "ignore"
+    )
 
 
 def test_health_and_missing_secret(monkeypatch):
@@ -76,7 +100,12 @@ def test_opened_issue_calls_groom(monkeypatch):
 
     monkeypatch.setattr(webhook.groom_ticket, "run_github", fake_groom)
     monkeypatch.setattr(webhook.gh, "token_from_env", lambda: "tok")
-    body = json.dumps({"action": "opened", "issue": {"number": 42, "title": "Due dates", "body": "thin", "labels": []}}).encode()
+    body = json.dumps(
+        {
+            "action": "opened",
+            "issue": {"number": 42, "title": "Due dates", "body": "thin", "labels": []},
+        }
+    ).encode()
     client = TestClient(webhook.app)
     response = client.post(
         "/github-webhook",

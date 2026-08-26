@@ -21,6 +21,6 @@ Requirements:
 - Set and clear `agent-in-progress`. Increment `agent-attempts-N`. Stop at `AGENT_MAX_ATTEMPTS`.
 - Log JSON. Comment when you give up.
 - Copy YAML from `labs/extra-credit/workflows/` onto a fork. Do not enable it on the instructor repo.
-- Do not edit graders. Do not skip Module 2.
+- Do not edit the target repo's tests. Do not skip Module 2.
 
 Working example: `solutions/extra_credit/`.

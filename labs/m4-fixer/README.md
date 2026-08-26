@@ -1,16 +1,56 @@
-# Module 4. PR Fixer and unattended stub
+# Lab 4. Broken PR Fixer, unattended
 
-Stub for attendees. Working example lives in `solutions/loops`.
+A failing branch in, a green one out, or an honest explanation of why not.
 
-Keep the pipeline healthy. Detect a broken pull request. Fix. Re-run checks. Then run the same stack with no human at the keyboard.
+**18 minutes. Artifact: A production-ready architecture you can hand to your engineering org.**
 
-Claude Code is not required. Pick one tool. See [HOW-TO-RUN.md](../HOW-TO-RUN.md).
+## Work from this folder
 
-1. Claude Code headless: `claude -p`
-2. OpenCode headless: `opencode run`
-3. Codex headless: `codex exec`
-4. Grok Build headless: `grok -p`
-5. Claude Agent Software Development Kit (SDK)
-6. LangGraph deep agent
+```bash
+cd labs/m4-fixer
+```
 
-Paste or pipe `prompts/claude-code.md`. Tool-specific one-liners are in `prompts/`.
+Your coding agent runs here, not at the repo root. This folder has its own
+`.claude/`, so the tool scope and the skills for this lab apply and nothing
+else does.
+
+## Fill one file
+
+`loop.py`. Nothing else.
+
+## Start
+
+Pick one tool and paste its prompt.
+
+| Tool | Command |
+|---|---|
+| Claude Code | `claude -p "$(cat prompts/claude-code.md)"` |
+| Codex | `codex exec "$(cat prompts/codex.md)"` |
+| Grok Build | `grok -p "$(cat prompts/grok-build.md)"` |
+| OpenCode | `opencode run "$(cat prompts/opencode.md)"` |
+
+## Verify
+
+```bash
+task loop:fixer -- --branch broken-pr --doer reference
+```
+
+## When it stops
+
+- the suite is green
+- the same tests fail twice
+- the budget is spent, and it leaves a comment saying why
+
+## The gate
+
+Nobody is watching this one. Its exits matter more than its successes, and the same gate that blocks your push blocks its push.
+
+## If you fall behind
+
+Stop typing and watch. Then:
+
+```bash
+git checkout done-m4
+```
+
+You continue the next module with a working artifact. See `FALL-BEHIND.md`.

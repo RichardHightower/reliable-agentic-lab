@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Write(../../loops/**)",
+      "Edit(../../loops/**)",
+      "Write(../../scripts/**)",
+      "Edit(../../scripts/**)",
+      "Write(../../work/**/tests/**)",
+      "Edit(../../work/**/tests/**)"
+    ]
+  }
+}

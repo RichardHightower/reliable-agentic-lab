@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Extra credit stub. One webhook for ngrok or a DigitalOcean Droplet."""
+
 from __future__ import annotations
 
 import sys

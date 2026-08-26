@@ -1,13 +1,38 @@
-# Labs instructions
+# Instructions
 
-Work one module at a time. Do not build the CRM.
+Work one module at a time. Each lab stands on its own, and a `done-*` branch
+means falling behind on one never costs you the next.
 
-1. Module 1: make `labs/m1-implementer/loop.py` pass the hidden due-date grader.
-2. Module 2: wrap that loop with Maker, Checker, rubric, and gates.
-3. Module 3: groom T001 from draft to ready. That is the Ticket Enhancer.
-4. Module 4: restore a broken PR, then run the same stack unattended.
+## Before Saturday
 
-Prompts are the lab. The Python stubs exist so the loop has a place to land.
-Claude Code is not required. Run a prompt headless with Claude Code (`claude -p`), OpenCode (`opencode run`), Codex (`codex exec`), or Grok Build (`grok -p`). See [HOW-TO-RUN.md](HOW-TO-RUN.md).
+Follow [SETUP.md](../SETUP.md) once. `task setup` does the rest.
 
-Fall-behind path: stop typing, watch Rick, copy from `solutions/`.
+```bash
+task setup
+task test
+```
+
+## The order
+
+1. `labs/m1-enhancer` grooms a vague ticket into a contract a machine can check.
+2. `labs/m2-implementer` wraps that with a harness that can score it. This is
+   the centre.
+3. `labs/m3-research` runs the same graph over a question instead of a ticket.
+4. `labs/m4-fixer` runs it with nobody watching.
+
+## The four goals
+
+1. **Name the roles.** Orchestrator, planner, test implementer, code
+   implementer, judge. Write scope is what separates them, not instructions.
+2. **Make the contract machine-checkable.** A criterion that cannot fail a test
+   is a wish. A plan step with no validation statement is a wish.
+3. **Put the gate at a tool boundary.** A rule in a prompt can be talked past. A
+   hook cannot.
+4. **Know when to stop.** Pass, retry, escalate. There is no fourth exit, and
+   the one people miss is stopping when two rounds fail identically.
+
+## What you keep
+
+Four artifacts, and the architecture that connects them. Point the same loops at
+your own repo on Monday: any repo with a conforming `Taskfile.yml` is a valid
+target.

@@ -1,13 +1,62 @@
 # Prompt for Grok Build
 
-Claude Code is not required. Same task as `claude-code.md`.
+You do not need Grok Build. Any of the four tools works. See
+[labs/HOW-TO-RUN.md](../../HOW-TO-RUN.md).
 
-From the repo root, headless:
+Run it from this folder:
 
 ```bash
-grok -p "$(cat labs/m4-fixer/prompts/claude-code.md)" --no-auto-update
+cd labs/m4-fixer
+grok -p "$(cat prompts/grok-build.md)" --no-auto-update
 ```
 
-Interactive: start Grok Build in this clone and paste `claude-code.md`.
+Interactive: run `grok` here and paste everything below the line.
 
-Full tool notes: [labs/HOW-TO-RUN.md](../../HOW-TO-RUN.md).
+---
+
+Fill `loop.py` in this folder. Fill only that file.
+
+A failing branch in, a green one out, or an honest explanation of why not.
+
+## What to implement
+
+- `summarize_failure(run_result)`
+- `repair_until_green(contract, budget)`
+
+## The roles
+
+This loop has orchestrator owns the budget, a code implementer repairs inside its scope, and a judge reads the suite.
+
+Write scope is not advice. It is declared in `.loop.yml` in the target repo and
+enforced at the tool boundary. The code implementer cannot weaken a test to
+reach green, because it holds no write path to one.
+
+## When the loop stops
+
+There are three exits and no fourth: pass, retry, escalate.
+
+1. the suite is green
+2. the same tests fail twice
+3. the budget is spent, and it leaves a comment saying why
+
+## Verify
+
+```bash
+task loop:fixer -- --branch broken-pr --doer reference
+```
+
+## The gate
+
+Nobody is watching this one. Its exits matter more than its successes, and the same gate that blocks your push blocks its push.
+
+## Rules
+
+- Fill only `loop.py`. Do not edit anything under `loops/`.
+- Do not edit the target repo's tests to make something pass.
+- Stop at the documented exit. Do not add a fourth one.
+- If you stall, read loops/fixer.py. It is the answer, not a hint.
+
+## Worth reading
+
+- `loops/fixer.py`
+- `loops/gates.py`

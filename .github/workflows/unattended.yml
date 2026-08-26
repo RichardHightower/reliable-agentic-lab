@@ -1,13 +1,15 @@
 name: unattended-loop
 
+# The loop does not change when nobody is watching. The trigger does.
+
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: m2 harness or m3 research
-        default: m2
+      loop:
+        description: which loop to run
+        default: fixer
         type: choice
-        options: [m2, m3]
+        options: [fixer, implementer, enhancer]
   pull_request:
   schedule:
     - cron: "0 15 * * 1-5"
@@ -20,16 +22,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install
-        run: pip install -r solutions/crm/requirements.txt
-      - name: Run unattended loop
-        run: python solutions/m4-production/run_unattended.py --target ${{ github.event.inputs.target || 'm2' }}
-      - name: Upload state
+
+      - name: Install the engine
+        run: pip install -r requirements.txt
+
+      - name: Clone and set up the target repo
+        run: |
+          git clone --quiet https://github.com/RichardHightower/northwind-field-crm.git \
+            work/northwind-field-crm
+          python -m pip install --quiet -r work/northwind-field-crm/requirements.txt
+
+      # Exit 0 is a pass, 2 is an escalation a human must read, 1 is a crash.
+      - name: Run the loop with nobody watching
+        run: |
+          python -m loops.unattended \
+            --repo work/northwind-field-crm \
+            --loop ${{ github.event.inputs.loop || 'fixer' }}
+
+      - name: Upload the state and the reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unattended-state
           path: |
-            solutions/m4-production/state.json
-            solutions/m2-harness/traces
-            solutions/m3-research/work
+            work/northwind-field-crm/.harness/state.json
+            work/northwind-field-crm/.harness/receipt.json
+            work/northwind-field-crm/reports/

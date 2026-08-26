@@ -1,11 +1,13 @@
 """Tiny GitHub REST helper. Extra credit only. Polling remains the class default."""
+
 from __future__ import annotations
 
 import json
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import quote
 
 API = "https://api.github.com"
@@ -78,7 +80,11 @@ class GitHub:
 
 
 def repo_from_env() -> str:
-    return os.environ.get("GITHUB_REPO") or os.environ.get("GITHUB_REPOSITORY") or "RichardHightower/reliable-agentic-lab"
+    return (
+        os.environ.get("GITHUB_REPO")
+        or os.environ.get("GITHUB_REPOSITORY")
+        or "RichardHightower/reliable-agentic-lab"
+    )
 
 
 def token_from_env() -> str:
