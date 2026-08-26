@@ -1,7 +1,10 @@
-# Optional. Install if you fill a lab with Claude, OpenAI, or LangGraph.
+# Optional. Only needed for the take-home labs in labs/takehome/.
 -r requirements.txt
 anthropic>=0.40.0
+claude-agent-sdk>=0.1.0
 openai>=1.40.0
 langgraph>=0.2.0
 langchain-core>=0.3.0
+deepagents>=0.0.5
+langfuse>=2.60.0,<3
 PyGithub>=2.5.0

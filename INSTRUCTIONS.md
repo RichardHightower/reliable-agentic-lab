@@ -1,57 +1,75 @@
-# Instructions
+# Instructions for the instructor
 
-Work from the repo root. Activate `.venv` first. See `SETUP.md`.
-
-Solutions are the instructor reference. Labs are stubs and prompts.
-Talk track lives in `slides/`. Marp decks plus narrative notes. Same images.
-
-## Order
-
-1. `solutions/crm` boots and the hidden grader is green.
-2. `solutions/m1-implementer` turns a starter CRM into a passing due-date change.
-3. `solutions/m2-harness` wraps that loop with Maker, Checker, rubric, and gates.
-4. `solutions/m3-research` writes a report, fact-checks it, and enforces style.
-5. `solutions/m4-production` runs the same stack unattended.
-6. `solutions/loops` runs the three PRD agents against a local board.
-
-## Sessions
-
-| Session | Deck | Notes |
-|---|---|---|
-| 1 System Architecture | [slides.md](slides/session-1-system-architecture/slides.md) | [notes.md](slides/session-1-system-architecture/notes.md) |
-| 2 Harness Engineering | [slides.md](slides/session-2-harness-engineering/slides.md) | [notes.md](slides/session-2-harness-engineering/notes.md) |
-| 3 Research Loops and MCP | [slides.md](slides/session-3-research-loops-mcp/slides.md) | [notes.md](slides/session-3-research-loops-mcp/notes.md) |
-| 4 Production Architecture | [slides.md](slides/session-4-production-architecture/slides.md) | [notes.md](slides/session-4-production-architecture/notes.md) |
-
-Feature order: [slides/FEATURE-MAP.md](slides/FEATURE-MAP.md).
-
-## One-liners
+## Before Saturday
 
 ```bash
-# CRM
-export PYTHONPATH="$PWD/solutions/crm"
-pytest solutions/crm/tests solutions/m2-harness/graders -q
-cd solutions/crm && docker compose up --build
-
-# Module 1
-python solutions/m1-implementer/loop.py
-
-# Module 2
-PYTHONPATH=solutions/m2-harness python -m loops.implementer --maker none
-PYTHONPATH=solutions/m2-harness python -m loops.implementer --maker reference
-
-# Module 3
-python solutions/m3-research/loop.py
-python solutions/m3-research/loop.py --dirty
-
-# Module 4
-python solutions/m4-production/run_unattended.py --target m2
-python solutions/m4-production/run_unattended.py --target m3
-
-# PRD loops (local board, no GitHub token)
-python -m solutions.loops enhancer --ticket T001 --incorporate
-python -m solutions.loops implementer --maker reference
-python -m solutions.loops fixer --maker reference
+task setup
+task test
 ```
 
-Open the package `INSTRUCTIONS.md` for the talking points and stop rules.
+129 checks. Then confirm each loop runs with no model key:
+
+```bash
+task loop:enhancer    -- --ticket T001 --incorporate
+task loop:implementer -- --ticket T001 --doer reference
+task loop:research    -- --question "sqlalchemy nullable datetime column" --backend fixture
+task loop:fixer       -- --doer reference
+```
+
+The fixer needs the target on its broken branch:
+
+```bash
+git -C work/northwind-field-crm checkout broken-pr
+```
+
+## The two repositories
+
+| Repository | Role |
+|---|---|
+| `reliable-agentic-lab` | The engine, the labs, the decks. Attendees clone this. |
+| `northwind-field-crm` | The first target. Cloned into `work/` by `task setup`. |
+
+The engine never imports the target. That is the test of whether it is generic,
+and `loops/tests/fixtures/node-target` proves it by being JavaScript.
+
+## The target's branches
+
+| Branch | State |
+|---|---|
+| `main` | No due dates. 75 percent coverage, below the floor. The starting point. |
+| `known-good` | Due dates implemented. Everything green. The reference answer. |
+| `broken-pr` | A dropped null guard. One test red. What the fixer repairs. |
+
+## Module to lab
+
+| Module | Lab | Deck |
+|---|---|---|
+| 1 | `labs/m1-enhancer` | `slides/session-1-system-architecture` |
+| 2 | `labs/m2-implementer` | `slides/session-2-harness-engineering` |
+| 3 | `labs/m3-research` | `slides/session-3-research-loops-mcp` |
+| 4 | `labs/m4-fixer` | `slides/session-4-production-architecture` |
+
+The outline and the clock live in [README.md](README.md). Do not restate them
+anywhere else.
+
+## Live demos worth rehearsing
+
+1. **The push gate refusing.** Break a test in the target, ask an agent to push,
+   read the refusal aloud.
+2. **The red gate refusing.** `task loop:implementer -- --doer none`. No test was
+   ever red, so nothing has been proven.
+3. **Swap the object.** Point the implementer at
+   `loops/tests/fixtures/node-target`. Same engine, different language.
+4. **Reading a trace.** `.harness/last-implementer.json` in the target. Ten rows,
+   the gate, and the reason.
+
+## Rebuilding the labs
+
+`labs/` is generated:
+
+```bash
+python scripts/build_labs.py
+```
+
+Sixteen prompts, four stubs, and four sets of docs come from one description per
+module. Edit `scripts/build_labs.py`, never a generated file.

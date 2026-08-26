@@ -482,6 +482,106 @@ is in `prompts/`, and `{lab.solution}` is the answer whenever you want it.
 """
 
 
+def architecture_for(lab: Lab) -> str:
+    reading = "\n".join(f"- `{item}`" for item in lab.reading)
+    return f"""# Architecture. Lab {lab.module}
+
+{lab.one_line}
+
+## The shape
+
+Every loop in this workshop is the same three parts. Only the object changes.
+
+```
+orchestrator  owns the budget and the exits. Writes nothing.
+     |
+     +-- doer    writes files inside a declared scope
+     |
+     +-- judge   scores the result. Holds no write path.
+```
+
+For this lab: {lab.roles}.
+
+## Why write scope matters
+
+Scope is declared in `.loop.yml` in the target repo and enforced at the tool
+boundary. It is not an instruction in a prompt, because an agent can talk its
+way past an instruction and cannot talk its way past a missing tool.
+
+The judge has no `write` method to call. That is why it cannot grade its own
+homework.
+
+## The exits
+
+Three, and no fourth: pass, retry, escalate. Python holds the loop, so the model
+never counts its own retries.
+
+The exit people forget is stable failure. When this round fails in exactly the
+same way as the last one, the loop is not converging, and spending the rest of
+the budget to watch it fail identically buys a surprise bill rather than a fix.
+
+## Where the code lives
+
+The answer for this lab is `{lab.solution}`.
+
+Worth reading:
+
+{reading}
+"""
+
+
+def troubleshooting_for(lab: Lab) -> str:
+    return f"""# Troubleshooting. Lab {lab.module}
+
+## `ModuleNotFoundError: No module named 'loops'`
+
+Your stub is missing its first import. Every stub starts with:
+
+```python
+import _root  # noqa: F401
+```
+
+`_root.py` sits in this folder and puts the repo root on `sys.path`. No
+PYTHONPATH needed.
+
+## `task: command not found`
+
+Install Task. See [SETUP.md](../../SETUP.md).
+
+## `task test` says no target repo
+
+Run `task clone` from the repo root. The demo repository lands in `work/`.
+
+## Your agent was refused a push
+
+```
+BLOCKED by pre-tool hook: git push
+```
+
+Working as designed. Run `task test`, get it green, push again. The gate reads
+`.harness/receipt.json` and nothing else, and a receipt only counts when the
+suite passed against exactly this tree.
+
+## `NotImplementedError: fill me in`
+
+That is the stub. Fill it.
+
+## The loop escalates and you expected a pass
+
+Read the reason it printed. It names the row that failed and why it stopped.
+That reading is the skill this workshop is about, not a sign something broke.
+
+## You are out of time
+
+Stop and run `git checkout done-m{lab.module}`. See [FALL-BEHIND.md](FALL-BEHIND.md).
+
+## Something is genuinely broken
+
+Tell Rick. A fresh clone plus `task setup` plus `task test` should be 129 green
+checks, and anything else is a real bug.
+"""
+
+
 def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -497,7 +597,12 @@ def main() -> int:
         write(folder / lab.stub_file, lab.stub_body)
         write(folder / "README.md", readme_for(lab))
         write(folder / "FALL-BEHIND.md", fall_behind_for(lab))
-        written += 3
+        write(folder / "ARCHITECTURE.md", architecture_for(lab))
+        write(folder / "TROUBLESHOOTING.md", troubleshooting_for(lab))
+        # One SETUP and one INSTRUCTIONS for all four labs. Four copies drift.
+        for stale in ("SETUP.md", "INSTRUCTIONS.md"):
+            (folder / stale).unlink(missing_ok=True)
+        written += 5
         for tool_key in TOOLS:
             write(folder / "prompts" / f"{tool_key}.md", prompt_for(lab, tool_key))
             written += 1

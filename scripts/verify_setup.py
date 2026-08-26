@@ -165,7 +165,7 @@ def main() -> int:
     ok, detail = check_git()
     rows.append(("pass" if ok else "fail", "git", detail))
     ok, detail = check_tickets()
-    rows.append(("pass" if ok else "fail", "crm tickets", detail))
+    rows.append(("pass" if ok else "fail", "target tickets", detail))
     rows.append(
         (
             "pass" if (REPO_ROOT / ".venv").exists() else "warn",
@@ -204,7 +204,7 @@ def main() -> int:
 
     model_ok = an_status == "pass" or oa_status == "pass"
     if not model_ok:
-        print("\nLocal graders and reference loops are ready.")
+        print("\nThe loops are ready to run with no model key.")
         print("Add ANTHROPIC_API_KEY or OPENAI_API_KEY when you fill a live-model lab.")
         return 0
 

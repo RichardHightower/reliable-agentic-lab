@@ -1,3 +1,12 @@
-# Core. Enough to grade and run the local loops with no model key.
--r solutions/crm/requirements.txt
+# Enough to run every loop and check them. No model key required.
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+jinja2==3.1.6
+python-multipart==0.0.20
+sqlalchemy==2.0.41
+httpx==0.28.1
+pytest==8.3.5
+pytest-cov==6.0.0
+ruff==0.8.4
+PyYAML==6.0.2
 python-dotenv==1.1.1
