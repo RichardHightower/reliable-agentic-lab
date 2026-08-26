@@ -12,7 +12,8 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TICKETS = REPO_ROOT / "solutions" / "tickets"
+# Tickets live in the target repo, not in this one. `task setup` clones it.
+TARGET = REPO_ROOT / "work" / "northwind-field-crm"
 
 
 def load_dotenv() -> None:
@@ -39,9 +40,21 @@ def check_git() -> tuple[bool, str]:
     return bool(path), path or "git not on PATH"
 
 
-def check_tickets() -> tuple[bool, str]:
-    files = sorted(p.name for p in TICKETS.glob("T0*.md"))
-    return bool(files), ", ".join(files) if files else "no tickets found"
+def check_target() -> tuple[bool, str]:
+    """The target repo, and the tickets the loops work on.
+
+    A clone that is present but has no tickets is a different problem from one
+    that was never cloned. Saying which is the difference between a fix and a
+    guess at 09:55 on Saturday.
+    """
+    if not TARGET.exists():
+        return False, f"not cloned yet. Run `task clone` (expected at {TARGET.name})"
+    if not (TARGET / "Taskfile.yml").exists():
+        return False, f"{TARGET.name} has no Taskfile.yml, so no loop can run against it"
+    files = sorted(p.name for p in (TARGET / "tickets").glob("T0*.md"))
+    if not files:
+        return False, f"{TARGET.name} is cloned but holds no tickets"
+    return True, f"{TARGET.name}: {', '.join(files)}"
 
 
 def github_get(url: str, token: str) -> tuple[int, object]:
@@ -164,8 +177,8 @@ def main() -> int:
     rows.append(("pass" if ok else "fail", "python", detail))
     ok, detail = check_git()
     rows.append(("pass" if ok else "fail", "git", detail))
-    ok, detail = check_tickets()
-    rows.append(("pass" if ok else "fail", "target tickets", detail))
+    ok, detail = check_target()
+    rows.append(("pass" if ok else "fail", "target repo", detail))
     rows.append(
         (
             "pass" if (REPO_ROOT / ".venv").exists() else "warn",
