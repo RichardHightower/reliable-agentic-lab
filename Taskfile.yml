@@ -73,10 +73,12 @@ tasks:
 
   # --- the class ---------------------------------------------------------
   slides:
-    desc: Render every deck to PDF.
+    desc: Draw the mermaid diagrams, then render every deck to PDF.
     cmds:
+      # Marp does not draw mermaid. This renders each block to SVG first.
+      - '{{.PY}} scripts/build_slides.py'
       - for: ['session-1-system-architecture', 'session-2-harness-engineering', 'session-3-research-loops-mcp', 'session-4-production-architecture']
-        cmd: npx --yes @marp-team/marp-cli slides/{{.ITEM}}/slides.md --pdf --allow-local-files
+        cmd: npx --yes @marp-team/marp-cli slides/{{.ITEM}}/slides.build.md --pdf --allow-local-files -o slides/{{.ITEM}}/slides.pdf
 
   contract:
     desc: Check that a repo satisfies the loop contract. Pass TARGET=path.

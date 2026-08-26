@@ -181,14 +181,7 @@ minutes: 2
 beat: talk
 -->
 
-```mermaid
-flowchart LR
-  T[Trigger<br/>a draft ticket] --> A[Action<br/>a doer edits it]
-  A --> V[Verify<br/>a judge scores it]
-  V -->|not ready| A
-  V -->|ready| M[Memory<br/>the file and the trace]
-  M --> H[Human<br/>accepts, or does not]
-```
+![w:1060](images/diagram-s1-09-62653220.svg)
 
 Five parts. **Verify** is the one that separates a loop from a script that calls
 a model.
@@ -327,12 +320,7 @@ beat: talk
 
 # Three parts, and the object is the only variable.
 
-```mermaid
-flowchart TB
-  O[Orchestrator<br/>owns the budget<br/>writes nothing]
-  O --> D[Doer<br/>writes inside a scope]
-  O --> J[Judge<br/>scores<br/>no write path]
-```
+![h:460](images/diagram-s1-15-9c893ef1.svg)
 
 | Module | Object |
 |---|---|

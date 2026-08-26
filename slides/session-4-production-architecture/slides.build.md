@@ -216,21 +216,7 @@ beat: talk
 
 # Swap the object. Keep the graph.
 
-```mermaid
-flowchart LR
-  subgraph keep [Keep. You built this today.]
-    O[Orchestrator] --> D[Doer]
-    D --> J[Judge]
-    J --> G[Gate]
-  end
-  subgraph swap [Swap. This is yours.]
-    Obj[Your tickets<br/>PRs, or docs]
-    Trig[Your trigger]
-    Rub[Your rubric<br/>rows]
-  end
-  Trig --> O
-  Rub --> J
-```
+![w:1060](images/diagram-s4-09-128ad2c1.svg)
 
 Four modules, one graph, four objects. That was on purpose.
 

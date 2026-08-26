@@ -123,19 +123,7 @@ minutes: 2
 beat: talk
 -->
 
-```mermaid
-flowchart LR
-  P[Planner<br/>steps.jsonl] --> T[Test implementer<br/>tests/ only]
-  T --> R{New tests<br/>failing?}
-  R -->|no| S[STOP<br/>nothing was proven]
-  R -->|yes| C[Code implementer<br/>app/ only]
-  C --> J[Rubric judge<br/>ten rows, no model]
-  J --> F[Final judge<br/>actually done?]
-  F --> G{Gate}
-  G -->|pass| D[Stop]
-  G -->|retry| C
-  G -->|escalate| H[Human]
-```
+![w:1060](images/diagram-s2-06-601918d8.svg)
 
 The orchestrator owns the budget and sees summaries, never the diff.
 
@@ -476,12 +464,7 @@ beat: lab
 A harness that fails, iterates, and passes on its own, and refuses to ship when
 it should not.
 
-```mermaid
-flowchart LR
-  M1[Session 1 loop] --> M2[Session 2 harness]
-  M2 --> Score[Ten rows<br/>and a gate]
-  Score --> PR[A pull request<br/>or an honest escalation]
-```
+![w:1060](images/diagram-s2-21-bf424946.svg)
 
 ---
 
