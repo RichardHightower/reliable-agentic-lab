@@ -47,7 +47,7 @@ python labs/extra-credit/scripts/fix_pr.py --pr "$PR_NUMBER"
 Working command:
 
 ```bash
-python solutions/extra_credit/fix_pr.py --pr T001 --maker reference
+python solutions/extra_credit/fix_pr.py --pr T001 --doer reference
 ```
 
 The script reads the failing check, proposes a fix, re-runs tests, and either comments a plan or, with `--apply`, restores the known-good due-date files.

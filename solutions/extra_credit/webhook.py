@@ -129,12 +129,12 @@ def run_python(kind: str, number: str) -> dict:
         return groom_ticket.run_local(ticket, incorporate=False, budget=MAX_ATTEMPTS)
     if kind == "fulfill":
         ticket = number if str(number).startswith("T") else "T001"
-        return implementer.run(ticket_id=ticket, maker="reference", budget=MAX_ATTEMPTS)
+        return implementer.run(ticket_id=ticket, doer="reference", budget=MAX_ATTEMPTS)
     if kind == "fix":
         if number.isdigit() and gh.token_from_env():
-            return fix_pr.run_github(int(number), budget=MAX_ATTEMPTS, maker="reference")
+            return fix_pr.run_github(int(number), budget=MAX_ATTEMPTS, doer="reference")
         ticket = number if str(number).startswith("T") else "T001"
-        return fix_pr.run_local(ticket, maker="reference", budget=MAX_ATTEMPTS)
+        return fix_pr.run_local(ticket, doer="reference", budget=MAX_ATTEMPTS)
     return {"ok": False, "error": f"unknown kind {kind}"}
 
 
@@ -148,7 +148,7 @@ def run_cli(kind: str, number: str, backend: str) -> dict:
         "claude": [
             "claude",
             "-p",
-            f"Extra credit. Kind={kind}. Issue or PR {number}. Follow {prompt}. Do not edit graders.",
+            f"Extra credit. Kind={kind}. Issue or PR {number}. Follow {prompt}. Do not edit the target repo's tests.",
             "--allowedTools",
             "Read,Edit,Write,Bash,Glob,Grep",
         ],

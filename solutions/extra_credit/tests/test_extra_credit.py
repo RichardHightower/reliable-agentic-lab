@@ -80,6 +80,6 @@ def test_github_groom_stops_at_budget():
 
 def test_local_fixer_reference(tmp_path, monkeypatch):
     monkeypatch.setattr(fix_pr, "WORK", tmp_path)
-    payload = fix_pr.run_local("T001", maker="reference", budget=2)
+    payload = fix_pr.run_local("T001", doer="reference", budget=2)
     assert payload["passed"] is True
     assert (tmp_path / "last-fix.json").exists()

@@ -30,7 +30,7 @@ ERROR_IN_OUTPUT = re.compile(r"\b([A-Z][A-Za-z]*(?:Error|Exception))\b[^\n]*")
 
 
 def failure_summary(run_result) -> str:
-    """What the checker reads. Failed test ids and the first real error line."""
+    """What the judge reads. Failed test ids and the first real error line."""
     failed = sorted(run_result.junit.failed_ids)
     lines = [f"{len(failed)} failing: {', '.join(failed[:5])}"] if failed else ["the suite is red"]
     error = ERROR_IN_OUTPUT.search(run_result.output or "")

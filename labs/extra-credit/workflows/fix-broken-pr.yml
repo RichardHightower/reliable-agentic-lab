@@ -44,7 +44,7 @@ jobs:
           PR_NUMBER: ${{ github.event.check_suite.pull_requests[0].number || github.event.inputs.pr_number }}
           AGENT_MAX_ATTEMPTS: "3"
         run: |
-          python solutions/extra_credit/fix_pr.py --pr "$PR_NUMBER" --github --maker reference
+          python solutions/extra_credit/fix_pr.py --pr "$PR_NUMBER" --github --doer reference
       - name: Upload log
         if: always()
         uses: actions/upload-artifact@v4
