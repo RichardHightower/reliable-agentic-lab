@@ -1,0 +1,3 @@
+# Core. Enough to grade and run the local loops with no model key.
+-r solutions/crm/requirements.txt
+python-dotenv==1.1.1

@@ -1,0 +1,7 @@
+# Optional. Install if you fill a lab with Claude, OpenAI, or LangGraph.
+-r requirements.txt
+anthropic>=0.40.0
+openai>=1.40.0
+langgraph>=0.2.0
+langchain-core>=0.3.0
+PyGithub>=2.5.0

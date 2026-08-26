@@ -1,12 +1,25 @@
 # Labs setup
 
-1. Finish root `SETUP.md`.
-2. Activate `.venv`.
-3. Open one lab folder.
-4. Paste one prompt from that lab's `prompts/` directory.
-5. Keep graders read-only.
+Finish the root [SETUP.md](../SETUP.md) first.
+
+```bash
+git clone https://github.com/RichardHightower/reliable-agentic-lab.git
+cd reliable-agentic-lab
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python scripts/verify_setup.py
+```
+
+Then:
+
+1. Activate `.venv`.
+2. Open one lab folder.
+3. Paste one prompt from that lab's `prompts/` directory.
+4. Keep graders read-only.
 
 ```bash
 source .venv/bin/activate
-export PYTHONPATH="$PWD:$PWD/solutions/crm"
+export PYTHONPATH="$PWD:$PWD/solutions/crm:$PWD/solutions/m2-harness"
 ```
