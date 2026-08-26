@@ -11,6 +11,7 @@ Start here:
 
 - [SETUP.md](SETUP.md) clone or fork, venv, `.env`, verify script
 - [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md) Claude Code is not required. Headless for Claude Code, OpenCode, Codex, Grok Build
+- [docs/PRD-extra-credit.md](docs/PRD-extra-credit.md) GitHub Actions triggers. Optional. Not Saturday.
 - [INSTRUCTIONS.md](INSTRUCTIONS.md)
 - [slides/README.md](slides/README.md) Marp decks and session notes
 - [slides/FEATURE-MAP.md](slides/FEATURE-MAP.md) which loop feature each hour proves
@@ -25,12 +26,15 @@ solutions/m2-harness       Maker, Checker, rubric, hidden grader, gates
 solutions/m3-research      report loop. Fact-check. Style enforcer.
 solutions/m4-production    unattended runner plus GitHub Actions
 solutions/loops            working PRD loops: enhancer, implementer, fixer
+solutions/extra_credit     extra credit Actions wrappers. Not Saturday.
 labs/                      stubs plus paste-ready prompts
+labs/extra-credit          copy-me workflows and stubs. Fork only.
 slides/                    four session decks plus narrative notes
 ```
 
-`labs/` has one folder per Saturday module. Each lab has a stub and three prompts
-(Claude Code, Agent Software Development Kit, LangGraph). Pick one tool.
+`labs/` has one folder per Saturday module, plus `labs/extra-credit`.
+Each lab has prompts for Claude Code, OpenCode, Codex, Grok Build, Agent SDK, and LangGraph.
+Pick one tool. Extra credit is optional.
 
 Every solutions package has `README.md`, `SETUP.md`, `INSTRUCTIONS.md`,
 `ARCHITECTURE.md`, and `TROUBLESHOOTING.md`.

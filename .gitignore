@@ -18,6 +18,9 @@ solutions/m4-production/state.json
 .DS_Store
 
 solutions/loops/work/
+solutions/extra_credit/work/
+!solutions/extra_credit/work/.gitkeep
+labs/**/work/
 labs/**/work/
 labs/**/PR.md
 labs/**/traces/*.json

@@ -120,7 +120,7 @@ Then prove the graders:
 
 ```bash
 export PYTHONPATH="$PWD:$PWD/solutions/crm:$PWD/solutions/m2-harness"
-pytest solutions/crm/tests solutions/m2-harness/graders solutions/m2-harness/tests solutions/m3-research/tests solutions/loops/tests -q
+pytest solutions/crm/tests solutions/m2-harness/graders solutions/m2-harness/tests solutions/m3-research/tests solutions/loops/tests solutions/extra_credit/tests -q
 ```
 
 Those should pass on `main`.
@@ -167,6 +167,18 @@ If you stall: stop typing, watch Rick, copy from `solutions/`.
 | `XAI_API_KEY` | Grok Build | No |
 | `PERPLEXITY_API_KEY` | Module 3 live search | No. Fixture is the fallback. |
 | `LANGFUSE_*` | cloud traces | No. Local JSON traces are the fallback. |
+
+## Extra credit only
+
+GitHub Actions triggers are optional. Not on the Saturday clock.
+Copy YAML from `labs/extra-credit/workflows/` onto your fork. Leave it off the instructor repo.
+
+```bash
+python solutions/extra_credit/groom_ticket.py --issue T001 --incorporate
+python solutions/extra_credit/fix_pr.py --pr T001 --maker reference
+```
+
+Details: [docs/PRD-extra-credit.md](docs/PRD-extra-credit.md).
 
 ## Docs in every package
 
