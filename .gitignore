@@ -24,3 +24,9 @@ labs/**/work/
 labs/**/work/
 labs/**/PR.md
 labs/**/traces/*.json
+
+# Loop engine
+.venv/
+work/
+.harness/
+reports/
