@@ -1,140 +1,165 @@
 # Session 4 notes. Production Architecture.
 
-35 minutes. Then 10 minutes close.
-Artifact they keep: a production-ready architecture.
+35 minutes for the module, then 10 minutes to close.
+Artifact they keep: a production architecture they can hand to their team.
 
-Same stack. Unattended. If the room is late, the fixer is a diagram and a folder, not a live build. The Actions runner still ships.
+Energy is lowest here. Keep it moving. The lab is 18 minutes, not 25.
 
-Images match `slides.md`. Reuse `four-artifacts.png` from Session 1 on the close.
+**Clock checkpoints.** Slide s4-07 at 11 minutes. Slide s4-08 at 29 minutes.
+Slide s4-12 at 35 minutes.
 
 ---
 
 ## s4-01. Title
 
-Eventbrite name. Production Architecture, the capstone.
-
-Tell them the graph does not get a new personality. The human leaves. That is the only new requirement.
-
----
-
-## s4-02. What changes when you stand up. Image `human-leaves.png`
-
-Empty chair. Factory still ticks.
-
-Trigger changes: cron, pull request, ticket ready. Not a keystroke.
-
-State must live on disk. Chat will not be there in the morning. That is the Session Illusion article, in one picture.
-
-If they cannot read the last score, they cannot debug at 2am. Say 2am. It lands.
+Say the shape of the hour: build for 11 minutes, type for 18, land for 6, then
+close.
 
 ---
 
-## s4-03. Durable state. Mermaid.
+## s4-02. What changes when you walk away
 
-Four fields. Ticket. Branch. Trace id. Last score.
+Four items. The graph is not one of them.
 
-That is enough to resume. Do not invent a database for Saturday.
-
-Actions fires the runner. Runner writes `state.json` and traces. Human appears only on escalate.
-
----
-
-## s4-04. Observability at 2am. Image `observability-2am.png`
-
-A printout with `gate: escalate` and failed node ids. A mug. A lamp.
-
-Langfuse is allowed. A dashboard nobody opens is decoration. Local JSON that they actually read is production.
+The last line is the hook for the whole hour: if you cannot read the last score,
+you cannot debug at 2 a.m.
 
 ---
 
-## s4-05. Actions triggers. Image `actions-trigger.png`
+## s4-03. MAST
 
-Three pistols. `workflow_dispatch`, `pull_request`, weekday cron.
+The headline is the takeaway: most agent failures are not model failures.
 
-They all fire the same runner. Saturday you use dispatch. You do not wait for 15:00 UTC cron while people watch.
+41.8% system design, 36.9% handoff, 21.3% verification. From 1,600 traces across
+7 frameworks.
 
-GitHub Actions is already on the event page as a prereq. Do not teach YAML from zero. Open the file. Fire it.
-
----
-
-## s4-06. PR Fixer. Mermaid on top.
-
-Failing PR in. Tests or review findings. Mergeable out. Human still merges.
-
-This is the production pattern from the locked three loops. Live build only if the room is on time. Otherwise the mermaid plus `solutions/m2-harness/loops/fixer` as a pointer is honest.
-
-Do not start a second product here.
+Say the closing line: every one of those three is something you build, not
+something you buy. That justifies the whole day retroactively.
 
 ---
 
-## s4-07. Lab.
+## s4-04. Durable state
 
-Run m2 unattended. Run m3 unattended. Cat state.json.
+Five fields. Read them.
 
-Then dispatch the workflow if the network is kind. If Actions is slow, the local runner is the lab. The YAML is the take-home.
-
----
-
-## s4-08. Read state.json. Image `state-json.png`
-
-Read `human: false` out loud. That is the slide.
-
-`last_score.passed` is whether they go back to bed.
-
-The file is gitignored. Upload it as an artifact. That is the production record. Committing secrets-adjacent run output is how people get sloppy.
+The point is small and concrete: it survives the process. A chat transcript does
+not.
 
 ---
 
-## s4-09. Swap the object. Mermaid.
+## s4-05. Observability
 
-Keep orchestrator, Maker, Checker, gate.
+A trace is not a log file. Name what a span carries.
 
-Swap their tickets, their trigger, their grader.
+Then three numbers per run: steps, loop count, cost per task. Those three catch
+runaway loops before the invoice does.
 
-This is how the CRM does not follow them home as a product. The graph does.
-
----
-
-## s4-10. Seven loops, named not built. Image `seven-loops-named.png`
-
-Daily triage. PR babysitter. CI sweeper. Name a few. Stamp NOT TODAY.
-
-That list is in the Loop Engineering article they can read on the plane. Building seven labs would have broken the outline. Denim bought four modules.
+Local JSON counts as production if it is the record you actually open.
 
 ---
 
-## s4-11. Close section card.
+## s4-06. Local and remote gates
 
-Ten minutes. Q and A. Do not start a new demo.
+Callback to the push gate they hit in Module 2.
 
----
+Read the exit codes. 0 pass, 2 escalate, 1 crash. CI needs a number, not a
+paragraph.
 
-## s4-12. Four artifacts again. Reuse `four-artifacts.png`.
+Closing line: same rule in both places, or the remote one is theater.
 
-Same bench as the morning. Now with checks. They can feel the day.
-
----
-
-## s4-13. Folders, not branches.
-
-Point at `solutions/`. Labs are next, not old `done-m2` branches.
-
-Fall-behind was "copy the solution folder." Say it once more so the recording has it.
+**You should be at 11 minutes here.**
 
 ---
 
-## s4-14. Monday. Image `adapt-to-org.png`
+## s4-07. Lab 4
 
-One backlog object. A contract that can fail. Maker and Checker before MCP. State and a budget on a trigger they already have.
+Read both commands. The second one is the unattended run.
 
-If they try to adopt all four artifacts on five teams this week, they will adopt none.
+`loop.py`. Two functions. The line to repeat while you walk the room: giving up
+is allowed, giving up silently is the bug.
+
+18 minutes. Call time at 10 and at 5 remaining.
 
 ---
 
-## s4-15. Questions.
+## s4-08. Why the receipt exists
+
+This is the payoff for the receipt work in Module 2. Do not rush it.
+
+A model that may both act and verify can produce plausible false evidence.
+Invented test passes. File edits that never happened.
+
+Then the sharp version: that is a wrong judgment about the state of its own
+output, and a self-check cannot catch it by construction.
+
+**You should be at 29 minutes here.**
+
+---
+
+## s4-09. Swap the object
+
+Point at the two subgraphs. Keep the left one, replace the right one.
+
+Say it plainly: four modules, one graph, four objects, on purpose.
+
+---
+
+## s4-10. Seven loops named
+
+One minute. Name them, do not build them.
+
+If someone asks for the list in writing, point at the repo. Do not read seven
+items off a slide.
+
+---
+
+## s4-11. The slow failure
+
+The one nobody plans for. Passes every demo, earns trust, degrades over months
+with nothing visibly breaking.
+
+The fix is a cadence, not a tool. Weekly evaluation, not quarterly. A 2% weekly
+drop is invisible in a week and catastrophic over a quarter.
+
+**You should be at 35 minutes here.**
+
+---
+
+## s4-12. Section. Close
+
+A breath. Zero minutes.
+
+---
+
+## s4-13. What you take home
+
+Four artifacts, one per module. Check them off out loud.
+
+Then the claim they will test on Monday: all four run from a clean clone with one
+`task setup`.
+
+---
+
+## s4-14. Where everything lives
+
+Point at the tree. Say that `loops/` never imports the CRM, so it already points
+at their repo.
+
+Name the done branches once more for anyone who fell behind.
+
+---
+
+## s4-15. Monday
+
+Five steps, in order. The order is the advice.
+
+Step 5 is the one people skip: arm the push gate on day one, while the loop is
+still small enough that the refusals are cheap.
+
+---
+
+## s4-16. Questions
+
+Four minutes. Hold the last line for the end.
 
 The loop is the product. The prompt is not.
-
-If they ask what to cut: do not cut Session 2.
-If they ask what they take home: the four artifacts, in order.
-If they ask when: you already told them. Do not reopen the clock.

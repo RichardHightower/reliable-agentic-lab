@@ -1,151 +1,215 @@
 # Session 2 notes. Harness Engineering.
 
-55 minutes. Center of gravity. If the day is dying, cut talk in other modules. Do not cut this.
-
+55 minutes. The center of gravity. This module never gets cut.
 Artifact they keep: a reusable evaluation harness.
 
-They already have a loop from Session 1. This hour wraps it.
+Vocabulary is fixed here. Unit test, e2e test, rubric, rubric judge, final judge,
+planner, doer, orchestrator, target repo. The outline says "Maker and Checker".
+Say once, on s2-04, that maker means doer and checker means judge, then never use
+the old words again.
 
-Images match `slides.md`.
+**Clock checkpoints.** Slide s2-07 at 15 minutes. Slide s2-18 at 25 minutes.
+Slide s2-16 at 50 minutes.
 
 ---
 
 ## s2-01. Title
 
-Say the Eventbrite name. Harness Engineering, the validation layer. Say the time. 55 minutes. Say do not cut it, because Denim already asked you to keep this the centerpiece.
+Say it plainly: this is the hour that makes the other three worth having.
 
 ---
 
-## s2-02. The loop will lie. Image `loop-without-harness.png`
+## s2-02. The loop you just built will lie to you
 
-The five boxes from Session 1 are still right. They are not sufficient.
+Three ways it lies. Edit forever, declare victory on red, stuff the window.
 
-Without a harness the agent edits forever, declares victory on a red test, or dumps the repo into the next call. A better prompt does not fix that. A gate does.
-
----
-
-## s2-03. Maker and Checker. Image `maker-checker.png`
-
-This is the Loop Engineering Maker/Checker split, three ways, compressed to one picture.
-
-Maker has a keyboard and five file cards. Checker has a red pen and no keyboard. A wall between them.
-
-If one agent writes the code and scores the code, it will grade its own homework. False completeness. You have seen this in production. Name it. Then show the wall.
+The last line is the thesis: a harness stops that, not a better prompt.
 
 ---
 
-## s2-04. Graph nodes. Mermaid full width.
+## s2-03. A true story from this repo
 
-Orchestrator. Maker. Grader. Checker. Gate.
+Tell it as a story, not as a slide. Seven tests, green on every run, testing the
+wrong tree.
 
-Python holds the retry. `for attempt in range`. The model does not interpret "please retry." That is the v3 lesson from the articles pipeline, applied to CRM.
+The conftest put the finished answer on `sys.path` ahead of the work copy. The
+fail-then-pass demo had never once worked, and nothing reported an error.
 
-The orchestrator sees summaries and scores. Research and long files stay in sub-agents. That sentence is also the setup for Session 3.
-
----
-
-## s2-05. Tool scope. Image `tool-scope.png`
-
-Read the badge board out loud.
-
-Maker: read CRM, write five files, run grader.
-Checker: read diff, read pytest, read ticket.
-Forbidden: edit graders, change ticket state, merge, deploy.
-
-Deep Agents is how you show scoped tools. Claude Agent SDK is the same shape. Pick one binary for the projector. Attendees may keep using Claude Code against the same ticket and the same grader. Do not make a product tour.
+Land the closing line hard: a check that reports success while measuring the
+wrong thing is worse than no check. That is the bug class this whole hour is
+about.
 
 ---
 
-## s2-06. Section. Spec-driven development.
+## s2-04. Two doers, disjoint scope
 
-Intent becomes a contract. Not a paragraph of hope.
+Say the mapping once, here: maker means doer, checker means judge. Then drop the
+old words.
 
----
-
-## s2-07. Ready ticket is the rubric. Image `ready-ticket-rubric.png`
-
-Load `T001-due-dates.ready.md`. The `## Success criteria` bullets are the rubric rows.
-
-If a row cannot fail a test, it is a wish. Wishes do not belong on a grader.
-
-You are not scoring prose quality on this ticket. You are scoring an optional UTC field, an API shape, and two filters.
+The important sentence is the last one. The code implementer cannot weaken a
+test, not because it was told not to, but because it holds no write path to one.
 
 ---
 
-## s2-08. Edges with types. Mermaid on top.
+## s2-05. Scope is a type
 
-Graph engineering in this workshop is not AGER as a product. It is typed edges.
+Show the class. There is no `write` method.
 
-Ticket to rubric. Rubric to grader. Grader to gate.
-
-If someone asks about the 20 August graph runtime, point back, do not demo it.
-
----
-
-## s2-09. Grader. Image `hidden-grader.png`
-
-The tests are hidden from the Maker's authoring loop. They live in `solutions/m2-harness/graders`.
-
-Proof: they fail on `starter_crm` and pass on `solutions/crm`. If both pass, the contract is too weak. If both fail, the known-good is not good.
+A rule in a prompt is a suggestion an agent can reason around. A missing method
+is not. One minute, then move.
 
 ---
 
-## s2-10. Quality gates. Mermaid.
+## s2-06. The whole sequence
 
-Three exits. Pass. Retry. Escalate.
+Walk the diagram once, top to bottom, naming each box.
 
-Escalate on a repeated failure signature. Same `failed_node_ids` twice means the Maker made no progress. Spending another call is a cost incident, not optimism.
+Stop on the diamond. If the new tests are not failing, the loop stops there. That
+is the red gate and it gets its own slide in a moment.
 
-Escalate when the budget is spent. Default 3.
+Closing line: Python holds the loop, so the model never counts its own retries.
 
-There is no fourth exit called "just once more."
-
----
-
-## s2-11. Stop conditions. Image `stop-conditions.png`
-
-Stop conditions are the invisible failure mode from the Loop Engineering series. Make them visible as three cards.
-
-The model does not get a vote on whether to continue. Python does.
+**You should be at 15 minutes here.**
 
 ---
 
-## s2-12. Traces. Image `trace-json.png`
+## s2-07. Section. Spec-driven development
 
-Local JSON. `traces/last-loop.json`.
-
-Inputs, tool calls, scores, gate. That is enough to teach.
-
-Langfuse is a pane on the same schema. If cloud signup stalls, you do not skip the lab. You open the file.
-
-Observability is not a fifth module. Do not let it become one.
+A breath. Zero minutes.
 
 ---
 
-## s2-13. Lab.
+## s2-08. If a criterion cannot fail a test, it is a wish
 
-Known-good is green. `--maker none` should pass on iteration 1. That proves the harness can score Session 1's artifact.
+Read AC-4 out loud. Notice it names a condition, a boundary, and a negative case.
 
-If you need the drama of fail then pass, run against a broken tree with `--maker reference`. Module 1 already did that on `starter_crm`. Do not burn the 25 minutes re-implementing due dates by hand.
-
-Unit tests on gates and rubric should already be green. Run them once on the projector.
+Then say what "should be intuitive" names. Nothing.
 
 ---
 
-## s2-14. Read the trace. Image `read-the-trace.png`
+## s2-09. steps.jsonl
 
-Open `last-loop.json`. Finger on `gate`. Finger on `failed_node_ids`.
+The plan is a file, so the plan is checkable.
 
-Pass: stop. Retry: Maker may write scoped files. Escalate: human. The loop is not ashamed of escalate. That is a designed stop.
-
----
-
-## s2-15. What you keep. Mermaid.
-
-Session 1 loop into Session 2 harness into a score. That is the center of the paid outline. Say it.
+Name the three rejections: a step with no validation statement, a criterion that
+maps to no step, a step marked done with no test named as evidence.
 
 ---
 
-## s2-16. Break.
+## s2-10. The red gate
 
-Next hour is one research assistant. Same graph. New tools. Report instead of a PR. Not a survey of MCP servers.
+Three steps, and step three is the one that matters.
+
+Say the line: a test that passes before any code exists proves nothing, and it is
+the most comfortable kind of nothing because it is green.
+
+---
+
+## s2-11. The rubric
+
+Read the ten rows. Do not explain each one.
+
+Then say the point: "the tests passed" is one row of ten. That reframing is what
+they take back to their team.
+
+---
+
+## s2-12. Two judges
+
+Four questions, three answered by arithmetic, one by a model.
+
+Say the rule: use a model only where you must.
+
+---
+
+## s2-13. Why a model judge cannot be the gate
+
+This is your own measured data. Say so.
+
+41 articles. The deterministic detector separates good from bad at a threshold of
+70. The LLM quality judge saturates near 0.97 and flags 41 of 41.
+
+A judge that approves everything is not a judge.
+
+---
+
+## s2-14. Make the verdict a schema
+
+Three rules, one minute.
+
+A pass carrying a critical issue is not a decision. Output that will not parse is
+a fail. Absent evidence is never clean.
+
+---
+
+## s2-15. The push gate
+
+Read the refusal text out loud, exactly as printed.
+
+Then tell them: your agent will hit this today. Saying it now turns a surprise
+into a demonstration.
+
+**You should be at 25 minutes here.**
+
+---
+
+## s2-18. Lab 2
+
+This slide is out of id order on purpose. It runs here, at 25 minutes.
+
+Read both commands. The `--doer none` run is the red gate refusing. Tell them
+that before they run it.
+
+`harness.py`. Three functions. Nothing else.
+
+25 minutes. Call time at 15 and at 5 remaining. Walk the room. The common stall
+is `score_attempt`, because people try to compute rows instead of forwarding the
+evidence.
+
+---
+
+## s2-16. The receipt
+
+Three claims or nothing. Passed, this tree, after the newest edit.
+
+The closing line is the callback to s2-03: a zero exit code with no test report
+is the silent-skip bug wearing a green shirt.
+
+**You should be at 50 minutes here.**
+
+---
+
+## s2-17. One gate is never enough
+
+The in-process scope stops the loop's own doer. The agent is a subprocess, so it
+walks straight past that one.
+
+`write_scope` reads the diff and catches it. Defense at one layer is a demo.
+
+---
+
+## s2-19. Reading the output
+
+This is the outline's 50-to-55 slot. Walk one trace.
+
+Three exits. Then the rule that saves money: the same rows twice means stop.
+
+---
+
+## s2-20. Final-attempt narrowing
+
+One minute. A doer that spends its last turn on a naming nit leaves the blocking
+row unfixed.
+
+---
+
+## s2-21. What you keep
+
+Name the artifact: a harness that fails, iterates, passes on its own, and refuses
+to ship when it should not.
+
+---
+
+## s2-22. Break
+
+15 minutes. Next module points the same graph at a question.

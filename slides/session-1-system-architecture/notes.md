@@ -1,12 +1,15 @@
 # Session 1 notes. System Architecture.
 
-Open 10 minutes. Module 1 is 45 minutes. Then a break.
+Open is 10 minutes. Module 1 is 45. Then the first break.
 Artifact they keep: a working autonomous loop on their machine.
 
-Do not reteach 20 August. Point back. Then type.
-Do not build the CRM. They clone it.
+Do not reteach 20 August. Point back, then type.
+Do not build the CRM. They clone it with `task setup`.
 
-Images match `slides.md`. If a PNG is missing, describe the prompt and keep moving.
+Images match `slides.md`. If a PNG is missing, read the prompt aloud and move on.
+
+**Clock checkpoints.** Slide s1-08 at 10 minutes. Slide s1-16 at 25 minutes.
+Slide s1-17 at 50 minutes.
 
 ---
 
@@ -14,179 +17,179 @@ Images match `slides.md`. If a PNG is missing, describe the prompt and keep movi
 
 You are here to engineer a loop, not to collect prompts.
 
-Session 1 is System Architecture, the foundation. Eventbrite title. Locked. 45 minutes plus the 10 minute open.
-
-Say the time. 10:00 Central. 11:00 Eastern. We end this block before the first break.
-
----
-
-## s1-02. Four artifacts. Image `four-artifacts.png`
-
-Promise the four things they take home. Do not add a fifth.
-
-1. A running loop in the first hour.
-2. A reusable evaluation harness.
-3. One live research assistant over Model Context Protocol (MCP).
-4. A production architecture they can hand to an org.
-
-The picture is four physical objects on a bench. Not four vendor logos.
+Say the time out loud. 10:00 Central, 11:00 Eastern. This block ends before the
+first break.
 
 ---
 
-## s1-03. Loop Engineering. Mermaid full width.
+## s1-02. Four artifacts
 
-Loop Engineering is the work of making an agent repeatable.
+Promise exactly four things. Do not add a fifth.
 
-The figure is the whole slide. Five boxes. Trigger. Action. Verify. Memory. Human.
-
-Verify is the stage that separates self-correction from a script that happens to call a model. That sentence is the thesis of the day. Repeat it in Session 2.
-
----
-
-## s1-04. Prompting dies under volume. Image `prompting-volume.png`
-
-One clever prompt works once. Ten tickets a day, it drifts. A hundred, nobody remembers what good looked like.
-
-The bottleneck is not the model. It is you. That is the Loop Engineering claim. Do not spend five minutes defending it. Point at the picture of the engineer drowning in identical chats, then move.
+Say that all four run from a clean clone with one command. That promise is the
+one they will check.
 
 ---
 
-## s1-05. Point back to 20 August. Image `second-brain-point-back.png`
+## s1-03. Prompting dies under volume
 
-If they were in the free hour, they already have the mental model. The repo is the second brain. The event log is the source of truth.
+The failure is not that the model is bad. It is that you are the bottleneck.
 
-We do not rebuild ContextPacks, wiki_ticket_sdd, or graph runtime as a lecture. That hour stopped short of graders. Graders are why they paid.
-
----
-
-## s1-06. TicketCloser on a CRM. Image `crm-not-tickets.png`
-
-The object is a small customer relationship management (CRM) app. Customers. Sales tasks. Docker. SQLite. Thin pages.
-
-It is not a ticketing app. Say that out loud. Too meta. They would spend the morning arguing about tickets about tickets.
-
-First graded ticket: add a due date on sales tasks. Vague on purpose. Field type, timezone, required or optional, overdue filter. The draft does not decide those. The ready contract does.
+Ask the room: who has a prompt that worked brilliantly once and never again?
+Hands go up. Move on. Do not collect stories.
 
 ---
 
-## s1-07. Three loops. You build one live. Mermaid.
+## s1-04. A loop is not "call the model until it says done"
 
-Name all three so the day has a map.
+This is the definition slide. Read the four items slowly.
 
-1. Ticket Enhancer. Draft to ready. Session 3.
-2. Ticket Implementer. Ready to pull request. This hour.
-3. Broken PR Fixer. Failing PR to mergeable. Session 4 pattern.
-
-They do not build all three from scratch. If someone wants to, tell them the clock will not.
+Explicit state, bounded authority, observable evidence, an externally enforced
+transition. Say the last one twice. The model does not enforce its own
+transition, and that is the whole workshop.
 
 ---
 
-## s1-08. Clock and fall-behind.
+## s1-05. AlphaCodium
 
-25 minutes of typing inside this module. Anatomy first, then type.
+Give them one number they can quote to their manager: 19 to 44 on pass@5, same
+model, different flow.
 
-Stuck: stop typing. Watch you finish. Copy `solutions/m1-implementer`. Continue.
-
-Say it now so it is not a humiliation later.
-
----
-
-## s1-09. Section card. Anatomy.
-
-Triggers. Actions. Verify. Memory. Human oversight. Five words. Then one slide each.
+If someone asks whether it replicates: say the general result, that test-based
+iteration beats single-shot for code, is broad. The exact number is one paper on
+one benchmark. Do not oversell it.
 
 ---
 
-## s1-10. The five-part figure. Mermaid on top, one line under.
+## s1-06. The object is a CRM in another repo
 
-Trigger is ready ticket T001. Action is five CRM files. Verify is hidden pytest. Memory is the work copy and the PR body. Human merges.
+Two sentences on why a ticketing app would be too meta.
 
-If they cannot point at verify after the lab, they built a generator.
-
----
-
-## s1-11. Trigger. Image `trigger-ticket.png`
-
-Something outside the model starts the work. Ours is a file. `solutions/tickets/T001-due-dates.ready.md`.
-
-Not a chat. Chat is a courtesy, not a trigger. Production loops start from tickets, cron, or PR events. Session 4 will swap the trigger. The rest of the graph stays.
-
-If the trigger is the vague draft, the loop invents a required local-time field and the grader stays red. That is the enhancer's job. Not this hour.
+The important line is the third one: the engine never imports the CRM. That is
+what makes it point at their repo on Monday.
 
 ---
 
-## s1-12. Action. Image `action-scoped-files.png`
+## s1-07. The clock
 
-Smallest change that can pass. `dates.py`, `models.py`, `main.py`, two templates.
+Say the fall-behind rule now, before anyone needs it. Nobody is graded.
 
-Show the red stamp on graders and tickets. Action does not get to rewrite the test. That is how agents cheat.
+`git checkout done-m1` puts a working enhancer in their tree. Say the branch name
+so they hear it once before they need it.
 
----
-
-## s1-13. Verify. Image `verify-pytest.png`
-
-A check the agent did not write. Hidden tests for model, API, form, `due_before`, `overdue`. Null due dates stay valid. No hardcoded customer names.
-
-"Looks good to me" is not verify. LLM-as-judge can sit on the PR description later. It does not replace pytest on this contract.
+**You should be at 10 minutes here.** If you are over, cut s1-05 next time.
 
 ---
 
-## s1-14. Memory. Image `memory-not-chat.png`
+## s1-08. Section. Anatomy of an agent loop
 
-Chat evaporates. The work copy is memory. The PR body is memory.
-
-Point back to 20 August. One sentence. Then: we are not packing a ContextPack in this lab. We are putting the result in git where Session 2 can score it.
+Just a breath. Zero minutes.
 
 ---
 
-## s1-15. Human oversight. Image `human-merges.png`
+## s1-09. The five parts
 
-The loop opens a PR. It does not merge. A human still owns production.
+Point at Verify. Say the line: this is what separates a loop from a script that
+calls a model.
 
-Oversight is a box on the graph. If you skip the box, you did not forget a courtesy. You changed the architecture.
-
----
-
-## s1-16. Ready contract. Mermaid.
-
-Read two bullets off the ready ticket. Optional UTC ISO `due_date`. Overdue means open and before today UTC.
-
-This is spec-driven development as a file, not as a vibe. Session 2 will load those bullets as a rubric. Plant that now.
+Everything else on the diagram is plumbing they already know.
 
 ---
 
-## s1-17. Lab start.
+## s1-10. Trigger
 
-They clone. They do not scaffold.
+A trigger is outside the model. Today it is a file. In production it is a hook.
 
-Known-good CRM already passes the hidden grader. The implementer loop copies `starter_crm`, applies the due-date files, writes `PR.md`.
-
-You run `python solutions/m1-implementer/loop.py` on the projector first so the room hears a pass.
-
----
-
-## s1-18. Fail then pass. Image `starter-crm-fail.png`
-
-Walk the starter. Customers exist. Tasks exist. Due column is a hole.
-
-After the loop the form has `name="due_date"`. The list filters. Seed rows are still valid with null. That last part is how you know they did not require a backfill.
+The last bullet is the one that costs money: a trigger that fires when nothing
+changed burns budget for no work. Module 4 comes back to it.
 
 ---
 
-## s1-19. Name the five parts again.
+## s1-11. Action, inside a scope you declared
 
-They just ran it. Make them say trigger, action, verify, memory, human. Cold call if the room is shy. Two people. Then stop.
+This is the first appearance of write scope. Set it up here so Module 2 can land
+the punch.
 
----
-
-## s1-20. Where one-shot breaks. Image `oneshot-breaks.png`
-
-Three panels. No contract. No stop. Context rot.
-
-This is the bridge, not a new lecture. You are selling Session 2. Do not start Maker and Checker until after the break.
+Say the closing line as written: an agent can argue past an instruction, and
+cannot argue past a tool it was never given.
 
 ---
 
-## s1-21. Break.
+## s1-12. Verify
 
-Fifteen minutes. Next is the center of gravity. Do not cut it.
+The judge reports. It does not fix.
+
+If someone asks why the judge cannot just make the small fix it found: answer
+that a thing which can both act and grade will eventually grade its own work
+green. Module 4 has the evidence. Do not spend it here.
+
+---
+
+## s1-13. Memory
+
+Give them the lost-in-the-middle number: more than 30% accuracy drop when the
+fact sits in the middle.
+
+Then the practical rule: big output goes to a file, a short summary comes back.
+That rule is why the planner is its own subagent in Module 2.
+
+---
+
+## s1-14. Human oversight
+
+Oversight is a step you build, not a hope you hold.
+
+Today the loop rewrites a ticket and a human accepts it. In Module 2 it opens a
+pull request and still does not merge.
+
+---
+
+## s1-15. Three parts, four objects
+
+This is the map for the whole day. Spend the full two minutes.
+
+Say plainly: you learn this graph once, and then we change only the object. If
+they get nothing else, they should leave with this table.
+
+**You should be at 25 minutes here.**
+
+---
+
+## s1-16. Lab 1
+
+Read the two commands. The first one escalates on purpose. Tell them that before
+they run it, or half the room will think they broke it.
+
+Walk the room. The two functions are small. The common stall is `decide_next`,
+because people forget the stable-failure exit.
+
+25 minutes. Call time at 15 and at 5 remaining.
+
+---
+
+## s1-17. Read the trace
+
+Put the escalate trace on the screen and read it out loud.
+
+The point: the interesting run is the one that stops. An iteration that burns
+tokens and reproduces the identical failure is not progress.
+
+**You should be at 50 minutes here.**
+
+---
+
+## s1-18. Where this breaks at scale
+
+Four failures, four fixes, all four fixes in Module 2. Do not fix any of them
+now.
+
+This is the bridge. Keep it to two minutes.
+
+---
+
+## s1-19. Break
+
+Say the length: 15 minutes. Say what is next: the harness.
+
+Say that Module 2 is the one that does not get cut. They will remember that you
+said it, and it buys you the room's patience later.

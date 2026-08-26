@@ -1,131 +1,118 @@
 # Session 3 notes. Research Loops and MCP.
 
-40 minutes. Hands-on. Denim kept this a build, not a demo. Do not compress it unless Saturday forces you. If you must cut, cut talk, not the run.
+40 minutes. One research assistant, built end to end.
+Artifact they keep: a working research assistant that cites what it retrieved.
 
-Artifact they keep: one working research assistant.
+This is a build, not a survey. Do not tour MCP servers. One tool, one boundary.
 
-This is not Ticket Enhancer as the live lab. Ticket Enhancer stays in the architecture story. The sold module is a research assistant that searches, verifies, and synthesizes. We mimic v3. We emit a report.
-
-Images match `slides.md`.
+**Clock checkpoints.** Slide s3-07 at 10 minutes. Slide s3-08 at 35 minutes.
 
 ---
 
 ## s3-01. Title
 
-Eventbrite name. Research Loops and MCP, the execution model.
-
-One worked example. Not a survey of servers. Say that twice. People will ask for a catalog. The catalog is how you blow the clock.
+Say what this hour is not: a tour of nine frameworks.
 
 ---
 
-## s3-02. Same graph, new object. Image `same-graph-new-object.png`
+## s3-02. Same graph, new object
 
-They already own orchestrator, Maker, Checker, rubric, gate, budget.
+Point back at Module 1's three boxes. Nothing about them changes.
 
-The object in the middle changes. Pull request becomes a short report.
-
-The real v3 pipeline in `SpillwaveSolutions/articles` has SEO, images, voice, Notion, related-article footers, parallel parts. Those stay home. If you run full v3 live, Module 3 eats the day.
-
----
-
-## s3-03. Safe MCP boundary. Image `mcp-boundary.png`
-
-Model Context Protocol (MCP) is a tool contract, not a personality.
-
-One plug in the wall. Perplexity. Research.
-
-Caps on the other sockets: merge, deploy, seven other servers.
-
-Allowed tools for the researcher: search, write notes to disk. The orchestrator does not get those tools. That is the same wall as Maker and Checker.
+The only new thing is a tool that reaches outside the machine. That is the whole
+delta, and it is why this module is only 40 minutes.
 
 ---
 
-## s3-04. Research in a sub-agent. Mermaid.
+## s3-03. A safe tool boundary
 
-Cost control is structural.
+Two lists: allowed and denied. Read both.
 
-The researcher may pull a long thread. It writes `work/research_notes.json`. The orchestrator receives a summary paragraph.
-
-"Please don't paste the dump" is a prompt. A summary edge is architecture.
-
----
-
-## s3-05. Fixture fallback. Image `fixture-fallback.png`
-
-Same move as Langfuse versus local traces.
-
-If `PERPLEXITY_API_KEY` is missing, `fixtures/research.json` still drives the fact-check. Saturday does not depend on signup.
-
-If the key is present, you may show a live call, then still ground claims on the fixture so the grader is deterministic.
+Then the schema point. `add_review_comment(issue_id, body)` is a tool. An HTTP
+client holding your credentials is a liability. Narrow beats general.
 
 ---
 
-## s3-06. Section. Two domains.
+## s3-04. ToolPrivBench
 
-Fact, then style. Sequential. That is v3 editor/checker, two times, not twelve stages.
+Three findings, and the third is the one that stings: prompt-based controls gave
+only limited mitigation.
 
----
+Say the practical version. You do not fix this with a stronger sentence. You fix
+it by not shipping the sledgehammer.
 
-## s3-07. Fact-check loop. Mermaid.
-
-Checker reads. Editor writes.
-
-Must-include: optional, UTC, ISO 8601, overdue. Forbidden: required due date, local time.
-
-Pass is no critical and no major. Minors do not block. That matches the v3 verdict rule.
-
-If the editor cannot fix a contradiction, the loop escalates. It does not invent a pass.
+Note if asked: transient failures made escalation more likely, not less. Retries
+push agents toward bigger tools.
 
 ---
 
-## s3-08. Style enforcer. Image `style-enforcer.png`
+## s3-05. Tool output is untrusted input
 
-Deterministic first. Strip em dashes in code. The house rule is not a suggestion.
+AgentDojo. Content that comes back from a tool can carry instructions.
 
-Then a tiny rubric. One idea per sentence. Expand MCP on first use. Expand CRM on first use.
+The sentence to land: your search results are a document the internet wrote, not
+a system prompt.
 
-Not the full article style guide. Not engagement. Not SEO. Those are how v3 grew a factory. We are teaching a loop.
-
----
-
-## s3-09. Three exits again. Image `budget-calls.png`
-
-They saw pass, retry, escalate on pytest. Now the same exits on a report.
-
-Each call costs 1. Cap is 8. Loops per domain default to 3.
-
-Repeat failure still matters. Two identical issue signatures and you stop.
-
-Unresolved tags on a dirty report beat a green lie. A human can read tags. A human cannot un-see a fake pass.
+If someone asks about MCP authorization specifically: validate the token audience
+server side, never pass a token through. That is the confused-deputy fix.
 
 ---
 
-## s3-10. Lab.
+## s3-06. Three backends
 
-Unit tests first. Then a clean run. Then `--dirty`.
+Read the table. Then say the point: the loop calls one function and never learns
+which backend answered.
 
-The dirty run is the teaching run. First fact check fails. Editor repairs. Style runs. Trace shows the retries.
+Say the practical promise out loud. Saturday does not depend on a signup form.
+Anyone without a key uses `--backend fixture` and gets the same lesson.
 
-If someone finishes early, they read `work/last-loop.json` and say which gate fired. They do not start a second MCP server.
-
----
-
-## s3-11. The pipeline figure. Mermaid on top.
-
-Topic is boring. "Should CRM sales tasks store optional UTC ISO due dates?"
-
-Boring is a feature. A sexy topic turns this into a writing workshop. We are not packing a Substack.
+**You should be at 10 minutes here.**
 
 ---
 
-## s3-12. Failure modes. Last five minutes.
+## s3-07. Lab 3
 
-Four cards. Signup stall. Context dump. Fake pass. Ignored budget.
+Read the command. Say that the question is boring on purpose.
 
-Each has a green fix that is already in the code. Point at the code, not at a new slide of theory.
+`loop.py`. Two functions. The common stall is `check_brief`, because people reach
+for a model. Remind the room that both checks are arithmetic.
+
+25 minutes. Call time at 15 and at 5 remaining.
 
 ---
 
-## s3-13. Break.
+## s3-08. The judge output
 
-Session 4 is this stack with no human at the keyboard.
+Put the four rows on the screen and read them.
+
+Grounded and cited are arithmetic. No model call. Then the line that matters: a
+confident sentence nobody can trace is the failure that matters.
+
+**You should be at 35 minutes here.**
+
+---
+
+## s3-09. Stopping an unbounded search
+
+The setup: a code loop stops when the tests go green. A research loop has no
+equivalent, because the search space has no end.
+
+Four stops. The last one is the honest one: no source found escalates, and it
+never ships an uncited brief.
+
+---
+
+## s3-10. Two numbers
+
+15.7% one step repeated. 12.4% not knowing it was already done.
+
+Then the cost point. A retry replays the whole context, so a 20% per-step failure
+rate can roughly double the bill, not add a fifth to it.
+
+Closing line: cost is an architecture problem, not a pricing problem.
+
+---
+
+## s3-11. Break
+
+15 minutes. Next: the same stack with nobody at the keyboard.
