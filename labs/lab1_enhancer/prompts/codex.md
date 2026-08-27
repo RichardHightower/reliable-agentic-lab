@@ -16,7 +16,7 @@ Pick one of these for this hour:
    ```
 
    Then set up your fork's `config.json` (see [README.md](../README.md)) and
-   run it with Claude Code: `task run, --ticket T001`.
+   run it with Claude Code: `task run -- --ticket T001`.
 
 2. Watch or pair on the Claude Code build. See
    [prompts/claude-code.md](claude-code.md).

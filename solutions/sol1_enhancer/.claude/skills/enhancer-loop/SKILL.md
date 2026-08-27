@@ -48,8 +48,8 @@ read the frontmatter of each. Keep the ones with `state: draft` and
 
 ## Setup, once per run: read config.json
 
-Read `./config.json`, in your current working directory (`task run` always
-runs this from `solutions/sol1_enhancer/`, so that is where it is), created
+Read `./config.json`, in your current working directory (the folder you
+launched `task run` from), created
 by the attendee from `config.json.example` in that same directory. It has
 `fork_owner` and `repo_name`. Every `gh` command below targets
 `--repo <fork_owner>/<repo_name>`. If `./config.json` is missing, stop and
