@@ -1,20 +1,37 @@
-# sol1_enhancer_opencode
+# Lab 1 ticket enhancer, for OpenCode
 
-An OpenCode-native ticket enhancer is coming soon. This folder is a stub.
+A vague ticket goes in. A ticket that meets a written contract comes out.
+Nobody sits in a chat window: the loop polls the ticket's GitHub issue,
+reads the newest comment, and acts on it.
 
-It used to hold a generated Python port, `loop.py` and friends. That shape no
-longer matches Lab 1, whose answer is a plugin or a skill set rather than a
-Python stub, so the stale files are gone rather than left to mislead you.
+This folder is the finished OpenCode answer for lab 1. It replaces the
+stub left by #96. The Claude Code answer is `../sol1_enhancer/`. Both run
+the same loop, the same rubric, and the same exits.
 
-Need a working answer this weekend? Use
-[solutions/sol1_enhancer](../sol1_enhancer), the Claude Code plugin. It is the
-reference answer for Lab 1, and
-[its SPEC.md](../sol1_enhancer/SPEC.md) is the full design.
+## Read these first
 
-The other two tool answers are built, if you want to compare how each product
-expresses the same loop:
+| File | What it covers |
+|---|---|
+| [SPEC.md](SPEC.md) | The design: roles, labels, exits, and what "ready" means. |
+| [HOW_TO_RUN.md](HOW_TO_RUN.md) | Set up your fork and run a poll. |
+| [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) | How OpenCode loads this tree, the headless argv, and the judge jail. |
 
-- [sol1_enhancer_codex](../sol1_enhancer_codex), a Codex skill set under
-  `.agents/`, with each role in its own sandboxed process.
-- [sol1_enhancer_grok_build](../sol1_enhancer_grok_build), a Grok Build project
-  plugin under `.grok/`, with three registration symlinks.
+## The roles
+
+| Role | What it is | May write? |
+|---|---|---|
+| `enhancer-loop` | The orchestrator skill. One poll-and-act step, then it exits. | Yes. It is the only role that writes the ticket or calls `gh`. |
+| `enhancer-judge` | Grades one ticket against the rubric for its kind. | No. `edit: deny`, `bash: deny`. |
+| `enhancer-doer` | Drafts a better ticket body and returns it as text. | No. `edit: deny`, `bash: deny`. |
+
+Isolation is OpenCode's per-agent `permission` block, not a nested process
+and not a `plugin.json` pack. Agents live in `.opencode/agents/`. The skill
+lives in `.opencode/skills/enhancer-loop/`.
+
+## Run it
+
+```bash
+cp config.json.example config.json   # fill in your GitHub username
+task clone
+task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
+```
