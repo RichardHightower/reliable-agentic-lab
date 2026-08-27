@@ -97,7 +97,7 @@ GitHub, **Settings**, **Developer settings**, **Personal access tokens**. Grant
 Work from a lab folder, not the repo root:
 
 ```bash
-cd labs/m1-enhancer
+cd labs/lab1_enhancer
 ```
 
 See [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md).

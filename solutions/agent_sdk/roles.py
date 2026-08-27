@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 
 from loops.roles import WriteScope
-from solutions.roleplan import RolePlan, plan
+from solutions.roleplan import DEFAULT_LOOP, RolePlan, plan
 
 # Tool inputs that name a path. A hook has to know where to look.
 PATH_KEYS = ("file_path", "path", "notebook_path")
@@ -70,8 +70,8 @@ def scope_hook(repo: Path, role: RolePlan):
     return check
 
 
-def options_for(contract):
-    """Build `ClaudeAgentOptions` with one subagent per role.
+def options_for(contract, loop: str = DEFAULT_LOOP):
+    """Build `ClaudeAgentOptions` with one subagent per role in this loop's cast.
 
     Imported lazily. The workshop's own tests run without the SDK installed.
     """
@@ -82,7 +82,7 @@ def options_for(contract):
     )
 
     repo = Path(contract.repo)
-    roles = plan(contract)
+    roles = plan(contract, loop)
 
     agents = {
         role.name.replace("_", "-"): AgentDefinition(
@@ -105,7 +105,9 @@ def options_for(contract):
     return ClaudeAgentOptions(
         cwd=str(repo),
         agents=agents,
-        allowed_tools=["Task", "Read", "Glob", "Grep", "Edit", "Write", "Bash"],
+        # Derived, not restated. A loop whose cast holds WebSearch needs it in
+        # this list, and a loop whose cast writes nothing must not get Write.
+        allowed_tools=sorted({tool for role in roles.values() for tool in role.tools}),
         permission_mode="dontAsk",
         hooks={"PreToolUse": hooks},
         # A subagent inherits the project's MCP servers only with this set.

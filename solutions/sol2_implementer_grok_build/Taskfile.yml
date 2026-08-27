@@ -1,0 +1,7 @@
+# Reach the root spine from inside a solution. `task test` works here.
+version: '3'
+includes:
+  root:
+    taskfile: ../../Taskfile.yml
+    dir: ../..
+    flatten: true

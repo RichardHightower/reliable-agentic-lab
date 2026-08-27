@@ -1,0 +1,53 @@
+# Extra credit. Copy this file onto YOUR FORK as .github/workflows/fix-broken-pr.yml
+# Do not enable it on the shared instructor repo.
+name: Fix Broken PR
+
+on:
+  check_suite:
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+
+concurrency:
+  group: extra-credit-fix-${{ github.event.check_suite.head_sha || github.event.inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.check_suite.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.check_suite.head_branch || github.ref }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Attempt fix
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.check_suite.pull_requests[0].number || github.event.inputs.pr_number }}
+          AGENT_MAX_ATTEMPTS: "3"
+        run: |
+          python solutions/extra_credit/s_ext_4_fix_pr/fix_pr.py --pr "$PR_NUMBER" --github --doer reference
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-fix
+          path: solutions/extra_credit/s_ext_4_fix_pr/work/last-fix.json

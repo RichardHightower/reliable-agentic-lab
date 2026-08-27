@@ -1,0 +1,17 @@
+{
+  "adapter_path": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/adapters/github/adapter",
+  "items": {
+    "01M10N7X4TCZSZ6RCQ8348G3MG": {
+      "last_pushed_hash": "4a52a98aeba53322",
+      "last_pushed_key": "2"
+    },
+    "01M10N87FRARZQJET5ZF6N9WY1": {
+      "last_pushed_hash": "4281fef7be12dcb3",
+      "last_pushed_key": "3"
+    },
+    "01M10N87J6TTEFFEHB1510BC1M": {
+      "last_pushed_hash": "2260342309c2b5d6",
+      "last_pushed_key": "4"
+    }
+  }
+}

@@ -14,11 +14,11 @@ task test
 
 ## The order
 
-1. `labs/m1-enhancer` grooms a vague ticket into a contract a machine can check.
-2. `labs/m2-implementer` wraps that with a harness that can score it. This is
+1. `labs/lab1_enhancer` grooms a vague ticket into a contract a machine can check.
+2. `labs/lab2_implementer` wraps that with a harness that can score it. This is
    the centre.
-3. `labs/m3-research` runs the same graph over a question instead of a ticket.
-4. `labs/m4-fixer` runs it with nobody watching.
+3. `labs/lab3_research` runs the same graph over a question instead of a ticket.
+4. `labs/lab4_fixer` runs it with nobody watching.
 
 ## The four goals
 

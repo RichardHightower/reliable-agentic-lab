@@ -161,7 +161,7 @@ beat: lab
 # Lab 3. The research assistant. 25 minutes.
 
 ```bash
-cd labs/m3-research
+cd labs/lab3_research
 claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
 
 task loop:research -- --question "sqlalchemy nullable datetime column" \

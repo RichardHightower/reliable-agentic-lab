@@ -23,3 +23,6 @@ work/
 reports/
 labs/**/__pycache__/
 solutions/**/work/
+
+# Saved attempts from FALL-BEHIND.md step 2.
+labs/**/*.my-attempt
