@@ -1,13 +1,68 @@
-# Standalone. No dependency on the root Taskfile. This folder holds a
-# loop.py library (no CLI to run), so the only task is a self-check.
+# Standalone. No dependency on the root Taskfile. Every command here runs
+# from this folder, start to finish: trust the checkout, clone your fork,
+# seed test tickets, run a poll.
 version: '3'
+
+vars:
+  # TASKFILE_DIR is Task's own absolute path to this file's directory. Every
+  # path below is built from it, on purpose: a relative path here depends on
+  # the invoking process's cwd being exactly right, and when it is not, this
+  # plugin can end up reading and writing a different checkout entirely, one
+  # that happens to also have a work/northwind-field-crm.
+  TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
 
 tasks:
   default:
     cmds: [task --list]
 
-  test:
-    desc: Confirm judge_ticket and decide_next import and run without error.
+  trust:
+    desc: Step zero. Check that grok sees the local plugin, and trust the checkout if not.
+    # Grok only loads a project plugin from a trusted checkout, and it records
+    # trust against the git root, not this folder. Until then `grok inspect`
+    # shows ticket-enhancer as "(project, disabled)" and `task run` does
+    # nothing useful. There is no CLI trust command on grok 1.0.5: opening the
+    # TUI here and accepting the prompt is how you grant it. See
+    # IMPLEMENTATION_NOTES.md.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 -c "import loop; print('ok')"
+      - grok inspect | grep -A1 "Plugins" || true
+      - echo ""
+      - echo "If the line above says (project, disabled), run 'grok' here once,"
+      - echo "accept the trust prompt, then /plugins trust and quit. Re-run task trust."
+
+  clone:
+    desc: Clone your fork (from config.json) into work/. Skips if it is already there.
+    status:
+      - test -d {{.TARGET}}/.git
+    cmds:
+      - test -f {{.TASKFILE_DIR}}/config.json || (echo "copy config.json.example to config.json first, and fill in your GitHub username" && exit 1)
+      - mkdir -p {{.TASKFILE_DIR}}/../../work
+      - git clone --quiet https://github.com/$(jq -r .fork_owner {{.TASKFILE_DIR}}/config.json)/$(jq -r .repo_name {{.TASKFILE_DIR}}/config.json).git {{.TARGET}}
+
+  create-test-tickets:
+    desc: Write a few draft tickets (bug, ui, feature) into the target repo, for testing.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/setup_test_tickets.sh {{.TARGET}}
+
+  run:
+    desc: One poll-and-act step over every open ticket, using this plugin.
+    # dir is pinned, not just TARGET. Grok discovers .grok/plugins/ from its
+    # own cwd, so the subprocess has to start in this exact folder or the
+    # skill does not exist. SKILL.md reads ./config.json from its cwd too.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      # -p takes the prompt as its own value, so it has to come last. Put a
+      # flag after it and grok errors with "a value is required for --single".
+      - >-
+        grok --always-approve
+        --deny "Edit({{.TASKFILE_DIR}}/../../loops/**)"
+        --deny "Edit({{.TASKFILE_DIR}}/../../scripts/**)"
+        --deny "Edit({{.TASKFILE_DIR}}/../../work/**/tests/**)"
+        -p "/enhancer-loop --repo {{.TARGET}} {{.CLI_ARGS}}"
+
+  poll-forever:
+    desc: Poll forever until killed (Ctrl-C). Seminar-only stand-in for a real scheduler, see SPEC.md.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/poll_forever.sh {{.CLI_ARGS}}
