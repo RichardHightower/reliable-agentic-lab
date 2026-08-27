@@ -12,7 +12,7 @@ That creates the virtualenv, installs dependencies, clones the target repo into
 ## Then work from a lab folder
 
 ```bash
-cd labs/m1-enhancer
+cd labs/lab1_enhancer
 task test
 ```
 

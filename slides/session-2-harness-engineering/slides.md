@@ -409,7 +409,7 @@ beat: lab
 # Lab. 25 minutes.
 
 ```bash
-cd labs/m2-implementer
+cd labs/lab2_implementer
 claude -p "$(cat prompts/claude-code.md)"
 
 task loop:implementer -- --ticket T001 --doer reference   # ten rows

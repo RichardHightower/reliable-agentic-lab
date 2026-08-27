@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from loops.roles import ScopeViolation, WriteScope
-from solutions.roleplan import RolePlan, plan
+from solutions.roleplan import DEFAULT_LOOP, RolePlan, plan
 
 
 def scoped_write_tool(repo: Path, role: RolePlan):
@@ -60,12 +60,12 @@ def read_tool(repo: Path):
     return read_file
 
 
-def subagents_for(contract) -> list[dict]:
-    """One Deep Agents subagent per role, with its own tools."""
+def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
+    """One Deep Agents subagent per role in this loop's cast, with its own tools."""
     repo = Path(contract.repo)
     reader = read_tool(repo)
     out = []
-    for role in plan(contract).values():
+    for role in plan(contract, loop).values():
         if role.name == "orchestrator":
             continue
         tools = [reader]
@@ -82,8 +82,8 @@ def subagents_for(contract) -> list[dict]:
     return out
 
 
-def build_agent(contract, model: str = "anthropic:claude-sonnet-5"):
+def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = "anthropic:claude-sonnet-5"):
     """The orchestrator, holding the subagents and nothing that writes."""
     from deepagents import create_deep_agent  # noqa: PLC0415  (optional dependency)
 
-    return create_deep_agent(model=model, subagents=subagents_for(contract))
+    return create_deep_agent(model=model, subagents=subagents_for(contract, loop))

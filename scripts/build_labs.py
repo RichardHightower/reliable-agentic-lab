@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LABS = ROOT / "labs"
+SOLUTIONS = ROOT / "solutions"
 
 TOOLS = {
     "claude-code": (
@@ -29,6 +31,59 @@ TOOLS = {
     "grok-build": ("Grok Build", 'grok -p "$(cat prompts/grok-build.md)" --no-auto-update', "grok"),
     "opencode": ("OpenCode", 'opencode run "$(cat prompts/opencode.md)"', "opencode"),
 }
+
+# One solution folder per tool. Claude Code is the base folder, so `sol1_enhancer`
+# is the Claude Code answer and the other three carry a suffix. The code in all
+# four is the same, because the tool you drive does not change the answer. What
+# changes is the spec that tells you how to drive it.
+VARIANTS = {
+    "claude-code": "",
+    "codex": "_codex",
+    "grok-build": "_grok_build",
+    "opencode": "_opencode",
+}
+
+# The two runtime ports. Unlike the four tools above, these are different code:
+# the loop is the same, and the way the runtime keeps a role out of a path is
+# not. Both read the cast from `solutions/roleplan.py`, so neither can invent a
+# role or widen a scope.
+RUNTIMES = {
+    "agent_sdk": {
+        "name": "Claude Agent SDK",
+        "module": "solutions.agent_sdk",
+        "alias": "sdk",
+        "call": "sdk.options_for(contract, loop=LOOP)",
+        "enforces": (
+            "The Agent SDK scopes in two places and you need both. `tools=[...]` "
+            "decides whether a role can write at all. A `PreToolUse` hook decides "
+            "which paths it may write. The judge holds neither Edit nor Write, so "
+            "there is nothing left for a hook to guard."
+        ),
+        "package": "claude-agent-sdk",
+    },
+    "deep_agents": {
+        "name": "LangChain Deep Agents",
+        "module": "solutions.deep_agents",
+        "alias": "deep",
+        "call": "deep.subagents_for(contract, loop=LOOP)",
+        "enforces": (
+            "Deep Agents scopes by handing each subagent its own tool list. A "
+            "subagent can only call what it was given. Path scope moves inside the "
+            "write tool, which checks the scope before it touches the disk."
+        ),
+        "package": "deepagents",
+    },
+}
+
+# Reach the root spine from inside a solution folder, exactly as a lab does.
+SOLUTION_TASKFILE = """# Reach the root spine from inside a solution. `task test` works here.
+version: '3'
+includes:
+  root:
+    taskfile: ../../Taskfile.yml
+    dir: ../..
+    flatten: true
+"""
 
 
 @dataclass
@@ -50,10 +105,38 @@ class Lab:
     solved_body: str = ""
     reading: list[str] = field(default_factory=list)
 
+    @property
+    def sol_slug(self) -> str:
+        """`lab1_enhancer` becomes `sol1_enhancer`. One source, two trees."""
+        return self.slug.replace("lab", "sol", 1)
+
+    @property
+    def loop_key(self) -> str:
+        """`lab1_enhancer` becomes `enhancer`, which is the key in `roleplan.LOOPS`."""
+        return self.slug.split("_", 1)[1]
+
+    @property
+    def needs_repo(self) -> bool:
+        """Research runs against a question. The other three need a target repo."""
+        return self.loop_key != "research"
+
+
+ROLE_CASTS = {
+    "enhancer": ("orchestrator", "doer", "judge"),
+    "implementer": (
+        "orchestrator",
+        "planner",
+        "test_implementer",
+        "code_implementer",
+        "judge",
+    ),
+    "research": ("orchestrator", "researcher", "writer", "judge"),
+    "fixer": ("orchestrator", "code_implementer", "judge"),
+}
 
 LABS_SPEC = [
     Lab(
-        slug="m1-enhancer",
+        slug="lab1_enhancer",
         module=1,
         title="Ticket Enhancer",
         minutes=25,
@@ -62,7 +145,7 @@ LABS_SPEC = [
         stub_file="loop.py",
         fills=["judge_ticket(ticket)", "decide_next(verdict, iteration, previous)"],
         roles=(
-            "orchestrator owns the budget and the exits, a doer edits the ticket body "
+            "an orchestrator owns the budget and the exits, a doer edits the ticket body "
             "and nothing else, and a judge scores the ticket against criteria for its kind"
         ),
         exit_when=[
@@ -124,7 +207,7 @@ def decide_next(
         reading=["loops/criteria.py", "loops/gates.py", "loops/ticket.py"],
         solved_body='''"""Lab 1. The Ticket Enhancer. Filled in.
 
-This is the `done-m1` answer. Each function hands the work to the reference
+This is the lab 1 answer, the same file as `solutions/sol1_enhancer/`. Each function hands the work to the reference
 implementation, because that is where the lesson lives and duplicating it here
 would let the two drift apart.
 
@@ -170,7 +253,7 @@ def decide_next(
 ''',
     ),
     Lab(
-        slug="m2-implementer",
+        slug="lab2_implementer",
         module=2,
         title="Ticket Implementer and the harness",
         minutes=25,
@@ -179,7 +262,7 @@ def decide_next(
         stub_file="harness.py",
         fills=["red_gate(before, after)", "score_attempt(...)", "run_loop(...)"],
         roles=(
-            "orchestrator writes nothing, a test implementer owns tests/ only, a code "
+            "an orchestrator writes nothing, a test implementer owns tests/ only, a code "
             "implementer owns app/ and is denied tests/, and a judge holds no write path at all"
         ),
         exit_when=[
@@ -246,7 +329,7 @@ def run_loop(contract: Contract, budget: int = 3) -> dict:
         reading=["loops/rubric.py", "loops/gates.py", "loops/roles.py", "loops/steps.py"],
         solved_body='''"""Lab 2. The harness. Filled in.
 
-This is the `done-m2` answer. The order is the lesson:
+This is the lab 2 answer, the same file as `solutions/sol2_implementer/`. The order is the lesson:
 
     tests first  ->  prove them red  ->  code until green  ->  judge  ->  gate
 
@@ -308,7 +391,7 @@ def decide(score: rubric.Score, iteration: int, previous=None, budget: int = 3) 
 ''',
     ),
     Lab(
-        slug="m3-research",
+        slug="lab3_research",
         module=3,
         title="Research Assistant over MCP",
         minutes=25,
@@ -317,7 +400,7 @@ def decide(score: rubric.Score, iteration: int, previous=None, budget: int = 3) 
         stub_file="loop.py",
         fills=["plan_questions(question)", "check_brief(body, sources)"],
         roles=(
-            "orchestrator owns the budget, a researcher calls the tool boundary, a writer "
+            "an orchestrator owns the budget, a researcher calls the tool boundary, a writer "
             "assembles the brief, and a judge checks grounding and style without a model"
         ),
         exit_when=[
@@ -375,7 +458,7 @@ def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
         reading=["loops/brief.py", "loops/research.py", "MCP.md"],
         solved_body='''"""Lab 3. The research assistant. Filled in.
 
-This is the `done-m3` answer.
+This is the lab 3 answer, the same file as `solutions/sol3_research/`.
 
 The backend does not appear anywhere in this file. That is the point of a tool
 boundary: the loop calls one function and never learns whether Perplexity, the
@@ -410,7 +493,7 @@ def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
 ''',
     ),
     Lab(
-        slug="m4-fixer",
+        slug="lab4_fixer",
         module=4,
         title="Broken PR Fixer, unattended",
         minutes=18,
@@ -419,7 +502,7 @@ def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
         stub_file="loop.py",
         fills=["summarize_failure(run_result)", "repair_until_green(contract, budget)"],
         roles=(
-            "orchestrator owns the budget, a code implementer repairs inside its scope, "
+            "an orchestrator owns the budget, a code implementer repairs inside its scope, "
             "and a judge reads the suite"
         ),
         exit_when=[
@@ -475,7 +558,7 @@ def repair_until_green(contract: Contract, budget: int = 3) -> dict:
         reading=["loops/fixer.py", "loops/gates.py"],
         solved_body='''"""Lab 4. The Broken PR Fixer. Filled in.
 
-This is the `done-m4` answer.
+This is the lab 4 answer, the same file as `solutions/sol4_fixer/`.
 
 Nobody is watching this loop, so the exits matter more than the successes.
 Giving up is allowed. Giving up silently is the bug.
@@ -543,7 +626,7 @@ Fill `{lab.stub_file}` in this folder. Fill only that file.
 
 ## The roles
 
-This loop has {lab.roles}.
+In this loop, {lab.roles}.
 
 Write scope is not advice. It is declared in `.loop.yml` in the target repo and
 enforced at the tool boundary. The code implementer cannot weaken a test to
@@ -575,6 +658,258 @@ There are three exits and no fourth: pass, retry, escalate.
 ## Worth reading
 
 {reading}
+"""
+
+
+def spec_for(lab: Lab, tool_key: str) -> str:
+    """The step-by-step build for one lab, driven by one tool.
+
+    The answer code is the same for all four tools. This is the part that
+    differs, so it is the part each solution folder carries.
+    """
+    name, headless, binary = TOOLS[tool_key]
+    folder = f"{lab.sol_slug}{VARIANTS[tool_key]}"
+
+    step = 3  # steps 1 and 2 are fixed
+    fill_steps = []
+    for item in lab.fills:
+        fill_steps.append(
+            f"{step}. Fill `{item}`. The docstring in the stub says what it must decide."
+        )
+        step += 1
+    exits = "\n".join(f"   - {item}" for item in lab.exit_when)
+    verify = "\n".join(f"   {line}" for line in lab.verify)
+    reading = "\n".join(f"- `{item}`" for item in lab.reading)
+    fills_md = "\n".join(fill_steps)
+
+    return f"""# Spec. Lab {lab.module}. {lab.title}, with {name}
+
+{lab.one_line}
+
+**Artifact: {lab.artifact} About {lab.minutes} minutes.**
+
+This folder holds the finished answer. `{lab.stub_file}` here runs as it stands.
+The stub you start from is `labs/{lab.slug}/{lab.stub_file}`, and the prompt that
+drives {name} is `labs/{lab.slug}/prompts/{tool_key}.md`.
+
+## Build it step by step
+
+1. Work from the lab folder, not from this one.
+
+   ```bash
+   cd labs/{lab.slug}
+   ```
+
+2. Drive {name} with the lab's prompt, or fill `{lab.stub_file}` by hand.
+
+   ```bash
+   {headless}
+   ```
+
+   Interactive: run `{binary}` in the lab folder and paste everything below the
+   line in the prompt file.
+
+{fills_md}
+{step}. Stop at one of three exits. Do not add a fourth.
+
+{exits}
+
+{step + 1}. Verify.
+
+   ```bash
+{verify}
+   ```
+
+{step + 2}. Compare your answer against this folder.
+
+   ```bash
+   diff {lab.stub_file} ../../solutions/{folder}/{lab.stub_file}
+   ```
+
+## The roles
+
+In this loop, {lab.roles}.
+
+Write scope is not advice. It is declared in `.loop.yml` in the target repo and
+enforced at the tool boundary. The code implementer cannot weaken a test to
+reach green, because it holds no write path to one.
+
+## The gate
+
+{lab.gate_note}
+
+## The reference
+
+{lab.solution}
+
+## Worth reading
+
+{reading}
+
+## Run the finished answer
+
+```bash
+cd solutions/{folder}
+task test
+```
+"""
+
+
+def port_for(lab: Lab, runtime_key: str) -> str:
+    """The runtime port for one lab. Configuration, not a second loop."""
+    rt = RUNTIMES[runtime_key]
+    enforces = textwrap.fill(rt["enforces"], width=79)
+    if lab.needs_repo:
+        repo_arg = '    parser.add_argument("--repo", default="../../work/northwind-field-crm")\n'
+        contract_expr = "Contract(args.repo)"
+        contract_import = "\nfrom loops.contract import Contract"
+    else:
+        # The research loop runs against a question, not a repo. There is no
+        # `.loop.yml` to read, so the cast falls back to the table's own scopes.
+        repo_arg = ""
+        contract_expr = "None"
+        contract_import = ""
+
+    return f'''#!/usr/bin/env python3
+"""Lab {lab.module}. {lab.title}, on {rt["name"]}.
+
+The loop does not change. The rubric, the gates, and the exits are the same
+objects lab {lab.module} uses. What changes is how the runtime says "this role
+may not write that file".
+
+{enforces}
+
+    python {lab.stub_file} --table-only
+
+Nothing here calls a model. This module returns configuration, and your driver
+is what runs it.
+"""
+
+from __future__ import annotations
+
+import argparse
+
+import _root  # noqa: F401  (puts the repo root on sys.path)
+{contract_import}
+from solutions import roleplan
+from {rt["module"]} import roles as {rt["alias"]}
+
+LOOP = "{lab.loop_key}"
+
+
+def cast(contract) -> dict[str, roleplan.RolePlan]:
+    """The roles this loop runs.
+
+    Read from `solutions/roleplan.py`, never restated here. A port that writes
+    its own scopes is a port that drifts from the loop it claims to be, and it
+    drifts silently.
+    """
+    return roleplan.plan(contract, LOOP)
+
+
+def build(contract):
+    """This runtime's configuration for the cast.
+
+    Needs `{rt["package"]}` installed. `cast()` and the role table do not, which
+    is why the tests can check the separation without either SDK present.
+    """
+    return {rt["call"]}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+{repo_arg}    parser.add_argument(
+        "--table-only",
+        action="store_true",
+        help="print the role table and stop, so no SDK is needed",
+    )
+    args = parser.parse_args(argv)
+
+    contract = {contract_expr}
+    print(roleplan.table(cast(contract)))
+    if args.table_only:
+        return 0
+    print()
+    print(build(contract))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
+def port_spec_for(lab: Lab, runtime_key: str) -> str:
+    """The step-by-step build for one runtime port."""
+    rt = RUNTIMES[runtime_key]
+    enforces = textwrap.fill(rt["enforces"], width=79)
+    folder = f"{lab.sol_slug}_{runtime_key}"
+    repo_flag = " --repo ../../work/northwind-field-crm" if lab.needs_repo else ""
+    role_lines = "\n".join(f"- `{name}`" for name in ROLE_CASTS[lab.loop_key])
+
+    return f"""# Spec. Lab {lab.module}. {lab.title}, on {rt["name"]}
+
+The same loop, in a different runtime. The point is not that it runs. The point
+is that the rubric, the red gate, the write scope, and the exits did not have to
+change to make it run.
+
+## The cast for this loop
+
+{role_lines}
+
+`solutions/roleplan.py` is where that list lives. Read it there. Do not restate
+a scope in this folder.
+
+## How this runtime enforces scope
+
+{enforces}
+
+## Build it step by step
+
+1. Install the runtime.
+
+   ```bash
+   pip install -r requirements-takehome.txt
+   ```
+
+2. Read the cast before you configure anything.
+
+   ```bash
+   cd solutions/{folder}
+   python {lab.stub_file} --table-only{repo_flag}
+   ```
+
+   The judge must print `no` in the writes column. If it prints `yes`, stop.
+   Nothing downstream is worth building on that.
+
+3. Translate the cast into this runtime, one role at a time. `cast(contract)`
+   returns a `RolePlan` per role, carrying the tools, the allow list, and the
+   deny list. `build(contract)` turns those into the runtime's own objects.
+
+4. Give the writing roles their path check. A role holding `Edit` or `Write`
+   without a path check can reach any file in the repo, and the first thing an
+   agent under pressure reaches for is the failing test.
+
+5. Print the configuration and read it.
+
+   ```bash
+   python {lab.stub_file}{repo_flag}
+   ```
+
+## Verify
+
+```bash
+task test -- loops/tests/test_runtime_ports.py
+```
+
+Those checks need no SDK and no key. They assert that this port and the
+in-process roles read the same table, and that the judge holds no write tool in
+either.
+
+## What this folder is not
+
+It is not a second loop engine. `loops/` holds the loop, and porting it must not
+require changing `loops/`. If it does, the design leaked.
 """
 
 
@@ -628,10 +963,10 @@ Pick one tool and paste its prompt.
 
 ## If you fall behind
 
-Stop typing and watch. Then:
+Stop typing and watch. Then copy the answer into this folder:
 
 ```bash
-git checkout done-m{lab.module}
+cp ../../solutions/{lab.sol_slug}/{lab.stub_file} .
 ```
 
 You continue the next module with a working artifact. See `FALL-BEHIND.md`.
@@ -646,28 +981,40 @@ Nobody is graded here. Falling behind on one lab must not cost you the next one.
 ## Do this
 
 1. Stop typing and watch Rick finish the build.
-2. When he is done, run:
+2. Save your attempt. The next step overwrites it.
 
    ```bash
-   git checkout done-m{lab.module}
+   cp {lab.stub_file} {lab.stub_file}.my-attempt
    ```
 
-3. You now have a working {lab.title.lower()}. Continue with the next module.
+3. Copy the answer in.
+
+   ```bash
+   cp ../../solutions/{lab.sol_slug}/{lab.stub_file} .
+   ```
+
+4. You now have a working {lab.title.lower()}. Continue with the next module.
 
 ## What you get
 
 {lab.artifact}
 
+## Read what you copied
+
+`solutions/{lab.sol_slug}/SPEC.md` is the step-by-step build for this lab. The same
+answer sits in `solutions/{lab.sol_slug}_codex`, `_grok_build`, and `_opencode`, one
+per tool, each with the spec written for that tool.
+
 ## Coming back later
 
-Put the empty stub back whenever you want to try it again:
+Put the empty stub back and try again:
 
 ```bash
-git checkout main -- labs/{lab.slug}
+git checkout -- {lab.stub_file}
 ```
 
-That restores this lab only. Everything you need is in `prompts/`, and
-`{lab.solution}` is the answer whenever you want it.
+That restores this one file. Everything you need is in `prompts/`, and
+`{lab.solution}` is the reference the answer calls.
 """
 
 
@@ -762,12 +1109,18 @@ That reading is the skill this workshop is about, not a sign something broke.
 
 ## You are out of time
 
-Stop and run `git checkout done-m{lab.module}`. See [FALL-BEHIND.md](FALL-BEHIND.md).
+Stop and copy the answer in:
+
+```bash
+cp ../../solutions/{lab.sol_slug}/{lab.stub_file} .
+```
+
+See [FALL-BEHIND.md](FALL-BEHIND.md).
 
 ## Something is genuinely broken
 
-Tell Rick. A fresh clone plus `task setup` plus `task test` should be 129 green
-checks, and anything else is a real bug.
+Tell Rick. A fresh clone plus `task setup` plus `task test` should be green, and
+anything else is a real bug.
 """
 
 
@@ -810,8 +1163,38 @@ def main(argv: list[str] | None = None) -> int:
             written += 1
         for stale in ("agent-sdk.md", "langgraph.md"):
             (folder / "prompts" / stale).unlink(missing_ok=True)
+
+    # The solution tree. One folder per lab per tool, always filled in. The
+    # `--solved` switch controls the labs only, because a solution that is a
+    # stub is not a solution.
+    solutions = 0
+    for lab in LABS_SPEC:
+        for tool_key, suffix in VARIANTS.items():
+            folder = SOLUTIONS / f"{lab.sol_slug}{suffix}"
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(LABS / "_root.py", folder / "_root.py")
+            write(folder / lab.stub_file, lab.solved_body)
+            write(folder / "SPEC.md", spec_for(lab, tool_key))
+            write(folder / "Taskfile.yml", SOLUTION_TASKFILE)
+            solutions += 4
+
+    # The runtime ports. Different code, not a different prompt, so they get
+    # their own writer.
+    ports = 0
+    for lab in LABS_SPEC:
+        for runtime_key in RUNTIMES:
+            folder = SOLUTIONS / f"{lab.sol_slug}_{runtime_key}"
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(LABS / "_root.py", folder / "_root.py")
+            write(folder / lab.stub_file, port_for(lab, runtime_key))
+            write(folder / "SPEC.md", port_spec_for(lab, runtime_key))
+            write(folder / "Taskfile.yml", SOLUTION_TASKFILE)
+            ports += 4
+
     filled = args.solved if args.solved else ("all" if args.solved is not None else "none")
     print(f"wrote {written} files across {len(LABS_SPEC)} labs (solved: {filled})")
+    print(f"wrote {solutions} files across {len(LABS_SPEC) * len(VARIANTS)} solutions")
+    print(f"wrote {ports} files across {len(LABS_SPEC) * len(RUNTIMES)} runtime ports")
     return 0
 
 

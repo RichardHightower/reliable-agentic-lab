@@ -14,7 +14,7 @@
 set -euo pipefail
 
 BASE="${1:-$(git rev-parse --abbrev-ref HEAD)}"
-SLUGS=(m1-enhancer m2-implementer m3-research m4-fixer)
+SLUGS=(lab1_enhancer lab2_implementer lab3_research lab4_fixer)
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "the tree is dirty. commit or stash first." >&2

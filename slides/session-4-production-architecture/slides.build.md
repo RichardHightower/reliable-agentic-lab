@@ -165,7 +165,7 @@ beat: lab
 # Lab 4. The Broken PR Fixer. 18 minutes.
 
 ```bash
-cd labs/m4-fixer
+cd labs/lab4_fixer
 git -C ../../work/northwind-field-crm stash --include-untracked   # Module 2's work
 claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
 
@@ -310,8 +310,8 @@ beat: talk
 
 ```
 loops/                the engine. It never imports the CRM.
-labs/m1-enhancer      labs/m2-implementer
-labs/m3-research      labs/m4-fixer
+labs/lab1_enhancer    labs/lab2_implementer
+labs/lab3_research    labs/lab4_fixer
 labs/takehome/        Claude Agent SDK and Deep Agents. Optional.
 solutions/            the reference, and the code on these slides.
 work/                 the target repo, cloned by task setup.

@@ -17,18 +17,18 @@ Stubs and copy-me workflows: `labs/extra-credit/`
 
 Trigger: `issues` event, types `opened` or `labeled`.
 
-Copy `labs/extra-credit/workflows/groom-ticket.yml` to `.github/workflows/groom-ticket.yml` on the fork.
+Copy `labs/extra-credit/ext_3_groom_ticket/workflows/groom-ticket.yml` to `.github/workflows/groom-ticket.yml` on the fork.
 
 The job checks out the repo, sets up Python 3.11, installs dependencies, then runs:
 
 ```bash
-python labs/extra-credit/scripts/groom_ticket.py --issue "$ISSUE_NUMBER"
+python labs/extra-credit/ext_3_groom_ticket/groom_ticket.py --issue "$ISSUE_NUMBER"
 ```
 
 Working command (no GitHub event required):
 
 ```bash
-python solutions/extra_credit/groom_ticket.py --issue T001
+python solutions/extra_credit/s_ext_3_groom_ticket/groom_ticket.py --issue T001
 ```
 
 The script evaluates the ticket against bug, feature, or user-interface criteria.
@@ -38,16 +38,16 @@ It either adds the `ready` label or posts a comment with suggested edits.
 
 Trigger: `check_suite` completed with failure.
 
-Copy `labs/extra-credit/workflows/fix-broken-pr.yml` to `.github/workflows/fix-broken-pr.yml` on the fork.
+Copy `labs/extra-credit/ext_4_fix_pr/workflows/fix-broken-pr.yml` to `.github/workflows/fix-broken-pr.yml` on the fork.
 
 ```bash
-python labs/extra-credit/scripts/fix_pr.py --pr "$PR_NUMBER"
+python labs/extra-credit/ext_4_fix_pr/fix_pr.py --pr "$PR_NUMBER"
 ```
 
 Working command:
 
 ```bash
-python solutions/extra_credit/fix_pr.py --pr T001 --doer reference
+python solutions/extra_credit/s_ext_4_fix_pr/fix_pr.py --pr T001 --doer reference
 ```
 
 The script reads the failing check, proposes a fix, re-runs tests, and either comments a plan or, with `--apply`, restores the known-good due-date files.
@@ -89,13 +89,13 @@ How it fits the three agents:
 Minimal setup:
 
 1. Install ngrok and authenticate. A free account is fine.
-2. Run `python solutions/extra_credit/webhook.py --port 8765`
+2. Run `python solutions/extra_credit/s_ext_1_webhook/webhook.py --port 8765`
 3. `ngrok http 8765`
 4. Copy the public HTTPS URL.
 5. GitHub, Settings, Webhooks. Payload URL `https://…/github-webhook`. Events: issues, check_suite, pull_request.
 6. Verify the GitHub webhook secret, then call the same agent logic as polling.
 
-Student notes: [labs/extra-credit/NGROK.md](../labs/extra-credit/NGROK.md)
+Student notes: [labs/extra-credit/ext_2_ngrok/README.md](../labs/extra-credit/ext_2_ngrok/README.md)
 
 ## 6. Extra credit. DigitalOcean VPS plus webhooks
 
@@ -110,9 +110,9 @@ Goal: Ubuntu 24.04 Droplet, about $6 per month, Nginx plus Let's Encrypt, system
 - `opencode` / `codex` / `grok`
 - `agent-sdk` / `langgraph` lab stubs
 
-Student notes: [labs/extra-credit/deploy/DIGITALOCEAN.md](../labs/extra-credit/deploy/DIGITALOCEAN.md)
-Nginx sample: [labs/extra-credit/deploy/nginx.conf](../labs/extra-credit/deploy/nginx.conf)
-systemd sample: [labs/extra-credit/deploy/agent-webhook.service](../labs/extra-credit/deploy/agent-webhook.service)
+Student notes: [labs/extra-credit/ext_5_digitalocean/README.md](../labs/extra-credit/ext_5_digitalocean/README.md)
+Nginx sample: [labs/extra-credit/ext_5_digitalocean/deploy/nginx.conf](../labs/extra-credit/ext_5_digitalocean/deploy/nginx.conf)
+systemd sample: [labs/extra-credit/ext_5_digitalocean/deploy/agent-webhook.service](../labs/extra-credit/ext_5_digitalocean/deploy/agent-webhook.service)
 
 Do not run this on the shared instructor Droplet during class unless Rick says so. Students use their own account.
 

@@ -343,7 +343,7 @@ beat: lab
 # Lab 1. The Ticket Enhancer. 25 minutes.
 
 ```bash
-cd labs/m1-enhancer
+cd labs/lab1_enhancer
 claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
 
 task loop:enhancer -- --ticket T001           # it escalates. that is correct.

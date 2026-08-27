@@ -8,6 +8,8 @@ port that teaches the wrong lesson, and it drifts silently.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -108,3 +110,102 @@ def test_the_role_table_renders(contract):
     text = roleplan.table(roleplan.plan(contract))
     assert "code_implementer" in text
     assert "denied: tests/**" in text
+
+
+# --- every loop, not only the implementer ---------------------------------
+#
+# The four loops run four different casts. A port that only ever sees the
+# implementer's five roles will look correct and be wrong the first time
+# somebody points it at the fixer.
+
+ROOT = Path(__file__).resolve().parents[2]
+SOLUTIONS = ROOT / "solutions"
+LOOP_KEYS = tuple(roleplan.LOOPS)
+
+
+@pytest.mark.parametrize("loop", LOOP_KEYS)
+def test_the_judge_holds_no_write_tool_in_every_loop(contract, loop):
+    assert roleplan.plan(contract, loop)["judge"].can_write is False
+
+
+@pytest.mark.parametrize("loop", LOOP_KEYS)
+def test_the_orchestrator_holds_no_write_tool_in_every_loop(contract, loop):
+    assert roleplan.plan(contract, loop)["orchestrator"].can_write is False
+
+
+@pytest.mark.parametrize("loop", LOOP_KEYS)
+def test_every_writing_role_declares_a_scope(contract, loop):
+    """A role holding Edit with an empty allow list can write nothing at all.
+
+    That is the shape of a port that looks scoped and silently does nothing, so
+    it is worth failing on rather than discovering during a demo.
+    """
+    for role in roleplan.plan(contract, loop).values():
+        if role.can_write:
+            assert role.allow, f"{loop}/{role.name} can write but may write nothing"
+
+
+@pytest.mark.parametrize("loop", LOOP_KEYS)
+def test_the_sdk_hook_denies_an_out_of_scope_write_in_every_loop(contract, loop):
+    for role in roleplan.plan(contract, loop).values():
+        if not role.can_write:
+            continue
+        check = sdk_roles.scope_hook(Path(contract.repo), role)
+        result = asyncio.run(
+            check(
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": str(Path(contract.repo) / "etc/nope.txt")},
+                },
+                "id",
+                None,
+            )
+        )
+        decision = result["hookSpecificOutput"]["permissionDecision"]
+        assert decision == "deny", f"{loop}/{role.name} let an out-of-scope write through"
+
+
+def test_an_unknown_loop_is_rejected(contract):
+    with pytest.raises(ValueError, match="unknown loop"):
+        roleplan.plan(contract, "not-a-loop")
+
+
+def test_the_research_cast_needs_no_contract():
+    """Research runs against a question. There is no repo and no `.loop.yml`."""
+    roles = roleplan.plan(None, "research")
+    assert roles["judge"].can_write is False
+    assert roles["writer"].can_write is True
+
+
+def _load_port(folder: str, stub_file: str):
+    """Import one generated port the way it imports itself, from its folder."""
+    path = SOLUTIONS / folder / stub_file
+    sys.path.insert(0, str(path.parent))
+    try:
+        spec = importlib.util.spec_from_file_location(f"port_{folder}", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.path.remove(str(path.parent))
+
+
+PORTS = [
+    (f"sol{n}_{slug}_{runtime}", stub, loop)
+    for n, slug, stub, loop in (
+        (1, "enhancer", "loop.py", "enhancer"),
+        (2, "implementer", "harness.py", "implementer"),
+        (3, "research", "loop.py", "research"),
+        (4, "fixer", "loop.py", "fixer"),
+    )
+    for runtime in ("agent_sdk", "deep_agents")
+]
+
+
+@pytest.mark.parametrize("folder,stub_file,loop", PORTS)
+def test_every_port_reads_the_shared_table(contract, folder, stub_file, loop):
+    """The port names a loop, and its cast is the table's cast. Nothing local."""
+    module = _load_port(folder, stub_file)
+    assert loop == module.LOOP
+    target = contract if loop != "research" else None
+    assert module.cast(target) == roleplan.plan(target, loop)

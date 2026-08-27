@@ -7,7 +7,7 @@ You need one coding agent. You choose which.
 **Work from the lab folder, not the repo root.**
 
 ```bash
-cd labs/m2-implementer
+cd labs/lab2_implementer
 ```
 
 Each lab is its own project. Running there means that lab's `.claude/` applies:

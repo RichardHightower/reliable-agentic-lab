@@ -32,11 +32,11 @@ tasks:
       - cd {{.TARGET}} && task setup
 
   test:
-    desc: Run the loop engine's tests, then write the receipt.
+    desc: Run the loop engine's tests and the extra credit tests, then write the receipt.
     cmds:
       - mkdir -p reports
       - defer: '{{.PY}} scripts/receipt.py write . {{.EXIT_CODE}}'
-      - '{{.PY}} -m pytest loops/tests -q --junitxml=reports/junit.xml'
+      - '{{.PY}} -m pytest loops/tests solutions/extra_credit -q --junitxml=reports/junit.xml'
 
   e2e:
     desc: Run the end-to-end tests.

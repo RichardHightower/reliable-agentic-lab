@@ -44,10 +44,10 @@ and `loops/tests/fixtures/node-target` proves it by being JavaScript.
 
 | Module | Lab | Deck |
 |---|---|---|
-| 1 | `labs/m1-enhancer` | `slides/session-1-system-architecture` |
-| 2 | `labs/m2-implementer` | `slides/session-2-harness-engineering` |
-| 3 | `labs/m3-research` | `slides/session-3-research-loops-mcp` |
-| 4 | `labs/m4-fixer` | `slides/session-4-production-architecture` |
+| 1 | `labs/lab1_enhancer` | `slides/session-1-system-architecture` |
+| 2 | `labs/lab2_implementer` | `slides/session-2-harness-engineering` |
+| 3 | `labs/lab3_research` | `slides/session-3-research-loops-mcp` |
+| 4 | `labs/lab4_fixer` | `slides/session-4-production-architecture` |
 
 The outline and the clock live in [README.md](README.md). Do not restate them
 anywhere else.

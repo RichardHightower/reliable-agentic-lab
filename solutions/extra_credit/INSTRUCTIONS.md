@@ -4,7 +4,7 @@ Pass:
 
 - Local groom with `--incorporate` exits ready.
 - Local fixer with `--doer reference` restores the test suite.
-- `python solutions/extra_credit/webhook.py` serves `/health` and `/github-webhook`.
+- `python solutions/extra_credit/s_ext_1_webhook/webhook.py` serves `/health` and `/github-webhook`.
 - Unsigned webhook posts return 401. Missing secret returns 503.
 - GitHub mode comments or labels, never loops past `AGENT_MAX_ATTEMPTS`.
 - `agent-in-progress` is removed even when the run fails.

@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# WORKLOG-SPEC section 8.2 + section 14.
+# Install: git config core.hooksPath hooks
+set -euo pipefail
+
+# A hook must never dirty the worktree: without this, importing a module the
+# staged tree hasn't imported yet writes bin/__pycache__/*.pyc AFTER `git
+# add`, and the next merge aborts on a tracked-vs-untracked collision in any
+# repo that doesn't gitignore __pycache__ (item 01KY5P9V0C).
+export PYTHONDONTWRITEBYTECODE=1
+
+fail() { echo "worklog: $*" >&2; exit 1; }
+
+# Branch guard: never author a commit directly on main/master. A local
+# reconciliation merge (e.g. `git merge origin/main`) is legitimate and
+# exempted two ways: WORKLOG_MERGE_COMMIT (set by pre-merge-commit before
+# exec'ing here -- MERGE_HEAD is NOT yet on disk at this point in git's own
+# merge sequence, verified empirically) covers a fresh `git merge`; MERGE_HEAD
+# itself (present by the time a merge that a hook rejected is resumed via a
+# later plain `git commit`) covers that follow-up case. WORKLOG_SKIP_BRANCH_
+# GUARD is set only by non-commit callers of this script (doctor.sh, CI's
+# --no-verify backstop, the integration-test "CI gate passes" assertions)
+# that run it standalone, with no commit in flight, and would otherwise get
+# a false FAIL on main.
+if [ -z "${WORKLOG_SKIP_BRANCH_GUARD:-}" ] && \
+   [ -z "${WORKLOG_MERGE_COMMIT:-}" ] && \
+   [ ! -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+  branch=$(git symbolic-ref --quiet --short HEAD || true)
+  case "$branch" in
+    main|master)
+      fail "commits go on a branch, not '$branch' (main/master is pull-only). Run: git checkout -b <branch-name>, then commit there."
+      ;;
+  esac
+fi
+
+# Conflict markers, in ANY staged file, with no merge exemption (01KYZEC0C1).
+# A merge is exactly when this happens: commit-msg exempts merge commits from
+# its item-reference rule and nothing else parses tests/ or plugin/, so a
+# resolution that missed a hunk committed cleanly and was only found by
+# running the suite. Staged content only -- an unstaged conflict elsewhere in
+# the tree is not this commit's problem.
+conflicted=$(git diff --cached --name-only --diff-filter=ACM |
+             while IFS= read -r f; do
+               [ -f "$f" ] || continue
+               if git show ":$f" 2>/dev/null |
+                  grep -qE '^(<{7}|={7}|>{7})( |$)'; then echo "$f"; fi
+             done)
+if [ -n "$conflicted" ]; then
+  fail "unresolved conflict markers in staged files:
+$(echo "$conflicted" | sed 's/^/  /')
+Resolve them, re-stage, and commit again."
+fi
+
+for f in .work/todo.jsonl .work/done.jsonl; do
+  [ -f "$f" ] || continue
+
+  # The trailing-newline invariant. Without it, union merge fuses the last line
+  # of one side with the first line of the other and you lose two events to one
+  # unparseable line. This check is the whole reason this hook exists.
+  [ -z "$(tail -c1 "$f")" ] || fail "$f has no trailing newline (invariant 15.1)"
+
+  python3 - "$f" <<'PY' || fail "schema validation failed"
+import json, sys
+ok = True
+for n, line in enumerate(open(sys.argv[1]), 1):
+    if not line.strip():
+        continue
+    try:
+        ev = json.loads(line)
+    except json.JSONDecodeError as e:
+        print(f"  {sys.argv[1]}:{n}: unparseable: {e}"); ok = False; continue
+    for field in ("ev", "ts", "actor", "op"):
+        if field not in ev:
+            print(f"  {sys.argv[1]}:{n}: missing {field}"); ok = False
+    if ev.get("op") != "compact" and "item" not in ev:
+        print(f"  {sys.argv[1]}:{n}: missing item"); ok = False
+    # Taxonomy rules (spec §3.3 / taxonomy §2) on new-style create events.
+    # Legacy `type` events predate the split and are normalized by the fold.
+    if ev.get("op") in ("create", "snapshot"):
+        s = ev.get("set") or {}
+        lvl, knd = s.get("level"), s.get("kind")
+        if lvl is not None and lvl not in ("epic", "story", "task", "subtask"):
+            print(f"  {sys.argv[1]}:{n}: unknown level {lvl!r}"); ok = False
+        if knd is not None and knd not in ("feature", "bug", "ops", "triage"):
+            print(f"  {sys.argv[1]}:{n}: unknown kind {knd!r}"); ok = False
+        if lvl == "epic" and knd in ("bug", "triage"):
+            print(f"  {sys.argv[1]}:{n}: level:epic with kind:{knd} — "
+                  "epics are feature or ops (taxonomy 2.2)"); ok = False
+        if lvl == "epic" and s.get("milestone"):
+            print(f"  {sys.argv[1]}:{n}: milestone on an epic — "
+                  "milestone lives on leaves (taxonomy 2.5)"); ok = False
+sys.exit(0 if ok else 1)
+PY
+done
+
+# Merge integrity guard (#243 + #237): a union merge can resurrect the very
+# lines a compaction just deleted, or land two branches that each claimed the
+# same external ticket. Only meaningful when a merge is in flight -- same
+# signal the branch guard above uses (WORKLOG_MERGE_COMMIT for a fresh `git
+# merge`, MERGE_HEAD for a resumed one).
+if { [ -n "${WORKLOG_MERGE_COMMIT:-}" ] || [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; } \
+   && [ -f bin/compact.py ]; then
+  python3 bin/compact.py --merge-check .work/todo.jsonl .work/done.jsonl || \
+    fail "merge integrity check failed (see above) -- resolve manually, then git merge --continue, or git merge --abort"
+fi
+
+# Invariant 15.7: the roadmap is generated. Regenerate and diff.
+# mktemp, not a fixed path: two checkouts running this concurrently must not
+# race on the same scratch file.
+if [ -f bin/render_roadmap.py ] && [ -f docs/roadmap.md ]; then
+  tmp=$(mktemp)
+  python3 bin/render_roadmap.py > "$tmp"
+  if ! diff -q "$tmp" docs/roadmap.md >/dev/null; then
+    rm -f "$tmp"
+    fail "docs/roadmap.md is stale or hand-edited. Run: worklog roadmap-render"
+  fi
+  rm -f "$tmp"
+fi
+
+# Guarded: scaffolded repos have no tests/ (the suite lives in the source repo).
+[ ! -f tests/test_fold.py ] || python3 tests/test_fold.py -q >/dev/null 2>&1 || fail "fold tests failing"
+
+# ADRs: schema + cross-file invariants. Guarded like the fold tests.
+[ ! -d docs/adr ] || [ ! -x bin/worklog ] || python3 bin/worklog adr check >/dev/null || fail "ADR validation failed — run: worklog adr check"
+
+# IA gates (plan ia-content-model, migration 0002): wiki_key present/unique,
+# schema-valid frontmatter, fresh inventory. The warn-only release cycle is
+# over — these are hard now (#98).
+#
+# The extra `-d docs/.index` guard is what makes promotion safe: it asks "has
+# this repo opted INTO the IA?", where the bin/ia.py guard only asks "does it
+# have the code?". A scaffolded repo gets bin/ from the plugin but has never
+# generated an index, and must not be blocked from its first commit. A repo
+# that HAS an index stays fully enforced — deleting any single generated file
+# inside it still fails, because the directory is still there.
+if [ -f bin/ia.py ] && [ -x bin/worklog ] && [ -d docs/.index ]; then
+  python3 bin/worklog ia-normalize --check >/dev/null 2>&1 || \
+    fail "doc metadata drift; run: worklog ia-normalize"
+  python3 bin/worklog ia-inventory --check >/dev/null 2>&1 || \
+    fail "inventory stale/invalid; run: worklog ia-inventory"
+  [ ! -f bin/ia_render.py ] || python3 bin/worklog ia-render --check >/dev/null 2>&1 || \
+    fail "rendered pages/manifest stale; run: worklog ia-render"
+  # trace-check stays warn-level here forever; --strict runs at release time
+  [ ! -f bin/ia_graph.py ] || python3 bin/worklog trace-check >/dev/null 2>&1 || \
+    echo "worklog: WARNING — unlinked evidence; run: worklog trace-check" >&2
+  # doc-verify, scoped to the documents THIS commit touches (--staged).
+  # Repo-wide is right for the release gate and wrong here: every finding in
+  # this repo lives in a frozen document that policy says stays frozen, so
+  # the unscoped check warned on every commit forever no matter what it
+  # touched, and a warning that always fires is one people learn to scroll
+  # past. Still warn-level rather than blocking: a commit that legitimately
+  # edits a frozen doc's metadata should not be stopped. --strict runs at
+  # release time, unscoped. Skipped outright on a shallow clone, where
+  # `git show <sha>:path` cannot resolve and every answer is
+  # "unresolvable" (#294).
+  [ ! -f bin/doc_verify.py ] || python3 bin/worklog doc-verify --staged --strict >/dev/null 2>&1 || \
+    echo "worklog: WARNING — a document THIS commit touches cites code that does not match the commit it was written against; run: worklog doc-verify --staged" >&2
+fi
