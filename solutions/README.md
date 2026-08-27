@@ -32,9 +32,9 @@ copies of one file. Read each folder's own `README.md` and `SPEC.md`.
 | `sol1_enhancer_grok_build` | Grok Build project plugin under `.grok/plugins/ticket-enhancer/`, plus three registration symlinks. On grok 1.0.5 a project plugin registers nothing on its own. |
 | `sol1_enhancer_opencode` | OpenCode skill set under `.opencode/`. Isolation is per-agent `edit: deny`. |
 
-The two runtime ports of Lab 1 differ again. `sol1_enhancer_agent_sdk` carries
-a real poll loop in `enhancer.py` with a test suite. `sol1_enhancer_deep_agents`
-carries the role table and its tests.
+Both runtime ports of Lab 1 run the same poll. `enhancer.py` is one file, copied
+into `sol1_enhancer_agent_sdk` and `sol1_enhancer_deep_agents` unchanged, and
+each folder tests it against its own fakes. Only the wiring in `loop.py` differs.
 
 ## Two runtimes, one role table
 

@@ -90,6 +90,79 @@ that the judge holds no write tool, that the doer's write tool refuses a path
 outside `tickets/**`, that `.loop.yml` merges over the defaults, and that the
 backend drops any file the scope does not permit.
 
+## Run the loop
+
+`loop.py --table-only` needs nothing. The loop itself needs three things: the
+`deepagents` package, an API key, and a clone of the target repo.
+
+1. Copy `config.json.example` to `config.json` and fill in your GitHub username.
+
+2. Clone your fork and seed a few draft tickets.
+
+   ```bash
+   task clone
+   task create-test-tickets
+   ```
+
+3. Run one poll-and-act step.
+
+   ```bash
+   task run
+   ```
+
+   It prints one line per ticket: `passed`, `escalated`, or `waiting`.
+
+4. Poll on an interval, until you stop it.
+
+   ```bash
+   task poll-forever
+   ```
+
+   That script is a seminar stand-in for a scheduler. In production the trigger
+   is cron, or a scheduled GitHub Actions workflow.
+
+To work one ticket without waiting on a real comment, pass your own:
+
+```bash
+task run -- --ticket T001 --simulate-comment "due dates should be optional"
+```
+
+## What one poll does
+
+`enhancer.py` is the orchestrator, and it is the same file the Agent SDK port
+runs. It never imports a runtime. It takes a backend, and both ports hand it one
+with the same `run(repo, prompt, allow)` surface. That is the claim this folder
+makes: the loop did not change, only the wiring did.
+
+It is Python, not a prompt, because a stop condition trusted to a model's own
+judgment is a stop condition a model can talk itself past. The model drafts and
+grades. Everything else is computed.
+
+1. Find every `tickets/*.md` with `state: draft` and `loop: enhancer`. Skip
+   `*.ready.md` and `*.enhancer-candidate.md`.
+2. Find or create the ticket's GitHub issue. The lookup order is the state
+   file, then the ticket's `github_issue`, then a title search across every
+   state. Never only the open ones: a closed issue is still that ticket's
+   issue, and skipping it is what opens a duplicate.
+3. Read the newest comment the loop did not write itself. Every comment it
+   posts ends with `<!-- enhancer-loop -->` and this query skips those, so the
+   loop cannot spend every poll answering its own last reply.
+4. If the issue carries `needs-human`, stop and wait for a person.
+5. The judge grades the real ticket. `check_fields.py` turns its
+   `{kind, present_fields}` into the authoritative `ready`.
+6. Ready plus a comment of exactly `LGTM` releases the ticket to
+   `state: ready`, `loop: implementer`. A red rubric never consumes an `LGTM`.
+7. The doer writes `tickets/<id>.enhancer-candidate.md`. The judge grades that
+   file. The draft replaces the real ticket only when its missing set is a
+   proper subset of the current one. "Not worse" is not good enough.
+8. `check_stop.py` decides the other two exits: budget spent, or the same gaps
+   two rounds running. Either one adds `needs-human` and stops.
+
+The doer is the only role holding a write tool, and the scope check inside that
+tool keeps it within `tickets/**`. The candidate file lives there, so the one
+write the loop wants lands and every other path the doer might reach for is
+refused.
+
 ## What this folder is not
 
 It is not a second loop engine. `loops/` holds the loop, and porting it must not
