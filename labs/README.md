@@ -5,7 +5,7 @@ around them is written.
 
 | Lab | Module | You build | You fill | Artifact |
 |---|---|---|---|---|
-| `lab1_enhancer` | 1 | Ticket Enhancer | `loop.py` | A working autonomous loop |
+| `lab1_enhancer` | 1 | Ticket Enhancer | a Claude Code plugin (`.claude/agents`, `.claude/skills`) | A working autonomous loop |
 | `lab2_implementer` | 2 | The harness | `harness.py` | A reusable evaluation harness |
 | `lab3_research` | 3 | Research assistant | `loop.py` | A cited research brief |
 | `lab4_fixer` | 4 | Broken PR Fixer | `loop.py` | A production architecture |

@@ -27,16 +27,18 @@ below the line in the prompt file.
 
 ## No coding agent at all
 
-You can still do every lab. The loops run with no model key:
+You can still do labs 2 through 4. The loops run with no model key:
 
 ```bash
-task loop:enhancer    -- --repo work/northwind-field-crm --ticket T001 --incorporate
 task loop:implementer -- --repo work/northwind-field-crm --ticket T001 --doer reference
 task loop:research    -- --question "..." --backend fixture
 task loop:fixer       -- --repo work/northwind-field-crm --doer reference
 ```
 
-Fill the stub by hand and check it against the same commands.
+Fill the stub by hand and check it against the same commands. Lab 1 is
+not on this path: it is a Claude Code plugin, so it needs an LLM to run
+at all. `task loop:enhancer` above still runs, but it exercises the root
+`loops/enhancer.py` reference engine, not the lab.
 
 ## Four rules, whichever tool you picked
 

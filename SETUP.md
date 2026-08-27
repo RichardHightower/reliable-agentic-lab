@@ -10,13 +10,14 @@ fights. Budget 15 minutes.
 | Python 3.10 or newer | The loops and the demo app | `python3 --version` |
 | Git | Everything | `git --version` |
 | Task | The command spine | `task --version` |
-| A GitHub account | Module 4 only | |
+| `jq` | Module 1's plugin clone and `gh` scripting | `jq --version` |
+| A GitHub account | Module 1's plugin polls a real issue; Module 4 needs one too | |
 | A coding agent | Your labs. Any one of four. | |
 
 Optional, and nothing is blocked without them: Docker, an API key for a model
 provider, a Perplexity key, and a Langfuse account.
 
-### Install Task
+### Install task
 
 ```bash
 brew install go-task            # macOS
@@ -32,7 +33,7 @@ Claude Code, Codex, Grok Build, or OpenCode. One is enough, and the labs do not
 care which. You can also do every lab by hand, because the loops run with no
 model key at all.
 
-## 1. Clone
+## 1. clone
 
 ```bash
 git clone https://github.com/RichardHightower/reliable-agentic-lab.git
@@ -53,7 +54,7 @@ into `work/`, and runs the verifier.
 Windows without `make`-style tooling: the same steps run by hand are in
 `Taskfile.yml`, one command per line.
 
-## 3. Verify
+## 3. verify
 
 ```bash
 task test

@@ -16,7 +16,7 @@ minutes: 1
 beat: talk
 -->
 
-# Engineering Reliable Agentic AI Systems
+# Engineering reliable agentic AI systems
 
 Session 1. System Architecture, the foundation.
 Saturday 29 August 2026. 10:00 Central.
@@ -154,8 +154,8 @@ beat: talk
 
 - 10 minutes open. 45 this module. Then a break.
 - The lab is 25 minutes of typing, not 45.
-- Stuck? Stop typing and watch. `git checkout done-m1` and you continue with a
-  working artifact.
+- Stuck? Stop typing and watch. Copy `solutions/sol1_enhancer/.claude/` in
+  and you continue with a working artifact.
 
 Nobody leaves this room behind.
 
@@ -366,7 +366,7 @@ Fill `loop.py`. Two functions: `judge_ticket` and `decide_next`.
 
 This lab writes no code, so the push gate stays quiet. You meet it in Module 2.
 
-Falling behind is fine: `git checkout done-m1`.
+Falling behind is fine: copy the answer from `solutions/sol1_enhancer/`.
 
 ---
 

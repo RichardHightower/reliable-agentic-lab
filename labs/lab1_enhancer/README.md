@@ -4,8 +4,14 @@ A vague ticket in, a ready contract out. No human sits in an interactive
 session driving this loop: it polls the ticket's GitHub issue for comments
 and acts on what it finds.
 
-**25 minutes. Artifact: a Claude Code plugin that grooms every open ticket
-in your fork, one poll at a time.**
+**25 minutes for the four build prompts. Artifact: a Claude Code plugin
+that grooms every open ticket in your fork, one poll at a time.** You do
+fork setup and `task clone` once, from `SETUP.md`, before this lab; the
+25 minutes covers the four build prompts only.
+
+`task poll-forever` never stops on its own, not even once every ticket
+reaches `ready`. That is by design, a seminar stand-in for a real
+scheduler, not a bug. `Ctrl-C` it when you are done.
 
 ## Work from this folder
 
@@ -35,7 +41,9 @@ else does.
    ```
 
    Every task here runs from this folder, standalone; you never need the
-   repo root.
+   repo root. `task clone` writes the fork to `../../work/`, a shared,
+   gitignored folder outside this lab tree, on purpose, one clone for
+   every module, not one per folder.
 
 ## Build it
 
