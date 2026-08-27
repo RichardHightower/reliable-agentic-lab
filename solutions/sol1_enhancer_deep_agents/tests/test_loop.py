@@ -47,3 +47,20 @@ def test_build_needs_the_sdk(contract):
     """`build()` is the line that pulls in LangChain. It is not on the table path."""
     with pytest.raises(ModuleNotFoundError):
         loop.build(contract)
+
+
+def test_target_repo_env_var_sets_the_default(target_repo, monkeypatch, capsys):
+    """`.env` carries TARGET_REPO. Task loads it, argparse reads it."""
+    monkeypatch.setenv("TARGET_REPO", str(target_repo))
+
+    assert loop.main(["--table-only"]) == 0
+
+    assert "no target repo" not in capsys.readouterr().err
+
+
+def test_an_explicit_repo_beats_the_env_var(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("TARGET_REPO", str(tmp_path))
+
+    assert loop.main(["--table-only", "--repo", str(tmp_path / "gone")]) == 0
+
+    assert "no target repo" in capsys.readouterr().err

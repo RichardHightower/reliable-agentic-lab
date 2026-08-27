@@ -18,6 +18,7 @@ is what runs it.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -62,7 +63,9 @@ def backend(contract) -> DeepAgentsBackend:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="../../work/northwind-field-crm")
+    parser.add_argument(
+        "--repo", default=os.environ.get("TARGET_REPO", "../../work/northwind-field-crm")
+    )
     parser.add_argument(
         "--table-only",
         action="store_true",
