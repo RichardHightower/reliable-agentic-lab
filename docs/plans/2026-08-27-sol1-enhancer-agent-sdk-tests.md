@@ -180,7 +180,7 @@ Three edits, all cross references to root files this folder no longer uses.
 
 - `SPEC.md`: change "`solutions/roleplan.py` is where that list lives" to name the
   local `roleplan.py`. Replace the **Verify** block's
-  `task test, loops/tests/test_runtime_ports.py` with `task test` run from this
+  `task test -- loops/tests/test_runtime_ports.py` with `task test` run from this
   folder, and say those checks need no SDK, no key, and no CRM clone.
 - `loop.py`: the `cast()` docstring says "Read from `solutions/roleplan.py`".
   Change it to the local `roleplan.py`.

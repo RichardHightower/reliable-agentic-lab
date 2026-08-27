@@ -23,7 +23,7 @@ cp ../../solutions/sol1_enhancer/config.json.example .
 ```
 
 Set up your fork's `config.json`, see [README.md](../README.md), then run
-`task run, --ticket T001` with Claude Code.
+`task run -- --ticket T001` with Claude Code.
 
 ## Build it for a tool that has an answer
 

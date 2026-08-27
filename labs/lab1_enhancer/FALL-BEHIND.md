@@ -21,7 +21,7 @@ cp -r ../../solutions/sol1_enhancer/.claude/skills/* .claude/skills/
 cp ../../solutions/sol1_enhancer/config.json.example .
 ```
 
-Run it: `task run, --ticket T001`.
+Run it: `task run -- --ticket T001`.
 
 The full design is
 [solutions/sol1_enhancer/SPEC.md](../../solutions/sol1_enhancer/SPEC.md).

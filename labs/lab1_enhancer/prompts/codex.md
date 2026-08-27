@@ -131,7 +131,7 @@ Escape the `$` in `$enhancer-loop` or the shell eats it.
 task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
 ```
 
-Cap it while you develop: `timeout 420 task run, ...`. One poll starts
+Cap it while you develop: `timeout 420 task run -- ...`. One poll starts
 three model processes and takes about four minutes. A run with no output for
 minutes is a hang, not deep thought.
 
