@@ -34,7 +34,7 @@ Parse from the invocation text after `/enhancer-loop`:
 - `--ticket <id>`: optional. If given, act on only that ticket. If omitted,
   discover every open ticket (step 0).
 - `--simulate-comment "<text>"`: dev-only. Use this text in place of
-  fetching new issue comments, and skip the GitHub round trip in step 4. Only
+  fetching new issue comments, and skip the GitHub round trip in step 3. Only
   valid together with `--ticket`.
 
 ## Step 0: discover open tickets
@@ -89,27 +89,37 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      If its `id` is not newer than `last_comment_id`, there is no new
      comment: stop here for this ticket (no-op, does not count as a round).
 
-4. If there is a comment and its body, trimmed, is exactly `LGTM`: set
-   `state: ready` and `loop: implementer` in the ticket file (the
-   `loop: implementer` module discovers its work the same way this one
-   does, by that field, so a ticket left at `loop: enhancer` would never
-   be picked up next). Run
-   `gh issue edit <issue> --repo <owner>/<repo> --add-label ready`. Keep the
-   `enhanced` label; do not remove it. Delete
-   `<repo>/.harness/last-enhancer-<id>.json`. Done with this ticket.
-
-5. If the issue already carries `needs-human`, this ticket already reached a
+4. If the issue already carries `needs-human`, this ticket already reached a
    stable-failure or budget escalation on an earlier poll: stop here, wait
    for a human.
 
-6. Otherwise, this is a round. Call the `enhancer-judge` agent on the real
-   ticket file, and parse its JSON. Run
+5. Call the `enhancer-judge` agent on the real ticket file, and parse its
+   JSON. Run
    `python3 .claude/skills/enhancer-loop/scripts/check_fields.py '<judge json>'`
-   to get the authoritative `{kind, missing_fields, ready}`. If it is
-   already `ready` (a human commented something other than `LGTM` on an
-   already-complete ticket, or this is the first poll and the ticket somehow
-   already meets the rubric), post an issue comment saying it looks ready
-   and is waiting for `LGTM`, and stop here without calling the Doer.
+   to get the authoritative `{kind, missing_fields, ready}`. Do this before
+   looking at `LGTM`: a human's `LGTM` is not a substitute for the rubric,
+   it can only confirm a ticket the rubric already accepts.
+
+6. Decide what happens next from step 5's `ready` and this round's comment
+   (if any), trimmed:
+
+   - `ready` is true and the comment is exactly `LGTM`: set `state: ready`
+     and `loop: implementer` in the ticket file (the `loop: implementer`
+     module discovers its work the same way this one does, by that field,
+     so a ticket left at `loop: enhancer` would never be picked up next).
+     Run `gh issue edit <issue> --repo <owner>/<repo> --add-label ready`.
+     Keep the `enhanced` label; do not remove it. Delete
+     `<repo>/.harness/last-enhancer-<id>.json`. Done with this ticket.
+   - `ready` is true and the comment is anything else, or there is none (a
+     human commented something other than `LGTM` on an already-complete
+     ticket, or this is the first poll and the ticket somehow already meets
+     the rubric): post an issue comment saying it looks ready and is
+     waiting for `LGTM`, and stop here without calling the Doer.
+   - `ready` is false: nothing finalizes here, whatever the comment says,
+     `LGTM` included. `LGTM` is never treated as consumed by a red rubric.
+     Continue to step 7, the same as any other round, so the Doer gets a
+     turn and a later poll can still see this ticket through to ready once
+     it clears the rubric.
 
 7. Call the `enhancer-doer` agent with the ticket's current body, its kind,
    its `missing_fields`, and the newest comment's text if there is one (on
@@ -118,7 +128,7 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    text to `<repo>/tickets/<id>.enhancer-candidate.md`. Call `enhancer-judge`
    again on that candidate file, and run it through `check_fields.py` the
    same way. Compare candidate `missing_fields` to the current ticket's
-   `missing_fields` from step 6:
+   `missing_fields` from step 5:
 
    - Strict improvement (candidate's missing set is a proper subset):
      copy the candidate over the real ticket file, then update the issue
@@ -136,8 +146,8 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    rubric for this kind and what is still needed.
 
 8. Compute this round's `missing_fields` signature (the sorted list from
-   whichever of step 6 or 7 is now current). Compare to `previous_signature`
-   from the loaded state.
+   step 7, the only path that reaches here: step 6's other two branches
+   already stopped). Compare to `previous_signature` from the loaded state.
 
    - Identical, and this is not the first round: escalate.
      `gh issue edit <issue> --repo <owner>/<repo> --add-label needs-human`.

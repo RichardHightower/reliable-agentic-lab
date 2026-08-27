@@ -96,8 +96,9 @@ not by grading or drafting tickets itself. It runs one poll-and-act step and
 exits; it does not loop internally. Repeated polling, over time, is /loop's
 job, external to this skill.
 
-Read config.json next to this SKILL.md for {fork_owner, repo_name}; every gh
-call targets that repo.
+Read config.json in your current working directory (task run always runs
+this from the folder that holds config.json) for {fork_owner, repo_name};
+every gh call targets that repo.
 
 Without --ticket, discover every tickets/*.md in the target repo (excluding
 *.ready.md) whose frontmatter has state: draft and loop: enhancer, and run
@@ -110,17 +111,28 @@ The step, per ticket:
 1. Find or create the ticket's GitHub issue (search by a "[<id>]" title
    prefix; if none exists, create one from the ticket, label it "enhanced").
 2. Get the newest comment on that issue newer than last_comment_id (or use
-   --simulate-comment if given). No new comment: stop, this ticket is
-   untouched this poll.
-3. Comment is exactly "LGTM": set state: ready in the ticket, swap the
-   "enhanced" label for "ready", delete the state file, done.
-4. Issue already carries "needs-human": stop, wait for a person.
-5. Otherwise: judge the current ticket (enhancer-judge, then
-   check_fields.py). Call enhancer-doer with the newest comment. Judge its
+   --simulate-comment if given). Exception: on the ticket's first poll (no
+   state file yet), there is no comment to wait for, so run one round
+   anyway, the human needs something to react to. Otherwise, no new
+   comment means stop, this ticket is untouched this poll.
+3. Issue already carries "needs-human": stop, wait for a person.
+4. Judge the current ticket (enhancer-judge, then check_fields.py) to get
+   this round's kind, missing_fields, and ready. LGTM must never skip this:
+   a human blessing a two-line draft is not the same as the rubric passing.
+5. Comment is exactly "LGTM" and the ticket is already ready: set
+   state: ready in the ticket, swap the "enhanced" label for "ready",
+   delete the state file, done. LGTM on a ticket that is not yet ready
+   finalizes nothing, the comment is not consumed; fall through to step 7
+   like any other comment, so the next poll can still see this ticket
+   through to ready.
+6. Ticket is already ready but the comment was something other than LGTM
+   (or there was none): post a comment saying it looks ready and is
+   waiting for LGTM, stop, do not call the doer.
+7. Otherwise: call enhancer-doer with the newest comment. Judge its
    candidate draft the same way. Only if the candidate's missing_fields is a
    strict improvement, replace the real ticket with it. Either way, post one
    issue comment: what changed, or why the draft did not clear the rubric.
-6. Compare this round's missing-fields signature to the previous one.
+8. Compare this round's missing-fields signature to the previous one.
    Identical two rounds running, or the round budget (3) is spent: add
    "needs-human", stop. Otherwise: persist the updated state, done for this
    poll.
