@@ -130,9 +130,10 @@ task run -- --ticket T001 --simulate-comment "due dates should be optional"
 ## What one poll does
 
 `enhancer.py` is the orchestrator, and it is the same file the Agent SDK port
-runs. It never imports a runtime. It takes a backend, and both ports hand it one
-with the same `run(repo, prompt, allow)` surface. That is the claim this folder
-makes: the loop did not change, only the wiring did.
+runs, give or take the comment marker in step 3. It never imports a runtime. It
+takes a backend, and both ports hand it one with the same
+`run(repo, prompt, allow)` surface. That is the claim this folder makes: the
+loop did not change, only the wiring did.
 
 It is Python, not a prompt, because a stop condition trusted to a model's own
 judgment is a stop condition a model can talk itself past. The model drafts and

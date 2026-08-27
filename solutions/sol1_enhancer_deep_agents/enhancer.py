@@ -159,6 +159,28 @@ class State:
         return self.fresh
 
 
+def already_acted_on(comment_id: str, last_comment_id: str | None) -> bool:
+    """Did an earlier poll already act on this comment?
+
+    Two id shapes reach this. A real GitHub comment id is an integer, and those
+    have to compare as numbers: `"1000000001" <= "999999999"` is True as text,
+    which reads a brand new comment as an old one and leaves the ticket stuck at
+    "no new comment" for good.
+
+    `--simulate-comment` makes up a `sim:<text>` id instead, which is not a
+    number and is only ever equal to itself. Mixing the two shapes is the
+    common case, not a corner: SPEC.md tells the reader to run a simulated poll,
+    and the state file it leaves behind is what the next real poll compares
+    against. Comparing those as text says `"4242" <= "sim:hello"`, which is
+    True, and wedges the ticket the documented walkthrough just created.
+    """
+    if last_comment_id is None:
+        return False
+    if comment_id.isdigit() and last_comment_id.isdigit():
+        return int(comment_id) <= int(last_comment_id)
+    return comment_id == last_comment_id
+
+
 # -- GitHub -----------------------------------------------------------------
 
 
@@ -232,10 +254,20 @@ class Gh:
         return int(url.rstrip("/").rsplit("/", 1)[-1])
 
     def latest_comment(self, issue: int) -> tuple[str, str] | None:
-        """The newest comment this loop did not write itself. See `MARKER`."""
+        """The newest comment this loop did not write itself. See `MARKER`.
+
+        ponytail: one page of 100. `gh api` defaults to 30, and the marker
+        filter runs on whatever page it gets, so a thread past the page size
+        reads a stale id, and once the loop's own comments fill the page the
+        filter returns nothing and the ticket sits at "no new comment" for
+        good. 100 is past any ticket a three-round budget can produce. For an
+        unbounded thread this needs `--paginate`, which cannot keep `--jq`
+        (gh applies the filter per page and emits one object each), so it would
+        also need the newest-of-all pick moved into Python.
+        """
         out = self._run(
             "api",
-            f"repos/{self.slug}/issues/{issue}/comments",
+            f"repos/{self.slug}/issues/{issue}/comments?per_page=100",
             "--jq",
             f'[.[] | select((.body // "") | contains("{MARKER}") | not)] '
             "| sort_by(.id) | .[-1] // empty | {id, body}",
@@ -360,7 +392,14 @@ class Enhancer:
         if not result.ok:
             raise EnhancerError(f"the judge failed: {result.output}")
         verdict = parse_judge(result.output)
-        return check_fields.check(verdict["kind"], verdict.get("present_fields", []))
+        try:
+            return check_fields.check(verdict["kind"], verdict.get("present_fields", []))
+        except ValueError as exc:
+            # The rubric knows three kinds. A model that invents a fourth is the
+            # judge answering badly, which is what `EnhancerError` is for. Left
+            # bare, it is the one failure in this loop that reaches an attendee
+            # as a traceback instead of the "enhancer stopped:" line.
+            raise EnhancerError(f"the judge returned an unusable verdict: {exc}") from exc
 
     def draft(
         self, tkt: ticket_mod.Ticket, kind: str, missing: list[str], comment: str | None
@@ -493,7 +532,7 @@ class Enhancer:
         if simulate is not None:
             # A stable id, so the same simulated text is the same comment twice.
             comment_id = f"sim:{simulate}"
-            if comment_id == state.last_comment_id:
+            if already_acted_on(comment_id, state.last_comment_id):
                 return _NO_NEW_COMMENT, None
             return comment_id, simulate
         if state.first_poll:
@@ -503,7 +542,7 @@ class Enhancer:
         if newest is None:
             return _NO_NEW_COMMENT, None
         comment_id, text = newest
-        if state.last_comment_id is not None and comment_id <= state.last_comment_id:
+        if already_acted_on(comment_id, state.last_comment_id):
             return _NO_NEW_COMMENT, None
         return comment_id, text
 

@@ -585,6 +585,42 @@ def test_the_same_simulated_text_is_the_same_comment_twice(target):
     assert outcome.detail == "no new comment"
 
 
+# -- which comment counts as new -------------------------------------------
+
+
+def test_a_real_comment_after_a_simulated_one_is_still_new(target):
+    """SPEC.md walks the reader through a simulated poll, then a real one.
+
+    The simulated poll leaves `sim:<text>` in the state file. Comparing that to
+    a real id as text says `"4242" <= "sim:hello"`, which is True, so the real
+    comment reads as one already acted on and the ticket never moves again.
+    """
+    State(github_issue=7, last_comment_id="sim:hello", round=1).save(target, "T001")
+    backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
+    gh = FakeGh(comments=[("4242", "make it optional")])
+
+    [outcome] = engine(target, backend, gh).poll("T001")
+
+    assert outcome.detail != "no new comment"
+    assert "make it optional" in backend.prompts[1]
+
+
+def test_comment_ids_compare_as_numbers_not_text():
+    """`"1000000001" <= "999999999"` is True as text and False as a number."""
+    assert enhancer.already_acted_on("999999999", "999999999") is True
+    assert enhancer.already_acted_on("999999998", "999999999") is True
+    assert enhancer.already_acted_on("1000000001", "999999999") is False
+
+
+def test_a_comment_with_no_id_recorded_yet_is_new():
+    assert enhancer.already_acted_on("4242", None) is False
+
+
+def test_a_simulated_id_only_matches_itself():
+    assert enhancer.already_acted_on("sim:hello", "sim:hello") is True
+    assert enhancer.already_acted_on("sim:goodbye", "sim:hello") is False
+
+
 # -- the report -------------------------------------------------------------
 
 
@@ -717,6 +753,29 @@ def test_commenting_and_labeling_and_setting_a_body_all_name_the_repo(gh_calls):
 
 
 # -- the marker that stops the loop answering itself ------------------------
+
+
+def test_a_judge_kind_outside_the_rubric_stops_the_loop_rather_than_crashing(target):
+    """`check_fields.check` raises a bare ValueError for a fourth kind.
+
+    Unwrapped it is the one failure here that reaches an attendee as a
+    traceback, when every other one prints an "enhancer stopped:" line.
+    """
+    backend = FakeBackend([judged(kind="chore")])
+    with pytest.raises(EnhancerError, match="unusable verdict"):
+        engine(target, backend, FakeGh()).poll("T001")
+
+
+def test_the_comment_query_asks_for_more_than_one_default_page(gh_calls):
+    """`gh api` defaults to 30 per page, and the marker filter only sees a page.
+
+    Once the loop's own comments fill that page the filter returns nothing and
+    the ticket sits at "no new comment" for good.
+    """
+    calls, _ = gh_calls
+    Gh("me", "crm").latest_comment(7)
+
+    assert "per_page=100" in calls[0][2]
 
 
 def test_every_comment_the_loop_posts_carries_the_marker(gh_calls):

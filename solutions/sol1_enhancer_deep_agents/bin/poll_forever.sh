@@ -23,7 +23,10 @@ esac
 
 echo "polling every ${INTERVAL} (${SECS}s). Ctrl-C to stop."
 while true; do
-  task run -- "$@"
+  # A poll that fails is a poll to retry, not a reason to stop. `loop.py`
+  # returns 1 for any EnhancerError, a `gh` hiccup included, and `set -e`
+  # would take the whole loop down with it on the first one.
+  task run -- "$@" || echo "--- that poll failed. Retrying after the interval. ---"
   echo "--- sleeping ${INTERVAL} ---"
   sleep "$SECS"
 done
