@@ -110,6 +110,55 @@ line per tool call, timestamp and tool name, only while `debug` is `true`.
 `debug.log` is gitignored. Leave `debug` `false` for normal use, it is a
 diagnostic, not a feature you need on to run this.
 
+## Reset a ticket to run it again
+
+Closing the GitHub issue is not a reset. It is the one thing that reliably
+breaks the next poll.
+
+The loop finds a ticket's issue through the state file, then the ticket
+frontmatter, then a title search. Close the issue and the first two still
+point at it, so the loop stops and tells you to reopen it. Delete the
+frontmatter line as well and the search finds nothing, so the loop creates a
+second issue for the same ticket, and the original's comment history is
+stranded on an issue nothing reads.
+
+Reset all three pieces instead:
+
+1. Put the ticket file back to a draft. Keep the issue number.
+
+   ```
+   ---
+   id: T901
+   state: draft
+   loop: enhancer
+   github_issue: 8
+   ---
+   ```
+
+2. Drop the loop's memory of the ticket.
+
+   ```bash
+   rm -f ../../work/northwind-field-crm/.harness/last-enhancer-T901.json
+   ```
+
+3. Reopen the same issue, so its comments survive.
+
+   ```bash
+   gh issue reopen 8 --repo <owner>/<repo>
+   ```
+
+Same number, same title, new poll. To start completely fresh instead, delete
+the ticket file and run `task create-test-tickets`, then let the loop open a
+new issue.
+
+Two messages send you back to this section:
+
+- `issue N is closed; reopen it`. Somebody closed the issue for a ticket that
+  is still a draft. Reopen it, or reset the ticket properly.
+- `T901: already ready / implementer, skipping`. The ticket is finished.
+  `--ticket` names a ticket, it does not override that. Reset it if you meant
+  to run it again.
+
 ## Known issues fixed along the way
 
 - `Write(path)` deny rules in `.claude/settings.json` are silently ignored
