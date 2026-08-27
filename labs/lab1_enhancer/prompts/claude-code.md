@@ -130,12 +130,30 @@ candidate is the doer's unjudged draft from step 7, which a crashed run can
 leave behind carrying the real ticket's draft frontmatter; it is not a
 ticket.
 
+Apply state: draft and loop: enhancer to every ticket, however it was
+chosen. --ticket <id> names a ticket to consider, it does not excuse the
+check, so a finished ticket is skipped rather than run a second time as
+though it were a fresh draft. Skip it out loud, on one line naming the
+ticket and the state you found, so nobody reads the silence as a hang.
+
 Persist state per ticket in .harness/last-enhancer-<id>.json:
 {github_issue, last_comment_id, round, previous_signature}.
 
 The step, per ticket:
-1. Find or create the ticket's GitHub issue (search by a "[<id>]" title
-   prefix; if none exists, create one from the ticket, label it "enhanced").
+1. Find or create the ticket's GitHub issue. Take the first of these that
+   gives you a number: the state file's github_issue, then the ticket
+   frontmatter's github_issue, then a title search on the "[<id>]" prefix
+   across all states. Create only when none of the three found anything,
+   from the ticket, labeled "enhanced". Do not search --state open: a closed
+   issue is still that ticket's issue, and skipping it is what makes the loop
+   open a second one for the same title. The frontmatter entry matters
+   because it outlives the state file, which the LGTM pass deletes, and the
+   search ranks below both recorded sources because it indexes lazily and can
+   miss an issue created moments ago. If the issue you find is closed, stop
+   and say so rather than creating another. However you got the number,
+   found or created, write it into both the state file and the ticket's
+   frontmatter as github_issue before you go on. Nothing else writes the
+   frontmatter entry, so a lookup that only reads it never finds one.
 2. Get the newest comment on that issue newer than last_comment_id, and
    note its id, a real comment's numeric id. --simulate-comment, if given,
    stands in for that comment and wins over both cases below; it has no
