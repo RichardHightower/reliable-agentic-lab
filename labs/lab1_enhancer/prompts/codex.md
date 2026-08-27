@@ -87,6 +87,23 @@ Persist the issue number as soon as you know it, whether you found it or
 created it. A state file written only on the create path makes every later
 poll look like a first poll, and a first poll never reads a comment.
 
+Two rules about which ticket and which issue. Both look like details and both
+produced real duplicates before they were written down.
+
+Apply `state: draft` and `loop: enhancer` to every ticket, however it was
+chosen. `--ticket <id>` names a ticket to consider, it does not excuse the
+check. Skip a finished ticket out loud, on one line, so the attendee does not
+read silence as a hang.
+
+Look the issue up in this order, and stop at the first hit: the state file's
+`github_issue`, then the ticket frontmatter's `github_issue`, then a title
+search across **all** states. Create only when none of the three found
+anything. Do not search with `--state open`: a closed issue is still that
+ticket's issue, and skipping it makes your loop open a second one for the
+same title. The frontmatter matters because it outlives the state file, which
+the `LGTM` pass deletes. If the issue you find is closed, stop and say so
+rather than creating another.
+
 ## Prompt 3b: the deterministic stop
 
 Write `check_stop.py`. Two more exits are facts, not judgment calls: the
