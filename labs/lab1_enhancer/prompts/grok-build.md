@@ -97,7 +97,10 @@ real duplicate or a real infinite reply before somebody wrote it down.
   ticket's issue, and skipping it makes your loop open a second one for the
   same title. The frontmatter matters because it outlives the state file,
   which the `LGTM` pass deletes. If the issue you find is closed, stop and say
-  so rather than creating another.
+  so rather than creating another. However you got the number, found or
+  created, write it into both the state file and the ticket's frontmatter as
+  `github_issue` before you go on. Nothing else writes that frontmatter entry,
+  so a lookup that only reads it never finds one.
 - Every comment the loop posts ends with the marker line
   `<!-- enhancer-loop -->`, and step 3's newest-comment query skips any
   comment carrying it. Without that the loop reads its own last reply as the

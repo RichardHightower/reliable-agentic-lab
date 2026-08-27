@@ -104,7 +104,7 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    second run as though it were a fresh draft.
 
    Say it out loud rather than exiting quietly. Somebody who just typed
-   `task run, --ticket T900` and saw nothing would read the silence as a
+   `task run -- --ticket T900` and saw nothing would read the silence as a
    hang.
 
 2. Find or create the ticket's GitHub issue.
