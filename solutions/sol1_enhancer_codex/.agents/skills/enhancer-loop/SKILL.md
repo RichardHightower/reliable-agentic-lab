@@ -170,8 +170,13 @@ way that expects a reply: this skill runs headlessly and cannot wait for one.
      human commented something other than `LGTM` on an already-complete
      ticket, or this is the first poll and the ticket somehow already meets
      the rubric): post an issue comment saying it looks ready and is
-     waiting for `LGTM`, ending the body with the marker line, and stop
-     here without calling the Doer.
+     waiting for `LGTM`, ending the body with the marker line. Write the
+     state file with `last_comment_id` set to step 3's comment id, keeping
+     `round` and `previous_signature` as step 1 loaded them, then stop here
+     without calling the Doer. This branch never reaches step 8, so it has
+     to record the id itself. The marker keeps the loop from answering its
+     own reply, but a human comment that is not `LGTM` still draws the same
+     reply on every later poll until this branch persists the id.
    - `ready` is false: nothing finalizes here, whatever the comment says,
      `LGTM` included. `LGTM` is never treated as consumed by a red rubric.
      Continue to step 7, the same as any other round, so the Doer gets a
