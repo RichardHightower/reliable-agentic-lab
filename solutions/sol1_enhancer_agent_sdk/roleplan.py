@@ -10,8 +10,8 @@ The table below is the only place that difference is written down, so a runtime
 never gets to invent a role or widen a scope.
 
 If the table and a runtime ever disagree, the runtime is wrong. That is what
-`loops/tests/test_runtime_ports.py` checks, and it checks it without either SDK
-installed.
+this folder's `tests/test_roleplan.py` and `tests/test_loop.py` check, and they
+check it without either SDK installed.
 """
 
 from __future__ import annotations

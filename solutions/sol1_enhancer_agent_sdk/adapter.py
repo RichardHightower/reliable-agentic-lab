@@ -70,5 +70,5 @@ class AgentSdkBackend(Backend):
             output = asyncio.run(collect())
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]
             return DoerResult(wrote=wrote, output=output)
-        except Exception as exc:  # noqa: BLE001  (graceful failure, mirrors CliBackend.run)
+        except Exception as exc:  # graceful failure, the way CliBackend.run fails
             return DoerResult(ok=False, output=f"agent sdk backend failed: {exc}")

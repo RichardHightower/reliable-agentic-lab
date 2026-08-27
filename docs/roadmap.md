@@ -2,7 +2,7 @@
 wiki_key: roadmap
 doc_type: roadmap
 truth_state: current
-source_hash: 136ad1d4
+source_hash: a9736c19
 generated_at: 2026-08-27T18:27:35Z
 git_hash: "3506ea7"
 ---
@@ -14,7 +14,7 @@ git_hash: "3506ea7"
 
 # Roadmap
 
-_1 epic(s) in flight, 9 open item(s), 0 blocked, 0 unclassified._
+_2 epic(s) in flight, 11 open item(s), 0 blocked, 0 unclassified._
 
 ## Now
 
@@ -35,11 +35,18 @@ solutions/sol1_enhancer_codex holds an old Python port that no longer matches th
 | [87](https://github.com/RichardHightower/reliable-agentic-lab/issues/87) | Verify the loop end to end and update the pointers | task | P2 | todo | — |
 | [88](https://github.com/RichardHightower/reliable-agentic-lab/issues/88) | Write the Codex Taskfile and the runnable scripts | task | P2 | todo | — |
 
+### Unit test the Agent SDK enhancer port  ·  P1  ·  12 of 13 done  ·  feature 11 / bug 1 / ops 1
+
+| # | Item | Type | Priority | Status | Blocked by |
+|---|---|---|---|---|---|
+| [52](https://github.com/RichardHightower/reliable-agentic-lab/issues/52) | Verify, render the roadmap, and open the pull request | task | P2 | todo | — |
+
 ### (no epic)
 
 | # | Item | Type | Priority | Status | Blocked by |
 |---|---|---|---|---|---|
 | [91](https://github.com/RichardHightower/reliable-agentic-lab/issues/91) | sol1_enhancer writes no state file when it finds an existing issue, so LGTM is never read | task | P1 | todo | — |
+| [73](https://github.com/RichardHightower/reliable-agentic-lab/issues/73) | Build the poll loop for the Agent SDK enhancer port | story | P1 | todo | — |
 | [67](https://github.com/RichardHightower/reliable-agentic-lab/issues/67) | Sibling ports share the loop.py --table-only Contract() bug | task | P2 | todo | — |
 
 ## Later
@@ -60,8 +67,11 @@ graph TD
     01M1217WTAEM5W96N68WVN3CVS["📦 Give a simulated comment a sta"]
     01M1217WTAK4MAAXX3P7279H54["📦 Verify the loop end to end and"]
     01M1217WTAPT5AVHK27NAJJPMY["📦 Write the Codex Taskfile and t"]
+    01M122KB0K47AMZ4F3NJ3GWW9A["📦 Unit test the Agent SDK enhanc"]
+    01M122KB125759RRT2WAEAS246["📦 Verify render the roadmap and"]
     01M12361G4N02WAWMJWW64188Z["🐛 Sibling ports share the loop.p"]
     01M124T0411AFGE306A00T17X3["🐛 sol1_enhancer writes no state"]
+    01M124VFGPB0BAR9A251T7VA6W["📦 Build the poll loop for the Ag"]
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WT9586S4PHZFXV2RZQQ
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WT9NYGSJ2B43G3YE7FW
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WT9X3FMDT5YYM9D0E4B
@@ -69,8 +79,9 @@ graph TD
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WTAEM5W96N68WVN3CVS
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WTAK4MAAXX3P7279H54
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WTAPT5AVHK27NAJJPMY
+    01M122KB0K47AMZ4F3NJ3GWW9A --> 01M122KB125759RRT2WAEAS246
     classDef todo fill:#f4f4f4,stroke:#999999
-    class 01M1217WSS22TWYCM42N3N6E9W,01M1217WT9586S4PHZFXV2RZQQ,01M1217WT9NYGSJ2B43G3YE7FW,01M1217WT9X3FMDT5YYM9D0E4B,01M1217WTA3WFB7X29CF69BMJ5,01M1217WTAEM5W96N68WVN3CVS,01M1217WTAK4MAAXX3P7279H54,01M1217WTAPT5AVHK27NAJJPMY,01M12361G4N02WAWMJWW64188Z,01M124T0411AFGE306A00T17X3 todo
+    class 01M1217WSS22TWYCM42N3N6E9W,01M1217WT9586S4PHZFXV2RZQQ,01M1217WT9NYGSJ2B43G3YE7FW,01M1217WT9X3FMDT5YYM9D0E4B,01M1217WTA3WFB7X29CF69BMJ5,01M1217WTAEM5W96N68WVN3CVS,01M1217WTAK4MAAXX3P7279H54,01M1217WTAPT5AVHK27NAJJPMY,01M122KB0K47AMZ4F3NJ3GWW9A,01M122KB125759RRT2WAEAS246,01M12361G4N02WAWMJWW64188Z,01M124T0411AFGE306A00T17X3,01M124VFGPB0BAR9A251T7VA6W todo
 ```
 
 ### Hierarchy
@@ -85,8 +96,11 @@ graph TD
     01M1217WTAEM5W96N68WVN3CVS["📦 Give a simulated comment a sta"]
     01M1217WTAK4MAAXX3P7279H54["📦 Verify the loop end to end and"]
     01M1217WTAPT5AVHK27NAJJPMY["📦 Write the Codex Taskfile and t"]
+    01M122KB0K47AMZ4F3NJ3GWW9A["📦 Unit test the Agent SDK enhanc"]
+    01M122KB125759RRT2WAEAS246["📦 Verify render the roadmap and"]
     01M12361G4N02WAWMJWW64188Z["🐛 Sibling ports share the loop.p"]
     01M124T0411AFGE306A00T17X3["🐛 sol1_enhancer writes no state"]
+    01M124VFGPB0BAR9A251T7VA6W["📦 Build the poll loop for the Ag"]
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WT9586S4PHZFXV2RZQQ
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WT9NYGSJ2B43G3YE7FW
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WT9X3FMDT5YYM9D0E4B
@@ -94,4 +108,5 @@ graph TD
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WTAEM5W96N68WVN3CVS
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WTAK4MAAXX3P7279H54
     01M1217WSS22TWYCM42N3N6E9W --> 01M1217WTAPT5AVHK27NAJJPMY
+    01M122KB0K47AMZ4F3NJ3GWW9A --> 01M122KB125759RRT2WAEAS246
 ```

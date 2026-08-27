@@ -1,4 +1,4 @@
-"""The five roles, as Claude Agent SDK subagents.
+"""The roles, as Claude Agent SDK subagents.
 
 The Agent SDK enforces scope in two places, and you need both.
 
@@ -10,7 +10,7 @@ guard. The code implementer holds both, so the hook is what keeps it out of
 `tests/**`.
 
 Nothing here calls a model. `options_for` returns configuration, and
-`implementer.py` is what runs it.
+`loop.py` is what runs it.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def scope_hook(repo: Path, role: RolePlan):
 
     Returning an empty dict means "no opinion", which lets the call through.
     Denying needs the full hookSpecificOutput shape, so a typo here fails open.
-    That is why `test_runtime_ports.py` asserts the deny shape directly.
+    That is why `tests/test_roles.py` asserts the deny shape key by key.
     """
     scope = WriteScope(allow=list(role.allow), deny=list(role.deny))
 
