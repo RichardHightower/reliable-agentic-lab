@@ -44,6 +44,10 @@ class EnhancerError(RuntimeError):
     """The loop cannot continue for a reason a human has to fix."""
 
 
+class TicketBlocked(RuntimeError):
+    """Stop this one ticket and report why. The other tickets still run."""
+
+
 # -- the Judge's reply ------------------------------------------------------
 
 _FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
@@ -167,6 +171,12 @@ class Gh:
         return proc.stdout.strip()
 
     def find_issue(self, ticket_id: str) -> int | None:
+        """The ticket's issue, whatever state it is in.
+
+        Never `--state open`. A closed issue is still that ticket's issue, and
+        searching only the open ones is what makes the loop create a second
+        issue for a title that already has one.
+        """
         out = self._run(
             "issue",
             "list",
@@ -175,12 +185,16 @@ class Gh:
             "--search",
             f'in:title "[{ticket_id}]"',
             "--state",
-            "open",
+            "all",
             "--json",
             "number",
         )
         found = json.loads(out or "[]")
         return int(found[0]["number"]) if found else None
+
+    def is_closed(self, issue: int) -> bool:
+        out = self._run("issue", "view", str(issue), "--repo", self.slug, "--json", "state")
+        return json.loads(out or "{}").get("state", "").upper() == "CLOSED"
 
     def create_issue(self, title: str, body: str) -> int:
         for label, color in (
@@ -373,18 +387,42 @@ class Enhancer:
                 raise EnhancerError(f"no ticket {ticket_id} in {self.repo}/tickets")
             parsed = ticket_mod.parse(path.read_text(encoding="utf-8"), ticket_id=ticket_id)
             parsed.path = path
+            # `--ticket` names a ticket to consider, it is not a reason to skip
+            # the state check `open_tickets` applies to everything it finds.
+            # Without this a finished ticket runs again as though it were a
+            # fresh draft, and the re-run opens a second issue for it.
+            if parsed.state != "draft" or parsed.meta.get("loop") != "enhancer":
+                found = f"{parsed.state} / {parsed.meta.get('loop') or 'no loop'}"
+                return [Outcome(ticket_id, "skipped", f"already {found}")]
             tickets = [parsed]
         elif simulate_comment is not None:
             raise EnhancerError("--simulate-comment needs --ticket, it acts on one ticket")
         else:
             tickets = open_tickets(Path(self.repo))
-        return [self._one(tkt, simulate_comment) for tkt in tickets]
+        outcomes = []
+        for tkt in tickets:
+            try:
+                outcomes.append(self._one(tkt, simulate_comment))
+            except TicketBlocked as blocked:
+                outcomes.append(Outcome(tkt.id, "blocked", str(blocked)))
+        return outcomes
 
     def _one(self, tkt: ticket_mod.Ticket, simulate_comment: str | None) -> Outcome:
         state = State.load(Path(self.repo), tkt.id)
 
-        # 2. find or create the issue.
-        issue = state.github_issue or self.gh.find_issue(tkt.id)
+        # 2. find or create the issue. First hit wins, in this order: the state
+        # file, the ticket frontmatter, then a title search across every state.
+        # The frontmatter matters because it outlives the state file, which the
+        # `LGTM` pass deletes.
+        recorded = tkt.meta.get("github_issue")
+        issue = state.github_issue or (int(recorded) if recorded else None) or self.gh.find_issue(
+            tkt.id
+        )
+        if issue is not None and self.gh.is_closed(issue):
+            # Somebody closed the issue for a ticket that is still a draft,
+            # which is not how you reset one. Creating a second issue here is
+            # the duplicate this whole lookup exists to prevent.
+            raise TicketBlocked(f"issue {issue} is closed; reopen it")
         if issue is None:
             issue = self.gh.create_issue(
                 f"[{tkt.id}] {tkt.title}", strip_front_matter(tkt.path.read_text(encoding="utf-8"))
