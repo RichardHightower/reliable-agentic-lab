@@ -124,8 +124,11 @@ this from the folder that holds config.json) for {fork_owner, repo_name};
 every gh call targets that repo.
 
 Without --ticket, discover every tickets/*.md in the target repo (excluding
-*.ready.md) whose frontmatter has state: draft and loop: enhancer, and run
-the step below for each.
+both *.ready.md and *.enhancer-candidate.md) whose frontmatter has
+state: draft and loop: enhancer, and run the step below for each. A
+candidate is the doer's unjudged draft from step 7, which a crashed run can
+leave behind carrying the real ticket's draft frontmatter; it is not a
+ticket.
 
 Persist state per ticket in .harness/last-enhancer-<id>.json:
 {github_issue, last_comment_id, round, previous_signature}.
@@ -133,11 +136,15 @@ Persist state per ticket in .harness/last-enhancer-<id>.json:
 The step, per ticket:
 1. Find or create the ticket's GitHub issue (search by a "[<id>]" title
    prefix; if none exists, create one from the ticket, label it "enhanced").
-2. Get the newest comment on that issue newer than last_comment_id (or use
-   --simulate-comment if given). Exception: on the ticket's first poll (no
-   state file yet), there is no comment to wait for, so run one round
-   anyway, the human needs something to react to. Otherwise, no new
-   comment means stop, this ticket is untouched this poll.
+2. Get the newest comment on that issue newer than last_comment_id, and
+   note its id, a real comment's numeric id. --simulate-comment, if given,
+   stands in for that comment and wins over both cases below; it has no
+   GitHub id, so derive a stable one from its exact text, and the same text
+   twice is therefore not a new comment. Exception: on the ticket's first
+   poll (no state file yet, and no --simulate-comment), there is no comment
+   to wait for, so run one round anyway, the human needs something to react
+   to. Otherwise, no new comment means stop, this ticket is untouched this
+   poll.
 3. Issue already carries "needs-human": stop, wait for a person.
 4. Judge the current ticket (enhancer-judge, then check_fields.py) to get
    this round's kind, missing_fields, and ready. LGTM must never skip this:
@@ -158,7 +165,10 @@ The step, per ticket:
 8. Run check_stop.py with this round's missing-fields signature, the
    budget (3), and previous_signature. Do not compare them yourself.
    stop is true: add "needs-human", stop. stop is false: persist the
-   updated state, done for this poll.
+   updated state, done for this poll. Persisting includes the id of the
+   comment this poll used: a state file that never records it lets the next
+   poll read the same comment as new, forever. Step 6 stops before this step
+   and has to record the id itself.
 ```
 
 ## Verify
