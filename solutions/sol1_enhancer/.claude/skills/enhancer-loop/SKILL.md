@@ -37,6 +37,29 @@ Parse from the invocation text after `/enhancer-loop`:
   fetching new issue comments, and skip the GitHub round trip in step 3. Only
   valid together with `--ticket`.
 
+## The comment marker
+
+Every comment this loop posts ends with this exact line:
+
+```
+<!-- enhancer-loop -->
+```
+
+GitHub renders an HTML comment as nothing, so a human never sees it.
+
+Step 3 uses the marker to skip this loop's own replies when it looks for the
+newest comment. Without it the loop reads its own last reply as the newest
+comment and answers it again, once per poll, forever. Storing
+`last_comment_id` does not help, because the reply genuinely carries a newer
+id.
+
+Do not filter by comment author instead. The loop runs as the attendee's own
+`gh` account, so an author filter would also drop their `LGTM`, the one
+comment this loop must never miss.
+
+If step 3's query prints nothing, every comment on the issue is one of this
+loop's own. Treat that exactly like no new comment.
+
 ## Step 0: discover open tickets
 
 Skip this step if the invocation named `--ticket`; act on that one ticket
@@ -110,7 +133,7 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      file): there is no comment yet, and none is needed. A fresh ticket
      always gets one round, so the human has something to react to; skip
      straight to step 5 with no comment and no comment id.
-   - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq 'sort_by(.id) | .[-1] | {id, body}'`.
+   - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq '[.[] | select((.body // "") | contains("<!-- enhancer-loop -->") | not)] | sort_by(.id) | .[-1] // empty | {id, body}'`.
      The id is that comment's numeric `id`. If it is not newer than
      `last_comment_id`, there is no new comment: stop here for this ticket
      (no-op, does not count as a round).
@@ -140,9 +163,9 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      human commented something other than `LGTM` on an already-complete
      ticket, or this is the first poll and the ticket somehow already meets
      the rubric): post an issue comment saying it looks ready and is
-     waiting for `LGTM`. Write the state file with `last_comment_id` set to
-     step 3's comment id, keeping `round` and `previous_signature` as step 1
-     loaded them, then stop here without calling the Doer. This branch never
+     waiting for `LGTM`, ending the body with the marker line. Write the
+     state file with `last_comment_id` set to step 3's comment id, keeping
+     `round` and `previous_signature` as step 1 loaded them, then stop here without calling the Doer. This branch never
      reaches step 8, so it has to record the id itself, or the same comment
      draws the same reply on every later poll.
    - `ready` is false: nothing finalizes here, whatever the comment says,
@@ -170,10 +193,11 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    - Not an improvement: leave the real ticket file, and the issue body,
      untouched.
 
-   Either way, delete the candidate file, then post one issue comment: on
-   improvement, what changed and what is still missing (or that it is now
-   ready for `LGTM`); otherwise, that the suggestion did not clear the
-   rubric for this kind and what is still needed.
+   Either way, delete the candidate file, then post one issue comment,
+   ending its body with the marker line: on improvement, what changed and
+   what is still missing (or that it is now ready for `LGTM`); otherwise,
+   that the suggestion did not clear the rubric for this kind and what is
+   still needed.
 
 8. Compute this round's `missing_fields` signature (the sorted list from
    step 7, the only path that reaches here: step 6's other two branches
