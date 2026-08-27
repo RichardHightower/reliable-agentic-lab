@@ -1,0 +1,7 @@
+config.json
+debug.log
+_jail_probe.md
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+.opencode/.gitignore

@@ -1,0 +1,154 @@
+# Spec. Lab 1. Ticket enhancer, as an OpenCode skill set
+
+A vague ticket in, a ready contract out. No human sits in an interactive
+session driving this loop: it polls the ticket's GitHub issue for comments
+and acts on what it finds.
+
+**Artifact: An OpenCode-native skill and two subagents that groom every open
+ticket in your fork, one poll at a time.**
+
+This folder holds the finished answer: `.opencode/agents/`,
+`.opencode/skills/enhancer-loop/`, and `config.json.example`. Build it by
+following `labs/lab1_enhancer/prompts/opencode.md`, then compare your result
+against this folder.
+
+This folder is standalone. It does not depend on the root Taskfile. Every
+command here runs from this folder, start to finish: clone your fork, seed
+some test tickets, run a poll. OpenCode discovers agents and skills from
+`.opencode/` relative to this folder. There is no `plugin.json` pack, and
+this is not a copy of `.claude/`.
+
+#96 stubbed this folder after an old Python port. This tree is the working
+OpenCode answer that replaces that stub.
+
+## The roles
+
+- **`enhancer-judge`** (subagent). Reads a ticket, real or a candidate draft,
+  and reports which required fields for its kind are genuinely present. It
+  holds `edit: deny` and `bash: deny`: a judge that could edit the ticket
+  could grade itself.
+- **`enhancer-doer`** (subagent). Given a ticket, its missing fields, and the
+  latest issue comment if there is one, investigates the target app's code
+  and drafts a full replacement body. It holds no write tool either: its
+  draft is text output, not a file, so nothing it writes can reach the real
+  ticket without being judged first.
+- **`enhancer-loop`** (skill, the orchestrator). The only role that writes
+  the real ticket file or talks to GitHub. Runs one poll-and-act step, then
+  exits.
+
+## Set up your fork
+
+1. Fork the target repo into your own GitHub account. The canonical
+   upstream is `RichardHightower/northwind-field-crm` today, moving to
+   `SpillwaveSolutions/northwind-field-crm` around Saturday. Fork whichever
+   is canonical when you do this, into your own account, not into
+   `SpillwaveSolutions`.
+
+2. From this folder, copy the config template and fill in your GitHub
+   username:
+
+   ```bash
+   cd solutions/sol1_enhancer_opencode
+   cp config.json.example config.json
+   ```
+
+3. Clone your fork:
+
+   ```bash
+   task clone
+   ```
+
+   This reads `fork_owner` and `repo_name` from `config.json` and clones
+   that repo into `work/northwind-field-crm`. Every task here runs from this
+   folder; you never need the repo root.
+
+## Run it
+
+One step, by hand:
+
+```bash
+task run -- --ticket T001
+```
+
+Every open ticket, one poll:
+
+```bash
+task run --
+```
+
+## Keep it running
+
+`enhancer-loop` runs one poll and exits. Something else has to call it
+again, and again, for this to be an actual loop over time. Two ways:
+
+### For the seminar: run forever, in one terminal
+
+```bash
+task poll-forever -- --ticket T001    # one ticket
+task poll-forever --                  # every open ticket
+```
+
+This is `while true: task run; sleep poll_interval`, nothing more. It never
+stops on its own, whether every ticket has passed or not. Leave it running
+in a terminal for the length of the session, pretend it is a process
+running somewhere in the cloud, and `Ctrl-C` it when you are done.
+
+### How this should really run
+
+A scheduled GitHub Actions workflow, triggered on a cron interval, running
+`task run` once per trigger. `.harness/last-enhancer-<id>.json` already
+persists state file-to-file in the target repo for exactly this reason.
+Porting that workflow is out of scope here.
+
+`opencode run` exits when its turn ends, so nothing inside the loop can
+schedule the next poll.
+
+## GitHub has no "ready" status
+
+Issues have open and closed state, and labels, nothing else built in. This
+design tracks progress with three labels the orchestrator creates the first
+time it needs one:
+
+| Label | Means |
+|---|---|
+| `enhanced` | The enhancer has posted at least one draft. Stays on the issue even after `ready`, it is a history marker, not a status. |
+| `ready` | The newest comment was `LGTM`. The ticket's `state: ready` and `loop: implementer`. |
+| `needs-human` | Escalated: the same gaps twice running, or the round budget is spent. |
+
+## The exits
+
+Same three as before, now checked per ticket, per poll, not in one long-
+running process:
+
+- The newest comment is `LGTM` **and** the rubric already reads ready:
+  pass. `LGTM` on a ticket the rubric has not cleared finalizes nothing.
+- Two rounds in a row find exactly the same gaps: escalate, the human has
+  not acted and another round will not help.
+- The round budget (3) is spent: escalate.
+
+## What "ready" means
+
+| Kind | Required fields |
+|---|---|
+| Bug | title (8+ characters), numbered steps, expected, actual, environment |
+| Feature | problem, proposal, value, 2+ acceptance criteria a test can fail |
+| UI | same as feature, plus a wireframe or mockup |
+
+`.opencode/skills/enhancer-loop/scripts/check_fields.py` is the deterministic
+half of the judge: it takes the agent's `{kind, present_fields}` and
+computes `missing_fields` itself, against this table, rather than trusting
+the model's own claim about what is missing.
+`.opencode/skills/enhancer-loop/scripts/check_stop.py` does the same for the
+other two exits: it takes `{round, budget, signature, previous_signature}`
+and computes `{stop, reason}` itself.
+
+## Known limitations
+
+- There is no dollar or token spend tracking or cap.
+
+## Worth reading
+
+- `.opencode/skills/enhancer-loop/SKILL.md`, the orchestrator's full step list
+- `.opencode/agents/enhancer-judge.md`, `.opencode/agents/enhancer-doer.md`
+- `.opencode/skills/enhancer-loop/scripts/check_fields.py`
+- [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md)

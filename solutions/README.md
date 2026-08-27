@@ -30,7 +30,7 @@ copies of one file. Read each folder's own `README.md` and `SPEC.md`.
 | `sol1_enhancer` | Claude Code plugin under `.claude/`. The reference answer. |
 | `sol1_enhancer_codex` | Codex skill set under `.agents/`, plus `bin/role.sh`. Each role runs as its own read-only `codex exec` process, because Codex isolation is a process sandbox. |
 | `sol1_enhancer_grok_build` | Grok Build project plugin under `.grok/plugins/ticket-enhancer/`, plus three registration symlinks. On grok 1.0.5 a project plugin registers nothing on its own. |
-| `sol1_enhancer_opencode` | Stub. Coming soon, see its `README.md`. |
+| `sol1_enhancer_opencode` | OpenCode skill set under `.opencode/`. Isolation is per-agent `edit: deny`. |
 
 The two runtime ports of Lab 1 differ again. `sol1_enhancer_agent_sdk` carries
 a real poll loop in `enhancer.py` with a test suite. `sol1_enhancer_deep_agents`
