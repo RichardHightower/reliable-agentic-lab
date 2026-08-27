@@ -34,3 +34,8 @@ solutions/**/config.json
 # Debug log from the enhancer-loop hooks, when config.json sets debug: true.
 labs/**/debug.log
 solutions/**/debug.log
+
+# Claude Code local state. Machine-specific permissions, and worktree
+# checkouts that live-in-repo sessions create.
+.claude/settings.local.json
+.claude/worktrees/

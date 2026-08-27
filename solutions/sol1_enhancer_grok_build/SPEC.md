@@ -1,75 +1,132 @@
-# Spec. Lab 1. Ticket Enhancer, with Grok Build
+# Spec. Lab 1. Ticket enhancer, as a Grok Build plugin.
 
-A vague ticket in, a ready contract out.
+A vague ticket goes in. A ready contract comes out. No human sits in an
+interactive session while it happens. The loop polls the ticket's GitHub issue
+for comments and acts on what it finds.
 
-**Artifact: A working autonomous loop, running on your machine. About 25 minutes.**
+The artifact is a Grok Build project plugin: one skill and two agents, under
+`.grok/plugins/ticket-enhancer/`. It grooms every open ticket in your fork,
+one poll at a time.
 
-This folder holds the finished answer. `loop.py` here runs as it stands.
-The stub you start from is `labs/lab1_enhancer/loop.py`, and the prompt that
-drives Grok Build is `labs/lab1_enhancer/prompts/grok-build.md`.
+Grok 1.0.5 registers no skills and no agents from a project plugin, so this
+folder also ships three symlinks under `.grok/skills/` and `.grok/agents/`
+that point into the plugin. The plugin stays the source of truth. See
+[IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
 
-## Build it step by step
-
-1. Work from the lab folder, not from this one.
-
-   ```bash
-   cd labs/lab1_enhancer
-   ```
-
-2. Drive Grok Build with the lab's prompt, or fill `loop.py` by hand.
-
-   ```bash
-   grok -p "$(cat prompts/grok-build.md)" --no-auto-update
-   ```
-
-   Interactive: run `grok` in the lab folder and paste everything below the
-   line in the prompt file.
-
-3. Fill `judge_ticket(ticket)`. The docstring in the stub says what it must decide.
-4. Fill `decide_next(verdict, iteration, previous)`. The docstring in the stub says what it must decide.
-5. Stop at one of three exits. Do not add a fourth.
-
-   - the ticket is ready
-   - the budget is spent
-   - two rounds in a row find exactly the same gaps, which means the human has not acted and another round will not help
-
-6. Verify.
-
-   ```bash
-   task loop:enhancer -- --ticket T001
-   ```
-
-7. Compare your answer against this folder.
-
-   ```bash
-   diff loop.py ../../solutions/sol1_enhancer_grok_build/loop.py
-   ```
+This folder is the finished answer. Build yours in `labs/lab1_enhancer/` and
+compare. It is standalone on purpose: no dependency on the repository root
+Taskfile and no imports from `loops/`, so you can deploy it as its own repo.
 
 ## The roles
 
-In this loop, an orchestrator owns the budget and the exits, a doer edits the ticket body and nothing else, and a judge scores the ticket against criteria for its kind.
+| Role | Kind | Writes? |
+|---|---|---|
+| `enhancer-judge` | plugin agent | no |
+| `enhancer-doer` | plugin agent | no |
+| `enhancer-loop` | plugin skill | yes, the only one |
 
-Write scope is not advice. It is declared in `.loop.yml` in the target repo and
-enforced at the tool boundary. The code implementer cannot weaken a test to
-reach green, because it holds no write path to one.
+`enhancer-judge` reads one ticket and reports which required fields hold real
+content. It holds no write tool. A judge that could edit the ticket could
+grade its own work.
 
-## The gate
+`enhancer-doer` investigates the ticket and the target app, then returns a
+full candidate ticket body as the text of its reply. It holds no write tool
+either, so its draft reaches a file only after the orchestrator saves it and
+the judge scores it.
 
-This lab writes no code, so the push gate does not fire. You meet it in Module 2.
+`enhancer-loop` is the orchestrator. It runs one poll-and-act step and exits.
 
-## The reference
+### The lockdown is deliberately uneven
 
-loops/enhancer.py and loops/criteria.py
+Both agents carry a read-only allowlist and an explicit deny on Grok's MCP
+tools, so neither can write a file, spawn another agent, or reach a connected
+GitHub MCP server. The orchestrator holds the shell, writes the ticket file,
+and runs `gh`.
+
+That asymmetry is the design, not an oversight. The roles that could grade or
+draft their own work cannot act, and the role that acts does not grade. An
+allowlist on the two agents is what makes that split real rather than a
+promise in a prompt.
+
+## Set up your fork
+
+Fork `RichardHightower/northwind-field-crm` into your own account. Copy
+`config.json.example` to `config.json` and fill in your GitHub username.
+`task clone` reads `fork_owner` and `repo_name` from it and clones into
+`work/northwind-field-crm`.
+
+Grok also needs your checkout trusted before it will load a project plugin.
+That is `task trust`, and it is step zero. See
+[IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
+
+## Run it
+
+```bash
+task run -- --ticket T001   # one ticket
+task run --                 # every open ticket
+```
+
+## Keep it running
+
+Three ways, in order of realism.
+
+1. **For the seminar, run forever in one terminal.**
+   `task poll-forever -- --ticket T001`, or `task poll-forever --`. It is
+   `while true: task run; sleep poll_interval` and nothing more. It never
+   stops on its own, whether every ticket has passed or not. Press Ctrl-C
+   when you are done. This is not production shape.
+2. **A cron job.** One `task run` per trigger. The state file already
+   persists everything a stateless run needs.
+3. **How this should really run.** A scheduled GitHub Actions workflow on a
+   cron interval, running `task run` once per trigger.
+   `.harness/last-enhancer-<id>.json` exists for exactly that case. The
+   workflow file is out of scope for this lab.
+
+Grok has no built-in loop skill, so the skill cannot re-invoke itself the way
+the Claude Code answer does. Repeated polling always comes from outside the
+process.
+
+## GitHub has no "ready" status
+
+The orchestrator creates three labels on demand and uses them as the status
+this loop needs.
+
+| Label | Means |
+|---|---|
+| `enhanced` | At least one draft has been posted. A history marker, it stays after `ready`. |
+| `ready` | The newest comment was `LGTM` on a ticket the rubric already accepts. The ticket file becomes `state: ready`, `loop: implementer`. |
+| `needs-human` | The same gaps came back twice running, or the round budget is spent. |
+
+## The exits
+
+Checked per ticket, per poll:
+
+1. The newest comment is `LGTM` **and** the rubric already reads ready. Pass.
+   `LGTM` on a red rubric finalizes nothing.
+2. Two rounds in a row find exactly the same gaps. Escalate.
+3. The round budget (3) is spent. Escalate.
+
+`check_stop.py` decides exits 2 and 3. The skill never decides them in prose.
+
+## What "ready" means
+
+| Kind | Required |
+|---|---|
+| `bug` | title of 8 or more characters, numbered steps, expected, actual, environment |
+| `feature` | problem, proposal, value, 2 or more testable acceptance criteria |
+| `ui` | the feature fields, plus a wireframe or mockup |
+
+`check_fields.py` is the deterministic half of the judge. The agent reports
+which fields it found. The script looks up the rubric for that kind and
+computes `missing_fields` itself, so a model's own claim about readiness is
+never the thing that decides.
+
+## Known limitations
+
+No dollar or token spend tracking, and no cap.
 
 ## Worth reading
 
-- `loops/criteria.py`
-- `loops/gates.py`
-- `loops/ticket.py`
-
-## Run the finished answer
-
-```bash
-cd solutions/sol1_enhancer_grok_build
-task test
-```
+- `.grok/plugins/ticket-enhancer/skills/enhancer-loop/SKILL.md`
+- `.grok/plugins/ticket-enhancer/agents/enhancer-judge.md`
+- `.grok/plugins/ticket-enhancer/skills/enhancer-loop/scripts/check_fields.py`
