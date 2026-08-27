@@ -82,8 +82,17 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      same for `ready` and `needs-human`, ignore errors if a label already
      exists), then create the issue from the ticket's H1 and body:
      `gh issue create --repo <owner>/<repo> --title "[<id>] <ticket H1>" --body "<ticket body>" --label enhanced`.
-     Write the returned issue number into the ticket's frontmatter as
-     `github_issue: <number>`, and into the state file.
+
+   However you arrived at the number, found by search or freshly created,
+   write it into the ticket's frontmatter as `github_issue: <number>` and
+   into the state file before you go on. Persist it even on a branch that
+   stops early, such as step 6's "ready, waiting for `LGTM`".
+
+   Write it on the search path too, not only on the create path. A state
+   file that appears only when this loop creates the issue leaves every
+   later poll looking like a first poll, and step 3 skips the comment fetch
+   on a first poll. A ticket whose issue already existed would then never
+   read `LGTM`, and could never reach ready.
 
 3. Get the newest comment, if there is one. Whichever branch below applies,
    note that comment's id: step 6 and step 8 write it back into the state
