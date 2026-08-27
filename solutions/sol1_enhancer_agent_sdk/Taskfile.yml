@@ -1,5 +1,8 @@
-# Standalone. No dependency on the root Taskfile. Needs no SDK installed:
-# --table-only prints the role table and stops.
+# Standalone. No dependency on the root Taskfile, and no SDK installed.
+#
+# The tests need pytest and nothing else. They stub `claude_agent_sdk` in
+# sys.modules, so installing it is never required. Activate the repo's .venv
+# first, or `pip install pytest`.
 version: '3'
 
 tasks:
@@ -7,7 +10,20 @@ tasks:
     cmds: [task --list]
 
   test:
+    desc: Unit tests for this folder. No SDK and no API key.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 -m pytest tests -q
+
+  table:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - python3 loop.py --table-only
+
+  checks:
+    desc: Run the two deterministic check scripts against their own assertions.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 check_fields.py --demo
+      - python3 check_stop.py --demo

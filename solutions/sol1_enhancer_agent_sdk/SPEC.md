@@ -10,8 +10,10 @@ change to make it run.
 - `doer`
 - `judge`
 
-`solutions/roleplan.py` is where that list lives. Read it there. Do not restate
-a scope in this folder.
+This folder's `roleplan.py` is where that list lives. Read it there. Do not
+restate a scope anywhere else in this folder. `contract.py`, `write_scope.py`,
+and `ticket.py` are flat copies of the engine's modules, so this folder needs
+nothing from `loops/` and imports nothing from it.
 
 ## How this runtime enforces scope
 
@@ -32,7 +34,7 @@ hook to guard.
 
    ```bash
    cd solutions/sol1_enhancer_agent_sdk
-   python loop.py --table-only --repo ../../work/northwind-field-crm
+   task table
    ```
 
    The judge must print `no` in the writes column. If it prints `yes`, stop.
@@ -55,14 +57,37 @@ hook to guard.
 ## Verify
 
 ```bash
-task test -- loops/tests/test_runtime_ports.py
+cd solutions/sol1_enhancer_agent_sdk
+task test
 ```
 
-Those checks need no SDK and no key. They assert that this port and the
-in-process roles read the same table, and that the judge holds no write tool in
-either.
+Those checks need no SDK, no API key, and no cloned target repo. They stub
+`claude_agent_sdk` in `sys.modules`, build a target repo in a temporary
+directory, and assert the rules this port has to keep:
+
+- The enhancer cast is `orchestrator`, `doer`, `judge`, and the judge holds no
+  write tool.
+- `cast()` returns the shared table, not a local restatement.
+- The `PreToolUse` hook denies a write outside scope with the full
+  `hookSpecificOutput` shape. Returning an empty dict lets the call through, so
+  a typo anywhere in that envelope fails open.
+- A path outside the target repo is denied rather than allowed by default.
+- `AgentSdkBackend.run` reports a failed result when the SDK is absent, and
+  never claims a write it did not make.
+
+Run the two deterministic check scripts against their own assertions with
+`task checks`.
 
 ## What this folder is not
 
 It is not a second loop engine. `loops/` holds the loop, and porting it must not
 require changing `loops/`. If it does, the design leaked.
+
+It is not a Claude Code plugin either. There is no `.claude/` here. The plugin
+port of this same lab lives in `solutions/sol1_enhancer/`, and the two are meant
+to be read side by side: same rubric, same exits, two different runtimes.
+
+`write_scope.build()` is a copy of the engine's role builder and the enhancer
+never calls it. Leave it alone. Rewriting it to return an enhancer cast makes
+this copy drift from `loops/roles.py`, which is the exact failure the shared
+table exists to prevent.
