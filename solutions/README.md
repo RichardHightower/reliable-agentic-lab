@@ -5,9 +5,15 @@ the runtime, so a folder is `sol<n>_<name>_<product>`.
 
 ## Four tools, one answer each
 
-The tool you drive does not change the answer, so the code in these four columns
-is the same file. What changes is `SPEC.md`, which tells you how to drive that
-tool.
+For labs 2 to 4, the tool you drive does not change the answer, so the code in
+these four columns is the same file. What changes is `SPEC.md`, which tells you
+how to drive that tool.
+
+Lab 1 is the exception. Its answer is a plugin, not a Python stub, and each
+tool builds plugins its own way. `sol1_enhancer` is a Claude Code plugin under
+`.claude/`, and `sol1_enhancer_codex` is a Codex skill set under `.agents/`
+that runs its judge and doer as separate sandboxed processes. Read each one's
+own `README.md` and `SPEC.md`.
 
 | Lab | Claude Code | Codex | Grok Build | OpenCode |
 |---|---|---|---|---|
