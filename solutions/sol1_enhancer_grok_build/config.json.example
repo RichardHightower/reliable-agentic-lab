@@ -1,0 +1,6 @@
+{
+  "fork_owner": "<your-github-username>",
+  "repo_name": "northwind-field-crm",
+  "poll_interval": "10m",
+  "debug": false
+}
