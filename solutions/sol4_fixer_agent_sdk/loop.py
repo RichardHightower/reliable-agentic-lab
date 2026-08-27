@@ -1,25 +1,15 @@
 #!/usr/bin/env python3
-"""Lab 4. Broken PR Fixer, unattended, on Claude Agent SDK.
+"""Lab 4. Unattended PR fixer on Claude Agent SDK.
 
-The loop does not change. The rubric, the gates, and the exits are the same
-objects lab 4 uses. What changes is how the runtime says "this role
-may not write that file".
-
-The Agent SDK scopes in two places and you need both. `tools=[...]` decides
-whether a role can write at all. A `PreToolUse` hook decides which paths it may
-write. The judge holds neither Edit nor Write, so there is nothing left for a
-hook to guard.
-
-    python loop.py --table-only
-
-Nothing here calls a model. This module returns configuration, and your driver
-is what runs it.
+query(), not a chat client. Python owns the exits. PreToolUse owns write scope.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 
+import fixer
 import roleplan
 import roles as sdk
 from contract import Contract, ContractError
@@ -27,53 +17,44 @@ from contract import Contract, ContractError
 LOOP = "fixer"
 
 
-def cast(contract) -> dict[str, roleplan.RolePlan]:
-    """The roles this loop runs.
-
-    Read from `solutions/roleplan.py`, never restated here. A port that writes
-    its own scopes is a port that drifts from the loop it claims to be, and it
-    drifts silently.
-    """
+def cast(contract):
     return roleplan.plan(contract, LOOP)
 
 
 def build(contract):
-    """This runtime's configuration for the cast.
-
-    Needs `claude-agent-sdk` installed. `cast()` and the role table do not, which
-    is why the tests can check the separation without either SDK present.
-    """
     return sdk.options_for(contract, loop=LOOP)
 
 
-def backend(contract) -> "AgentSdkBackend":
-    """A `doers.Backend` that runs the code_implementer role through this runtime.
-
-    See `adapter.py`. Needs `claude-agent-sdk` only once `.run()` is called.
-    """
-    from adapter import AgentSdkBackend  # noqa: PLC0415  (keeps --table-only free of it)
+def backend(contract):
+    from adapter import AgentSdkBackend  # noqa: PLC0415
 
     return AgentSdkBackend(build(contract))
 
 
+def summarize_failure(run_result) -> str:
+    return fixer.failure_summary(run_result)
+
+
+def repair_until_green(contract, budget: int = 3, doer: str = "reference") -> dict:
+    if doer == "sdk":
+        doer = backend(contract)
+    return fixer.run(repo=contract.repo, budget=budget, doer=doer, research_backend=None)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="../../work/northwind-field-crm")
     parser.add_argument(
-        "--table-only",
-        action="store_true",
-        help="print the role table and stop, so no SDK is needed",
+        "--repo", default=os.environ.get("TARGET_REPO", "../../work/northwind-field-crm")
     )
+    parser.add_argument("--branch", default="broken-pr")
+    parser.add_argument("--doer", default="reference", help="reference | sdk")
+    parser.add_argument("--budget", type=int, default=None)
+    parser.add_argument("--table-only", action="store_true")
     args = parser.parse_args(argv)
 
     try:
         contract = Contract(args.repo)
     except ContractError:
-        # The table is the one thing this folder can show with nothing cloned,
-        # and SPEC.md tells a reader to run it before `task setup`.
-        # `roleplan.plan` already accepts None and falls back to the declared
-        # scope. Anything past the table needs the real repo, so the error
-        # still fires there.
         if not args.table_only:
             raise
         print(f"# no target repo at {args.repo}. Showing the declared scopes.")
@@ -82,9 +63,23 @@ def main(argv: list[str] | None = None) -> int:
     print(roleplan.table(cast(contract)))
     if args.table_only:
         return 0
-    print()
-    print(build(contract))
-    return 0
+
+    doer = args.doer
+    if doer == "sdk":
+        doer = backend(contract)
+    trace = fixer.run(
+        repo=args.repo,
+        doer=doer,
+        branch=args.branch,
+        budget=args.budget,
+        research_backend=None,
+    )
+    print(f"gate: {trace['gate']}")
+    print(f"reason: {trace['reason']}")
+    if trace.get("comment"):
+        print()
+        print(trace["comment"])
+    return 0 if trace.get("green") else 1
 
 
 if __name__ == "__main__":

@@ -1,32 +1,19 @@
-"""The five roles, as LangChain Deep Agents subagents.
+"""Research roles as LangChain Deep Agents subagents.
 
-Deep Agents scopes by handing each subagent its own tool list. A subagent can
-only call what it was given, so the judge is separated the same way it is in
-every other runtime: it holds no tool that writes.
-
-Path scope needs one more step. The write tool itself checks the scope before
-it touches the disk, which is the same idea as the Agent SDK's PreToolUse hook
-moved inside the tool.
-
-Nothing here calls a model. `subagents_for` returns configuration.
+Researcher: search only. Writer: briefs only. Judge: read only.
+The orchestrator never sees raw search dumps. It sees a summary.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from write_scope import ScopeViolation, WriteScope
 from roleplan import DEFAULT_LOOP, RolePlan, plan
+from write_scope import ScopeViolation, WriteScope
 
 
 def scoped_write_tool(repo: Path, role: RolePlan):
-    """A write tool that refuses a path outside this role's scope.
-
-    Returning the refusal as text, rather than raising, is deliberate. An
-    unformatted exception string in an agent's context tends to start a retry
-    loop. A short sentence that names the scope tends to change the next action.
-    """
-    from langchain.tools import tool  # noqa: PLC0415  (optional dependency)
+    from langchain.tools import tool  # noqa: PLC0415
 
     scope = WriteScope(allow=list(role.allow), deny=list(role.deny))
     allowed = ", ".join(role.allow) or "nothing"
@@ -47,7 +34,7 @@ def scoped_write_tool(repo: Path, role: RolePlan):
 
 
 def read_tool(repo: Path):
-    from langchain.tools import tool  # noqa: PLC0415  (optional dependency)
+    from langchain.tools import tool  # noqa: PLC0415
 
     @tool
     def read_file(path: str) -> str:
@@ -60,15 +47,30 @@ def read_tool(repo: Path):
     return read_file
 
 
-def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
-    """One Deep Agents subagent per role in this loop's cast, with its own tools."""
-    repo = Path(contract.repo)
+def search_tool(backend):
+    """One search call through the tool boundary. The loop never learns which backend."""
+    from langchain.tools import tool  # noqa: PLC0415
+
+    @tool
+    def search(question: str) -> str:
+        """Search through the research boundary. Returns answer plus citations."""
+        finding = backend.search(question)
+        cites = " ".join(finding.citations) or "(no citations)"
+        return f"{finding.answer}\nCITATIONS: {cites}"
+
+    return search
+
+
+def subagents_for(contract, loop: str = DEFAULT_LOOP, backend=None) -> list[dict]:
+    repo = Path(contract.repo) if contract is not None else Path(".")
     reader = read_tool(repo)
     out = []
     for role in plan(contract, loop).values():
         if role.name == "orchestrator":
             continue
         tools = [reader]
+        if role.name == "researcher" and backend is not None:
+            tools.append(search_tool(backend))
         if role.can_write:
             tools.append(scoped_write_tool(repo, role))
         out.append(
@@ -82,8 +84,15 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
     return out
 
 
-def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = "anthropic:claude-sonnet-5"):
-    """The orchestrator, holding the subagents and nothing that writes."""
-    from deepagents import create_deep_agent  # noqa: PLC0415  (optional dependency)
+def build_agent(
+    contract,
+    loop: str = DEFAULT_LOOP,
+    model: str = "anthropic:claude-sonnet-5",
+    backend=None,
+):
+    from deepagents import create_deep_agent  # noqa: PLC0415
 
-    return create_deep_agent(model=model, subagents=subagents_for(contract, loop))
+    return create_deep_agent(
+        model=model,
+        subagents=subagents_for(contract, loop, backend=backend),
+    )

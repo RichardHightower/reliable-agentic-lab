@@ -1,0 +1,23 @@
+{
+  "sqlalchemy nullable datetime column": {
+    "question": "sqlalchemy nullable datetime column",
+    "answer": "Use DateTime(timezone=True) with nullable=True on the Column. Existing rows stay NULL.",
+    "citations": [
+      "https://docs.sqlalchemy.org/en/20/core/types.html"
+    ]
+  },
+  "sqlalchemy nullable datetime column common mistake": {
+    "question": "sqlalchemy nullable datetime column common mistake",
+    "answer": "Do not use server_default=func.now() if the field must stay optional. That fills every row.",
+    "citations": [
+      "https://docs.sqlalchemy.org/en/20/core/defaults.html"
+    ]
+  },
+  "sqlalchemy nullable datetime column how to verify": {
+    "question": "sqlalchemy nullable datetime column how to verify",
+    "answer": "Insert a row with due_date omitted and assert the stored value is None.",
+    "citations": [
+      "https://docs.sqlalchemy.org/en/20/orm/quickstart.html"
+    ]
+  }
+}

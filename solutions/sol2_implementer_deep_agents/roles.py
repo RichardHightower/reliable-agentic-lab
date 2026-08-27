@@ -1,32 +1,25 @@
-"""The five roles, as LangChain Deep Agents subagents.
+"""The five implementer roles, as LangChain Deep Agents subagents.
 
 Deep Agents scopes by handing each subagent its own tool list. A subagent can
 only call what it was given, so the judge is separated the same way it is in
 every other runtime: it holds no tool that writes.
 
-Path scope needs one more step. The write tool itself checks the scope before
-it touches the disk, which is the same idea as the Agent SDK's PreToolUse hook
-moved inside the tool.
-
-Nothing here calls a model. `subagents_for` returns configuration.
+Path scope lives inside the write tool. Python still owns the red gate and
+the Pass / Retry / Escalate decision. The model never counts its own retries.
 """
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
-from write_scope import ScopeViolation, WriteScope
 from roleplan import DEFAULT_LOOP, RolePlan, plan
+from write_scope import ScopeViolation, WriteScope
 
 
 def scoped_write_tool(repo: Path, role: RolePlan):
-    """A write tool that refuses a path outside this role's scope.
-
-    Returning the refusal as text, rather than raising, is deliberate. An
-    unformatted exception string in an agent's context tends to start a retry
-    loop. A short sentence that names the scope tends to change the next action.
-    """
-    from langchain.tools import tool  # noqa: PLC0415  (optional dependency)
+    """A write tool that refuses a path outside this role's scope."""
+    from langchain.tools import tool  # noqa: PLC0415
 
     scope = WriteScope(allow=list(role.allow), deny=list(role.deny))
     allowed = ", ".join(role.allow) or "nothing"
@@ -47,7 +40,7 @@ def scoped_write_tool(repo: Path, role: RolePlan):
 
 
 def read_tool(repo: Path):
-    from langchain.tools import tool  # noqa: PLC0415  (optional dependency)
+    from langchain.tools import tool  # noqa: PLC0415
 
     @tool
     def read_file(path: str) -> str:
@@ -58,6 +51,26 @@ def read_tool(repo: Path):
         return target.read_text(encoding="utf-8")
 
     return read_file
+
+
+def run_tests_tool(repo: Path):
+    """Mechanical. The orchestrator may run tests. It may not edit them."""
+    from langchain.tools import tool  # noqa: PLC0415
+
+    @tool
+    def run_tests() -> str:
+        """Run `task test` in the target repo and return the last 2000 characters."""
+        proc = subprocess.run(
+            ["task", "test"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        body = (proc.stdout or "") + (proc.stderr or "")
+        return f"exit {proc.returncode}\n{body[-2000:]}"
+
+    return run_tests
 
 
 def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
@@ -83,7 +96,12 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
 
 
 def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = "anthropic:claude-sonnet-5"):
-    """The orchestrator, holding the subagents and nothing that writes."""
-    from deepagents import create_deep_agent  # noqa: PLC0415  (optional dependency)
+    """The orchestrator. Holds `task` plus `run_tests`. Holds no write tool."""
+    from deepagents import create_deep_agent  # noqa: PLC0415
 
-    return create_deep_agent(model=model, subagents=subagents_for(contract, loop))
+    repo = Path(contract.repo)
+    return create_deep_agent(
+        model=model,
+        tools=[run_tests_tool(repo)],
+        subagents=subagents_for(contract, loop),
+    )

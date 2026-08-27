@@ -1,18 +1,14 @@
-"""A `loops/doers.Backend` implementation that wraps a Deep Agents agent.
+"""A `doers.Backend` for this runtime port, copied flat from `loops/doers.py`.
 
-`loops/doers.py`'s `build(spec)` now passes an already-built `Backend` object
-through unchanged, which is what lets a runtime port plug in its own doer
-without `loops/doers.py` ever importing it. This is that doer, for research.
+`implementer.run()` in the reference loop takes any object shaped like
+`Backend`: a `.name` and a `.run(*, repo, prompt, allow) -> DoerResult`. This
+folder is standalone, so it does not import `loops.doers` for that shape, it
+restates the two small pieces it needs and wraps the Deep Agents graph
+behind them.
 
-    agent = roles.build_agent(contract, loop=LOOP)
-    backend = DeepAgentsBackend(agent)
-    result = backend.run(repo=repo, prompt=prompt, allow=role.allow)
-
-ponytail: research produces a brief, not a code diff, so `wrote` is usually
-empty here (the writer subagent lands `brief.md` under `work/research/**`,
-which this reports if the agent actually touches it). A no-op stub would
-satisfy the interface too; this version still tracks real file changes
-because the shape costs nothing extra to fill in honestly.
+`deepagents` is not installed in this environment. The import stays inside
+`build_agent()` (already true in `roles.py`), so `harness.py --table-only`
+keeps working without it.
 """
 
 from __future__ import annotations
@@ -41,21 +37,13 @@ class Backend:
 
 def _changed_files(repo: Path) -> set[str]:
     out = subprocess.run(
-        ["git", "diff", "--name-only"],
-        cwd=repo,
-        text=True,
-        capture_output=True,
-        check=False,
+        ["git", "diff", "--name-only"], cwd=repo, text=True, capture_output=True, check=False
     )
-    return set(out.stdout.split())
+    return {line.strip() for line in out.stdout.splitlines() if line.strip()}
 
 
 class DeepAgentsBackend(Backend):
-    """Invokes a built Deep Agent (`roles.build_agent(...)`) and reports what changed.
-
-    The `deepagents`/`langchain` import happens inside `roles.build_agent`, not
-    here, so constructing this backend needs no SDK either, same as `roles.py`.
-    """
+    """Runs one role's prompt through the Deep Agents graph this folder builds."""
 
     name = "deep_agents"
 
@@ -68,17 +56,7 @@ class DeepAgentsBackend(Backend):
             result = self.agent.invoke({"messages": [{"role": "user", "content": prompt}]})
             after = _changed_files(repo)
             scope = WriteScope(allow=allow)
-            wrote = [path for path in sorted(after - before) if scope.permits(path)]
-            return DoerResult(wrote=wrote, output=str(result)[-4000:])
-        except Exception as exc:  # noqa: BLE001  (mirrors CliBackend.run's own catch-all)
-            return DoerResult(ok=False, output=f"deep agents backend failed: {exc}")
-
-
-if __name__ == "__main__":
-    # No SDK, no live call: only the shape and the diff-snapshot helper.
-    backend = DeepAgentsBackend(agent=None)
-    assert backend.name == "deep_agents"
-    assert isinstance(_changed_files(Path(__file__).parent), set)
-    result = DoerResult()
-    assert result.wrote == [] and result.ok is True
-    print("ok")
+            wrote = sorted(path for path in (after - before) if scope.permits(path))
+            return DoerResult(wrote=wrote, output=str(result))
+        except Exception as exc:  # noqa: BLE001  (mirrors CliBackend.run: never raise, report it)
+            return DoerResult(ok=False, output=f"deep_agents backend failed: {exc}")

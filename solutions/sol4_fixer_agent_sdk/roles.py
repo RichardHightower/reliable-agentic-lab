@@ -108,7 +108,7 @@ def options_for(contract, loop: str = DEFAULT_LOOP):
         # Derived, not restated. A loop whose cast holds WebSearch needs it in
         # this list, and a loop whose cast writes nothing must not get Write.
         allowed_tools=sorted({tool for role in roles.values() for tool in role.tools}),
-        permission_mode="dontAsk",
+        permission_mode="acceptEdits",
         hooks={"PreToolUse": hooks},
         # A subagent inherits the project's MCP servers only with this set.
         setting_sources=["project"],

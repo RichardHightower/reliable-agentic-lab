@@ -1,68 +1,34 @@
-# Spec. Lab 3. Research Assistant over MCP, on LangChain Deep Agents
+# Spec. Lab 3. Research assistant on LangChain Deep Agents
 
-The same loop, in a different runtime. The point is not that it runs. The point
-is that the rubric, the red gate, the write scope, and the exits did not have to
-change to make it run.
+A question in, a cited brief out. LangChain's own Deep Agents quickstart is a
+research agent. This folder is that shape pointed at our tool boundary.
 
-## The cast for this loop
+## Cast
 
-- `orchestrator`
-- `researcher`
-- `writer`
-- `judge`
+orchestrator, researcher, writer, judge.
 
-`solutions/roleplan.py` is where that list lives. Read it there. Do not restate
-a scope in this folder.
+Researcher: search only. Isolated context. Writer: `brief.md` only. Judge:
+`check_brief` in Python. Citations are arithmetic.
 
-## How this runtime enforces scope
+## Tool boundary
 
-Deep Agents scopes by handing each subagent its own tool list. A subagent can
-only call what it was given. Path scope moves inside the write tool, which
-checks the scope before it touches the disk.
+One function. Three backends. The loop cannot tell which one answered.
 
-## Build it step by step
+- context7 / Perplexity when a key exists
+- the agent's WebSearch
+- `fixtures/research.json` when the room has no wifi
 
-1. Install the runtime.
+Cannot merge, deploy, or edit the CRM.
 
-   ```bash
-   pip install -r requirements-takehome.txt
-   ```
+Three exits: brief grounded; search budget spent; no source found, escalate.
 
-2. Read the cast before you configure anything.
-
-   ```bash
-   cd solutions/sol3_research_deep_agents
-   python loop.py --table-only
-   ```
-
-   The judge must print `no` in the writes column. If it prints `yes`, stop.
-   Nothing downstream is worth building on that.
-
-3. Translate the cast into this runtime, one role at a time. `cast(contract)`
-   returns a `RolePlan` per role, carrying the tools, the allow list, and the
-   deny list. `build(contract)` turns those into the runtime's own objects.
-
-4. Give the writing roles their path check. A role holding `Edit` or `Write`
-   without a path check can reach any file in the repo, and the first thing an
-   agent under pressure reaches for is the failing test.
-
-5. Print the configuration and read it.
-
-   ```bash
-   python loop.py
-   ```
-
-## Verify
+## Run
 
 ```bash
-task test -- loops/tests/test_runtime_ports.py
+cd solutions/sol3_research_deep_agents
+python3 -m pytest tests -q
+python3 loop.py --table-only
+python3 loop.py --question "sqlalchemy nullable datetime column" --backend fixture
 ```
 
-Those checks need no SDK and no key. They assert that this port and the
-in-process roles read the same table, and that the judge holds no write tool in
-either.
-
-## What this folder is not
-
-It is not a second loop engine. `loops/` holds the loop, and porting it must not
-require changing `loops/`. If it does, the design leaked.
+Saturday still fills `plan_questions` and `check_brief` in the lab folder.
