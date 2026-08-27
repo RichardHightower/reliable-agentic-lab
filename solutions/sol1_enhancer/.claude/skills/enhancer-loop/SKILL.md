@@ -42,9 +42,16 @@ Parse from the invocation text after `/enhancer-loop`:
 Skip this step if the invocation named `--ticket`; act on that one ticket
 only.
 
-Otherwise, list `<repo>/tickets/*.md`, excluding any `*.ready.md` file, and
-read the frontmatter of each. Keep the ones with `state: draft` and
-`loop: enhancer`. Run steps 1 to 8 for each one found, in any order.
+Otherwise, list `<repo>/tickets/*.md`, excluding any `*.ready.md` file and
+any `*.enhancer-candidate.md` file, and read the frontmatter of each. Keep
+the ones with `state: draft` and `loop: enhancer`. Run steps 1 to 8 for each
+one found, in any order.
+
+A candidate is the Doer's unjudged draft from step 7, and step 7 deletes it
+again. A run that dies in between leaves one behind, carrying the real
+ticket's `state: draft` and `loop: enhancer` frontmatter. A glob that does
+not exclude it hands the next run a second copy of a ticket that no Judge
+ever accepted.
 
 ## Setup, once per run: read config.json
 
@@ -63,7 +70,8 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    `<repo>/.harness/last-enhancer-<id>.json` if that file exists:
    `{github_issue, last_comment_id, round, previous_signature}`. If it does
    not exist, this is the ticket's first poll: `round` starts at 0 and
-   `previous_signature` is null.
+   `previous_signature` is null. `last_comment_id` stays null, or absent,
+   until some poll actually uses a comment; treat null and absent the same.
 
 2. Find or create the ticket's GitHub issue.
 
@@ -77,17 +85,26 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      Write the returned issue number into the ticket's frontmatter as
      `github_issue: <number>`, and into the state file.
 
-3. Get the newest comment, if there is one.
+3. Get the newest comment, if there is one. Whichever branch below applies,
+   note that comment's id: step 6 and step 8 write it back into the state
+   file, and a poll that never records the id it acted on will act on the
+   same comment again on the next poll, and on every poll after that.
 
-   - If this is the ticket's first poll (step 1 found no state file): there
-     is no comment yet, and none is needed. A fresh ticket always gets one
-     round, so the human has something to react to; skip straight to step
-     5 with no comment.
-   - Otherwise, if the invocation named `--simulate-comment "<text>"`, treat
-     `<text>` as the newest comment and skip the `gh` call below.
+   - If the invocation named `--simulate-comment "<text>"`: there is no
+     GitHub comment and so no GitHub id. The id is the literal `sim:`
+     followed by the exact `<text>`, so the same simulated text always
+     produces the same id. If that id equals `last_comment_id`, this poll
+     has no new comment: stop here for this ticket (no-op, does not count as
+     a round). Otherwise treat `<text>` as the newest comment, and skip the
+     `gh` call below.
+   - Otherwise, if this is the ticket's first poll (step 1 found no state
+     file): there is no comment yet, and none is needed. A fresh ticket
+     always gets one round, so the human has something to react to; skip
+     straight to step 5 with no comment and no comment id.
    - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq 'sort_by(.id) | .[-1] | {id, body}'`.
-     If its `id` is not newer than `last_comment_id`, there is no new
-     comment: stop here for this ticket (no-op, does not count as a round).
+     The id is that comment's numeric `id`. If it is not newer than
+     `last_comment_id`, there is no new comment: stop here for this ticket
+     (no-op, does not count as a round).
 
 4. If the issue already carries `needs-human`, this ticket already reached a
    stable-failure or budget escalation on an earlier poll: stop here, wait
@@ -114,7 +131,11 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      human commented something other than `LGTM` on an already-complete
      ticket, or this is the first poll and the ticket somehow already meets
      the rubric): post an issue comment saying it looks ready and is
-     waiting for `LGTM`, and stop here without calling the Doer.
+     waiting for `LGTM`. Write the state file with `last_comment_id` set to
+     step 3's comment id, keeping `round` and `previous_signature` as step 1
+     loaded them, then stop here without calling the Doer. This branch never
+     reaches step 8, so it has to record the id itself, or the same comment
+     draws the same reply on every later poll.
    - `ready` is false: nothing finalizes here, whatever the comment says,
      `LGTM` included. `LGTM` is never treated as consumed by a red rubric.
      Continue to step 7, the same as any other round, so the Doer gets a
@@ -160,8 +181,13 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      `gh issue edit <issue> --repo <owner>/<repo> --add-label needs-human`.
      Stop.
    - `stop` is `false`: write the updated state file with
-     `round: round + 1` and `previous_signature` set to this round's
-     signature. This ticket's step ends here, waiting for the next poll.
+     `round: round + 1`, `previous_signature` set to this round's
+     signature, and `last_comment_id` set to step 3's comment id, so the
+     next poll can tell that comment apart from a new one. If this poll used
+     no comment at all (the first-poll branch of step 3), leave
+     `last_comment_id` null or omit it. Never invent an id for a comment
+     that does not exist. This ticket's step ends here, waiting for the next
+     poll.
 
 ## Report, and whether to keep polling
 

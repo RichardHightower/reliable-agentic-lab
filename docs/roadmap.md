@@ -2,7 +2,7 @@
 wiki_key: roadmap
 doc_type: roadmap
 truth_state: current
-source_hash: 9e82efee
+source_hash: 693f8f06
 generated_at: 2026-08-27T17:25:26Z
 git_hash: "043aaf9"
 ---

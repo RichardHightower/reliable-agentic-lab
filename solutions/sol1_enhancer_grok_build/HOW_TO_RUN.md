@@ -117,10 +117,12 @@ grok --always-approve --output-format streaming-json \
   -p "/enhancer-loop --repo ../../work/northwind-field-crm --ticket T001"
 ```
 
-## Two bugs this port fixes
+## Two poll-loop bugs this skill avoids
 
-The Claude Code answer in `solutions/sol1_enhancer/` has both. This one does
-not.
+Both bugs were in the original Claude Code skill. This port and
+`solutions/sol1_enhancer/` fixed them separately and landed on the same
+answer, so both skills are correct now. They are worth knowing, because they
+are the two ways a poll loop quietly stops being a loop.
 
 1. **The state file dropped `last_comment_id`.** Step 3 compares the newest
    comment's id against it, but step 8 wrote back only `round` and
@@ -132,3 +134,6 @@ not.
    only. A run that died after writing `tickets/<id>.enhancer-candidate.md`
    left it behind, and the next run groomed that scratch file as a ticket of
    its own. Step 0 here skips it too.
+
+A third poll on the same simulated comment is the test for the first bug. It
+must report "no new comment" and not count as a round.
