@@ -182,11 +182,19 @@ Persist state per ticket in .harness/last-enhancer-<id>.json:
 {github_issue, last_comment_id, round, previous_signature}.
 
 Keep these protocol rules:
-- Step 2 writes github_issue into the state file on search and create.
+- Step 2 writes github_issue to both the state file and the ticket
+  frontmatter, whether the number was found or freshly created. The
+  frontmatter is the durable record: the LGTM pass deletes the state file,
+  and nothing else in this loop writes that frontmatter entry.
+- Step 2 looks the issue up in this order and stops at the first hit: the
+  state file, the ticket frontmatter, then a title search with --state all.
+  Never --state open: a closed issue is still that ticket's issue, and
+  skipping it opens a second one for the same title. Create only when none
+  of the three found a number.
 - Step 3: sim: plus exact text for --simulate-comment. Persist
   last_comment_id in step 8 and on the ready-but-not-LGTM branch.
 - Ready requires check_fields.py first. LGTM alone cannot set state: ready.
-- Tag every comment this loop posts with <!-- enhancer -->. Step 3 ignores
+- Tag every comment this loop posts with <!-- enhancer-loop -->. Step 3 ignores
   comments that contain that marker. Do not filter by author.
 
 Also create .opencode/command/enhancer-loop.md so `opencode run --command
