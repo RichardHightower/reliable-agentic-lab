@@ -84,7 +84,7 @@ def run(  # noqa: PLR0915
     *,
     repo: str | Path,
     ticket_id: str = "T001",
-    doer: str = "reference",
+    doer: str | doers.Backend = "reference",
     budget: int | None = None,
     write_trace: bool = True,
 ) -> dict:

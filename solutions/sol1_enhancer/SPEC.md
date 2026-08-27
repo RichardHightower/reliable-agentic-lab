@@ -142,7 +142,8 @@ time it needs one:
 Same three as before, now checked per ticket, per poll, not in one long-
 running process:
 
-- The newest comment is `LGTM`: pass.
+- The newest comment is `LGTM` **and** the rubric already reads ready:
+  pass. `LGTM` on a ticket the rubric has not cleared finalizes nothing.
 - Two rounds in a row find exactly the same gaps: escalate, the human has
   not acted and another round will not help.
 - The round budget (3) is spent: escalate.
@@ -159,11 +160,13 @@ running process:
 half of the judge: it takes the agent's `{kind, present_fields}` and
 computes `missing_fields` itself, against this table, rather than trusting
 the model's own claim about what is missing.
+`.claude/skills/enhancer-loop/scripts/check_stop.py` does the same for the
+other two exits: it takes `{round, budget, signature, previous_signature}`
+and computes `{stop, reason}` itself, rather than trusting the skill's own
+read of whether two signatures matched.
 
 ## Known limitations
 
-- The round budget and the stable-failure check are instructions the model
-  follows, not code that stops it.
 - There is no dollar or token spend tracking or cap.
 
 ## Worth reading

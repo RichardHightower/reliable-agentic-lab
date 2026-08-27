@@ -1,6 +1,6 @@
 # Instructions for the instructor
 
-## Before Saturday
+## Before saturday
 
 ```bash
 task setup
@@ -15,6 +15,12 @@ task loop:implementer -- --ticket T001 --doer reference
 task loop:research    -- --question "sqlalchemy nullable datetime column" --backend fixture
 task loop:fixer       -- --doer reference
 ```
+
+`task loop:enhancer` here checks the root `loops/enhancer.py` reference
+engine, not lab 1: lab 1 is a Claude Code plugin and needs an LLM, so
+this no-model-key check does not cover it. Verify lab 1 separately with
+`cd solutions/sol1_enhancer && task run, --ticket T001
+--simulate-comment "..."`.
 
 The fixer needs the target on its broken branch:
 
@@ -56,7 +62,7 @@ anywhere else.
 
 1. **The push gate refusing.** Break a test in the target, ask an agent to push,
    read the refusal aloud.
-2. **The red gate refusing.** `task loop:implementer -- --doer none`. No test was
+2. **The red gate refusing.** `task loop:implementer, --doer none`. No test was
    ever red, so nothing has been proven.
 3. **Swap the object.** Point the implementer at
    `loops/tests/fixtures/node-target`. Same engine, different language.

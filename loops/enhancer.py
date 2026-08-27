@@ -26,7 +26,7 @@ import re
 import time
 from pathlib import Path
 
-from loops import criteria, gates, research, roles
+from loops import criteria, doers, gates, research, roles
 from loops import ticket as tickets
 from loops.contract import Contract
 
@@ -44,6 +44,7 @@ def run(  # noqa: PLR0913, PLR0912, PLR0915
     ticket_id: str = "T001",
     budget: int | None = None,
     incorporate: bool = False,
+    doer: str | doers.Backend | None = None,
     research_backend: research.Backend | None = None,
     write_trace: bool = True,
 ) -> dict:
@@ -118,7 +119,12 @@ def run(  # noqa: PLR0913, PLR0912, PLR0915
             break
         if decision.stop:
             break
-        if incorporate:
+        if doer is not None:
+            # A real backend edits the ticket, the same way implementer.run and
+            # fixer.run already hand work to one. Supersedes --incorporate's
+            # canned fixture copy when a doer is actually given.
+            _doer_edit(target, the_ticket, doer, comment)
+        elif incorporate:
             # Stands in for a human accepting the suggestion between rounds.
             _incorporate(target, the_ticket, folder)
         previous = verdict.signature()
@@ -153,6 +159,24 @@ def _incorporate(repo: Path, the_ticket: tickets.Ticket, folder: str) -> None:
     the_ticket.path.write_text(ready[0].read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def _doer_edit(repo: Path, the_ticket: tickets.Ticket, doer: str | doers.Backend, comment: str) -> None:
+    """Have a real doer backend edit the ticket, scoped to tickets/** (the
+    doer role's write scope, `solutions/roleplan.py`'s `FALLBACK_SCOPE["doer"]`).
+
+    Unlike `_incorporate`'s canned fixture copy, this calls a real backend:
+    a CLI tool, the reference answer, or a runtime port's own Backend, the
+    same way implementer.run and fixer.run already hand work to one.
+    """
+    if the_ticket.path is None:
+        return
+    backend = doers.build(doer)
+    prompt = (
+        f"Edit {the_ticket.path.relative_to(repo)} to address this feedback, "
+        f"and nothing else:\n\n{comment}"
+    )
+    backend.run(repo=repo, prompt=prompt, allow=["tickets/**"])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ticket Enhancer")
     parser.add_argument("--repo", default="work/northwind-field-crm")
@@ -162,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
         "--incorporate",
         action="store_true",
         help="Stand in for a human accepting the suggestion between rounds.",
+    )
+    parser.add_argument(
+        "--doer",
+        default=None,
+        help="A real backend edits the ticket instead: none, reference, "
+        "reference:<ref>, or a CLI tool name. Supersedes --incorporate.",
     )
     parser.add_argument(
         "--research",
@@ -182,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         ticket_id=args.ticket,
         budget=args.budget,
         incorporate=args.incorporate,
+        doer=args.doer,
         research_backend=backend,
     )
     for record in trace["rounds"]:

@@ -71,7 +71,7 @@ def checkout(repo: Path, branch: str) -> None:
 def run(  # noqa: PLR0913, PLR0912, PLR0915
     *,
     repo: str | Path,
-    doer: str = "reference",
+    doer: str | doers.Backend = "reference",
     fix_ref: str = "known-good",
     branch: str | None = None,
     budget: int | None = None,

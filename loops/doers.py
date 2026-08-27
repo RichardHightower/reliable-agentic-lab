@@ -159,8 +159,13 @@ class CliBackend(Backend):
         )
 
 
-def build(spec: str) -> Backend:
-    """`none`, `reference`, `reference:<ref>`, or a tool name."""
+def build(spec: str | Backend) -> Backend:
+    """`none`, `reference`, `reference:<ref>`, a tool name, or an already-built
+    Backend, passed through unchanged. The pass-through is what lets a runtime
+    port (Agent SDK, Deep Agents) plug in its own Backend without this
+    function needing to know it exists."""
+    if isinstance(spec, Backend):
+        return spec
     if spec == "none":
         return NoneBackend()
     if spec.startswith("reference"):

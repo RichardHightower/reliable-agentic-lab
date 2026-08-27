@@ -22,12 +22,14 @@ this folder depends on the repo root or on any other folder outside it.
    ```
 
    This reads `fork_owner` and `repo_name` from `config.json` and clones
-   that repo into `../../work/northwind-field-crm`. If you cannot fork the
-   upstream repo into your own account (GitHub refuses to fork a repo into
-   an account that already owns it), create a plain independent copy
-   instead: `gh repo create <owner>/<name> --public`, clone the upstream,
-   repoint its `origin` at your new repo, and push. The enhancer loop does
-   not care whether the relationship is a real GitHub fork, it only needs a
+   that repo into `../../work/northwind-field-crm`. The upstream
+   `northwind-field-crm` repo is public, so forking it is always possible.
+   The one known edge case: if you cannot fork the upstream repo into your
+   own account (GitHub refuses to fork a repo into an account that
+   already owns it), create a plain independent copy instead:
+   `gh repo create <owner>/<name> --public`, clone the upstream, repoint
+   its `origin` at your new repo, and push. The enhancer loop does not
+   care whether the relationship is a real GitHub fork, it only needs a
    repo with the same `tickets/` layout.
 
 3. Optional: seed a few extra draft tickets, one per kind, beyond the real

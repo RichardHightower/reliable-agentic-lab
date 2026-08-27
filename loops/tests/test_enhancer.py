@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from loops import criteria, gates
+from loops import criteria, doers, gates
 from loops.enhancer import run
 from loops.ticket import parse
 
@@ -89,6 +89,41 @@ def test_the_enhancer_reaches_ready_when_the_human_acts():
     subprocess.run(["git", "clean", "-qfd"], cwd=CRM, check=False)
     try:
         trace = run(repo=CRM, ticket_id="T001", incorporate=True, write_trace=False)
+        assert trace["gate"] == gates.PASS, trace["reason"]
+        assert trace["ready"] is True
+    finally:
+        subprocess.run(["git", "checkout", "-q", "--", "."], cwd=CRM, check=False)
+        subprocess.run(["git", "clean", "-qfd"], cwd=CRM, check=False)
+
+
+class _CopyReadyBackend(doers.Backend):
+    """A stand-in runtime port: same fixture-copy trick as --incorporate,
+    but reached through the doer plug point instead of a hardcoded branch."""
+
+    name = "fake-port"
+
+    def __init__(self, repo: Path, ticket_id: str, folder: str = "tickets"):
+        self._ready = sorted((repo / folder).glob(f"{ticket_id}*.ready.md"))[0]
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+        target = repo / "tickets" / self._ready.name.replace(".ready.md", ".md")
+        target.write_text(self._ready.read_text(encoding="utf-8"), encoding="utf-8")
+        return doers.DoerResult(wrote=[str(target)])
+
+
+@has_crm
+def test_the_enhancer_reaches_ready_through_the_doer_plug_point():
+    """#2: a real Backend, not just --incorporate's canned copy, can drive
+    the enhancer to ready. Proves the new plug point actually plugs in."""
+    subprocess.run(["git", "checkout", "-q", "--", "."], cwd=CRM, check=False)
+    subprocess.run(["git", "clean", "-qfd"], cwd=CRM, check=False)
+    try:
+        trace = run(
+            repo=CRM,
+            ticket_id="T001",
+            doer=_CopyReadyBackend(CRM, "T001"),
+            write_trace=False,
+        )
         assert trace["gate"] == gates.PASS, trace["reason"]
         assert trace["ready"] is True
     finally:

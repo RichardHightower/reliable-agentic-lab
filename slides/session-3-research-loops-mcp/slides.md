@@ -172,7 +172,7 @@ Fill `loop.py`. Two functions: `plan_questions` and `check_brief`.
 
 The question is boring on purpose. This is not "write my next post."
 
-Falling behind is fine: `git checkout done-m3`.
+Falling behind is fine: copy `loop.py` from `solutions/sol3_research/`.
 
 ---
 

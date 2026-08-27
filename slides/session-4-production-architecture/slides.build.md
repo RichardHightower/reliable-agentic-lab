@@ -176,7 +176,7 @@ Fill `loop.py`. Two functions: `summarize_failure` and `repair_until_green`.
 
 Giving up is allowed. Giving up **silently** is the bug.
 
-Falling behind is fine: `git checkout done-m4`.
+Falling behind is fine: copy `loop.py` from `solutions/sol4_fixer/`.
 
 ---
 
@@ -317,7 +317,7 @@ solutions/            the reference, and the code on these slides.
 work/                 the target repo, cloned by task setup.
 ```
 
-Branches `done-m1` through `done-m4` are green. Check one out any time.
+Every `solutions/sol<n>_*` folder is green. Copy from one any time.
 
 ---
 

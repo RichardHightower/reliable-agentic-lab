@@ -418,7 +418,8 @@ task loop:implementer -- --ticket T001 --doer none        # red gate refuses
 
 Fill `harness.py`. Three functions. Nothing else.
 
-Falling behind is fine: `git checkout done-m2` and keep going.
+Falling behind is fine: copy `harness.py` from `solutions/sol2_implementer/`
+and keep going.
 
 ---
 

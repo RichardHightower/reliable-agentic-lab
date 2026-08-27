@@ -13,7 +13,7 @@ Slide s1-17 at 50 minutes.
 
 ---
 
-## s1-01. Title
+## S1-01. title
 
 You are here to engineer a loop, not to collect prompts.
 
@@ -74,8 +74,8 @@ what makes it point at their repo on Monday.
 
 Say the fall-behind rule now, before anyone needs it. Nobody is graded.
 
-`git checkout done-m1` puts a working enhancer in their tree. Say the branch name
-so they hear it once before they need it.
+Copying `solutions/sol1_enhancer/.claude/` in puts a working enhancer in
+their tree. Say it once before they need it.
 
 **You should be at 10 minutes here.** If you are over, cut s1-05 next time.
 
@@ -96,7 +96,7 @@ Everything else on the diagram is plumbing they already know.
 
 ---
 
-## s1-10. Trigger
+## S1-10. trigger
 
 A trigger is outside the model. Today it is a file. In production it is a hook.
 
@@ -115,7 +115,7 @@ cannot argue past a tool it was never given.
 
 ---
 
-## s1-12. Verify
+## S1-12. verify
 
 The judge reports. It does not fix.
 
@@ -125,7 +125,7 @@ green. Module 4 has the evidence. Do not spend it here.
 
 ---
 
-## s1-13. Memory
+## S1-13. memory
 
 Give them the lost-in-the-middle number: more than 30% accuracy drop when the
 fact sits in the middle.
@@ -187,7 +187,7 @@ This is the bridge. Keep it to two minutes.
 
 ---
 
-## s1-19. Break
+## S1-19. break
 
 Say the length: 15 minutes. Say what is next: the harness.
 

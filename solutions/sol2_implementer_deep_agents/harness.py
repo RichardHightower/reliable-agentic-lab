@@ -19,11 +19,10 @@ from __future__ import annotations
 
 import argparse
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops.contract import Contract
-from solutions import roleplan
-from solutions.deep_agents import roles as deep
+from contract import Contract
+import roleplan
+import roles as deep
+from adapter import DeepAgentsBackend
 
 LOOP = "implementer"
 
@@ -45,6 +44,16 @@ def build(contract):
     is why the tests can check the separation without either SDK present.
     """
     return deep.subagents_for(contract, loop=LOOP)
+
+
+def backend(contract) -> DeepAgentsBackend:
+    """A `doers.Backend` that runs a role's prompt through this runtime.
+
+    This is what a driver hands to `loops.implementer.run(doer=...)` in place
+    of the `reference` stand-in, per GitHub issue #2. Needs `deepagents`
+    installed; `build_agent()` is what raises if it is not.
+    """
+    return DeepAgentsBackend(deep.build_agent(contract, loop=LOOP))
 
 
 def main(argv: list[str] | None = None) -> int:

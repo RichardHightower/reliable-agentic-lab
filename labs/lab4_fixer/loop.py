@@ -10,9 +10,7 @@ Read `loops/fixer.py` only if you stall.
 
 from __future__ import annotations
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops.contract import Contract, RunResult
+from contract import Contract, RunResult
 
 
 def summarize_failure(run_result: RunResult) -> str:

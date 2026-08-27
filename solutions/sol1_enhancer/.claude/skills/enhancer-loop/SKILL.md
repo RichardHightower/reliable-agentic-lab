@@ -147,15 +147,21 @@ expects a reply: this skill runs headlessly and cannot wait for one.
 
 8. Compute this round's `missing_fields` signature (the sorted list from
    step 7, the only path that reaches here: step 6's other two branches
-   already stopped). Compare to `previous_signature` from the loaded state.
+   already stopped). Run
+   `python3 .claude/skills/enhancer-loop/scripts/check_stop.py '{"round":
+   round, "budget": 3, "signature": <this round's signature>,
+   "previous_signature": previous_signature}'` to get the authoritative
+   `{stop, reason}`. Do not compare the signatures yourself: the same
+   reason `check_fields.py` computes `ready` instead of trusting the
+   Judge's own claim, a stop condition decided by the skill's own prose
+   is a stop condition a model can talk itself past.
 
-   - Identical, and this is not the first round: escalate.
+   - `stop` is `true`: escalate.
      `gh issue edit <issue> --repo <owner>/<repo> --add-label needs-human`.
      Stop.
-   - `round + 1` reaches the budget (3): escalate the same way. Stop.
-   - Otherwise: write the updated state file with `round: round + 1` and
-     `previous_signature` set to this round's signature. This ticket's step
-     ends here, waiting for the next poll.
+   - `stop` is `false`: write the updated state file with
+     `round: round + 1` and `previous_signature` set to this round's
+     signature. This ticket's step ends here, waiting for the next poll.
 
 ## Report, and whether to keep polling
 

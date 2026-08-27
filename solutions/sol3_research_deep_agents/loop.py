@@ -19,10 +19,8 @@ from __future__ import annotations
 
 import argparse
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from solutions import roleplan
-from solutions.deep_agents import roles as deep
+import roleplan
+import roles as deep
 
 LOOP = "research"
 

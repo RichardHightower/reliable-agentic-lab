@@ -9,9 +9,7 @@ built-in WebSearch tool, or a recorded fixture answered it.
 
 from __future__ import annotations
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops import brief, researcher
+import brief, researcher
 
 
 def plan_questions(question: str) -> list[str]:

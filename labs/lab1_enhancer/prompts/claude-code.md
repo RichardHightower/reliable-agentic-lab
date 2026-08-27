@@ -81,6 +81,29 @@ works.
 
 Run it: `python3 .claude/skills/enhancer-loop/scripts/check_fields.py --demo`
 
+## Prompt 3b: the deterministic stop
+
+`ready` is one exit, decided in code by prompt 3. The other two, budget
+spent and a stable failure, are not: nothing yet stops the skill from
+trusting its own read of "did the signature repeat" instead of computing
+it.
+
+```
+Create .claude/skills/enhancer-loop/scripts/check_stop.py.
+
+It reads a JSON object shaped like {"round": int, "budget": int,
+"signature": [...], "previous_signature": [...] or null} (CLI argument or
+stdin) and prints {"stop": bool, "reason": str or null}. stop is true when
+signature equals previous_signature (not the first round), or when round +
+1 reaches budget. It computes this itself; it does not trust a caller's own
+claim about whether the signatures matched.
+
+Include a --demo mode with a few assert statements I can run to check it
+works.
+```
+
+Run it: `python3 .claude/skills/enhancer-loop/scripts/check_stop.py --demo`
+
 ## Prompt 4: the orchestrator skill
 
 This is the real design work. Describe the shape, let Claude Code write the
@@ -132,10 +155,10 @@ The step, per ticket:
    candidate draft the same way. Only if the candidate's missing_fields is a
    strict improvement, replace the real ticket with it. Either way, post one
    issue comment: what changed, or why the draft did not clear the rubric.
-8. Compare this round's missing-fields signature to the previous one.
-   Identical two rounds running, or the round budget (3) is spent: add
-   "needs-human", stop. Otherwise: persist the updated state, done for this
-   poll.
+8. Run check_stop.py with this round's missing-fields signature, the
+   budget (3), and previous_signature. Do not compare them yourself.
+   stop is true: add "needs-human", stop. stop is false: persist the
+   updated state, done for this poll.
 ```
 
 ## Verify

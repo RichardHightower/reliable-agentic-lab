@@ -20,11 +20,9 @@ from __future__ import annotations
 
 import argparse
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops.contract import Contract
-from solutions import roleplan
-from solutions.agent_sdk import roles as sdk
+import roleplan
+import roles as sdk
+from contract import Contract
 
 LOOP = "fixer"
 
@@ -46,6 +44,16 @@ def build(contract):
     is why the tests can check the separation without either SDK present.
     """
     return sdk.options_for(contract, loop=LOOP)
+
+
+def backend(contract) -> "AgentSdkBackend":
+    """A `doers.Backend` that runs the code_implementer role through this runtime.
+
+    See `adapter.py`. Needs `claude-agent-sdk` only once `.run()` is called.
+    """
+    from adapter import AgentSdkBackend  # noqa: PLC0415  (keeps --table-only free of it)
+
+    return AgentSdkBackend(build(contract))
 
 
 def main(argv: list[str] | None = None) -> int:

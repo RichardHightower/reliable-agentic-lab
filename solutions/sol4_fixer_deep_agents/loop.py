@@ -19,11 +19,9 @@ from __future__ import annotations
 
 import argparse
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops.contract import Contract
-from solutions import roleplan
-from solutions.deep_agents import roles as deep
+import roleplan
+import roles as deep
+from contract import Contract
 
 LOOP = "fixer"
 
@@ -45,6 +43,16 @@ def build(contract):
     is why the tests can check the separation without either SDK present.
     """
     return deep.subagents_for(contract, loop=LOOP)
+
+
+def backend(contract) -> "DeepAgentsBackend":
+    """A `doers.Backend` that runs the code_implementer role through this runtime.
+
+    See `adapter.py`. Needs `deepagents` only once this is called.
+    """
+    from adapter import DeepAgentsBackend  # noqa: PLC0415  (keeps --table-only free of it)
+
+    return DeepAgentsBackend(deep.build_agent(contract, loop=LOOP))
 
 
 def main(argv: list[str] | None = None) -> int:

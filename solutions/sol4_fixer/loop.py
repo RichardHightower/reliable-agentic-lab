@@ -8,10 +8,8 @@ Giving up is allowed. Giving up silently is the bug.
 
 from __future__ import annotations
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops import fixer
-from loops.contract import Contract, RunResult
+import fixer
+from contract import Contract, RunResult
 
 
 def summarize_failure(run_result: RunResult) -> str:

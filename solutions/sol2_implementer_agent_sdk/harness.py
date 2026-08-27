@@ -20,11 +20,10 @@ from __future__ import annotations
 
 import argparse
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops.contract import Contract
-from solutions import roleplan
-from solutions.agent_sdk import roles as sdk
+from contract import Contract
+import roleplan
+import roles as sdk
+from adapter import AgentSdkBackend
 
 LOOP = "implementer"
 
@@ -46,6 +45,16 @@ def build(contract):
     is why the tests can check the separation without either SDK present.
     """
     return sdk.options_for(contract, loop=LOOP)
+
+
+def backend(contract) -> AgentSdkBackend:
+    """A `doers.Backend` that runs a role's prompt through this runtime.
+
+    This is what a driver hands to `loops.implementer.run(doer=...)` in place
+    of the `reference` stand-in, per GitHub issue #2. Needs `claude-agent-sdk`
+    installed; `build()` is what raises if it is not.
+    """
+    return AgentSdkBackend(build(contract))
 
 
 def main(argv: list[str] | None = None) -> int:
