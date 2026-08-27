@@ -22,7 +22,7 @@ import argparse
 
 import roleplan
 import roles as sdk
-from contract import Contract
+from contract import Contract, ContractError
 
 LOOP = "fixer"
 
@@ -66,7 +66,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    contract = Contract(args.repo)
+    try:
+        contract = Contract(args.repo)
+    except ContractError:
+        # The table is the one thing this folder can show with nothing cloned,
+        # and SPEC.md tells a reader to run it before `task setup`.
+        # `roleplan.plan` already accepts None and falls back to the declared
+        # scope. Anything past the table needs the real repo, so the error
+        # still fires there.
+        if not args.table_only:
+            raise
+        print(f"# no target repo at {args.repo}. Showing the declared scopes.")
+        contract = None
+
     print(roleplan.table(cast(contract)))
     if args.table_only:
         return 0
