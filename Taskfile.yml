@@ -72,6 +72,12 @@ tasks:
     desc: Groom a draft ticket until it is ready. Module 1.
     cmds: ['{{.PY}} -m loops.enhancer --repo {{.TARGET}} {{.CLI_ARGS}}']
 
+  loop:enhancer:plugin:
+    desc: One poll-and-act step over every open ticket, using the Claude Code plugin instead of the Python engine.
+    dir: solutions/sol1_enhancer
+    cmds:
+      - claude -p "/enhancer-loop --repo {{.ROOT_DIR}}/{{.TARGET}} {{.CLI_ARGS}}"
+
   loop:implementer:
     desc: Turn a ready ticket into a reviewed pull request. Module 2.
     cmds: ['{{.PY}} -m loops.implementer --repo {{.TARGET}} {{.CLI_ARGS}}']

@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(../../loops/**)",
+      "Edit(../../scripts/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Write|Edit|Grep|Glob|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); jq -e \".debug == true\" config.json >/dev/null 2>&1 && printf \"%s -> %s %s\\n\" \"$(date -u +%FT%TZ)\" \"$(echo \"$INPUT\" | jq -r .tool_name)\" \"$(echo \"$INPUT\" | jq -c .tool_input | cut -c1-200)\" >> debug.log; true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read|Write|Edit|Grep|Glob|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); jq -e \".debug == true\" config.json >/dev/null 2>&1 && printf \"%s <- %s\\n\" \"$(date -u +%FT%TZ)\" \"$(echo \"$INPUT\" | jq -r .tool_name)\" >> debug.log; true"
+          }
+        ]
+      }
+    ]
+  }
+}

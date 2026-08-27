@@ -26,3 +26,11 @@ solutions/**/work/
 
 # Saved attempts from FALL-BEHIND.md step 2.
 labs/**/*.my-attempt
+
+# Each attendee's fork, from config.json.example.
+labs/**/config.json
+solutions/**/config.json
+
+# Debug log from the enhancer-loop hooks, when config.json sets debug: true.
+labs/**/debug.log
+solutions/**/debug.log

@@ -14,14 +14,16 @@
 set -euo pipefail
 
 BASE="${1:-$(git rev-parse --abbrev-ref HEAD)}"
-SLUGS=(lab1_enhancer lab2_implementer lab3_research lab4_fixer)
+# lab1_enhancer is excluded: it is a hand-built Claude Code plugin now, not a
+# generated Python stub, so scripts/build_labs.py no longer knows it.
+SLUGS=(lab2_implementer lab3_research lab4_fixer)
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "the tree is dirty. commit or stash first." >&2
   exit 1
 fi
 
-for n in 1 2 3 4; do
+for n in $(seq 1 ${#SLUGS[@]}); do
   filled=("${SLUGS[@]:0:$n}")
   echo "== done-m$n: ${filled[*]}"
 

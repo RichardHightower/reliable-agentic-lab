@@ -1,63 +1,26 @@
 # Prompt for Codex
 
-You do not need Codex. Any of the four tools works. See
-[labs/HOW-TO-RUN.md](../../HOW-TO-RUN.md).
+This lab currently ships a Claude Code plugin only. A Codex-native
+equivalent is follow-up work, not built yet, so there is no `loop.py` here
+for Codex to fill and nothing in this folder for Codex to build.
 
-Run it from this folder:
+Pick one of these for this hour:
 
-```bash
-cd labs/lab1_enhancer
-codex exec "$(cat prompts/codex.md)"
-```
+1. Copy the finished plugin in, the same way [FALL-BEHIND.md](../FALL-BEHIND.md) does:
 
-Interactive: run `codex` here and paste everything below the line.
+   ```bash
+   mkdir -p .claude/agents .claude/skills
+   cp -r ../../solutions/sol1_enhancer/.claude/agents/* .claude/agents/
+   cp -r ../../solutions/sol1_enhancer/.claude/skills/* .claude/skills/
+   cp ../../solutions/sol1_enhancer/config.json.example .
+   ```
 
----
+   Then set up your fork's `config.json` (see [README.md](../README.md)) and
+   run it with Claude Code: `task run -- --ticket T001`.
 
-Fill `loop.py` in this folder. Fill only that file.
+2. Watch or pair on the Claude Code build. See
+   [prompts/claude-code.md](claude-code.md).
 
-A vague ticket in, a ready contract out.
+## Read what you copied
 
-## What to implement
-
-- `judge_ticket(ticket)`
-- `decide_next(verdict, iteration, previous)`
-
-## The roles
-
-In this loop, an orchestrator owns the budget and the exits, a doer edits the ticket body and nothing else, and a judge scores the ticket against criteria for its kind.
-
-Write scope is not advice. It is declared in `.loop.yml` in the target repo and
-enforced at the tool boundary. The code implementer cannot weaken a test to
-reach green, because it holds no write path to one.
-
-## When the loop stops
-
-There are three exits and no fourth: pass, retry, escalate.
-
-1. the ticket is ready
-2. the budget is spent
-3. two rounds in a row find exactly the same gaps, which means the human has not acted and another round will not help
-
-## Verify
-
-```bash
-task loop:enhancer -- --ticket T001
-```
-
-## The gate
-
-This lab writes no code, so the push gate does not fire. You meet it in Module 2.
-
-## Rules
-
-- Fill only `loop.py`. Do not edit anything under `loops/`.
-- Do not edit the target repo's tests to make something pass.
-- Stop at the documented exit. Do not add a fourth one.
-- If you stall, read loops/enhancer.py and loops/criteria.py. It is the answer, not a hint.
-
-## Worth reading
-
-- `loops/criteria.py`
-- `loops/gates.py`
-- `loops/ticket.py`
+`solutions/sol1_enhancer/SPEC.md` is the full design for this lab.
