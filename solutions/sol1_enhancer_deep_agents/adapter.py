@@ -60,5 +60,7 @@ class DeepAgentsBackend(Backend):
             result = self.agent.invoke({"messages": [{"role": "user", "content": prompt}]})
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]
             return DoerResult(wrote=wrote, output=str(result))
-        except Exception as exc:  # noqa: BLE001  (graceful failure, mirrors CliBackend.run)
+        # Graceful failure, mirrors CliBackend.run. A backend that raises
+        # takes the loop down with it.
+        except Exception as exc:
             return DoerResult(ok=False, output=f"deep agents backend failed: {exc}")
