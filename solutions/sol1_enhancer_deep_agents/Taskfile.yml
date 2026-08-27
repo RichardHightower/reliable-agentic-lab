@@ -1,12 +1,25 @@
-# Standalone. No dependency on the root Taskfile. Needs no SDK installed:
-# --table-only prints the role table and stops.
 version: '3'
+
+# Task loads these for every task below. The repo root `.env` is the normal
+# place for a key. The folder file is optional and fills in only what the
+# root does not set, because Task lets the FIRST file that defines a
+# variable win. A missing file is fine, and nothing here needs one.
+dotenv: ['../../.env', '.env']
+
+# Standalone. No includes, no shared vars, nothing outside this folder.
+# `python3` here means the venv you activated. See SPEC.md.
 
 tasks:
   default:
     cmds: [task --list]
 
   test:
+    desc: Run this folder's unit tests. No SDK and no target repo needed.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 -m pytest tests -q
+
+  table:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
