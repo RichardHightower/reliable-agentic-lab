@@ -5,9 +5,9 @@ interactive session watching it. The loop polls the ticket's GitHub issue for
 comments and acts on what it finds.
 
 The artifact is a Grok Build **project plugin** named `ticket-enhancer`, in
-`.grok/plugins/ticket-enhancer/`. It holds one skill, two agents, and a hooks
-file. This folder is standalone: it depends on nothing in the repository root
-and can be lifted out as its own repository.
+`.grok/plugins/ticket-enhancer/`. It holds one skill and two agents. This
+folder is standalone: it depends on nothing in the repository root and can be
+lifted out as its own repository.
 
 `solutions/sol1_enhancer/` is the same loop built as a Claude Code plugin.
 Same three roles, same rubric, same two gate scripts.

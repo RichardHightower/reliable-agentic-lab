@@ -42,18 +42,120 @@ quietly does nothing.
 Grok records trust against the **git root**, not this folder. Trust the clone
 once and every solution folder inside it is covered.
 
-Grok 1.0.5 has no command-line way to grant trust. Do it through the
-interactive UI:
+Grok 1.0.5 has no command-line way to grant trust. A coding agent cannot do it
+for you either, because it needs a human click. Do it yourself, in a real
+terminal:
 
-1. `cd solutions/sol1_enhancer_grok_build`
-2. Run `grok` with no arguments.
+1. Change to this folder.
+
+   ```bash
+   cd solutions/sol1_enhancer_grok_build
+   ```
+
+2. Start Grok with no arguments.
+
+   ```bash
+   grok
+   ```
+
 3. Accept the trust prompt for the folder.
-4. Type `/plugins trust` if the prompt did not already cover the plugin, then
-   quit.
-5. Run `task trust` again. The `disabled` marker is gone.
+4. If `grok inspect` still says `disabled`, type `/plugins trust` in that same
+   session.
+5. Quit Grok.
+6. Confirm it took.
+
+   ```bash
+   grok inspect
+   ```
+
+   You want `Project trusted: yes` and `ticket-enhancer (project, enabled)`.
+
+Do not hand-edit `~/.grok/trusted_folders.toml`. Let Grok write it.
 
 The same trust switches on the debug hooks in
 `.grok/plugins/ticket-enhancer/hooks/hooks.json`.
+
+## Trust alone is not enough on 1.0.5, so this folder ships a shim
+
+A trusted project plugin still contributes **only its hooks** on grok 1.0.5.
+Its skill and its agents never register.
+
+`grok inspect` shows the trap plainly. The **Plugins** section counts the
+components. The **Skills** and **Agents** sections do not list them:
+
+```
+Plugins (44)
+└ ticket-enhancer (project, enabled)       1 skills, 1 agents, hooks
+```
+
+`(project, enabled)` means "not disabled". It does not mean loaded. Only a
+plugin installed through `grok plugin install`, and named in `[plugins]
+enabled` in `~/.grok/config.toml`, gets its skills and agents registered. That
+key is user-global. **Grok 1.0.5 has no project-level equivalent**, so there is
+nothing this repository can commit to switch registration on.
+
+`grok plugin enable ticket-enhancer` does not help either. It only knows
+installed plugins:
+
+```
+Error: Plugin "ticket-enhancer" not found.
+```
+
+Four load paths were tested on 1.0.5. Every one loaded the hooks. None loaded
+the skill or the agents:
+
+| Load path | Skill and agents register? |
+|---|---|
+| `.grok/plugins/ticket-enhancer/` in this folder | no |
+| the same plugin at the git root | no |
+| a symlink into `~/.grok/plugins/` | no |
+| a duplicate manifest in `.claude-plugin/plugin.json` | no |
+
+### The shim
+
+Project-scoped `.grok/skills/` and `.grok/agents/` do register. This folder
+ships three symlinks that point into the plugin:
+
+```
+.grok/skills/enhancer-loop      -> ../plugins/ticket-enhancer/skills/enhancer-loop
+.grok/agents/enhancer-judge.md  -> ../plugins/ticket-enhancer/agents/enhancer-judge.md
+.grok/agents/enhancer-doer.md   -> ../plugins/ticket-enhancer/agents/enhancer-doer.md
+```
+
+Recreate them from this folder with:
+
+```bash
+mkdir -p .grok/skills .grok/agents
+ln -sfn ../plugins/ticket-enhancer/skills/enhancer-loop .grok/skills/enhancer-loop
+ln -sfn ../plugins/ticket-enhancer/agents/enhancer-judge.md .grok/agents/enhancer-judge.md
+ln -sfn ../plugins/ticket-enhancer/agents/enhancer-doer.md .grok/agents/enhancer-doer.md
+```
+
+Nothing is copied. The plugin stays the artifact and the single source of
+truth, so editing a file under `.grok/plugins/` changes what runs on the next
+poll. Delete the symlinks the day project plugins register their own
+components.
+
+### Check the names, not the counts
+
+The counts in the **Plugins** line come from counting directories, so
+`1 agents` shows even when two agent files are present and none loaded. Never
+read them as proof. Confirm registration by name before you trust a poll:
+
+```bash
+grok inspect | grep -E "enhancer-loop|enhancer-judge|enhancer-doer"
+```
+
+You want exactly three lines:
+
+```
+└ enhancer-loop      project
+└ enhancer-judge     project
+└ enhancer-doer      project
+```
+
+If any is missing, `spawn_subagent` cannot reach that role and the poll fails
+partway through.
 
 ## Three things that look like the answer and are not
 
@@ -98,6 +200,37 @@ that way.
 table calls it `task`. The README is wrong on this build, the same way it is
 wrong about `--plugin-dir`. A probe run on 1.0.5 named `spawn_subagent`, and
 that string is in the binary.
+
+## Plugin hooks never fire, so this plugin ships none
+
+The Claude Code answer logs one line per tool call to `debug.log`, driven by
+`PreToolUse` and `PostToolUse` hooks. That would be useful here, because
+`grok -p` prints nothing until the whole run finishes and a working run looks
+hung.
+
+It does not work on 1.0.5. A plugin `hooks/hooks.json` is the one component
+that *does* register from an untrusted-then-trusted project plugin, and
+`grok inspect` lists it under **Hooks**:
+
+```
+└ file                plugin: ticket-enhancer
+```
+
+It still never runs. A probe hook that wrote unconditionally to
+`/tmp/grok-hook-probe.log` produced no file across a run that called
+`list_dir`. An empty `debug.log` next to a working loop is worse than no
+`debug.log` at all, because it reads as "the skill never started".
+
+This plugin therefore ships no `hooks/` directory. For live progress, run the
+poll yourself with streaming output instead:
+
+```bash
+grok --always-approve --output-format streaming-json \
+  -p "/enhancer-loop --repo ../../work/northwind-field-crm --ticket T001"
+```
+
+`config.json` keeps its `debug` key so the shape matches the Claude Code
+answer. Nothing reads it here.
 
 ## Grok adds MCP tools to an agent allowlist
 

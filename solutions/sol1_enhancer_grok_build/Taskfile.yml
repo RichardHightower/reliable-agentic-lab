@@ -9,6 +9,10 @@ vars:
   # the invoking process's cwd being exactly right, and when it is not, this
   # plugin can end up reading and writing a different checkout entirely, one
   # that happens to also have a work/northwind-field-crm.
+  # Resolved, so it holds no "..". A deny glob is matched against a real path,
+  # and a literal ".." segment in the pattern never matches one.
+  LAB_ROOT:
+    sh: cd "{{.TASKFILE_DIR}}/../.." && pwd
   TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
 
 tasks:
@@ -56,9 +60,9 @@ tasks:
       # flag after it and grok errors with "a value is required for --single".
       - >-
         grok --always-approve
-        --deny "Edit({{.TASKFILE_DIR}}/../../loops/**)"
-        --deny "Edit({{.TASKFILE_DIR}}/../../scripts/**)"
-        --deny "Edit({{.TASKFILE_DIR}}/../../work/**/tests/**)"
+        --deny "Edit({{.LAB_ROOT}}/loops/**)"
+        --deny "Edit({{.LAB_ROOT}}/scripts/**)"
+        --deny "Edit({{.LAB_ROOT}}/work/**/tests/**)"
         -p "/enhancer-loop --repo {{.TARGET}} {{.CLI_ARGS}}"
 
   poll-forever:

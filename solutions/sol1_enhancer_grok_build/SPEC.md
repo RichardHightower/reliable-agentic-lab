@@ -4,9 +4,14 @@ A vague ticket goes in. A ready contract comes out. No human sits in an
 interactive session while it happens. The loop polls the ticket's GitHub issue
 for comments and acts on what it finds.
 
-The artifact is a Grok Build project plugin: one skill, two agents, and a
-hooks file, under `.grok/plugins/ticket-enhancer/`. It grooms every open
-ticket in your fork, one poll at a time.
+The artifact is a Grok Build project plugin: one skill and two agents, under
+`.grok/plugins/ticket-enhancer/`. It grooms every open ticket in your fork,
+one poll at a time.
+
+Grok 1.0.5 registers no skills and no agents from a project plugin, so this
+folder also ships three symlinks under `.grok/skills/` and `.grok/agents/`
+that point into the plugin. The plugin stays the source of truth. See
+[IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
 
 This folder is the finished answer. Build yours in `labs/lab1_enhancer/` and
 compare. It is standalone on purpose: no dependency on the repository root

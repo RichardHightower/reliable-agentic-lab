@@ -19,8 +19,22 @@ granted trust yet. Run `grok` here once with no arguments, accept the trust
 prompt, then quit and run `task trust` again.
 
 Headless `grok -p` never prompts. Until trust exists, `task run` finds no
-skill and does nothing useful. [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md)
-covers this and the other three dead ends.
+skill and does nothing useful.
+
+Then check the names, not the counts:
+
+```bash
+grok inspect | grep -E "enhancer-loop|enhancer-judge|enhancer-doer"
+```
+
+All three must be listed. If they are not, the symlinks under `.grok/skills/`
+and `.grok/agents/` are missing. On grok 1.0.5 a project plugin registers no
+skills and no agents on its own, so those three symlinks are what make the
+loop runnable. [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) has the
+`ln -sfn` commands and the reason.
+
+The counts on the **Plugins** line count directories, so `1 agents` shows even
+when two agent files are loaded. Never read them as proof.
 
 ## One-time setup
 
@@ -89,23 +103,19 @@ answer.
 
 ## Debug logging
 
-`grok -p` prints nothing until the whole run finishes, so a run that spawns
-two agents looks hung when it is working fine.
+`grok -p` prints nothing until the whole run finishes, so a run that spawns two
+agents looks hung when it is working fine. That is normal. Wait for it.
 
-Set `"debug": true` in `config.json`, then in a second terminal:
+There is no `debug.log` here. The Claude Code answer gets one from plugin
+hooks, and plugin hooks never fire on grok 1.0.5. See
+[IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
+
+For live progress, run the poll yourself with streaming output:
 
 ```bash
-touch debug.log && tail -f debug.log
+grok --always-approve --output-format streaming-json \
+  -p "/enhancer-loop --repo ../../work/northwind-field-crm --ticket T001"
 ```
-
-Create the file first. On macOS `tail -f` fails on a file that does not exist.
-
-The `PreToolUse` and `PostToolUse` hooks in
-`.grok/plugins/ticket-enhancer/hooks/hooks.json` write one line per tool call,
-and only while `debug` is true. `debug.log` is gitignored. Leave `debug` false
-the rest of the time.
-
-Hook execution needs the same checkout trust as the plugin.
 
 ## Two bugs this port fixes
 
