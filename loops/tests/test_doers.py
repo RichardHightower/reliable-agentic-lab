@@ -75,3 +75,20 @@ def test_reference_refuses_when_the_ref_is_nowhere(tmp_path):
     message = str(caught.value)
     assert "no-such-branch" in message
     assert "fetch" in message
+
+
+def test_build_passes_an_already_built_backend_through_unchanged():
+    """A runtime port hands build() a Backend it already constructed itself.
+
+    build() must return that exact object, not try to string-dispatch on it.
+    This is what lets implementer.run/fixer.run/enhancer.run accept a real
+    SDK-backed Backend without themselves knowing SDKs exist.
+    """
+    backend = doers.NoneBackend()
+    assert doers.build(backend) is backend
+
+
+def test_build_still_string_dispatches_as_before():
+    assert isinstance(doers.build("none"), doers.NoneBackend)
+    assert isinstance(doers.build("reference"), doers.ReferenceBackend)
+    assert isinstance(doers.build("claude"), doers.CliBackend)
