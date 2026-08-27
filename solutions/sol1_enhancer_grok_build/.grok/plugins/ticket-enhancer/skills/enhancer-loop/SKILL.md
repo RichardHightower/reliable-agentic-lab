@@ -25,8 +25,11 @@ Parse from the invocation text after `/enhancer-loop`:
 
 - `--repo <path>`: required, the target repo (for example
   `work/northwind-field-crm`).
-- `--ticket <id>`: optional. If given, act on only that ticket. If omitted,
-  discover every open ticket (step 0).
+- `--ticket <id>`: optional. If given, consider only that ticket. If omitted,
+  discover every open ticket (step 0). This flag chooses which ticket to look
+  at, and nothing more. Step 1 still requires `state: draft` and
+  `loop: enhancer`, so naming a finished ticket skips it rather than running
+  it again.
 - `--simulate-comment "<text>"`: dev-only. Use this text in place of
   fetching new issue comments, and skip the GitHub round trip in step 3. Only
   valid together with `--ticket`.
@@ -56,8 +59,9 @@ loop's own. Treat that exactly like no new comment.
 
 ## Step 0: discover open tickets
 
-Skip this step if the invocation named `--ticket`; act on that one ticket
-only.
+Skip this step if the invocation named `--ticket`; consider that one ticket
+only. Skipping discovery does not skip the state rule. Step 1 applies
+`state: draft` and `loop: enhancer` to every ticket, however it was chosen.
 
 Otherwise, list `<repo>/tickets/*.md`, excluding any `*.ready.md` file and
 any `*.enhancer-candidate.md` file. A candidate file is scratch written by
@@ -88,11 +92,44 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    not exist, this is the ticket's first poll: `round` starts at 0 and both
    `previous_signature` and `last_comment_id` are null.
 
+   Then check the ticket's own frontmatter before you go any further. Unless
+   it reads `state: draft` **and** `loop: enhancer`, this ticket is not this
+   loop's work. Print one line naming the ticket and the state you found, for
+   example `T900: already ready / implementer, skipping`, and stop here. Do
+   not create an issue, do not post a comment, and do not write a state file.
+
+   This rule holds whichever path chose the ticket. Step 0 applies it to
+   every ticket it discovers, and `--ticket <id>` names a ticket to consider,
+   not a reason to skip the check. Without it, a finished ticket gets a
+   second run as though it were a fresh draft.
+
+   Say it out loud rather than exiting quietly. Somebody who just typed
+   `task run -- --ticket T900` and saw nothing would read the silence as a
+   hang.
+
 2. Find or create the ticket's GitHub issue.
 
-   - If the state file already has `github_issue`, use that number.
-   - Otherwise search: `gh issue list --repo <owner>/<repo> --search "in:title \"[<id>]\"" --state open --json number`.
-   - If none found: create the labels this design needs, once
+   Take the first of these that gives you a number:
+
+   - The state file's `github_issue`.
+   - The ticket frontmatter's `github_issue`. Step 2 writes this field, and
+     unlike the state file it survives the deletion step 6 performs on the
+     `LGTM` pass, which makes it the durable record.
+   - A title search across every state:
+     `gh issue list --repo <owner>/<repo> --search "in:title \"[<id>]\"" --state all --json number,state`.
+     Do not pass `--state open`. A closed issue is still that ticket's issue,
+     and searching only open ones is what makes the loop create a second issue
+     for a title that already has one. The search also indexes lazily and can
+     miss an issue created moments ago, which is why it ranks below the two
+     recorded sources rather than above them.
+   - If the number you now hold belongs to a **closed** issue, stop here for
+     this ticket and say so: `issue <number> is closed; reopen it`. Never
+     create a second issue for the same title, and do not comment on a closed
+     one. You only reach this when somebody closed the issue for a ticket
+     that is still a draft, which is not how you reset a ticket. `HOW_TO_RUN.md`
+     gives the procedure that is.
+   - Only when none of the three found anything: create the labels this design
+     needs, once
      (`gh label create enhanced --repo <owner>/<repo> --color fbca04 --force`,
      same for `ready` and `needs-human`, ignore errors if a label already
      exists), then create the issue from the ticket's H1 and body:

@@ -83,8 +83,24 @@ Write `skills/enhancer-loop/SKILL.md` as numbered steps. It takes `--repo`,
 `--ticket`, and `--simulate-comment`. Keep every step number and every `gh`
 command.
 
-Two rules that cost the most to rediscover:
+Four rules that cost the most to rediscover. Every one of them produced a
+real duplicate or a real infinite reply before somebody wrote it down.
 
+- Apply `state: draft` and `loop: enhancer` to every ticket, however it was
+  chosen. `--ticket <id>` names a ticket to consider, it does not excuse the
+  check. Skip a finished ticket out loud, on one line, so the attendee does
+  not read silence as a hang.
+- Look the issue up in this order and stop at the first hit: the state file's
+  `github_issue`, then the ticket frontmatter's `github_issue`, then a title
+  search across **all** states. Create only when none of the three found
+  anything. Do not search with `--state open`, a closed issue is still that
+  ticket's issue, and skipping it makes your loop open a second one for the
+  same title. The frontmatter matters because it outlives the state file,
+  which the `LGTM` pass deletes. If the issue you find is closed, stop and say
+  so rather than creating another. However you got the number, found or
+  created, write it into both the state file and the ticket's frontmatter as
+  `github_issue` before you go on. Nothing else writes that frontmatter entry,
+  so a lookup that only reads it never finds one.
 - Every comment the loop posts ends with the marker line
   `<!-- enhancer-loop -->`, and step 3's newest-comment query skips any
   comment carrying it. Without that the loop reads its own last reply as the

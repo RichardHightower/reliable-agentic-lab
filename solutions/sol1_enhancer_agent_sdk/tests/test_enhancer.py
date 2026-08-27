@@ -49,9 +49,13 @@ class FakeGh:
         self.added: list[str] = []
         self.bodies: list[str] = []
         self.created: list[tuple[str, str]] = []
+        self.closed: set[int] = set()
 
     def find_issue(self, ticket_id):
         return self.existing
+
+    def is_closed(self, issue):
+        return issue in self.closed
 
     def create_issue(self, title, body):
         self.created.append((title, body))
@@ -412,6 +416,59 @@ def test_a_green_rubric_with_no_lgtm_asks_for_one(target):
     assert State.load(target, "T001").last_comment_id == "2", (
         "without recording the id, the same comment draws the same reply forever"
     )
+
+
+# -- which ticket, and which issue (#104, #105) -----------------------------
+
+
+def test_naming_a_ready_ticket_with_ticket_skips_it(target):
+    """`--ticket` chooses which ticket to look at. It is not a state override.
+
+    Discovery already refuses a ready ticket. Without the same rule on this
+    path, `--ticket T001` re-runs a finished ticket as a fresh draft, and the
+    re-run opens a second issue for it. That is how #104 was found live.
+    """
+    (target / "tickets" / "T001.md").write_text(
+        DRAFT.replace("state: draft", "state: ready").replace("loop: enhancer", "loop: implementer")
+    )
+    gh = FakeGh()
+    [outcome] = engine(target, FakeBackend([]), gh).poll("T001")
+    assert outcome.status == "skipped"
+    assert "ready" in outcome.detail and "implementer" in outcome.detail
+    assert gh.created == [], "a finished ticket must not open an issue"
+    assert gh.posted == [], "and must not draw a comment"
+
+
+def test_the_frontmatter_issue_is_used_after_the_state_file_is_deleted(target):
+    """Frontmatter outlives the state file, which the LGTM pass deletes.
+
+    With no state file and no frontmatter fallback, the loop drops to a search.
+    A search that misses hands it to `create_issue`, which is the duplicate.
+    """
+    (target / "tickets" / "T001.md").write_text(
+        DRAFT.replace("loop: enhancer", "loop: enhancer\ngithub_issue: 8")
+    )
+    gh = FakeGh(comments=[("2", "looks good to me")])
+    gh.existing = None  # the search finds nothing, as it did on the live run
+    [outcome] = engine(target, FakeBackend([judged(present=FEATURE)]), gh).poll("T001")
+    assert gh.created == [], "issue 8 is on the ticket, so nothing should be created"
+    assert outcome.status == "waiting"
+
+
+def test_a_closed_issue_stops_the_ticket_rather_than_creating_a_second_one(target):
+    """Closing an issue is not how you reset a ticket, so say so and stop.
+
+    #105: the search used `--state open`, so a closed issue was invisible and
+    the next poll created a duplicate. Issue 10 duplicated issue 8.
+    """
+    State(github_issue=8, last_comment_id="1").save(target, "T001")
+    gh = FakeGh()
+    gh.closed = {8}
+    [outcome] = engine(target, FakeBackend([]), gh).poll("T001")
+    assert outcome.status == "blocked"
+    assert "8 is closed" in outcome.detail
+    assert gh.created == [], "never a second issue for a title that already has one"
+    assert gh.posted == [], "and never a comment on a closed issue"
 
 
 # -- no new comment ---------------------------------------------------------

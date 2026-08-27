@@ -117,6 +117,47 @@ grok --always-approve --output-format streaming-json \
   -p "/enhancer-loop --repo ../../work/northwind-field-crm --ticket T001"
 ```
 
+## Reset a ticket to run it again
+
+Closing the GitHub issue is not a reset. It is the one thing that reliably
+breaks the next poll.
+
+The loop finds a ticket's issue through the state file, then the ticket
+frontmatter, then a title search. Close the issue and the first two still
+point at it, so the loop stops and tells you to reopen it. Delete the
+frontmatter line as well and the search finds nothing, so the loop creates a
+second issue for the same ticket, and the original's comment history is
+stranded on an issue nothing reads.
+
+Reset all three pieces instead:
+
+1. Put the ticket file back to a draft. Keep the issue number.
+
+   ```
+   ---
+   id: T001
+   state: draft
+   loop: enhancer
+   github_issue: 8
+   ---
+   ```
+
+2. Drop the loop's memory of the ticket.
+
+   ```bash
+   rm -f ../../work/northwind-field-crm/.harness/last-enhancer-T001.json
+   ```
+
+3. Reopen the same issue, so its comments survive.
+
+   ```bash
+   gh issue reopen 8 --repo <owner>/<repo>
+   ```
+
+Same number, same title, new poll. To start completely fresh instead, delete
+the ticket file and run `task create-test-tickets`, then let the loop open a
+new issue.
+
 ## Two poll-loop bugs this skill avoids
 
 Both bugs were in the original Claude Code skill. This port and
