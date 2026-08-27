@@ -1,8 +1,10 @@
 version: '3'
 
-# Task loads `.env` for every task below. Copy `.env.example` to `.env`.
-# A missing `.env` is fine, nothing here needs one.
-dotenv: ['.env']
+# Task loads these for every task below. The repo root `.env` is the normal
+# place for a key. The folder file is optional and fills in only what the
+# root does not set, because Task lets the FIRST file that defines a
+# variable win. A missing file is fine, and nothing here needs one.
+dotenv: ['../../.env', '.env']
 
 # Standalone. No includes, no shared vars, nothing outside this folder.
 # `python3` here means the venv you activated. See SPEC.md.
