@@ -47,6 +47,28 @@ image_prompt: >
 ---
 
 <!--
+id: s4-02a
+layout: figure-bottom
+minutes: 2
+beat: talk
+-->
+
+# Unattended means `query()`, not a chat client
+
+Claude Agent SDK. One process. A budget. Three exits.
+
+- `permission_mode`: acceptEdits
+- PreToolUse: deny `tests/**`
+- `max_turns` is the iteration budget
+- Tests after every turn are pytest, not a claim
+- Merge stays a human. The loop never gets that tool
+
+Saturday lab stays two functions in `loop.py`.
+The Agent SDK port is the takehome: `solutions/sol4_fixer_agent_sdk/`. Issue #120.
+
+---
+
+<!--
 id: s4-03
 layout: split-left
 minutes: 2
@@ -326,7 +348,7 @@ beat: talk
 loops/                the engine. It never imports the CRM.
 labs/lab1_enhancer    labs/lab2_implementer
 labs/lab3_research    labs/lab4_fixer
-labs/takehome/        Claude Agent SDK and Deep Agents. Optional.
+labs/takehome/        Deep Agents implementer + research. Agent SDK fixer.
 solutions/            the reference, and the code on these slides.
 work/                 the target repo, cloned by task setup.
 ```

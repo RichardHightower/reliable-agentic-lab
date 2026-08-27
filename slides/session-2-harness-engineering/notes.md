@@ -213,3 +213,11 @@ to ship when it should not.
 ## s2-22. Break
 
 15 minutes. Next module points the same graph at a question.
+
+## Deep Agents, after the graph
+
+Say this once. Do not demo `create_deep_agent` live unless the room is ahead.
+
+Deep Agents is a harness. The subagent `tools` list is the write ban.
+Python still owns the red gate. Saturday they fill `harness.py`.
+Takehome is issue #118.

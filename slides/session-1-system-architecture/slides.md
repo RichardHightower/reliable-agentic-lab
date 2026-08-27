@@ -356,17 +356,18 @@ beat: lab
 
 ```bash
 cd labs/lab1_enhancer
-claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
+# Claude Code plugin. Not a Python stub.
 
-task loop:enhancer -- --ticket T001           # it escalates. that is correct.
-task loop:enhancer -- --ticket T001 --incorporate
+task run --
+# First poll needs no comment. LGTM is the only human action.
 ```
 
-Fill `loop.py`. Two functions: `judge_ticket` and `decide_next`.
+Build the plugin from `prompts/claude-code.md`.
+Codex and Grok have native answers. OpenCode is still coming.
 
-This lab writes no code, so the push gate stays quiet. You meet it in Module 2.
+This lab writes no application code, so the push gate stays quiet.
 
-Falling behind is fine: copy the answer from `solutions/sol1_enhancer/`.
+Falling behind is fine: copy `solutions/sol1_enhancer/.claude/`.
 
 ---
 
