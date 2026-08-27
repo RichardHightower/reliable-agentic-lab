@@ -20,10 +20,8 @@ from __future__ import annotations
 
 import argparse
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from solutions import roleplan
-from solutions.agent_sdk import roles as sdk
+import roleplan
+import roles as sdk
 
 LOOP = "research"
 

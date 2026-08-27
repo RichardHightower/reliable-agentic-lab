@@ -8,6 +8,7 @@ port that teaches the wrong lesson, and it drifts silently.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import importlib.util
 import sys
 from pathlib import Path
@@ -178,9 +179,18 @@ def test_the_research_cast_needs_no_contract():
 
 
 def _load_port(folder: str, stub_file: str):
-    """Import one generated port the way it imports itself, from its folder."""
+    """Import one generated port the way it imports itself, from its folder.
+
+    Every standalone port folder has its own local roleplan.py/contract.py/
+    roles.py/etc, all under the same plain names. `import roleplan` inside
+    the executed module caches under sys.modules["roleplan"], so a second
+    port loaded in the same process would silently reuse the first port's
+    copy instead of its own. Snapshotting and rolling back sys.modules keeps
+    each port's local imports isolated to its own load.
+    """
     path = SOLUTIONS / folder / stub_file
     sys.path.insert(0, str(path.parent))
+    before = set(sys.modules)
     try:
         spec = importlib.util.spec_from_file_location(f"port_{folder}", path)
         module = importlib.util.module_from_spec(spec)
@@ -188,6 +198,8 @@ def _load_port(folder: str, stub_file: str):
         return module
     finally:
         sys.path.remove(str(path.parent))
+        for name in set(sys.modules) - before:
+            del sys.modules[name]
 
 
 PORTS = [
@@ -208,4 +220,11 @@ def test_every_port_reads_the_shared_table(contract, folder, stub_file, loop):
     module = _load_port(folder, stub_file)
     assert loop == module.LOOP
     target = contract if loop != "research" else None
-    assert module.cast(target) == roleplan.plan(target, loop)
+    # Each standalone port has its own local RolePlan class, a flat copy of
+    # solutions/roleplan.py's, not the same class object. dataclass __eq__
+    # checks self.__class__ is other.__class__, so two field-identical
+    # RolePlans from different local copies compare unequal by identity.
+    # asdict() compares the values the policy actually cares about.
+    got = {name: dataclasses.asdict(plan) for name, plan in module.cast(target).items()}
+    want = {name: dataclasses.asdict(plan) for name, plan in roleplan.plan(target, loop).items()}
+    assert got == want

@@ -18,14 +18,10 @@ Read `solutions.deep_agents.roles` only if you stall. It is the answer.
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
-from loops.contract import Contract
-from solutions import roleplan
-from solutions.observability import trace
+import roleplan
+from contract import Contract
+from observability import trace
 
 
 def build(contract: Contract):

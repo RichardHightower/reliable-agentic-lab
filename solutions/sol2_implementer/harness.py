@@ -10,10 +10,8 @@ ten rows.
 
 from __future__ import annotations
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops import gates, implementer, rubric
-from loops.contract import Contract, RunResult
+import gates, implementer, rubric
+from contract import Contract, RunResult
 
 
 def red_gate(before: RunResult, after: RunResult) -> set[str]:

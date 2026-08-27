@@ -11,9 +11,7 @@ Read `loops/researcher.py` and `loops/brief.py` only if you stall.
 
 from __future__ import annotations
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops import brief
+import brief
 
 
 def plan_questions(question: str) -> list[str]:

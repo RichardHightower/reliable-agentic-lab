@@ -1,7 +1,13 @@
-# Reach the root spine from inside a solution. `task test` works here.
+# Standalone. No dependency on the root Taskfile. `claude-agent-sdk` is not
+# installed here, so the only task that can run without it is the role table.
 version: '3'
-includes:
-  root:
-    taskfile: ../../Taskfile.yml
-    dir: ../..
-    flatten: true
+
+tasks:
+  default:
+    cmds: [task --list]
+
+  test:
+    desc: Print the role table and stop. No SDK needed.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 harness.py --table-only

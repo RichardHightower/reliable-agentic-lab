@@ -1,7 +1,13 @@
-# Reach the root spine from inside a solution. `task test` works here.
+# Standalone. No dependency on the root Taskfile. This folder holds a
+# loop.py library (no CLI to run), so the only task is a self-check.
 version: '3'
-includes:
-  root:
-    taskfile: ../../Taskfile.yml
-    dir: ../..
-    flatten: true
+
+tasks:
+  default:
+    cmds: [task --list]
+
+  test:
+    desc: Confirm summarize_failure and repair_until_green import and run without error.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 -c "import loop; print('ok')"

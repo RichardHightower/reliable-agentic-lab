@@ -9,10 +9,8 @@ Read `loops/criteria.py` to see how the judge decides.
 
 from __future__ import annotations
 
-import _root  # noqa: F401  (puts the repo root on sys.path)
-
-from loops import criteria, gates
-from loops.ticket import Ticket
+import criteria, gates
+from ticket import Ticket
 
 
 def judge_ticket(ticket: Ticket) -> criteria.Verdict:
