@@ -1,0 +1,16 @@
+{
+  "lab-1-enhancer": {
+    "rev": "4d0fd5a",
+    "source": "solutions/sol1_enhancer/SPEC.md",
+    "source_hash": "b9655778",
+    "title": "Lab 1 Ticket Enhancer",
+    "url": "https://github.com/RichardHightower/reliable-agentic-lab/wiki/Lab-1-Ticket-Enhancer"
+  },
+  "roadmap": {
+    "rev": "4d0fd5a",
+    "source": "docs/roadmap.md",
+    "source_hash": "ad9e414c",
+    "title": "Roadmap",
+    "url": "https://github.com/RichardHightower/reliable-agentic-lab/wiki/Roadmap"
+  }
+}
