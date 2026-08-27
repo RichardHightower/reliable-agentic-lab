@@ -116,3 +116,9 @@ Closing line: cost is an architecture problem, not a pricing problem.
 ## s3-11. Break
 
 15 minutes. Next: the same stack with nobody at the keyboard.
+
+## Deep Agents research
+
+LangChain's own quickstart is a research agent. Use that sentence.
+Researcher is a subagent so raw search stays out of the orchestrator.
+Fixture backend is the Saturday path. Issue #119 is the takehome port.

@@ -144,6 +144,47 @@ Python holds the loop, so the model never counts its own retries.
 ---
 
 <!--
+id: s2-06a
+layout: figure-bottom
+minutes: 2
+beat: talk
+-->
+
+# Four planes. One graph.
+
+| Plane | Who | Job |
+|---|---|---|
+| Intent | The ready ticket | A contract a test can fail |
+| Execution | Maker | Writes inside a declared scope |
+| Verification | Checker | Read-only, or Python over junit |
+| Control | Harness | Budget, retry, stop. Outside the model |
+
+The model proposes. The harness decides. That is the whole module.
+
+---
+
+<!--
+id: s2-06b
+layout: figure-bottom
+minutes: 2
+beat: talk
+-->
+
+# This graph in Deep Agents
+
+`create_deep_agent` is a harness, not a chat wrapper.
+
+- Orchestrator: no write tool. It holds `task`.
+- Each subagent gets its own `tools` list. That list **replaces** the parent.
+- The judge's list is `read_file`, `ls`, `glob`, `grep`. No `write_file`.
+- Python still owns the red gate and `gates.decide`.
+
+Saturday lab stays Claude Code. Fill `harness.py`.
+The Deep Agents port is the takehome: `solutions/sol2_implementer_deep_agents/`.
+
+---
+
+<!--
 id: s2-07
 layout: section
 minutes: 0
@@ -420,6 +461,9 @@ Fill `harness.py`. Three functions. Nothing else.
 
 Falling behind is fine: copy `harness.py` from `solutions/sol2_implementer/`
 and keep going.
+
+After class: the same eight steps on LangChain Deep Agents.
+Issue #118. Python still owns the gate.
 
 ---
 

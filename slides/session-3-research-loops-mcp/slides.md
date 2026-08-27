@@ -47,6 +47,30 @@ image_prompt: >
 ---
 
 <!--
+id: s3-02a
+layout: figure-bottom
+minutes: 2
+beat: talk
+-->
+
+# Research is a subagent so the window stays clean
+
+LangChain Deep Agents ships this as the default example.
+
+- Researcher: search tools only. Isolated context.
+- Writer: `briefs/` only.
+- Judge: `check_brief` in Python. Citations are arithmetic.
+- MCP: context7, optional Perplexity, fixture when the room has no wifi.
+
+Raw search never returns to the orchestrator. A summary does.
+`langchain-mcp-adapters` loads the servers. The loop still cannot merge.
+
+Saturday lab stays two functions in `loop.py`.
+The Deep Agents port is the takehome: `solutions/sol3_research_deep_agents/`. Issue #119.
+
+---
+
+<!--
 id: s3-03
 layout: split-left
 minutes: 2

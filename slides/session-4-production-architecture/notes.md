@@ -172,3 +172,9 @@ still small enough that the refusals are cheap.
 Four minutes. Hold the last line for the end.
 
 The loop is the product. The prompt is not.
+
+## Agent SDK unattended
+
+query(), not ClaudeSDKClient. Nobody is chatting.
+PreToolUse is write scope. Merge is never a tool.
+Issue #120 is the takehome port.
