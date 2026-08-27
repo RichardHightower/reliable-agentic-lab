@@ -4,42 +4,62 @@ A vague ticket in, a ready contract out.
 
 ## The shape
 
-Every loop in this workshop is the same three parts. Only the object changes.
+Every loop in this workshop is the same three parts. Only the object
+changes, and only this lab's orchestrator is a Claude Code skill instead of
+Python.
 
 ```
-orchestrator  owns the budget and the exits. Writes nothing.
+orchestrator  owns the polling, the round budget, and the exits.
+   (skill)    Writes the real ticket file and talks to GitHub. Nothing else does.
      |
-     +-- doer    writes files inside a declared scope
+     +-- doer    investigates and drafts. Returns text, writes no file.
+     |  (agent)
      |
-     +-- judge   scores the result. Holds no write path.
+     +-- judge   scores a ticket (real or candidate). Holds no write tool.
+        (agent)
 ```
 
-For this lab: an orchestrator owns the budget and the exits, a doer edits the ticket body and nothing else, and a judge scores the ticket against criteria for its kind.
+For this lab: the `enhancer-loop` skill owns the poll and the exits, the
+`enhancer-doer` agent drafts a replacement ticket body, and the
+`enhancer-judge` agent scores a ticket against the rubric for its kind.
 
 ## Why write scope matters
 
-Scope is declared in `.loop.yml` in the target repo and enforced at the tool
-boundary. It is not an instruction in a prompt, because an agent can talk its
-way past an instruction and cannot talk its way past a missing tool.
-
-The judge has no `write` method to call. That is why it cannot grade its own
-homework.
+In the Python loops, scope is declared in `.loop.yml` in the target repo and
+enforced at the tool boundary. Here, `enhancer-judge` and `enhancer-doer`
+carry no write tool at all in their agent definitions, so there is no path
+for either to touch a file. The `enhancer-doer`'s draft is text output, not a
+file: the orchestrator is the one that writes it, as a candidate, and only
+after `enhancer-judge` has scored that candidate does the orchestrator
+decide whether it replaces the real ticket. Neither agent can talk its way
+past a tool it does not have.
 
 ## The exits
 
-Three, and no fourth: pass, retry, escalate. Python holds the loop, so the model
-never counts its own retries.
+Three, and no fourth: pass, retry, escalate. The skill's own step list holds
+the loop, so the model never counts its own retries against itself
+mid-round, but nothing enforces the round budget except the skill following
+its own instructions. That is a real limitation, see the SPEC's known
+limitations.
 
-The exit people forget is stable failure. When this round fails in exactly the
-same way as the last one, the loop is not converging, and spending the rest of
-the budget to watch it fail identically buys a surprise bill rather than a fix.
+The exit people forget is stable failure. When a round finds exactly the
+same gaps as the last one, spending the rest of the budget to watch it fail
+identically buys a surprise bill rather than a fix.
+
+## Where the human fits
+
+Nobody sits in an interactive session driving this loop. The orchestrator
+polls the ticket's GitHub issue, and the only human input is a comment on
+that issue: `LGTM` accepts the ticket, anything else is feedback to enhance
+from. Repeated polling is `/loop`'s job, external to the skill.
 
 ## Where the code lives
 
-The answer for this lab is `loops/enhancer.py and loops/criteria.py`.
+The answer for this lab is `solutions/sol1_enhancer/.claude/`.
 
 Worth reading:
 
-- `loops/criteria.py`
-- `loops/gates.py`
-- `loops/ticket.py`
+- `solutions/sol1_enhancer/.claude/skills/enhancer-loop/SKILL.md`
+- `solutions/sol1_enhancer/.claude/agents/enhancer-judge.md`
+- `solutions/sol1_enhancer/.claude/agents/enhancer-doer.md`
+- `solutions/sol1_enhancer/.claude/skills/enhancer-loop/scripts/check_fields.py`

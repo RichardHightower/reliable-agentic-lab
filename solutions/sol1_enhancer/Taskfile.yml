@@ -1,7 +1,46 @@
-# Reach the root spine from inside a solution. `task test` works here.
+# Standalone. No dependency on the root Taskfile. Every command here runs
+# from this folder, start to finish: clone your fork, seed test tickets, run
+# a poll.
 version: '3'
-includes:
-  root:
-    taskfile: ../../Taskfile.yml
-    dir: ../..
-    flatten: true
+
+vars:
+  # TASKFILE_DIR is Task's own absolute path to this file's directory. Every
+  # path below is built from it, on purpose: a relative path here depends on
+  # the invoking process's cwd being exactly right, and when it is not, this
+  # plugin can end up reading and writing a different checkout entirely, one
+  # that happens to also have a work/northwind-field-crm.
+  TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
+
+tasks:
+  default:
+    cmds: [task --list]
+
+  clone:
+    desc: Clone your fork (from config.json) into work/. Skips if it is already there.
+    status:
+      - test -d {{.TARGET}}/.git
+    cmds:
+      - test -f {{.TASKFILE_DIR}}/config.json || (echo "copy config.json.example to config.json first, and fill in your GitHub username" && exit 1)
+      - mkdir -p {{.TASKFILE_DIR}}/../../work
+      - git clone --quiet https://github.com/$(jq -r .fork_owner {{.TASKFILE_DIR}}/config.json)/$(jq -r .repo_name {{.TASKFILE_DIR}}/config.json).git {{.TARGET}}
+
+  create-test-tickets:
+    desc: Write a few draft tickets (bug, ui, feature) into the target repo, for testing.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/setup_test_tickets.sh {{.TARGET}}
+
+  run:
+    desc: One poll-and-act step over every open ticket, using this plugin.
+    # Pinning dir here, not just TARGET, means the claude -p subprocess
+    # always starts from this exact folder. SKILL.md reads ./config.json
+    # from its cwd, so that has to be right too, not only the --repo path.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - claude -p "/enhancer-loop --repo {{.TARGET}} {{.CLI_ARGS}}"
+
+  poll-forever:
+    desc: Poll forever until killed (Ctrl-C). Seminar-only stand-in for a real scheduler, see SPEC.md.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/poll_forever.sh {{.CLI_ARGS}}
