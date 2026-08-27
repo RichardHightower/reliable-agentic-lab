@@ -31,6 +31,29 @@ Parse from the invocation text after `/enhancer-loop`:
   fetching new issue comments, and skip the GitHub round trip in step 3. Only
   valid together with `--ticket`.
 
+## The comment marker
+
+Every comment this loop posts ends with this exact line:
+
+```
+<!-- enhancer-loop -->
+```
+
+GitHub renders an HTML comment as nothing, so a human never sees it.
+
+Step 3 uses the marker to skip this loop's own replies when it looks for the
+newest comment. Without it the loop reads its own last reply as the newest
+comment and answers it again, once per poll, forever. Storing
+`last_comment_id` does not help, because the reply genuinely carries a newer
+id.
+
+Do not filter by comment author instead. The loop runs as the attendee's own
+`gh` account, so an author filter would also drop their `LGTM`, the one
+comment this loop must never miss.
+
+If step 3's query prints nothing, every comment on the issue is one of this
+loop's own. Treat that exactly like no new comment.
+
 ## Step 0: discover open tickets
 
 Skip this step if the invocation named `--ticket`; act on that one ticket
@@ -74,8 +97,17 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      same for `ready` and `needs-human`, ignore errors if a label already
      exists), then create the issue from the ticket's H1 and body:
      `gh issue create --repo <owner>/<repo> --title "[<id>] <ticket H1>" --body "<ticket body>" --label enhanced`.
-     Write the returned issue number into the ticket's frontmatter as
-     `github_issue: <number>`, and into the state file.
+
+   However you arrived at the number, found by search or freshly created,
+   write it into the ticket's frontmatter as `github_issue: <number>` and
+   into the state file before you go on. Persist it even on a branch that
+   stops early, such as step 6's "ready, waiting for `LGTM`".
+
+   Write it on the search path too, not only on the create path. A state
+   file that appears only when this loop creates the issue leaves every
+   later poll looking like a first poll, and step 3 skips the comment fetch
+   on a first poll. A ticket whose issue already existed would then never
+   read `LGTM`, and could never reach ready.
 
 3. Get the newest comment, if there is one, and compute its id.
 
@@ -90,7 +122,7 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      as its id. The same simulated text therefore keeps the same id across
      polls, which is what makes a repeated `--simulate-comment` behave like
      the repeated real comment it stands in for.
-   - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq 'sort_by(.id) | .[-1] | {id, body}'`.
+   - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq '[.[] | select((.body // "") | contains("<!-- enhancer-loop -->") | not)] | sort_by(.id) | .[-1] // empty | {id, body}'`.
    - Either way, compare the id you now hold to `last_comment_id` from step
      1. If they are equal, there is no new comment: stop here for this
      ticket (no-op, does not count as a round).
@@ -120,8 +152,8 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      human commented something other than `LGTM` on an already-complete
      ticket, or this is the first poll and the ticket somehow already meets
      the rubric): post an issue comment saying it looks ready and is
-     waiting for `LGTM`, then go to step 8 to record this poll's
-     `last_comment_id`. Do not call the Doer.
+     waiting for `LGTM`, ending the body with the marker line, then go to
+     step 8 to record this poll's `last_comment_id`. Do not call the Doer.
    - `ready` is false: nothing finalizes here, whatever the comment says,
      `LGTM` included. `LGTM` is never treated as consumed by a red rubric.
      Continue to step 7, the same as any other round, so the Doer gets a
@@ -147,10 +179,11 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    - Not an improvement: leave the real ticket file, and the issue body,
      untouched.
 
-   Either way, delete the candidate file, then post one issue comment: on
-   improvement, what changed and what is still missing (or that it is now
-   ready for `LGTM`); otherwise, that the suggestion did not clear the
-   rubric for this kind and what is still needed.
+   Either way, delete the candidate file, then post one issue comment,
+   ending its body with the marker line: on improvement, what changed and
+   what is still missing (or that it is now ready for `LGTM`); otherwise,
+   that the suggestion did not clear the rubric for this kind and what is
+   still needed.
 
 8. Record this poll, and check the exits.
 

@@ -43,6 +43,29 @@ Parse from the invocation text after `$enhancer-loop`:
   fetching new issue comments, and skip the GitHub round trip in step 3. Only
   valid together with `--ticket`.
 
+## The comment marker
+
+Every comment this loop posts ends with this exact line:
+
+```
+<!-- enhancer-loop -->
+```
+
+GitHub renders an HTML comment as nothing, so a human never sees it.
+
+Step 3 uses the marker to skip this loop's own replies when it looks for the
+newest comment. Without it the loop reads its own last reply as the newest
+comment and answers it again, once per poll, forever. Storing
+`last_comment_id` does not help, because the reply genuinely carries a newer
+id.
+
+Do not filter by comment author instead. The loop runs as the attendee's own
+`gh` account, so an author filter would also drop their `LGTM`, the one
+comment this loop must never miss.
+
+If step 3's query prints nothing, every comment on the issue is one of this
+loop's own. Treat that exactly like no new comment.
+
 ## Step 0: discover open tickets
 
 Skip this step if the invocation named `--ticket`; act on that one ticket
@@ -57,24 +80,6 @@ A candidate file is a crashed run's leftover. Step 7 deletes it on both
 branches, so it only survives an interrupt. It carries `state: draft` and
 `loop: enhancer` because the doer is told to keep frontmatter exactly, which
 is why the glob has to exclude it by name rather than by field.
-
-## Mark every comment you post
-
-Every issue comment this loop writes starts with this exact line, on its own
-line, before anything else:
-
-```
-<!-- enhancer -->
-```
-
-GitHub renders it as nothing, and step 3 uses it to skip the loop's own
-replies when it looks for what a human said. There is no exception. A comment
-posted without the marker reads back as human input on the next poll, the
-loop answers itself, and the issue grows a comment every poll forever.
-
-The marker is the only way to tell the two apart. Do not filter by author:
-this loop runs as the attendee's own `gh` account, so its comments and their
-comments come from the same login.
 
 ## Setup, once per run: read config.json
 
@@ -128,25 +133,11 @@ way that expects a reply: this skill runs headlessly and cannot wait for one.
      `sim:<those 12 characters>` as its id. If that id equals
      `last_comment_id`, this is the same comment as last poll: stop here for
      this ticket, the same as a real repeat.
-   - Otherwise, fetch the newest comment that this loop did not write:
+   - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq '[.[] | select((.body // "") | contains("<!-- enhancer-loop -->") | not)] | sort_by(.id) | .[-1] // empty | {id, body}'`.
+     If its `id` is not newer than `last_comment_id`, there is no new
+     comment: stop here for this ticket (no-op, does not count as a round).
 
-     ```bash
-     gh api repos/<owner>/<repo>/issues/<issue>/comments --paginate \
-       --jq '[.[] | select(.body | contains("<!-- enhancer -->") | not)] | sort_by(.id) | .[-1] | {id, body}'
-     ```
-
-     Every comment this loop posts carries the `<!-- enhancer -->` marker, so
-     that filter leaves only comments a human wrote. Filter on the marker,
-     never on the author: the loop runs as the attendee's own `gh` account,
-     so its comments and their comments come from the same login.
-
-     If the result is empty, no human has spoken yet: stop here for this
-     ticket (no-op, does not count as a round). If its `id` is not newer than
-     `last_comment_id`, there is no new comment: stop here the same way.
-
-   Carry this round's comment id forward. Steps 6 and 8 both persist it, and
-   whichever one this poll reaches has to, or the same comment draws the same
-   reply forever.
+   Carry this round's comment id forward. Step 8 persists it.
 
 4. If the issue already carries `needs-human`, this ticket already reached a
    stable-failure or budget escalation on an earlier poll: stop here, wait
@@ -179,11 +170,13 @@ way that expects a reply: this skill runs headlessly and cannot wait for one.
      human commented something other than `LGTM` on an already-complete
      ticket, or this is the first poll and the ticket somehow already meets
      the rubric): post an issue comment saying it looks ready and is
-     waiting for `LGTM`. Write the state file with `last_comment_id` set to
-     step 3's comment id, keeping `round` and `previous_signature` as step 1
-     loaded them, then stop here without calling the Doer. This branch never
-     reaches step 8, so it has to record the id itself, or the same comment
-     draws the same reply on every later poll.
+     waiting for `LGTM`, ending the body with the marker line. Write the
+     state file with `last_comment_id` set to step 3's comment id, keeping
+     `round` and `previous_signature` as step 1 loaded them, then stop here
+     without calling the Doer. This branch never reaches step 8, so it has
+     to record the id itself. The marker keeps the loop from answering its
+     own reply, but a human comment that is not `LGTM` still draws the same
+     reply on every later poll until this branch persists the id.
    - `ready` is false: nothing finalizes here, whatever the comment says,
      `LGTM` included. `LGTM` is never treated as consumed by a red rubric.
      Continue to step 7, the same as any other round, so the Doer gets a
@@ -219,11 +212,11 @@ way that expects a reply: this skill runs headlessly and cannot wait for one.
      untouched.
 
    Either way, delete the candidate file, then post one issue comment with
-   `gh issue comment <issue> --repo <owner>/<repo> --body "<text>"`, marked
-   as below: on
-   improvement, what changed and what is still missing (or that it is now
-   ready for `LGTM`); otherwise, that the suggestion did not clear the
-   rubric for this kind and what is still needed.
+   `gh issue comment <issue> --repo <owner>/<repo> --body "<text>"`, ending
+   `<text>` with the marker line: on improvement, what changed and what is
+   still missing (or that it is now ready for `LGTM`); otherwise, that the
+   suggestion did not clear the rubric for this kind and what is still
+   needed.
 
 8. Compute this round's `missing_fields` signature (the sorted list from
    step 7, the only path that reaches here: step 6's other two branches
