@@ -33,6 +33,10 @@ class Ticket:
     state: str = "draft"
     criteria: list[Criterion] = field(default_factory=list)
     path: Path | None = None
+    # `parse` already reads the whole front matter block. The enhancer loop
+    # needs `loop:` to know which tickets are its own, and `github_issue:` to
+    # find the issue again, so keep the block rather than dropping it.
+    meta: dict[str, str] = field(default_factory=dict)
 
     @property
     def criterion_ids(self) -> list[str]:
@@ -90,6 +94,7 @@ def parse(text: str, *, ticket_id: str = "") -> Ticket:
         body=text.strip(),
         state=meta.get("state", "ready" if criteria else "draft"),
         criteria=criteria,
+        meta=meta,
     )
 
 

@@ -78,6 +78,69 @@ directory, and assert the rules this port has to keep:
 Run the two deterministic check scripts against their own assertions with
 `task checks`.
 
+## Run the loop
+
+`loop.py --table-only` needs nothing. The loop itself needs three things: the
+`claude-agent-sdk` package, an API key, and a clone of the target repo.
+
+1. Copy `config.json.example` to `config.json` and fill in your GitHub username.
+
+2. Install the runtime and clone your fork.
+
+   ```bash
+   task setup
+   task clone
+   task create-test-tickets
+   ```
+
+3. Run one poll-and-act step.
+
+   ```bash
+   task run
+   ```
+
+   It prints one line per ticket: `passed`, `escalated`, or `waiting`.
+
+4. Poll on an interval, until you stop it.
+
+   ```bash
+   task poll-forever
+   ```
+
+   That script is a seminar stand-in for a scheduler. In production the trigger
+   is cron, or a scheduled GitHub Actions workflow.
+
+To work one ticket without waiting on a real comment, pass your own:
+
+```bash
+task run -- --ticket T001 --simulate-comment "due dates should be optional"
+```
+
+## What one poll does
+
+`enhancer.py` is the orchestrator. It is Python, not a prompt, because a stop
+condition trusted to a model's own judgment is a stop condition a model can talk
+itself past. The model drafts and grades. Everything else is computed.
+
+1. Find every `tickets/*.md` with `state: draft` and `loop: enhancer`. Skip
+   `*.ready.md` and `*.enhancer-candidate.md`.
+2. Find or create the ticket's GitHub issue.
+3. Read the newest comment. If it is one this loop already acted on, stop.
+4. If the issue carries `needs-human`, stop and wait for a person.
+5. The judge grades the real ticket. `check_fields.py` turns its
+   `{kind, present_fields}` into the authoritative `ready`.
+6. Ready plus a comment of exactly `LGTM` releases the ticket to
+   `state: ready`, `loop: implementer`. A red rubric never consumes an `LGTM`.
+7. The doer writes `tickets/<id>.enhancer-candidate.md`. The judge grades that
+   file. The draft replaces the real ticket only when its missing set is a
+   proper subset of the current one. "Not worse" is not good enough.
+8. `check_stop.py` decides the other two exits: budget spent, or the same gaps
+   two rounds running. Either one adds `needs-human` and stops.
+
+The doer is the only role holding `Write`, and the `PreToolUse` hook keeps it
+inside `tickets/**`. The candidate file lives there, so the hook allows the one
+write the loop wants and blocks every other path the doer might reach for.
+
 ## What this folder is not
 
 It is not a second loop engine. `loops/` holds the loop, and porting it must not

@@ -17,6 +17,7 @@ import pytest
 import roleplan
 from adapter import AgentSdkBackend
 from contract import ContractError
+from enhancer import EnhancerError, Outcome
 
 FOLDER = Path(__file__).resolve().parents[1]
 
@@ -149,3 +150,76 @@ def test_the_table_prints_from_the_command_line_with_no_sdk_installed(repo):
     )
     assert done.returncode == 0, done.stderr
     assert "judge" in done.stdout
+
+
+# -- config.json and the poll entry point ----------------------------------
+
+
+def test_config_reads_the_file_next_to_this_module(tmp_path):
+    (tmp_path / "config.json").write_text('{"fork_owner": "me", "repo_name": "crm"}')
+    assert loop.config(tmp_path)["fork_owner"] == "me"
+
+
+def test_a_missing_config_tells_you_exactly_what_to_copy(tmp_path):
+    """This runs headlessly. It cannot stop and wait for a username."""
+    with pytest.raises(SystemExit, match=r"config\.json\.example"):
+        loop.config(tmp_path)
+
+
+def test_once_polls_and_prints_one_line_per_ticket(repo, monkeypatch, capsys):
+    """The report is the only user-facing narration the loop produces."""
+    monkeypatch.setattr(loop, "config", lambda *a: {"fork_owner": "me", "repo_name": "crm"})
+    monkeypatch.setattr(loop, "backend", lambda contract: object())
+    monkeypatch.setattr(
+        "enhancer.Enhancer.poll", lambda self, t=None, **kw: [Outcome("T001", "passed", "green")]
+    )
+    assert loop.main(["--once", "--repo", str(repo)]) == 0
+    out = capsys.readouterr().out
+    assert "T001" in out
+    assert "passed" in out
+
+
+def test_a_waiting_ticket_names_the_command_to_poll_again(repo, monkeypatch, capsys):
+    monkeypatch.setattr(
+        loop, "config", lambda *a: {"fork_owner": "me", "repo_name": "crm", "poll_interval": "5m"}
+    )
+    monkeypatch.setattr(loop, "backend", lambda contract: object())
+    monkeypatch.setattr(
+        "enhancer.Enhancer.poll", lambda self, t=None, **kw: [Outcome("T001", "waiting", "round 1")]
+    )
+    loop.main(["--once", "--repo", str(repo)])
+    assert "poll-forever" in capsys.readouterr().out
+
+
+def test_no_open_tickets_says_so_rather_than_printing_nothing(repo, monkeypatch, capsys):
+    monkeypatch.setattr(loop, "config", lambda *a: {"fork_owner": "me", "repo_name": "crm"})
+    monkeypatch.setattr(loop, "backend", lambda contract: object())
+    monkeypatch.setattr("enhancer.Enhancer.poll", lambda self, t=None, **kw: [])
+    loop.main(["--once", "--repo", str(repo)])
+    assert "no open enhancer tickets" in capsys.readouterr().out
+
+
+def test_naming_a_ticket_implies_once(repo, monkeypatch, capsys):
+    seen = {}
+    monkeypatch.setattr(loop, "config", lambda *a: {"fork_owner": "me", "repo_name": "crm"})
+    monkeypatch.setattr(loop, "backend", lambda contract: object())
+    monkeypatch.setattr(
+        "enhancer.Enhancer.poll",
+        lambda self, t=None, **kw: (seen.update(ticket=t, kw=kw), [Outcome("T001", "passed")])[1],
+    )
+    loop.main(["--ticket", "T001", "--simulate-comment", "hi", "--repo", str(repo)])
+    assert seen["ticket"] == "T001"
+    assert seen["kw"]["simulate_comment"] == "hi"
+
+
+def test_an_enhancer_error_reports_and_exits_nonzero(repo, monkeypatch, capsys):
+    """A loop that dies has to say why, not just exit."""
+
+    def boom(self, t=None, **kw):
+        raise EnhancerError("no tickets/ directory")
+
+    monkeypatch.setattr(loop, "config", lambda *a: {"fork_owner": "me", "repo_name": "crm"})
+    monkeypatch.setattr(loop, "backend", lambda contract: object())
+    monkeypatch.setattr("enhancer.Enhancer.poll", boom)
+    assert loop.main(["--once", "--repo", str(repo)]) == 1
+    assert "enhancer stopped: no tickets/ directory" in capsys.readouterr().out
