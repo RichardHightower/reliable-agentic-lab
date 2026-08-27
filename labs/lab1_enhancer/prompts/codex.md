@@ -84,8 +84,11 @@ candidate file, grade the candidate, and keep it only if it fixes strictly
 more than it breaks.
 
 Persist the issue number as soon as you know it, whether you found it or
-created it. A state file written only on the create path makes every later
-poll look like a first poll, and a first poll never reads a comment.
+created it, and write it to both places: the state file, and the ticket's
+frontmatter as `github_issue`. A state file written only on the create path
+makes every later poll look like a first poll, and a first poll never reads a
+comment. Nothing else in this loop writes the frontmatter entry, so a lookup
+that reads it without ever writing it never finds one.
 
 Two rules about which ticket and which issue. Both look like details and both
 produced real duplicates before they were written down.
