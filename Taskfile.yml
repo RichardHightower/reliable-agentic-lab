@@ -1,7 +1,7 @@
 # The workshop's command spine. One name per action.
 #
-# Every command in the slides, the labs, and the docs is a task in this file.
-# If you find a raw python invocation in a doc, it is drift. Fix the doc.
+# There is no shared loop engine. Saturday work lives in labs/. Answers live
+# in solutions/, each folder standalone. Duplicate code is the point.
 version: '3'
 
 vars:
@@ -36,23 +36,19 @@ tasks:
       - cd {{.TARGET}} && task setup
 
   test:
-    desc: Run the loop engine's tests and the extra credit tests, then write the receipt.
+    desc: Extra-credit tests, receipt tests, and a guard that loops/ stays gone.
     cmds:
       - mkdir -p reports
       - defer: '{{.PY}} scripts/receipt.py write . {{.EXIT_CODE}}'
-      - '{{.PY}} -m pytest loops/tests solutions/extra_credit -q --junitxml=reports/junit.xml'
+      - '{{.PY}} -m pytest scripts/tests solutions/extra_credit -q --junitxml=reports/junit.xml'
 
   e2e:
-    desc: Run the end-to-end tests.
+    desc: Run the end-to-end tests if any exist.
     cmds:
       - mkdir -p reports
-      # pytest exits 5 when it collects nothing. An empty e2e suite is a real
-      # state, not a failure: the engine has no interface, and a target repo has
-      # no interface test until the feature exists. The rubric's ui_has_e2e row
-      # is what judges that, by reading the report. This exit code is not.
       - |
         set +e
-        {{.PY}} -m pytest loops/tests -q -m e2e --junitxml=reports/junit-e2e.xml
+        {{.PY}} -m pytest scripts/tests -q -m e2e --junitxml=reports/junit-e2e.xml
         code=$?
         set -e
         if [ $code -eq 5 ]; then
@@ -62,48 +58,44 @@ tasks:
         exit $code
 
   lint:
-    cmds: ['{{.PY}} -m ruff check loops scripts solutions labs']
+    cmds: ['{{.PY}} -m ruff check scripts solutions labs']
 
   format-check:
-    cmds: ['{{.PY}} -m ruff format --check loops scripts solutions labs']
+    cmds: ['{{.PY}} -m ruff format --check scripts solutions labs']
 
   receipt:
     desc: Show whether a push would be allowed right now.
     cmds: ['{{.PY}} scripts/receipt.py check {{.TARGET}}']
 
-  # --- the loops ---------------------------------------------------------
-  loop:enhancer:
-    desc: Groom a draft ticket until it is ready. Module 1.
-    cmds: ['{{.PY}} -m loops.enhancer --repo {{.TARGET}} {{.CLI_ARGS}}']
-
-  loop:enhancer:plugin:
-    desc: One poll-and-act step over every open ticket, using the Claude Code plugin instead of the Python engine.
+  # --- Saturday artifacts. Each command runs a standalone solutions/ folder.
+  lab1:
+    desc: One poll of the Claude Code enhancer plugin. Module 1. Needs an LLM.
     dir: solutions/sol1_enhancer
     cmds:
       - claude -p "/enhancer-loop --repo {{.ROOT_DIR}}/{{.TARGET}} {{.CLI_ARGS}}"
 
-  loop:implementer:
-    desc: Turn a ready ticket into a reviewed pull request. Module 2.
-    cmds: ['{{.PY}} -m loops.implementer --repo {{.TARGET}} {{.CLI_ARGS}}']
+  lab2:
+    desc: Ticket implementer in solutions/sol2_implementer. Module 2.
+    dir: solutions/sol2_implementer
+    cmds:
+      - '{{.ROOT_DIR}}/{{.PY}} implementer.py --repo {{.ROOT_DIR}}/{{.TARGET}} {{.CLI_ARGS}}'
 
-  loop:research:
-    desc: Research a question and produce a cited brief. Module 3.
-    cmds: ['{{.PY}} -m loops.researcher {{.CLI_ARGS}}']
+  lab3:
+    desc: Research assistant in solutions/sol3_research. Module 3.
+    dir: solutions/sol3_research
+    cmds:
+      - '{{.ROOT_DIR}}/{{.PY}} researcher.py {{.CLI_ARGS}}'
 
-  loop:fixer:
-    desc: Repair a broken pull request until it is green. Module 4.
-    cmds: ['{{.PY}} -m loops.fixer --repo {{.TARGET}} {{.CLI_ARGS}}']
+  lab4:
+    desc: Broken PR fixer in solutions/sol4_fixer. Module 4.
+    dir: solutions/sol4_fixer
+    cmds:
+      - '{{.ROOT_DIR}}/{{.PY}} fixer.py --repo {{.ROOT_DIR}}/{{.TARGET}} {{.CLI_ARGS}}'
 
   # --- the class ---------------------------------------------------------
   slides:
     desc: Draw the mermaid diagrams, then render every deck to PDF.
     cmds:
-      # Marp does not draw mermaid. This renders each block to SVG first.
       - '{{.PY}} scripts/build_slides.py'
       - for: ['session-1-system-architecture', 'session-2-harness-engineering', 'session-3-research-loops-mcp', 'session-4-production-architecture']
         cmd: npx --yes @marp-team/marp-cli slides/{{.ITEM}}/slides.build.md --pdf --allow-local-files -o slides/{{.ITEM}}/slides.pdf
-
-  contract:
-    desc: Check that a repo satisfies the loop contract. Pass TARGET=path.
-    cmds:
-      - '{{.PY}} -c "from loops.contract import Contract; c=Contract(''{{.TARGET}}''); c.validate(); print(''{{.TARGET}} satisfies the contract'')"'

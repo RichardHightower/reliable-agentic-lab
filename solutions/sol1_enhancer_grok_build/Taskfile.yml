@@ -60,7 +60,6 @@ tasks:
       # flag after it and grok errors with "a value is required for --single".
       - >-
         grok --always-approve
-        --deny "Edit({{.LAB_ROOT}}/loops/**)"
         --deny "Edit({{.LAB_ROOT}}/scripts/**)"
         --deny "Edit({{.LAB_ROOT}}/work/**/tests/**)"
         -p "/enhancer-loop --repo {{.TARGET}} {{.CLI_ARGS}}"

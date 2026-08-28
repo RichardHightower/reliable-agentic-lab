@@ -24,7 +24,7 @@ claude -p "$(cat prompts/claude-code.md)"
 ## Verify
 
 ```bash
-task test -- loops/tests/test_runtime_ports.py     # no key needed
+task test     # no key needed
 python loop.py --repo ../../../work/northwind-field-crm --dry-run
 python loop.py --repo ../../../work/northwind-field-crm --ticket T001
 ```

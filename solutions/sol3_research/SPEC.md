@@ -59,12 +59,12 @@ The boundary is the lesson. This loop can search and write into its own output f
 
 ## The reference
 
-loops/researcher.py, loops/research.py, and loops/brief.py
+solutions/sol3_research/
 
 ## Worth reading
 
-- `loops/brief.py`
-- `loops/research.py`
+- `solutions/sol3_research/brief.py`
+- `solutions/sol3_research/research.py`
 - `MCP.md`
 
 ## Run the finished answer

@@ -1,8 +1,8 @@
-"""A `doers.Backend` for this runtime port, copied flat from `loops/doers.py`.
+"""A `doers.Backend` for this runtime port, copied flat into this folder.
 
 `implementer.run()` in the reference loop takes any object shaped like
 `Backend`: a `.name` and a `.run(*, repo, prompt, allow) -> DoerResult`. This
-folder is standalone, so it does not import `loops.doers` for that shape, it
+folder is standalone, so it does not import a shared engine for that shape, it
 restates the two small pieces it needs and wraps the Deep Agents graph
 behind them.
 

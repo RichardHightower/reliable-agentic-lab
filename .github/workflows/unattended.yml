@@ -1,17 +1,12 @@
-name: unattended-loop
+name: unattended-fixer
 
-# The loop does not change when nobody is watching. The trigger does.
+# Module 4. The fixer in solutions/sol4_fixer, triggered when nobody is watching.
 
 on:
   workflow_dispatch:
     inputs:
-      loop:
-        description: which loop to run
-        default: fixer
-        type: choice
-        options: [fixer, implementer, enhancer]
       branch:
-        description: the target branch to repair. Fixer only.
+        description: the target branch to repair
         default: broken-pr
         type: string
   pull_request:
@@ -27,34 +22,27 @@ jobs:
         with:
           python-version: "3.11"
 
-      # The loops shell out to `task test` in the target repo. The repo contract
-      # is the interface, so the runner needs the same tool your laptop has.
       - name: Install Task
         run: |
           sh -c "$(curl -fsSL https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
           task --version
 
-      - name: Install the engine
+      - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # `task setup` in the target, not pip in this one. The target's Taskfile
-      # runs .venv/bin/python, so installing into the system python leaves every
-      # `task test` unable to start.
       - name: Clone and set up the target repo
         run: |
           git clone --quiet https://github.com/RichardHightower/northwind-field-crm.git \
             work/northwind-field-crm
           cd work/northwind-field-crm && task setup
 
-      # Exit 0 is a pass, 2 is an escalation a human must read, 1 is a crash.
-      # The fixer starts on broken-pr. Pointed at a green branch it reports a
-      # pass and repairs nothing, which proves nothing.
-      - name: Run the loop with nobody watching
+      - name: Run the fixer with nobody watching
+        working-directory: solutions/sol4_fixer
         run: |
-          python -m loops.unattended \
-            --repo work/northwind-field-crm \
-            --loop ${{ github.event.inputs.loop || 'fixer' }} \
-            --branch ${{ github.event.inputs.branch || 'broken-pr' }}
+          git -C ../../work/northwind-field-crm checkout ${{ github.event.inputs.branch || 'broken-pr' }}
+          python fixer.py \
+            --repo ../../work/northwind-field-crm \
+            --doer reference
 
       - name: Upload the state and the reports
         if: always()

@@ -7,7 +7,7 @@ fights. Budget 15 minutes.
 
 | Thing | Why | Check |
 |---|---|---|
-| Python 3.10 or newer | The loops and the demo app | `python3 --version` |
+| Python 3.10 or newer | Labs 2-4 and the demo app | `python3 --version` |
 | Git | Everything | `git --version` |
 | Task | The command spine | `task --version` |
 | `jq` | Module 1's plugin clone and `gh` scripting | `jq --version` |
@@ -30,8 +30,7 @@ Anything else: <https://taskfile.dev/installation/>
 ### Pick a coding agent
 
 Claude Code, Codex, Grok Build, or OpenCode. One is enough, and the labs do not
-care which. You can also do every lab by hand, because the loops run with no
-model key at all.
+care which. You can also fill labs 2-4 by hand.
 
 ## 1. clone
 
@@ -60,13 +59,14 @@ Windows without `make`-style tooling: the same steps run by hand are in
 task test
 ```
 
-129 checks. All of them should pass. If they do not, you have found something
-worth telling Rick about before Saturday.
+That is extra credit plus a guard that the old shared `loops/` library stays
+gone. If it fails on a fresh clone, tell Rick.
 
-Then confirm the loops run with no key:
+Then, if you want to see Module 2's answer run with no model key:
 
 ```bash
-task loop:implementer -- --repo work/northwind-field-crm --ticket T001 --doer reference
+cd solutions/sol2_implementer
+python implementer.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
 ```
 
 You should see ten rubric rows, all passing, and `gate: pass`.
@@ -81,7 +81,7 @@ cp .env.example .env
 
 | Variable | Needed for | Without it |
 |---|---|---|
-| `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` | Driving a loop with a model | Use `--doer reference`. Everything still runs. |
+| `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` | Driving a live model | Labs 2-4 still run with `--doer reference`. Lab 1 needs an LLM. |
 | `PERPLEXITY_API_KEY` | Module 3 research | Use `--backend websearch` or `--backend fixture`. You choose. |
 | `GITHUB_TOKEN` | Module 4 pull requests | Modules 1 to 3 are fully offline. |
 | `LANGFUSE_*` | Take-home observability | Local JSON traces are the fallback. |

@@ -38,4 +38,4 @@ git checkout -- loop.py
 ```
 
 That restores this one file. Everything you need is in `prompts/`, and
-`loops/fixer.py` is the reference the answer calls.
+`solutions/sol4_fixer/` is the reference the answer calls.

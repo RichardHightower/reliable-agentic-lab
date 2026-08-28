@@ -151,7 +151,8 @@ Then the claim they will test on Monday: all four run from a clean clone with on
 
 ## s4-14. Where everything lives
 
-Point at the tree. Say that `loops/` never imports the CRM, so it already points
+Point at the tree. Say that each `solutions/` folder is standalone, so they
+already take this home. There is no shared engine to learn.
 at their repo.
 
 Name the done branches once more for anyone who fell behind.

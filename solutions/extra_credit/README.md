@@ -35,5 +35,5 @@ no token.
 ## The rule these assignments exist to show
 
 The trigger moves out of the loop. The exits stay in it. A workflow file starts
-the run. It never decides when to stop. Every loop here calls the same
-`loops/` engine the Saturday labs call.
+the run. It never decides when to stop. Every assignment here calls the matching
+`solutions/solN_*` folder. There is no shared engine.

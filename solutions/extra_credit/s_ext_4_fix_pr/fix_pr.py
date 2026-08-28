@@ -16,8 +16,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+_FIXER = ROOT / "solutions" / "sol4_fixer"
+if str(_FIXER) not in sys.path:
+    sys.path.insert(0, str(_FIXER))
 
-from loops import fixer
+import fixer
+
 from solutions.extra_credit import TARGET
 from solutions.extra_credit import (
     github_api as gh,

@@ -53,7 +53,7 @@ roles, and each runtime keeps a role out of a path its own way.
 
 | Runtime | How it keeps a role out of a path |
 |---|---|
-| Plain Python, `loops/` | the `Judge` class has no `write` method |
+| Claude Code plugin | subagent tool lists; the judge has no write tools |
 | Claude Agent SDK | a tool list per subagent, plus a `PreToolUse` hook for paths |
 | LangChain Deep Agents | a tool list per subagent, with the path check inside the tool |
 
@@ -101,29 +101,26 @@ own flat copy of the ones it needs. An attendee can copy one folder somewhere
 else and run it, with no path shim reaching back up this tree. Standalone beats
 DRY here, because the folder is the teaching unit.
 
-The copies really are copies. `loops/tests/test_runtime_ports.py` asserts every
-port's cast matches the table by value, not by identity, precisely because each
-port defines its own `RolePlan` class.
+The copies really are copies. Each port's own tests assert the cast by value,
+not by identity, precisely because each port defines its own `RolePlan` class.
 
 ## Edit this tree by hand
 
 `scripts/build_labs.py` used to write all 24 folders from one description per
 lab. Its `LABS_SPEC` is now empty, so running it is a no-op. Every folder here
-is maintained by hand, and `loops/tests/test_build_labs.py` iterates that empty
-list and asserts nothing about them.
+is maintained by hand.
 
-Do not add a folder back to the generator to avoid editing it. The generator is
-kept only so the tests that import it still load.
+Do not add a folder back to the generator to avoid editing it. Duplicate the
+file into the folder that needs it. There is no shared engine.
 
 ## Run the tests
 
 ```bash
-task test -- loops/tests/test_runtime_ports.py
+task test
 ```
 
-Those checks need no SDK and no key. They assert that all three runtimes read
-the same table, in all four loops, and that the judge holds no write tool in any
-of them.
+Those checks need no SDK and no key. Run `task test` from a port folder for
+that folder's own suite.
 
 ## Why a second runtime exists at all
 
@@ -131,4 +128,4 @@ To show that the harness is the product and the framework is not. The rubric,
 the red gate, the write scope, and the exits are the same in all three. Only
 the plumbing changes.
 
-If porting a loop to a new runtime requires changing `loops/`, the design leaked.
+If a port imports a shared engine, the design leaked. Copy the file.

@@ -19,15 +19,15 @@ Rebuild the Module 2 implementer loop on top of LangChain Deep Agents.
   from `solutions/roleplan.py`. Do not restate the scopes here. There is one
   table and it lives in `.loop.yml`.
 - `run(contract, ticket_id, budget)`. Run the loop: plan, write tests, check the
-  red gate, write code, score with `loops.rubric`, then decide with
-  `loops.gates`.
+  red gate, write code, score with the local `rubric`, then decide with
+  the local `gates`.
 
 ## Rules
 
 - The judge gets no tool that can write. Not a rule in its prompt. No tool.
 - The code implementer must not be able to write `tests/**`.
 - Python holds the loop. The model does not count its own retries.
-- Wrap the run in `solutions.observability.trace` so there is a record either
+- Wrap the run in this folder's own trace helper so there is a record either
   way.
 
 ## Exit when
@@ -39,7 +39,7 @@ Rebuild the Module 2 implementer loop on top of LangChain Deep Agents.
 ## Verify
 
 ```bash
-task test -- loops/tests/test_runtime_ports.py
+task test
 python loop.py --repo ../../../work/northwind-field-crm --dry-run
 ```
 
@@ -47,7 +47,6 @@ The first command needs no API key. Run it first.
 
 ## Reading
 
-- `solutions/roleplan.py`, the role table every runtime reads
-- `solutions/deep_agents/roles.py`, the answer for this runtime
-- `loops/implementer.py`, the plain-Python loop you are porting
+- `solutions/sol2_implementer_deep_agents/`, the answer for this runtime
+- `solutions/sol2_implementer/implementer.py`, the Saturday Module 2 answer you are porting
 - `import deepagents` is how you know the install worked

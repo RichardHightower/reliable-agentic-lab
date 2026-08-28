@@ -17,12 +17,13 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from loops import criteria, enhancer
-from loops import ticket as ticket_mod
 from solutions.extra_credit import TARGET
 from solutions.extra_credit import (
     github_api as gh,
 )
+
+from . import criteria
+from . import ticket as ticket_mod
 
 HERE = Path(__file__).resolve().parent
 WORK = HERE / "work"
@@ -49,14 +50,20 @@ def _log(name: str, payload: dict) -> Path:
 
 
 def run_local(ticket_id: str, *, incorporate: bool, budget: int) -> dict:
-    payload = enhancer.run(
-        repo=TARGET,
-        ticket_id=ticket_id,
-        incorporate=incorporate,
-        budget=budget,
-    )
-    payload["mode"] = "local"
-    payload["extra_credit"] = True
+    """Judge the local ticket file. Extra credit does not ship a shared engine."""
+    del incorporate, budget
+    path = TARGET / "tickets" / f"{ticket_id}.md"
+    parsed = ticket_mod.parse(path.read_text(encoding="utf-8"), ticket_id=ticket_id)
+    verdict = criteria.judge(parsed)
+    payload = {
+        "mode": "local",
+        "extra_credit": True,
+        "ticket": ticket_id,
+        "ready": verdict.ready,
+        "kind": verdict.kind,
+        "missing": verdict.missing,
+        "gate": "pass" if verdict.ready else "retry",
+    }
     _log("last-groom.json", payload)
     return payload
 

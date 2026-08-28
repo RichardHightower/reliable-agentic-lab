@@ -61,14 +61,14 @@ You will hit the push gate in this lab. Your agent will try to push and be refus
 
 ## The reference
 
-loops/implementer.py, loops/rubric.py, and loops/gates.py
+solutions/sol2_implementer/
 
 ## Worth reading
 
-- `loops/rubric.py`
-- `loops/gates.py`
-- `loops/roles.py`
-- `loops/steps.py`
+- `solutions/sol2_implementer/rubric.py`
+- `solutions/sol2_implementer/gates.py`
+- `solutions/sol2_implementer/roles.py`
+- `solutions/sol2_implementer/steps.py`
 
 ## Run the finished answer
 

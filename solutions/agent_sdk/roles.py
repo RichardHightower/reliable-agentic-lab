@@ -17,8 +17,9 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 
-from loops.roles import WriteScope
 from solutions.roleplan import DEFAULT_LOOP, RolePlan, plan
+
+from .write_scope import WriteScope
 
 # Tool inputs that name a path. A hook has to know where to look.
 PATH_KEYS = ("file_path", "path", "notebook_path")

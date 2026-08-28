@@ -12,7 +12,7 @@ may not write that file".
 `--dry-run` builds the configuration and prints it. It calls no model, so run
 it first and read what you built before you spend anything.
 
-Read `solutions.agent_sdk.roles` only if you stall. It is the answer.
+Read `solutions/sol2_implementer_agent_sdk/` only if you stall. It is the answer.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def build(contract: Contract):
     There is one role table and it lives in the target repo's `.loop.yml`.
 
     The judge must end up holding no tool that can write. Check it with
-    `task test -- loops/tests/test_runtime_ports.py`, which needs no API key.
+    `task test`, which needs no API key.
     """
     raise NotImplementedError("fill me in")
 
@@ -40,7 +40,7 @@ def run(contract: Contract, ticket_id: str = "T001", budget: int = 3) -> dict:
     """Run the loop: plan, tests, red gate, code, rubric, gate.
 
     Python holds the loop. The model never counts its own retries. Score with
-    `loops.rubric.score` and decide with `loops.gates.decide`, exactly as
+    the local `rubric.score` and decide with the local `gates.decide`, exactly as
     Module 2 does.
     """
     raise NotImplementedError("fill me in")

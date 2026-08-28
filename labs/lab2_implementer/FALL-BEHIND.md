@@ -38,4 +38,4 @@ git checkout -- harness.py
 ```
 
 That restores this one file. Everything you need is in `prompts/`, and
-`loops/implementer.py, loops/rubric.py, and loops/gates.py` is the reference the answer calls.
+`solutions/sol2_implementer/` is the reference the answer calls.

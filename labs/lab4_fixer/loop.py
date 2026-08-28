@@ -5,7 +5,7 @@ Fill the two functions below.
 This loop runs unattended. Nobody is watching to stop it, so the exits matter
 more than the successes, and giving up silently is the one thing it may not do.
 
-Read `loops/fixer.py` only if you stall.
+Read `solutions/sol4_fixer/fixer.py` only if you stall.
 """
 
 from __future__ import annotations

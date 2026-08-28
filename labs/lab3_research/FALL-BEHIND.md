@@ -38,4 +38,4 @@ git checkout -- loop.py
 ```
 
 That restores this one file. Everything you need is in `prompts/`, and
-`loops/researcher.py, loops/research.py, and loops/brief.py` is the reference the answer calls.
+`solutions/sol3_research/` is the reference the answer calls.

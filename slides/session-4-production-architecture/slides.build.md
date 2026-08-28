@@ -309,11 +309,9 @@ beat: talk
 # Where everything lives.
 
 ```
-loops/                the engine. It never imports the CRM.
-labs/lab1_enhancer    labs/lab2_implementer
-labs/lab3_research    labs/lab4_fixer
-labs/takehome/        Claude Agent SDK and Deep Agents. Optional.
-solutions/            the reference, and the code on these slides.
+labs/                 four labs. cd into one and work there.
+solutions/            the answer. One standalone folder per lab and runtime.
+labs/takehome/        Agent SDK and Deep Agents. Not Saturday.
 work/                 the target repo, cloned by task setup.
 ```
 

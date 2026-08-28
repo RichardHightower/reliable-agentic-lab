@@ -36,11 +36,11 @@ the budget to watch it fail identically buys a surprise bill rather than a fix.
 
 ## Where the code lives
 
-The answer for this lab is `loops/implementer.py, loops/rubric.py, and loops/gates.py`.
+The answer for this lab is `solutions/sol2_implementer/`.
 
 Worth reading:
 
-- `loops/rubric.py`
-- `loops/gates.py`
-- `loops/roles.py`
-- `loops/steps.py`
+- `solutions/sol2_implementer/rubric.py`
+- `solutions/sol2_implementer/gates.py`
+- `solutions/sol2_implementer/roles.py`
+- `solutions/sol2_implementer/steps.py`

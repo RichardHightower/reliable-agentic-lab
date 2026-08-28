@@ -36,10 +36,10 @@ the budget to watch it fail identically buys a surprise bill rather than a fix.
 
 ## Where the code lives
 
-The answer for this lab is `loops/researcher.py, loops/research.py, and loops/brief.py`.
+The answer for this lab is `solutions/sol3_research/`.
 
 Worth reading:
 
-- `loops/brief.py`
-- `loops/research.py`
+- `solutions/sol3_research/brief.py`
+- `solutions/sol3_research/research.py`
 - `MCP.md`
