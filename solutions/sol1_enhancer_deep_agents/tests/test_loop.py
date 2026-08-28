@@ -185,6 +185,25 @@ def test_an_enhancer_error_reports_and_exits_nonzero(target_repo, polling, capsy
     assert "enhancer stopped: no tickets/ directory" in capsys.readouterr().out
 
 
+def test_a_missing_deepagents_install_has_a_setup_command(target_repo, monkeypatch, capsys):
+    """A live run should not expose an import traceback to an attendee."""
+
+    monkeypatch.setattr(
+        loop, "config", lambda *a: {"fork_owner": "me", "repo_name": "crm"}
+    )
+
+    def missing_runtime(_contract):
+        raise ModuleNotFoundError("No module named 'deepagents'", name="deepagents")
+
+    monkeypatch.setattr(loop, "backend", missing_runtime)
+
+    assert loop.main(["--once", "--repo", str(target_repo)]) == 1
+
+    out = capsys.readouterr().out
+    assert "Deep Agents is not installed" in out
+    assert "pip install -r ../../requirements-takehome.txt" in out
+
+
 def test_the_entry_point_names_its_own_loop():
     """A bare `roleplan.plan(contract)` must build this folder's own cast.
 
