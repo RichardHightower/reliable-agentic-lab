@@ -1,6 +1,13 @@
 # Standalone. No dependency on the root Taskfile. Every command runs from this
 # folder, start to finish: clone your fork, seed test tickets, run a poll.
 #
+# The live test is the same three commands as sol1_enhancer, sol1_enhancer_opencode,
+# and sol1_enhancer_grok_build:
+#
+#   task reset-test-tickets
+#   task create-test-tickets
+#   task run --
+#
 # `task test`, `task table`, and `task checks` need no SDK, no API key, and no
 # clone. `task run` and `task poll-forever` need all three.
 version: '3'
@@ -53,7 +60,7 @@ tasks:
     cmds:
       - test -f {{.TASKFILE_DIR}}/config.json || (echo "copy config.json.example to config.json first, and fill in your GitHub username" && exit 1)
       - mkdir -p {{.TASKFILE_DIR}}/../../work
-      - git clone --quiet https://github.com/$({{.PY}} -c "import json;print(json.load(open('{{.TASKFILE_DIR}}/config.json'))['fork_owner'])")/$({{.PY}} -c "import json;print(json.load(open('{{.TASKFILE_DIR}}/config.json'))['repo_name'])").git {{.TARGET}}
+      - git clone --quiet https://github.com/$(jq -r .fork_owner {{.TASKFILE_DIR}}/config.json)/$(jq -r .repo_name {{.TASKFILE_DIR}}/config.json).git {{.TARGET}}
 
   create-test-tickets:
     desc: Create GitHub issues for every draft ticket. task run never opens issues.
@@ -71,6 +78,10 @@ tasks:
 
   run:
     desc: One poll-and-act step over every open ticket.
+    # Pinning dir here, not just TARGET, means loop.py always starts from this
+    # exact folder. config.json is read from Path(__file__), so that is already
+    # pinned; the subprocess cwd still has to be this folder so relative paths
+    # in CLI_ARGS and the plugin/ tree resolve the same way as the other ports.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - '{{.PY}} loop.py --once --repo {{.TARGET}} {{.CLI_ARGS}}'

@@ -48,10 +48,11 @@ hook to guard.
    without a path check can reach any file in the repo, and the first thing an
    agent under pressure reaches for is the failing test.
 
-5. Print the configuration and read it.
+5. Print the configuration and read it. `task table` needs no clone and no
+   SDK. A live `python loop.py --repo ...` without `--table-only` needs both.
 
    ```bash
-   python loop.py --repo ../../work/northwind-field-crm
+   task table
    ```
 
 ## Verify
@@ -80,8 +81,13 @@ Run the two deterministic check scripts against their own assertions with
 
 ## Run the loop
 
+The live test is the same three commands as `sol1_enhancer`,
+`sol1_enhancer_opencode`, and `sol1_enhancer_grok_build`. See
+[HOW_TO_RUN.md](HOW_TO_RUN.md).
+
 `loop.py --table-only` needs nothing. The loop itself needs three things: the
-`claude-agent-sdk` package, an API key, and a clone of the target repo.
+`claude-agent-sdk` package, an `ANTHROPIC_API_KEY`, and a clone of the target
+repo.
 
 1. Copy `config.json.example` to `config.json` and fill in your GitHub username.
 
@@ -90,13 +96,14 @@ Run the two deterministic check scripts against their own assertions with
    ```bash
    task setup
    task clone
-   task create-test-tickets
    ```
 
-3. Run one poll-and-act step.
+3. Retest from scratch. This is the demo.
 
    ```bash
-   task run
+   task reset-test-tickets
+   task create-test-tickets
+   task run --
    ```
 
    It prints one line per ticket: `passed`, `escalated`, or `waiting`.
@@ -104,16 +111,17 @@ Run the two deterministic check scripts against their own assertions with
 4. Poll on an interval, until you stop it.
 
    ```bash
-   task poll-forever
+   task poll-forever --
    ```
 
    That script is a seminar stand-in for a scheduler. In production the trigger
    is cron, or a scheduled GitHub Actions workflow.
 
-To work one ticket without waiting on a real comment, pass your own:
+To work one ticket without waiting on a real comment, pass `--ticket` and
+`--simulate-comment` after `--`:
 
 ```bash
-task run --
+task run -- --ticket T001 --simulate-comment LGTM
 ```
 
 ## What one poll does
@@ -181,4 +189,3 @@ exits. Skip comments that contain `<!-- enhancer-loop -->`. Set
 
 Grok on hosted runners is a poor fit. Prefer Claude Code, Agent SDK, or
 Deep Agents in Actions. Keep Grok on a laptop or `ext_5_digitalocean`.
-
