@@ -1,34 +1,207 @@
-# Spec. Lab 3. Research assistant on LangChain Deep Agents
+# Spec. Lab 3. Research on LangChain Deep Agents
 
-A question in, a cited brief out. LangChain's own Deep Agents quickstart is a
-research agent. This folder is that shape pointed at our tool boundary.
+A question in, a cited brief out. A topic in, an evidence-backed white paper out.
 
-## Cast
+LangChain's own Deep Agents quickstart is a research agent. This folder is that
+shape, pointed at our tool boundary, then grown until it produces something you
+would hand to a colleague.
 
-orchestrator, researcher, writer, judge.
+The point is not that it runs. The point is that a role cannot do a job it was
+not given a tool for, and that nothing about grounding, cost, or stopping is left
+to a model's own judgment.
 
-Researcher: search only. Isolated context. Writer: `brief.md` only. Judge:
-`check_brief` in Python. Citations are arithmetic.
+## Standalone
 
-## Tool boundary
+This folder imports no shared engine. Every module below is a copy, and
+`tests/test_standalone.py` fails if that stops being true.
 
-One function. Three backends. The loop cannot tell which one answered.
+| File | What it holds |
+| --- | --- |
+| `loop.py` | Both entry points, and the role table |
+| `roleplan.py` | The cast per loop, and the write scope per role |
+| `roles.py` | Deep Agents subagents, and the three fencing layers |
+| `write_scope.py` | `WriteScope`, `Doer`, `Judge`, `Orchestrator` |
+| `gates.py` | Three exits, and stable failure detection |
+| `research.py` | One search boundary, four backends, a hard cost cap |
+| `researcher.py` | The Lab 3 runner |
+| `brief.py` | Citation arithmetic and the em dash sweep |
+| `adapter.py` | Deep Agents results into a `DoerResult` |
+| `mcp_tools.py` | `.mcp.json`, and the fallbacks under it |
+| `evidence.py` | `SourceDocument`, `Claim`, `Finding`, and corroboration |
+| `paper.py` | The nine stage pipeline and the three exits |
+| `stages.py` | Each stage's gate |
+| `state.py` | The resumable checkpoint |
+| `diagrams.py` | Mermaid and PlantUML into figures |
+| `paper_check.py` | The hard gates on a finished paper |
+| `publish.py` | The secret gist push |
 
-- context7 / Perplexity when a key exists
-- the agent's WebSearch
-- `fixtures/research.json` when the room has no wifi
+## The cast for the paper loop
 
-Cannot merge, deploy, or edit the CRM.
-
-Three exits: brief grounded; search budget spent; no source found, escalate.
-
-## Run
-
-```bash
-cd solutions/sol3_research_deep_agents
-python3 -m pytest tests -q
-python3 loop.py --table-only
-python3 loop.py --question "sqlalchemy nullable datetime column" --backend fixture
+```
+role              writes  scope
+orchestrator      no      nothing
+planner           yes     plan.json
+researcher        no      nothing
+verifier          yes     evidence/**   (denied: paper/**)
+diagrammer        yes     diagrams/*.mmd, diagrams/*.puml   (denied: paper/**, evidence/**)
+writer            yes     brief.md, paper/**, work/research/**   (denied: evidence/**)
+reviewer          no      nothing
 ```
 
-Saturday still fills `plan_questions` and `check_brief` in the lab folder.
+Run `task table` and read the writes column. If the reviewer prints `yes`, the
+translation is wrong and the tests say so.
+
+## How this runtime enforces scope
+
+Deep Agents scopes three ways, and this folder uses all three.
+
+1. **A tool list per subagent.** The reviewer is handed `read_file` and nothing
+   else. "Do not edit the paper" is not an instruction it can reinterpret.
+2. **A path check inside the write tool.** The writer may write `paper/**`, the
+   verifier may write `evidence/**`, and neither can reach the other. The tool
+   returns a refusal sentence rather than raising, because a raw traceback in an
+   agent's context starts a retry loop and a sentence naming the scope changes
+   the next action.
+3. **A fence around the harness.** `build_agent` passes `permissions=`, hides the
+   built-in write tools from the orchestrator, mounts the working directory as
+   `FilesystemBackend(virtual_mode=True)` so `..` cannot walk out, and turns the
+   general-purpose subagent off.
+
+Layer 3 is the one people skip. The default general-purpose subagent ships with
+the harness filesystem tools, so leaving it enabled is how a carefully scoped
+agent writes anywhere it likes.
+
+## The nine stages
+
+| # | Stage | Model? | Its gate |
+| --- | --- | --- | --- |
+| 1 | plan | yes | Three to eight questions, each with a check, at least one important |
+| 2 | search | yes | Every claim names a source that resolves |
+| 3 | verify | yes | Every important claim has a decided truth state |
+| 4 | outline | yes | Every body section names claim ids that exist and may be used |
+| 5 | diagram | yes | At most twelve nodes per figure, and every figure has alt text |
+| 6 | write | yes | A section cites only the numbers its claims support |
+| 7 | review | yes | Every rubric row passes |
+| 8 | assemble | no | Every hard gate in `paper_check` |
+| 9 | publish | no | The gates passed. Opt-in only |
+
+## Three exits, and no fourth
+
+Checked before every stage, in this order:
+
+| Exit | When |
+| --- | --- |
+| `done` | Stage 8 finished and every hard gate is green |
+| `cost` | The money budget is spent |
+| `max turns` | A stage exhausted its retries |
+
+Done beats a spent budget. A run that finished and then noticed it was over its
+cap did finish, and reporting that as a cost failure discards the paper.
+
+Inside a stage, `gates.decide` returns pass, retry, or escalate. It short
+circuits the one case worth catching early: the same rows failing twice, which
+means the loop is not converging. Spending the rest of the budget to watch it
+fail identically buys a bill, not a fix.
+
+## One boundary, four backends
+
+The loop never learns which one answered.
+
+| Backend | When it is available |
+| --- | --- |
+| `perplexity` | `PERPLEXITY_API_KEY` is set. MCP first, then the REST API |
+| `context7` | `ctx7` is on PATH, or the MCP server answers. Verification only |
+| `websearch` | The coding agent answers through an inbox file |
+| `fixture` | Always. A recording, for a room with no network |
+
+## Build it step by step
+
+1. Make a virtualenv and install pytest.
+
+   ```bash
+   python3 -m venv .venv && source .venv/bin/activate && pip install pytest
+   ```
+
+2. Print the cast with nothing else installed.
+
+   ```bash
+   task table
+   ```
+
+3. Run the deterministic checks. Every one of them is a claim this folder makes
+   about itself.
+
+   ```bash
+   task checks
+   ```
+
+4. Run the whole pipeline offline, against a recording.
+
+   ```bash
+   task paper
+   ```
+
+5. Read `work/paper/<slug>/`. The paper is one file. The evidence behind it is a
+   directory of records you can grep, extend, or feed to the second brain.
+
+6. Only for a live run, install the SDK.
+
+   ```bash
+   task setup
+   ```
+
+## Verify
+
+```bash
+task test      # 198 tests, no SDK, no key, no network
+task table     # the reviewer prints no in the writes column
+task checks    # every module's own assertions
+task brief -- --question "sqlalchemy nullable datetime column"
+```
+
+## Run the pipeline
+
+```bash
+# offline, from a recording
+task paper
+
+# live, needs ANTHROPIC_API_KEY and PERPLEXITY_API_KEY in the root .env
+task setup
+task live TOPIC="context management in multi-agent research loops"
+
+# a resumed run skips every finished stage and carries the cost forward
+task live TOPIC="context management in multi-agent research loops"
+
+# push the finished paper to its own secret gist
+task publish -- --slug context-management-in-multi-agent-research-loops --dry-run --out /tmp/staged
+task publish -- --slug context-management-in-multi-agent-research-loops
+```
+
+## What one run leaves behind
+
+```
+work/paper/<slug>/
+  whitepaper.md          the paper
+  plan.json              the questions, and what would answer each one
+  outline.json           each section bound to the claims it may use
+  evidence/              SourceDocument, Claim, and Finding records
+  diagrams/              the mermaid and plantuml sources
+  figures/               rendered SVG, polished PNG, and a sidecar each
+  gates.json             which hard gates passed
+  .paper-state.json      the checkpoint a resume reads
+```
+
+The evidence directory uses the same record shape as
+`loop_eng_2nd_brain/knowledge/research/`, so a run can be ingested into the
+second brain later without a conversion step. The claims outlive the paper, which
+is the point of writing them down separately.
+
+## What this folder is not
+
+It is not a shared library. Nothing here is imported by another solution folder,
+and nothing here imports one. It is not a generic research engine. Copy this
+folder somewhere else and it runs.
+
+The check that runs without any of it is `task test`. No SDK required, no key
+required. If your reviewer ends up holding a write tool, the translation is
+wrong, and that test says so.

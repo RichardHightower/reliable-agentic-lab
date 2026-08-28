@@ -1,23 +1,87 @@
 version: '3'
 
+# Task loads these for every task below. The repo root `.env` is the normal
+# place for a key. The folder file is optional and fills in only what the root
+# does not set, because Task lets the FIRST file that defines a variable win.
+# A missing file is fine, and nothing under `task test` needs one.
 dotenv: ['../../.env', '.env']
+
+# Standalone. No includes, no shared vars, nothing outside this folder.
+# `python3` here means the venv you activated. See SPEC.md.
+
+vars:
+  # TASKFILE_DIR is Task's own absolute path to this file's directory. Every
+  # path below is built from it on purpose. A relative path depends on the
+  # invoking process's cwd being exactly right, and when it is not, this port
+  # writes its run into a different checkout that also has a work/ directory.
+  TOPIC: '{{.TOPIC | default "Exit conditions in production agent loops"}}'
+  BACKEND: '{{.BACKEND | default "fixture"}}'
 
 tasks:
   default:
     cmds: [task --list]
 
+  # -- no runtime, no key, no network ---------------------------------------
+
   test:
-    desc: Unit tests. Fixture backend. No Deep Agents package.
+    desc: Run this folder's tests. No SDK, no key, no network, no clone.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - python3 -m pytest tests -q
 
   table:
+    desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py --table-only
+      - python3 loop.py --table-only --paper
 
-  run:
+  checks:
+    desc: Run every deterministic check script against its own assertions.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 evidence.py --demo
+      - python3 paper_check.py --demo
+      - python3 diagrams.py --demo
+      - python3 publish.py --demo
+      - python3 mcp_tools.py --demo
+
+  brief:
+    desc: The Saturday artifact. A question in, a cited brief out.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - python3 loop.py --backend fixture {{.CLI_ARGS}}
+
+  # -- the pipeline ---------------------------------------------------------
+
+  diagrams:
+    desc: Render diagram sources to SVG, then polish with imagen when it is there.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 diagrams.py --src fixtures/paper/diagrams --out work/figures {{.CLI_ARGS}}
+
+  paper:
+    desc: The nine stage pipeline. Offline on the fixture backend, live on auto.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 loop.py --paper --topic "{{.TOPIC}}" --backend {{.BACKEND}} {{.CLI_ARGS}}
+
+  live:
+    desc: A real run. Needs ANTHROPIC_API_KEY and PERPLEXITY_API_KEY, plus setup.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 loop.py --paper --topic "{{.TOPIC}}" --backend auto {{.CLI_ARGS}}
+
+  publish:
+    desc: Push a finished paper to its stable secret gist. Never runs on its own.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 publish.py {{.CLI_ARGS}}
+
+  # -- setup ----------------------------------------------------------------
+
+  setup:
+    desc: Install what a live run needs. `task test` does not need any of it.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 -m pip install --quiet pytest
+      - python3 -m pip install --quiet -r ../../requirements-takehome.txt

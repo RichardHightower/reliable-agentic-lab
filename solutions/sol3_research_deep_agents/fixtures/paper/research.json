@@ -1,0 +1,23 @@
+{
+  "What are the documented exit conditions in a production agent loop?": {
+    "question": "What are the documented exit conditions in a production agent loop?",
+    "answer": "Production agent loops stop on a completion signal, a spend cap, or a turn cap. Anthropic's agent SDK documents max_turns and a budget; LangChain's Deep Agents documents a recursion limit.",
+    "citations": [
+      "https://docs.claude.com/en/api/agent-sdk/overview",
+      "https://docs.langchain.com/labs/deep-agents/overview"
+    ]
+  },
+  "What failure follows from a loop with no exit condition?": {
+    "question": "What failure follows from a loop with no exit condition?",
+    "answer": "Without an exit the loop spends until an external limit stops it. Reported failures are runaway cost and repeated identical attempts that never converge.",
+    "citations": ["https://docs.langchain.com/labs/deep-agents/overview"]
+  },
+  "How does a maker and checker split change reliability?": {
+    "question": "How does a maker and checker split change reliability?",
+    "answer": "A checker with a different tool scope catches errors the maker cannot see in its own output. A checker that shares the maker's context and tools is a second self-reflection turn, not independent validation.",
+    "citations": [
+      "https://docs.claude.com/en/docs/agents-and-tools/agent-loops",
+      "https://arxiv.org/abs/2305.11738"
+    ]
+  }
+}

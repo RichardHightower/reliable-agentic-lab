@@ -34,6 +34,18 @@ LOOPS = {
     ),
     "research": ("orchestrator", "researcher", "writer", "judge"),
     "fixer": ("orchestrator", "code_implementer", "judge"),
+    # The white paper cast. Seven roles, and each one earns its separation by
+    # holding a different tool list. A role that would hold the same tools as
+    # its neighbour is not a role, it is a prompt, and it belongs in a skill.
+    "paper": (
+        "orchestrator",
+        "planner",
+        "researcher",
+        "verifier",
+        "diagrammer",
+        "writer",
+        "reviewer",
+    ),
 }
 
 DEFAULT_LOOP = "research"
@@ -47,16 +59,29 @@ PURPOSE = {
     "researcher": "Calls the tool boundary and returns findings. Writes nothing.",
     "writer": "Assembles the brief from the findings. Writes the brief and nothing else.",
     "judge": "Scores the attempt. Reads reports and the diff. Holds no write path.",
+    "verifier": (
+        "Cross-checks each important claim against a second, independent source. "
+        "Writes evidence records. Cannot touch the paper."
+    ),
+    "diagrammer": (
+        "Draws mermaid and plantuml sources for the concepts the plan flagged. "
+        "Writes diagram sources only, so it cannot put a claim into the prose."
+    ),
+    "reviewer": (
+        "Grades the draft against the rubric and returns verdicts. "
+        "Holds no write path, so it cannot fix its own complaint."
+    ),
 }
 
 # Roles that hold no tool that writes. The separation is the tool list, not a
 # rule in a prompt, so there is nothing for a model to talk its way past.
-READERS = ("orchestrator", "judge", "researcher")
+READERS = ("orchestrator", "judge", "researcher", "reviewer")
 
 TOOLS_FOR_READER = {
     "orchestrator": ("Task",),
     "judge": (*READ_TOOLS, "Bash"),
     "researcher": (*READ_TOOLS, "WebSearch"),
+    "reviewer": (*READ_TOOLS,),
 }
 
 # Where a role may write when `.loop.yml` says nothing about it. A target repo
@@ -65,7 +90,15 @@ TOOLS_FOR_READER = {
 # be wrong.
 FALLBACK_SCOPE = {
     "doer": (("tickets/**",), ()),
-    "writer": (("brief.md", "work/research/**"), ()),
+    # The writer owns the prose and nothing else. It cannot write an evidence
+    # record, which is what stops it inventing a source to cite.
+    "writer": (("brief.md", "paper/**", "work/research/**"), ("evidence/**",)),
+    # The planner owns the plan. The verifier owns the evidence. The diagrammer
+    # owns diagram source and not one rendered figure, because a figure is the
+    # renderer's output and a role that can write one can fake one.
+    "planner": (("plan.json",), ()),
+    "verifier": (("evidence/**",), ("paper/**",)),
+    "diagrammer": (("diagrams/*.mmd", "diagrams/*.puml"), ("paper/**", "evidence/**")),
 }
 NO_WRITE_SCOPE = ((), ("**",))
 

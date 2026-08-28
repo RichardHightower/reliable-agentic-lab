@@ -1,0 +1,7 @@
+flowchart LR
+  P["Plan"] --> S["Search"]
+  S --> V["Verify"]
+  V --> W["Write"]
+  W --> R{"Grounded?"}
+  R -->|yes| A["Assemble"]
+  R -->|no| S

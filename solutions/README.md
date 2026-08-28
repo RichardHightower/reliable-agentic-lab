@@ -39,6 +39,12 @@ roles, and each runtime keeps a role out of a path its own way.
 | `lab3_research` | `sol3_research_agent_sdk` | `sol3_research_deep_agents` |
 | `lab4_fixer` | `sol4_fixer_agent_sdk` | `sol4_fixer_deep_agents` |
 
+`sol3_research_deep_agents` carries a second entry point. `loop.py --question`
+is the Saturday artifact, a question in and a cited brief out.
+`loop.py --paper --topic` is the take-home, a nine stage pipeline that produces
+an evidence-backed white paper with rendered figures. Same gates, same three
+exits, one more object. See that folder's `SPEC.md`.
+
 | Runtime | How it keeps a role out of a path |
 |---|---|
 | Claude Code plugin | subagent tool lists; the judge has no write tools |
