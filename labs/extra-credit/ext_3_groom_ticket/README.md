@@ -9,7 +9,7 @@ The Module 1 enhancer, started by an issue event instead of by you.
 ## What it must do
 
 1. Read one issue by number through the GitHub API.
-2. Judge it with `loops.criteria`. The judge does not change, only the trigger.
+2. Judge it with the ticket criteria in this folder. The judge does not change, only the trigger.
 3. Label it `ready` when it passes. Comment the missing parts when it does not.
 4. Count attempts with an `agent-attempts-N` label. Stop at the budget and say so
    in a comment.

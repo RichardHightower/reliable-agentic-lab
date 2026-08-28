@@ -10,7 +10,7 @@ The table below is the only place that difference is written down, so a runtime
 never gets to invent a role or widen a scope.
 
 If the table and a runtime ever disagree, the runtime is wrong. That is what
-`loops/tests/test_runtime_ports.py` checks, and it checks it without either SDK
+This folder's own tests check the cast, without either SDK
 installed.
 """
 

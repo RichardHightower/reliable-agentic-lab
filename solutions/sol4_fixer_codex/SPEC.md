@@ -62,12 +62,12 @@ Nobody is watching this one. Its exits matter more than its successes, and the s
 
 ## The reference
 
-loops/fixer.py
+solutions/sol4_fixer/fixer.py
 
 ## Worth reading
 
-- `loops/fixer.py`
-- `loops/gates.py`
+- `solutions/sol4_fixer/fixer.py`
+- `solutions/sol4_fixer/gates.py`
 
 ## Run the finished answer
 

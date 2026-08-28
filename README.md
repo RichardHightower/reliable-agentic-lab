@@ -5,8 +5,10 @@ Working code for **Engineering Reliable Agentic AI Systems**, a Packt workshop.
 Saturday 29 August 2026, 10:00 to 15:00 Central (11:00 to 16:00 Eastern).
 Instructor: Rick Hightower, Spillwave.
 
-You leave with four artifacts and the architecture that connects them. Point the
-same loops at your own repository on Monday.
+You leave with four artifacts. Saturday uses Claude Code agents as Claude Code
+actually works. Take-home uses the Claude Agent SDK and LangChain Deep Agents
+the same way. There is no shared `loops/` library. Each lab and each solution
+is a standalone folder. Duplicate code is the point.
 
 ## Agreed outline (30 July 2026, confirmed 31 July 2026)
 
@@ -81,54 +83,44 @@ buffer, not a fifth module.
 
 ```bash
 task setup     # venv, dependencies, clone the target repo, verify
-task test      # 129 checks
+task test      # extra credit + the no-shared-library guard
 ```
 
 Full instructions: [SETUP.md](SETUP.md).
 
 ## What you build
 
-| Module | Loop | Question it answers |
-|---|---|---|
-| 1 | Ticket Enhancer | Is this ticket a contract a machine can check? |
-| 2 | Ticket Implementer | Did the work meet the contract, and is it actually done? |
-| 3 | Research Assistant | Can every claim be traced to something retrieved? |
-| 4 | Broken PR Fixer | What happens when nobody is watching? |
+| Module | Artifact | Question it answers | Saturday path |
+|---|---|---|---|
+| 1 | Ticket Enhancer | Is this ticket a contract a machine can check? | Claude Code plugin |
+| 2 | Ticket Implementer | Did the work meet the contract, and is it actually done? | Fill `harness.py` in the lab folder |
+| 3 | Research Assistant | Can every claim be traced to something retrieved? | Fill `loop.py` in the lab folder |
+| 4 | Broken PR Fixer | What happens when nobody is watching? | Fill `loop.py` in the lab folder |
 
-Run any of them now, with no model key:
+Work from a lab folder:
 
 ```bash
-task loop:enhancer    -- --repo work/northwind-field-crm --ticket T001 --incorporate
-task loop:implementer -- --repo work/northwind-field-crm --ticket T001 --doer reference
-task loop:research    -- --question "sqlalchemy nullable datetime column" --backend fixture
-task loop:fixer       -- --repo work/northwind-field-crm --doer reference
+cd labs/lab1_enhancer
 ```
 
-## The idea
-
-The loops are generic. They point at a repository, not at this one.
-
-A target repository is valid when its `Taskfile.yml` exposes `setup`, `test`,
-`e2e`, `lint`, and `format-check`, and when `task test` writes
-`reports/junit.xml` and `reports/coverage.xml`. Those two formats are the whole
-interface, and any language emits them.
-
-`loops/tests/fixtures/node-target` is a JavaScript repository that satisfies the
-same contract. It exists to prove the engine is repo-agnostic.
+Answers live in `solutions/solN_*`. Take-home ports live in
+`solutions/solN_*_agent_sdk` and `solutions/solN_*_deep_agents`. Copy one
+folder somewhere else and it runs.
 
 ## Layout
 
 ```
-loops/          the engine. Never imports the CRM.
 labs/           four labs. cd into one and work there.
-labs/takehome/  the same loops in the Claude Agent SDK and Deep Agents.
+solutions/      the answer. One standalone folder per lab and runtime.
+labs/takehome/  Agent SDK and Deep Agents fill-ins. Not Saturday.
 slides/         four Marp decks.
 work/           gitignored. The target repository is cloned here.
 ```
 
+There is no `loops/` package. Do not add one. See `CLAUDE.md`.
+
 The demo application lives in its own repository,
 [northwind-field-crm](https://github.com/RichardHightower/northwind-field-crm).
-It is the first target, not the only one.
 
 ## Reading
 

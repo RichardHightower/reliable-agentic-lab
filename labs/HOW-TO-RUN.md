@@ -27,22 +27,30 @@ below the line in the prompt file.
 
 ## No coding agent at all
 
-You can still do labs 2 through 4. The loops run with no model key:
+You can still do labs 2 through 4 by filling the stub by hand. Check your
+work against the solution folder:
 
 ```bash
-task loop:implementer -- --repo work/northwind-field-crm --ticket T001 --doer reference
-task loop:research    -- --question "..." --backend fixture
-task loop:fixer       -- --repo work/northwind-field-crm --doer reference
+cd solutions/sol2_implementer
+python implementer.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
+
+cd solutions/sol3_research
+python researcher.py --question "sqlalchemy nullable datetime column" --backend fixture
+
+cd solutions/sol4_fixer
+python fixer.py --repo ../../work/northwind-field-crm --doer reference
 ```
 
-Fill the stub by hand and check it against the same commands. Lab 1 is
-not on this path: it is a Claude Code plugin, so it needs an LLM to run
-at all. `task loop:enhancer` above still runs, but it exercises the root
-`loops/enhancer.py` reference engine, not the lab.
+Lab 1 is a Claude Code plugin. It needs an LLM:
+
+```bash
+cd solutions/sol1_enhancer
+task run -- --ticket T001 --simulate-comment "looks good"
+```
 
 ## Four rules, whichever tool you picked
 
-1. Fill only the stub named in your lab's README. Nothing under `loops/`.
+1. Fill only the stub named in your lab's README. Do not edit `solutions/`.
 2. Never edit a test in the target repo to make something pass. The harness
    catches it, and catching it is the lesson.
 3. Stop at the documented exit. Do not invent a fourth one.

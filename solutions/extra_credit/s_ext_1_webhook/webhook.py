@@ -25,8 +25,12 @@ from fastapi.responses import JSONResponse
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+_IMPL = ROOT / "solutions" / "sol2_implementer"
+if str(_IMPL) not in sys.path:
+    sys.path.insert(0, str(_IMPL))
 
-from loops import implementer
+import implementer
+
 from solutions.extra_credit import TARGET
 from solutions.extra_credit import (
     github_api as gh,

@@ -4,7 +4,7 @@ This is the lab 2 answer, the same file as `solutions/sol2_implementer/`. The or
 
     tests first  ->  prove them red  ->  code until green  ->  judge  ->  gate
 
-Read `loops/implementer.py` for the full run, and `loops/rubric.py` for the
+Read `solutions/sol2_implementer/implementer.py` for the full run, and `solutions/sol2_implementer/rubric.py` for the
 ten rows.
 """
 

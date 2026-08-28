@@ -11,11 +11,10 @@ Answer: `groom_ticket.py` in this folder.
 
 2. Turn the issue into a `Ticket`.
 
-   A GitHub issue is a title and a body. `loops.ticket.parse` wants one markdown
+   A GitHub issue is a title and a body. `ticket.parse` wants one markdown
    document, so join them. `_as_ticket` in the answer does this.
 
-3. Judge it with `loops.criteria.judge`. Do not write a second judge. The one in
-   `loops/` is the one Module 1 teaches, and a copy here would drift from it.
+3. Judge it with `criteria.judge` in this folder. Do not write a second judge.
 
 4. Act on the verdict.
 

@@ -54,12 +54,12 @@ Nobody is watching this one. Its exits matter more than its successes, and the s
 
 ## Rules
 
-- Fill only `loop.py`. Do not edit anything under `loops/`.
+- Fill only `loop.py`. Do not edit anything under `solutions/`.
 - Do not edit the target repo's tests to make something pass.
 - Stop at the documented exit. Do not add a fourth one.
-- If you stall, read loops/fixer.py. It is the answer, not a hint.
+- If you stall, read solutions/sol4_fixer/. It is the answer, not a hint.
 
 ## Worth reading
 
-- `loops/fixer.py`
-- `loops/gates.py`
+- `solutions/sol4_fixer/fixer.py`
+- `solutions/sol4_fixer/gates.py`

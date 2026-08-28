@@ -1,6 +1,6 @@
 """A `doers.Backend` for this folder's `ClaudeAgentOptions`.
 
-Issue #2: `loops/doers.py`'s `build(spec)` now accepts an already-built
+Issue #2: this folder's `doers.py` `build(spec)` now accepts an already-built
 `Backend` and passes it through unchanged, so a runtime port can plug in its
 own doer. `Backend` and `DoerResult` are copied here rather than imported —
 one more standalone folder, not a ninth shared file.

@@ -6,7 +6,7 @@ Perplexity is optional. If you have no key, pass `--backend websearch` and use
 your agent's own search tool, or `--backend fixture` to run offline. The loop
 does not know which one it is holding.
 
-Read `loops/researcher.py` and `loops/brief.py` only if you stall.
+Read `solutions/sol3_research/researcher.py` and `solutions/sol3_research/brief.py` only if you stall.
 """
 
 from __future__ import annotations

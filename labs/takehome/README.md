@@ -8,18 +8,13 @@ only interesting part.
 
 | Runtime | How it separates the roles |
 |---|---|
-| Plain Python, `loops/` | The `Judge` class has no `write` method |
 | Claude Agent SDK | A tool list per subagent, plus a `PreToolUse` hook for paths |
 | LangChain Deep Agents | A tool list per subagent, with the path check inside the tool |
 
 The answers are in `solutions/sol2_implementer_agent_sdk/` and
 `solutions/sol2_implementer_deep_agents/`. Each holds a `SPEC.md` with the
-step-by-step build. The other three labs are ported too, one folder per lab per
-runtime, so `solutions/sol4_fixer_agent_sdk/` is lab 4 on the Agent SDK.
-
-The translation both ports call lives in `solutions/agent_sdk/roles.py` and
-`solutions/deep_agents/roles.py`. All four labs share it, and it reads the cast
-from `solutions/roleplan.py`.
+step-by-step build. Copy one folder somewhere else and it runs. Do not import
+a shared engine.
 
 ## Install
 
@@ -40,7 +35,7 @@ is the record either way. A dashboard nobody reads is decoration.
 ## The check that runs without any of it
 
 ```bash
-task test -- loops/tests/test_runtime_ports.py
+task test
 ```
 
 No SDK required, no key required. They assert that all three

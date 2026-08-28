@@ -43,5 +43,5 @@ task test
 
 ## Where the exits live
 
-In `loops/`, not in this file. This file decides who runs. The loop decides when
-to stop.
+In the matching `solutions/solN_*` folder, not in this file. This file decides
+who runs. The loop decides when to stop.

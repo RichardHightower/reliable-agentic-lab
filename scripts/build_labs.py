@@ -200,7 +200,7 @@ There are three exits and no fourth: pass, retry, escalate.
 
 ## Rules
 
-- Fill only `{lab.stub_file}`. Do not edit anything under `loops/`.
+- Fill only `{lab.stub_file}`. Do not edit anything under `solutions/`.
 - Do not edit the target repo's tests to make something pass.
 - Stop at the documented exit. Do not add a fourth one.
 - If you stall, read {lab.solution}. It is the answer, not a hint.
@@ -312,7 +312,7 @@ def port_for(lab: Lab, runtime_key: str) -> str:
     if lab.needs_repo:
         repo_arg = '    parser.add_argument("--repo", default="../../work/northwind-field-crm")\n'
         contract_expr = "Contract(args.repo)"
-        contract_import = "\nfrom loops.contract import Contract"
+        contract_import = "\nfrom contract import Contract"
     else:
         # The research loop runs against a question, not a repo. There is no
         # `.loop.yml` to read, so the cast falls back to the table's own scopes.
@@ -449,17 +449,15 @@ a scope in this folder.
 ## Verify
 
 ```bash
-task test -- loops/tests/test_runtime_ports.py
+task test
 ```
 
-Those checks need no SDK and no key. They assert that this port and the
-in-process roles read the same table, and that the judge holds no write tool in
-either.
+Those checks need no SDK and no key. They run this folder's own tests.
 
 ## What this folder is not
 
-It is not a second loop engine. `loops/` holds the loop, and porting it must not
-require changing `loops/`. If it does, the design leaked.
+A shared engine. Copy this folder somewhere else and it runs. If a port
+imports a library to do that, the design leaked.
 """
 
 

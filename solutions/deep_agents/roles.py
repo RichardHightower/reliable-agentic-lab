@@ -15,8 +15,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from loops.roles import ScopeViolation, WriteScope
 from solutions.roleplan import DEFAULT_LOOP, RolePlan, plan
+
+from .write_scope import ScopeViolation, WriteScope
 
 
 def scoped_write_tool(repo: Path, role: RolePlan):

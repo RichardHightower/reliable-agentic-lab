@@ -143,8 +143,7 @@ write the loop wants and blocks every other path the doer might reach for.
 
 ## What this folder is not
 
-It is not a second loop engine. `loops/` holds the loop, and porting it must not
-require changing `loops/`. If it does, the design leaked.
+This folder is standalone. Copy it somewhere else and it runs. Do not import a shared engine.
 
 It is not a Claude Code plugin either. There is no `.claude/` here. The plugin
 port of this same lab lives in `solutions/sol1_enhancer/`, and the two are meant

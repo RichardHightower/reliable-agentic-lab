@@ -54,7 +54,7 @@ checks the scope before it touches the disk.
 ## Verify
 
 ```bash
-task test -- loops/tests/test_runtime_ports.py
+task test
 ```
 
 Those checks need no SDK and no key. They assert that this port and the
@@ -63,5 +63,4 @@ either.
 
 ## What this folder is not
 
-It is not a second loop engine. `loops/` holds the loop, and porting it must not
-require changing `loops/`. If it does, the design leaked.
+This folder is standalone. Copy it somewhere else and it runs. Do not import a shared engine.

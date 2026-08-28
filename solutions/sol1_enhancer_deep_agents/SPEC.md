@@ -6,7 +6,7 @@ change to make it run.
 
 This folder is standalone. Every module it needs is a file next to this spec:
 `roleplan.py`, `contract.py`, `write_scope.py`, `roles.py`, `adapter.py`, and
-`loop.py`. Nothing imports `loops.` or `solutions.`.
+`loop.py`. Nothing imports a shared engine.
 
 ## The cast for this loop
 
@@ -166,5 +166,4 @@ refused.
 
 ## What this folder is not
 
-It is not a second loop engine. `loops/` holds the loop, and porting it must not
-require changing `loops/`. If it does, the design leaked.
+This folder is standalone. Copy it somewhere else and it runs. Do not import a shared engine.

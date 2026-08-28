@@ -41,7 +41,7 @@ def check_git() -> tuple[bool, str]:
 
 
 def check_target() -> tuple[bool, str]:
-    """The target repo, and the tickets the loops work on.
+    """The target repo, and the tickets the labs work on.
 
     A clone that is present but has no tickets is a different problem from one
     that was never cloned. Saying which is the difference between a fix and a
@@ -50,7 +50,7 @@ def check_target() -> tuple[bool, str]:
     if not TARGET.exists():
         return False, f"not cloned yet. Run `task clone` (expected at {TARGET.name})"
     if not (TARGET / "Taskfile.yml").exists():
-        return False, f"{TARGET.name} has no Taskfile.yml, so no loop can run against it"
+        return False, f"{TARGET.name} has no Taskfile.yml, so no lab can run against it"
     files = sorted(p.name for p in (TARGET / "tickets").glob("T0*.md"))
     if not files:
         return False, f"{TARGET.name} is cloned but holds no tickets"
@@ -79,7 +79,7 @@ def check_github() -> tuple[str, str]:
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     repo = os.environ.get("GITHUB_REPO", "RichardHightower/reliable-agentic-lab").strip()
     if not token:
-        return "skip", "GITHUB_TOKEN not set. Local loops still run."
+        return "skip", "GITHUB_TOKEN not set. Local labs still run."
     status, payload = github_get("https://api.github.com/user", token)
     if status != 200:
         return "fail", f"token rejected ({status}). Check scopes."
@@ -217,7 +217,7 @@ def main() -> int:
 
     model_ok = an_status == "pass" or oa_status == "pass"
     if not model_ok:
-        print("\nThe loops are ready to run with no model key.")
+        print("\nLabs 2-4 still run with no model key from their solution folders.")
         print("Add ANTHROPIC_API_KEY or OPENAI_API_KEY when you fill a live-model lab.")
         return 0
 

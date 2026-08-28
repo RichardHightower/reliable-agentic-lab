@@ -1,4 +1,4 @@
-# Lint and format for the loop engine. One tool, no plugins.
+# Lint and format. One tool, no plugins.
 line-length = 100
 target-version = "py310"
 
@@ -10,4 +10,5 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-"loops/tests/*" = ["PLR0913"]  # test helpers take many keyword arguments on purpose
+"scripts/tests/*" = ["PLR0913"]
+"solutions/**/tests/*" = ["PLR0913"]
