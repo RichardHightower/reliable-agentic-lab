@@ -62,7 +62,7 @@ That is `task trust`, and it is step zero. See
 ## Run it
 
 ```bash
-task run -- --ticket T001   # one ticket
+task run --
 task run --                 # every open ticket
 ```
 
@@ -71,7 +71,7 @@ task run --                 # every open ticket
 Three ways, in order of realism.
 
 1. **For the seminar, run forever in one terminal.**
-   `task poll-forever -- --ticket T001`, or `task poll-forever --`. It is
+   `task poll-forever --`, or `task poll-forever --`. It is
    `while true: task run; sleep poll_interval` and nothing more. It never
    stops on its own, whether every ticket has passed or not. Press Ctrl-C
    when you are done. This is not production shape.

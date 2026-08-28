@@ -140,20 +140,15 @@ Persist state per ticket in .harness/last-enhancer-<id>.json:
 {github_issue, last_comment_id, round, previous_signature}.
 
 The step, per ticket:
-1. Find or create the ticket's GitHub issue. Take the first of these that
-   gives you a number: the state file's github_issue, then the ticket
-   frontmatter's github_issue, then a title search on the "[<id>]" prefix
-   across all states. Create only when none of the three found anything,
-   from the ticket, labeled "enhanced". Do not search --state open: a closed
-   issue is still that ticket's issue, and skipping it is what makes the loop
-   open a second one for the same title. The frontmatter entry matters
-   because it outlives the state file, which the LGTM pass deletes, and the
-   search ranks below both recorded sources because it indexes lazily and can
-   miss an issue created moments ago. If the issue you find is closed, stop
-   and say so rather than creating another. However you got the number,
-   found or created, write it into both the state file and the ticket's
-   frontmatter as github_issue before you go on. Nothing else writes the
-   frontmatter entry, so a lookup that only reads it never finds one.
+1. Find the ticket's GitHub issue. Never create one. Creating tickets is
+   task create-test-tickets. Take the first of these that gives you a
+   number: the state file's github_issue, then the ticket frontmatter's
+   github_issue, then a title search on the "[<id>]" prefix across all
+   states. Do not search --state open. If the issue is closed, stop and say
+   so. If none of the three found anything, stop and say to run
+   task create-test-tickets. Do not call gh issue create. However you got
+   the number, write it into both the state file and the ticket's
+   frontmatter as github_issue before you go on.
 2. Get the newest comment on that issue newer than last_comment_id, and
    note its id, a real comment's numeric id. --simulate-comment, if given,
    stands in for that comment and wins over both cases below; it has no
@@ -194,11 +189,11 @@ The step, per ticket:
 ```bash
 cp config.json.example config.json   # fill in your GitHub username
 task clone
-task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
+task create-test-tickets && task run --
 ```
 
-Run it again with the same comment: it should report the same gaps and
-escalate, not spend a third round on an identical failure.
+A first poll needs no comment. It grooms every open draft. Run it again
+with no new GitHub comments: those tickets should be no-ops.
 
 ## Prompt 5: compare against the answer
 

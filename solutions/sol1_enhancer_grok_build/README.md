@@ -28,5 +28,6 @@ Same three roles, same rubric, same two gate scripts.
 task trust                 # step zero, once per checkout
 cp config.json.example config.json   # fill in your GitHub username
 task clone
-task run -- --ticket T001
+task create-test-tickets
+task run --
 ```

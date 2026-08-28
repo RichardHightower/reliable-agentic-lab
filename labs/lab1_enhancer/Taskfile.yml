@@ -26,7 +26,7 @@ tasks:
       - git clone --quiet https://github.com/$(jq -r .fork_owner {{.TASKFILE_DIR}}/config.json)/$(jq -r .repo_name {{.TASKFILE_DIR}}/config.json).git {{.TARGET}}
 
   create-test-tickets:
-    desc: Write a few draft tickets (bug, ui, feature) into the target repo, for testing.
+    desc: Create GitHub issues for every draft ticket. task run never opens issues.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - bin/setup_test_tickets.sh {{.TARGET}}

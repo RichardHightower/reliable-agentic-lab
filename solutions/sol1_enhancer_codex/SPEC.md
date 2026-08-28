@@ -66,13 +66,7 @@ role is launched.
 
 ## Run it
 
-One ticket:
-
-```bash
-task run -- --ticket T001
-```
-
-Every open ticket:
+One poll over every open draft ticket. No ticket name. No simulated comment.
 
 ```bash
 task run --

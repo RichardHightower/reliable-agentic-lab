@@ -131,7 +131,7 @@ Escape the `$` in `$enhancer-loop` or the shell eats it.
 ## Verify
 
 ```bash
-task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
+task create-test-tickets && task run --
 ```
 
 Cap it while you develop: `timeout 420 task run -- ...`. One poll starts

@@ -211,7 +211,7 @@ cp config.json.example config.json   # fill in your GitHub username
 task clone
 python3 .opencode/skills/enhancer-loop/scripts/check_fields.py --demo
 python3 .opencode/skills/enhancer-loop/scripts/check_stop.py --demo
-timeout 180 task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
+timeout 180 task create-test-tickets && task run --
 ```
 
 A first poll can take longer than 180 seconds here (three model calls). Cap

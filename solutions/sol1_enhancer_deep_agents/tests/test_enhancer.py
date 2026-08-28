@@ -46,7 +46,7 @@ class FakeGh:
     def __init__(self, issue: int = 7, comments: list[tuple[str, str]] | None = None):
         self.issue = issue
         self.comments = comments or []
-        self.existing: int | None = None
+        self.existing: int | None = issue
         self.posted: list[str] = []
         self.added: list[str] = []
         self.bodies: list[str] = []
@@ -287,13 +287,15 @@ def test_clearing_state_twice_is_not_an_error(target):
 # -- the first poll ---------------------------------------------------------
 
 
-def test_the_first_poll_creates_the_issue_and_records_it(target):
-    gh = FakeGh(issue=7)
+def test_a_poll_without_an_issue_does_not_create_one(target):
+    """Creating tickets is task create-test-tickets. The loop only polls."""
+    gh = FakeGh()
+    gh.existing = None
     backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
-    engine(target, backend, gh).poll()
-    assert gh.created[0][0] == "[T001] Sales tasks need due dates"
-    assert "loop: enhancer" not in gh.created[0][1], "the raw front matter must not reach GitHub"
-    assert "github_issue: 7" in (target / "tickets" / "T001.md").read_text(encoding="utf-8")
+    [outcome] = engine(target, backend, gh).poll()
+    assert gh.created == []
+    assert outcome.status == "blocked"
+    assert "create-test-tickets" in outcome.detail
 
 
 def test_the_first_poll_runs_a_round_with_no_comment(target):

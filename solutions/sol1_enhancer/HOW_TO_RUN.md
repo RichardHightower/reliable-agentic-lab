@@ -32,34 +32,25 @@ this folder depends on the repo root or on any other folder outside it.
    care whether the relationship is a real GitHub fork, it only needs a
    repo with the same `tickets/` layout.
 
-3. Optional: seed a few extra draft tickets, one per kind, beyond the real
-   `T001` fixture:
+3. Create the GitHub tickets. This is the only command that opens issues.
 
    ```bash
    task create-test-tickets
    ```
 
-   Writes `T900` (bug), `T901` (ui), `T902` (feature) into
-   `../../work/northwind-field-crm/tickets/`. Skips any that already exist,
-   safe to run again.
+   Writes `T900` (bug), `T901` (ui), `T902` (feature) if they are missing,
+   then opens a GitHub issue for every draft enhancer ticket, including
+   `T001`. Stamps `github_issue:` into each file. Reuses an existing issue
+   with the same `[Txxx]` title. Reopens a closed one. Safe to run again.
 
-## Run one poll
+   `task run` never creates issues. If a draft has no GitHub issue, the
+   loop stops and tells you to run this task.
 
-```bash
-task run -- --ticket T001
-```
+## Run one poll over every open ticket
 
-A ticket's first poll never needs a comment: it creates the ticket's GitHub
-issue and runs one round automatically, so there is something for a human
-to react to. `--simulate-comment "<text>"` is a dev-only flag that stands in
-for a real issue comment, for testing without a `gh` round trip:
-
-```bash
-task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
-task run -- --ticket T001 --simulate-comment LGTM
-```
-
-Drop `--ticket` to poll every open draft ticket in one run:
+This is the demo. No ticket name. No simulated comment. First poll on each
+draft runs one enhance round on its own, so a human has something to react
+to.
 
 ```bash
 task run --
@@ -117,10 +108,8 @@ breaks the next poll.
 
 The loop finds a ticket's issue through the state file, then the ticket
 frontmatter, then a title search. Close the issue and the first two still
-point at it, so the loop stops and tells you to reopen it. Delete the
-frontmatter line as well and the search finds nothing, so the loop creates a
-second issue for the same ticket, and the original's comment history is
-stranded on an issue nothing reads.
+point at it, so the loop stops and tells you to reopen it. The loop never
+opens a second issue.
 
 Reset all three pieces instead:
 
@@ -148,16 +137,18 @@ Reset all three pieces instead:
    ```
 
 Same number, same title, new poll. To start completely fresh instead, delete
-the ticket file and run `task create-test-tickets`, then let the loop open a
-new issue.
+the ticket file and run `task create-test-tickets`. That task opens the new
+issue. `task run` does not.
 
 Two messages send you back to this section:
 
 - `issue N is closed; reopen it`. Somebody closed the issue for a ticket that
   is still a draft. Reopen it, or reset the ticket properly.
+- `<id>: no GitHub issue; run task create-test-tickets`. The markdown file
+  exists, but no issue does. Run the seed task. Do not expect `task run` to
+  open one.
 - `T901: already ready / implementer, skipping`. The ticket is finished.
-  `--ticket` names a ticket, it does not override that. Reset it if you meant
-  to run it again.
+  Reset it if you meant to run it again.
 
 ## Known issues fixed along the way
 

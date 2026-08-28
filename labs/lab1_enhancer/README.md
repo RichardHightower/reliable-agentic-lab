@@ -56,15 +56,15 @@ result against the answer.
 ## Verify
 
 ```bash
-task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
+task create-test-tickets && task run --
 ```
 
 This tests the plugin you just built in `.claude/`, not the answer in
-`solutions/sol1_enhancer/`. It runs one poll-and-act step and exits. See
+`solutions/sol1_enhancer/`. It polls every open draft ticket and exits. See
 [SPEC.md](../../solutions/sol1_enhancer/SPEC.md) for the full design.
 
-To groom every open ticket, drop `--ticket`. For the length of the seminar,
-run it forever in one terminal, `Ctrl-C` when you are done:
+For the length of the seminar, run it forever in one terminal, `Ctrl-C`
+when you are done:
 
 ```bash
 task poll-forever --

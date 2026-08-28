@@ -34,45 +34,29 @@ You need `opencode`, `gh`, `jq`, `task`, and `python3`.
    care whether the relationship is a real GitHub fork, it only needs a
    repo with the same `tickets/` layout.
 
-3. Optional: seed a few extra draft tickets, one per kind, beyond the real
-   `T001` fixture:
+3. Create the GitHub tickets. This is the only command that opens issues.
 
    ```bash
    task create-test-tickets
    ```
 
-   Writes `T900` (bug), `T901` (ui), `T902` (feature) into
-   `../../work/northwind-field-crm/tickets/`. Skips any that already exist,
-   safe to run again.
+   Writes `T900` (bug), `T901` (ui), `T902` (feature) if missing, then opens
+   a GitHub issue for every draft enhancer ticket, including `T001`.
 
-## Run one poll
+## Run one poll over every open ticket
 
-```bash
-task run -- --ticket T001
-```
-
-A ticket's first poll never needs a comment: it creates the ticket's GitHub
-issue and runs one round automatically, so there is something for a human
-to react to. `--simulate-comment "<text>"` is a dev-only flag that stands in
-for a real issue comment, for testing without a comment fetch:
-
-```bash
-task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
-task run -- --ticket T001 --simulate-comment LGTM
-```
-
-Drop `--ticket` to poll every open draft ticket in one run:
+No ticket name. No simulated comment. First poll on each draft runs one
+enhance round on its own.
 
 ```bash
 task run --
 ```
 
 Cap it while you are developing. A first poll starts three model calls
-(judge, doer, judge again) and has taken about six minutes here, so 180
-seconds is often too short:
+(judge, doer, judge again) and has taken about six minutes here:
 
 ```bash
-timeout 360 task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
+timeout 360 task run --
 ```
 
 ## Repeated polling

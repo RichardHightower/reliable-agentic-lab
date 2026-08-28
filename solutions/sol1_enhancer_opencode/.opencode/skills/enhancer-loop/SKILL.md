@@ -105,7 +105,8 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    not create an issue, do not post a comment, and do not write a state file.
    `--ticket <id>` names a ticket to consider, not a reason to skip the check.
 
-2. Find or create the ticket's GitHub issue.
+2. Find the ticket's GitHub issue. Never create one. Creating tickets is
+   `task create-test-tickets`. This loop only polls issues that already exist.
 
    Take the first of these that gives you a number:
 
@@ -116,27 +117,23 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    - A title search across every state:
      `gh issue list --repo <owner>/<repo> --search "in:title \"[<id>]\"" --state all --json number,state`.
      Do not pass `--state open`. A closed issue is still that ticket's issue.
+
+   Then:
+
    - If the number you now hold belongs to a **closed** issue, stop here for
      this ticket and say so: `issue <number> is closed; reopen it`. Never
      create a second issue for the same title, and do not comment on a closed
-     one.
-   - Only when none of the three found anything: create the labels this design
-     needs, once
-     (`gh label create enhanced --repo <owner>/<repo> --color fbca04 --force`,
-     same for `ready` and `needs-human`, ignore errors if a label already
-     exists), then create the issue from the ticket's H1 and body:
-     `gh issue create --repo <owner>/<repo> --title "[<id>] <ticket H1>" --body "<ticket body>" --label enhanced`.
+     one. `HOW_TO_RUN.md` gives the reset procedure.
+   - If none of the three found anything: stop here for this ticket and say
+     `<id>: no GitHub issue; run task create-test-tickets`. Do not create
+     labels. Do not call `gh issue create`.
 
-   However you arrived at the number, found by search or freshly created,
-   write it into the ticket's frontmatter as `github_issue: <number>` and
-   into the state file before you go on. Persist it even on a branch that
-   stops early, such as step 6's "ready, waiting for `LGTM`".
-
-   Write it on the search path too, not only on the create path. A state
-   file that appears only when this loop creates the issue leaves every
-   later poll looking like a first poll, and step 3 skips the comment fetch
-   on a first poll. A ticket whose issue already existed would then never
-   read `LGTM`, and could never reach ready.
+   If you found a number, write it into the ticket's frontmatter as
+   `github_issue: <number>` and into the state file before you go on.
+   Persist it even on a branch that stops early, such as step 6's "ready,
+   waiting for `LGTM`". Write it on the search path too. A state file that
+   appears only on some later poll leaves every later poll looking like a
+   first poll, and step 3 skips the comment fetch on a first poll.
 
 3. Get the newest comment, if there is one. Whichever branch below applies,
    note that comment's id: step 6 and step 8 write it back into the state

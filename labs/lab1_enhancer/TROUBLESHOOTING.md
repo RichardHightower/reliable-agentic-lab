@@ -22,6 +22,11 @@ for every issue, comment, and label operation.
 Run `task clone` from this folder. It clones your fork from `config.json`
 into `work/`.
 
+## `task run` says no GitHub issue
+
+`task run` never opens issues. Run `task create-test-tickets` first. That
+task writes the draft files and opens a GitHub issue for each one.
+
 ## Nothing happens on a second run
 
 This is often correct, not a bug. Step 3 of the skill treats no new comment

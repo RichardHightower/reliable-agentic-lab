@@ -60,33 +60,23 @@ when two agent files are loaded. Never read them as proof.
    and push. The loop needs the same `tickets/` layout, not a real fork
    relationship.
 
-3. Optional. Seed a few more draft tickets to work on.
+3. Create the GitHub tickets. This is the only command that opens issues.
 
    ```bash
    task create-test-tickets
    ```
 
-   That writes `T900` (bug), `T901` (ui), and `T902` (feature). It skips a
-   file that already exists, so it is safe to re-run.
+   Writes `T900` (bug), `T901` (ui), `T902` (feature) if missing, then opens
+   a GitHub issue for every draft enhancer ticket, including `T001`.
 
-## Run one poll
+## Run one poll over every open ticket
 
-```bash
-task run -- --ticket T001
-```
-
-A ticket's first poll never needs a comment. It creates the GitHub issue and
-runs one round, so the human has something to react to.
-
-`--simulate-comment "<text>"` stands in for a real issue comment. It is
-dev-only.
+No ticket name. No simulated comment. First poll on each draft runs one
+enhance round on its own.
 
 ```bash
-task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
-task run -- --ticket T001 --simulate-comment "LGTM"
+task run --
 ```
-
-Drop `--ticket` to poll every open draft ticket.
 
 ## Repeated polling
 

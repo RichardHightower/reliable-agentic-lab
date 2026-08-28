@@ -67,7 +67,7 @@ OpenCode answer that replaces that stub.
 One step, by hand:
 
 ```bash
-task run -- --ticket T001
+task run --
 ```
 
 Every open ticket, one poll:
@@ -84,8 +84,7 @@ again, and again, for this to be an actual loop over time. Two ways:
 ### For the seminar: run forever, in one terminal
 
 ```bash
-task poll-forever -- --ticket T001    # one ticket
-task poll-forever --                  # every open ticket
+task poll-forever --
 ```
 
 This is `while true: task run; sleep poll_interval`, nothing more. It never

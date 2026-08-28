@@ -113,7 +113,7 @@ Run the two deterministic check scripts against their own assertions with
 To work one ticket without waiting on a real comment, pass your own:
 
 ```bash
-task run -- --ticket T001 --simulate-comment "due dates should be optional"
+task run --
 ```
 
 ## What one poll does
@@ -124,7 +124,7 @@ itself past. The model drafts and grades. Everything else is computed.
 
 1. Find every `tickets/*.md` with `state: draft` and `loop: enhancer`. Skip
    `*.ready.md` and `*.enhancer-candidate.md`.
-2. Find or create the ticket's GitHub issue.
+2. Find the ticket's GitHub issue. Never create one.
 3. Read the newest comment. If it is one this loop already acted on, stop.
 4. If the issue carries `needs-human`, stop and wait for a person.
 5. The judge grades the real ticket. `check_fields.py` turns its

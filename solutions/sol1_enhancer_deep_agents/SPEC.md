@@ -124,7 +124,7 @@ backend drops any file the scope does not permit.
 To work one ticket without waiting on a real comment, pass your own:
 
 ```bash
-task run -- --ticket T001 --simulate-comment "due dates should be optional"
+task run --
 ```
 
 ## What one poll does
@@ -141,7 +141,7 @@ grades. Everything else is computed.
 
 1. Find every `tickets/*.md` with `state: draft` and `loop: enhancer`. Skip
    `*.ready.md` and `*.enhancer-candidate.md`.
-2. Find or create the ticket's GitHub issue. The lookup order is the state
+2. Find the ticket's GitHub issue. Never create one. The lookup order is the state
    file, then the ticket's `github_issue`, then a title search across every
    state. Never only the open ones: a closed issue is still that ticket's
    issue, and skipping it is what opens a duplicate.

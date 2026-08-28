@@ -35,7 +35,7 @@ the judge and the doer are kept from writing by running in their own
 cp config.json.example config.json   # fill in your GitHub username
 task clone
 task fence-check
-task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
+task create-test-tickets && task run --
 ```
 
 Give one poll about five minutes. It starts three model processes, and each

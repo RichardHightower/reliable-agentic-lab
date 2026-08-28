@@ -60,15 +60,17 @@ This also makes it easier to deploy this via a new repo if/when needed.
    that repo into `work/northwind-field-crm`. Every task here runs from this
    folder; you never need the repo root.
 
+4. Create the GitHub tickets:
+
+   ```bash
+   task create-test-tickets
+   ```
+
+   This is the only command that opens issues. `task run` does not.
+
 ## Run it
 
-One step, by hand:
-
-```bash
-task run -- --ticket T001
-```
-
-Every open ticket, one poll:
+One poll over every open draft ticket. No ticket name. No simulated comment.
 
 ```bash
 task run --
@@ -83,8 +85,7 @@ that, in order of how real each one is meant to be:
 ### For the seminar: run forever, in one terminal
 
 ```bash
-task poll-forever -- --ticket T001    # one ticket
-task poll-forever --                  # every open ticket
+task poll-forever --
 ```
 
 This is `while true: task run; sleep poll_interval`, nothing more. It never

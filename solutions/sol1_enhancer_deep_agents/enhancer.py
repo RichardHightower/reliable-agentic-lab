@@ -465,7 +465,7 @@ class Enhancer:
     def _one(self, tkt: ticket_mod.Ticket, simulate_comment: str | None) -> Outcome:
         state = State.load(Path(self.repo), tkt.id)
 
-        # 2. find or create the issue. First hit wins, in this order: the state
+        # 2. find the issue. Never create one. First hit wins, in this order: the state
         # file, the ticket frontmatter, then a title search across every state.
         # The frontmatter matters because it outlives the state file, which the
         # `LGTM` pass deletes.
@@ -481,10 +481,8 @@ class Enhancer:
             # the duplicate this whole lookup exists to prevent.
             raise TicketBlocked(f"issue {issue} is closed; reopen it")
         if issue is None:
-            issue = self.gh.create_issue(
-                f"[{tkt.id}] {tkt.title}", strip_front_matter(tkt.path.read_text(encoding="utf-8"))
-            )
-            set_front_matter(tkt.path, github_issue=str(issue))
+            raise TicketBlocked(f"{tkt.id}: no GitHub issue; run task create-test-tickets")
+        set_front_matter(tkt.path, github_issue=str(issue))
         state.github_issue = issue
 
         # 3. the newest comment, if there is one.

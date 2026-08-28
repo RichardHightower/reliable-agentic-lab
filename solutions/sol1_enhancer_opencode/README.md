@@ -33,5 +33,5 @@ lives in `.opencode/skills/enhancer-loop/`.
 ```bash
 cp config.json.example config.json   # fill in your GitHub username
 task clone
-task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
+task create-test-tickets && task run --
 ```

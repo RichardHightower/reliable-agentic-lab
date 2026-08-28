@@ -125,7 +125,7 @@ so a reader can tell a trust problem from a code problem in one command.
 ```bash
 task trust                      # names all three, not counts
 task create-test-tickets
-task run -- --ticket T001
+task run --
 ```
 
 Run `task run` twice on a rubric-green ticket with no `LGTM`. The second run

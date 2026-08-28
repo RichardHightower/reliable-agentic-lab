@@ -11,7 +11,7 @@ Then confirm the Saturday answers run from their own folders:
 
 ```bash
 # Module 1 needs an LLM. From the plugin folder:
-cd solutions/sol1_enhancer && task run -- --ticket T001 --simulate-comment "looks good"
+cd solutions/sol1_enhancer && task create-test-tickets && task run --
 
 # Modules 2 and 4 still run with no model key (extra-credit copies of the loops):
 cd solutions/extra_credit/s_ext_1_webhook

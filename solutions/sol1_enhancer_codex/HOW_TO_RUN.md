@@ -48,28 +48,23 @@ You need `codex`, `gh`, `jq`, `task`, and `python3`.
    See [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) if it reports
    `TRUSTED`.
 
-4. Optional. Seed three more draft tickets, one per kind.
+4. Create the GitHub tickets. This is the only command that opens issues.
 
    ```bash
    task create-test-tickets
    ```
 
-   The script writes `T900` (bug), `T901` (ui), and `T902` (feature).
+   Writes `T900` (bug), `T901` (ui), `T902` (feature) if missing, then opens
+   a GitHub issue for every draft enhancer ticket, including `T001`.
 
-## Run one poll
+## Run one poll over every open ticket
+
+No ticket name. No simulated comment. First poll on each draft runs one
+enhance round on its own.
 
 ```bash
-task run -- --ticket T001
-task run -- --ticket T001 --simulate-comment "please add acceptance criteria"
-task run -- --ticket T001 --simulate-comment LGTM
 task run --
 ```
-
-`--simulate-comment` stands in for a real GitHub comment and skips the
-fetch. It is dev-only, and only valid with `--ticket`.
-
-A ticket's first poll needs no comment. The loop creates or finds the issue,
-runs one round, and gives the human something to react to.
 
 ## Expect five minutes, not one
 
@@ -80,7 +75,7 @@ A full round that promotes a candidate runs about four minutes here.
 Always put a cap on it while you are developing:
 
 ```bash
-timeout 420 task run -- --ticket T001
+timeout 420 task run --
 ```
 
 A run that produces no output for minutes is usually a hang, not slow
@@ -91,12 +86,11 @@ that look identical from outside.
 
 ```bash
 task poll-forever --
-task poll-forever -- --ticket T001
 ```
 
-Both loop `task run` on `poll_interval` until you press Ctrl-C. Neither stops
-on its own, even when every ticket has passed. The loop stands in for a
-scheduler, so running forever is the point.
+That loops `task run` on `poll_interval` until you press Ctrl-C. It never
+stops on its own, even when every ticket has passed. The loop stands in for
+a scheduler, so running forever is the point.
 
 ## Watch what it is doing
 

@@ -34,7 +34,7 @@ Lab 1 is a Claude Code plugin. It needs an LLM:
 
 ```bash
 cd solutions/sol1_enhancer
-task run -- --ticket T001 --simulate-comment "looks good"
+task create-test-tickets && task run --
 ```
 
 ## Four rules, whichever tool you picked
