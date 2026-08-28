@@ -95,7 +95,9 @@ def config(folder: Path | None = None) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def run(argv_repo: str, *, ticket: str | None, simulate: str | None) -> int:
+def run(
+    argv_repo: str, *, ticket: str | None, simulate: str | None, verbose: bool = True
+) -> int:
     """One poll-and-act step. Needs the SDK, a key, and a target repo."""
     from enhancer import (  # noqa: PLC0415  (keeps --table-only free of it)
         Enhancer,
@@ -115,6 +117,7 @@ def run(argv_repo: str, *, ticket: str | None, simulate: str | None) -> int:
         budget=int(budget.get("iterations") or 3),
         max_usd=float(budget["usd"]) if budget.get("usd") is not None else None,
         max_turns=int(budget["turns"]) if budget.get("turns") is not None else DEFAULT_MAX_TURNS,
+        verbose=verbose,
     )
     try:
         outcomes = engine.poll(ticket, simulate_comment=simulate)
@@ -152,10 +155,11 @@ def main(argv: list[str] | None = None) -> int:
         "--simulate-comment",
         help="use this text in place of the newest issue comment. Needs --ticket",
     )
+    parser.add_argument("--quiet", action="store_true", help="show only final ticket outcomes")
     args = parser.parse_args(argv)
 
     if args.once or args.ticket:
-        return run(args.repo, ticket=args.ticket, simulate=args.simulate_comment)
+        return run(args.repo, ticket=args.ticket, simulate=args.simulate_comment, verbose=not args.quiet)
 
     contract = _contract(args.repo, table_only=args.table_only)
     print(roleplan.table(cast(contract)))

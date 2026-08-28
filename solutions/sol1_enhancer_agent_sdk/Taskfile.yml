@@ -18,7 +18,8 @@ vars:
   # invoking process's cwd being exactly right, and when it is not, this port
   # can end up polling a different checkout that also has a work/ directory.
   TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
-  PY: '{{.PY | default "python3"}}'
+  VENV: '{{.VENV | default (printf "%s/.venv" .TASKFILE_DIR)}}'
+  PY: '{{.PY | default (printf "%s/bin/python" .VENV)}}'
 
 tasks:
   default:
@@ -51,6 +52,8 @@ tasks:
     desc: Install the Agent SDK and pytest into the repo venv.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
+      - 'python3 -m venv {{.VENV}}'
+      - '{{.PY}} -m pip install --quiet --upgrade pip'
       - '{{.PY}} -m pip install --quiet claude-agent-sdk pytest'
 
   clone:

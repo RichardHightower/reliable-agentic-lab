@@ -45,7 +45,8 @@ def test_options_load_plugin_agents_not_one_liners(contract, fake_sdk):
     assert judge.tools == ["Read", "Grep", "Glob"]
     assert doer.maxTurns == 12
     assert judge.background is False
-    assert judge.model == "haiku"
+    assert doer.model == "sonnet"
+    assert judge.model == "sonnet"
     assert "Bash" in (doer.disallowedTools or [])
     assert "Write" in (judge.disallowedTools or [])
 

@@ -13,6 +13,7 @@ reach it. Nothing here installs `claude-agent-sdk`.
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -120,8 +121,9 @@ def test_every_writing_role_denies_an_out_of_scope_write_in_every_loop(repo, con
 # -- options_for -----------------------------------------------------------
 
 
-def test_options_for_needs_the_sdk(contract):
+def test_options_for_needs_the_sdk(contract, monkeypatch):
     """Without the package there is nothing to build, and that must be loud."""
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     with pytest.raises(ImportError):
         roles.options_for(contract, loop="enhancer")
 

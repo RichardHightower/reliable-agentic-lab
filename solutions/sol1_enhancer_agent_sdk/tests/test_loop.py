@@ -92,7 +92,8 @@ def test_a_missing_repo_still_stops_anything_past_the_table(tmp_path):
         loop.main(["--repo", str(tmp_path / "nope")])
 
 
-def test_build_needs_the_sdk(contract):
+def test_build_needs_the_sdk(contract, monkeypatch):
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     with pytest.raises(ImportError):
         loop.build(contract)
 
@@ -109,7 +110,8 @@ def test_backend_wraps_the_built_options(contract, fake_sdk):
     assert made.options.cwd == str(contract.repo)
 
 
-def test_backend_needs_the_sdk_only_through_build(contract):
+def test_backend_needs_the_sdk_only_through_build(contract, monkeypatch):
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     with pytest.raises(ImportError):
         loop.backend(contract)
 
@@ -210,6 +212,24 @@ def test_naming_a_ticket_implies_once(repo, monkeypatch, capsys):
     loop.main(["--ticket", "T001", "--simulate-comment", "hi", "--repo", str(repo)])
     assert seen["ticket"] == "T001"
     assert seen["kw"]["simulate_comment"] == "hi"
+
+
+def test_quiet_turns_off_progress_logging(repo, monkeypatch):
+    seen = []
+
+    class ObservedEnhancer:
+        def __init__(self, **kwargs):
+            seen.append(kwargs["verbose"])
+
+        def poll(self, *args, **kwargs):
+            return []
+
+    monkeypatch.setattr(loop, "config", lambda *a: {"fork_owner": "me", "repo_name": "crm"})
+    monkeypatch.setattr(loop, "backend", lambda contract: object())
+    monkeypatch.setattr("enhancer.Enhancer", ObservedEnhancer)
+    loop.main(["--once", "--repo", str(repo)])
+    loop.main(["--once", "--quiet", "--repo", str(repo)])
+    assert seen == [True, False]
 
 
 def test_an_enhancer_error_reports_and_exits_nonzero(repo, monkeypatch, capsys):
