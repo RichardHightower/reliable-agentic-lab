@@ -505,13 +505,26 @@ class Paper:
             usd += reply.usd
             target.write_text(_strip_fence(reply.text), encoding="utf-8")
 
-        self.figures, complaints = stages.render_figures(
-            self.diagram_src,
-            self.figure_dir,
-            self.topic,
-            theme_name=self.theme,
-            polish=self.polish,
-        )
+        try:
+            self.figures, complaints = stages.render_figures(
+                self.diagram_src,
+                self.figure_dir,
+                self.topic,
+                theme_name=self.theme,
+                polish=self.polish,
+            )
+        except stages.RendererMissing as missing:
+            # The paper ships without figures rather than not at all. Nothing in
+            # `paper_check` requires a figure, and blocking every attendee who
+            # has no Java would be a worse answer than saying so out loud.
+            self.figures = []
+            self.say(f"    {missing}")
+            return StageResult(
+                "diagram",
+                usd=usd,
+                artifacts={"figures": 0, "renderer": "missing"},
+                summary=f"no renderer on this machine, {len(planned)} figures skipped",
+            )
         self._redraw = {Path(c.split(":", 1)[0]).stem for c in complaints}
         stages.diagram_gate(self.figures, complaints, planned)
         for complaint in complaints:
@@ -616,9 +629,17 @@ class Paper:
         body = brief.strip_em_dashes(body)
         score = stages.assemble_gate(body, self.ledger)
         self.paper_path.write_text(body, encoding="utf-8")
+        # A warning is not a failure. Filing both under one key made a short
+        # paper look like it had failed a gate, and `publish` reads this file to
+        # decide whether the paper may ship.
         (self.work_dir / "gates.json").write_text(
             json.dumps(
-                {"passed": score.passed, "failures": [c.name for c in score.failures]}, indent=2
+                {
+                    "passed": score.passed,
+                    "failures": list(score.signature()),
+                    "warnings": list(score.warnings()),
+                },
+                indent=2,
             ),
             encoding="utf-8",
         )

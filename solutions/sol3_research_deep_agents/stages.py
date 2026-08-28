@@ -59,6 +59,16 @@ class GateFailed(Exception):
         self.signature = signature or (message.split(".", maxsplit=1)[0][:40],)
 
 
+class RendererMissing(RuntimeError):
+    """No diagram renderer on this machine. Not a gate failure, so never a retry.
+
+    A gate failure means the model produced something a better attempt could
+    fix. `mmdc is not installed` is not that. Asking the diagrammer to redraw is
+    asking it to solve a problem it cannot see and cannot reach, and the only
+    thing three attempts buy is three times the bill.
+    """
+
+
 @dataclass
 class StageResult:
     name: str
@@ -433,8 +443,12 @@ def render_figures(src_dir: Path, out_dir: Path, topic: str, **kwargs) -> tuple[
 
     A complexity failure is not an exception here. It is a message for the
     diagrammer, and the caller feeds it straight back as the retry prompt.
+
+    A renderer that is not on this machine is the opposite. Nothing the
+    diagrammer writes will fix it, so it raises `RendererMissing` and the stage
+    stops rather than paying for two more identical attempts.
     """
-    figures, complaints = [], []
+    figures, complaints, unrenderable = [], [], []
     if not src_dir.is_dir():
         return figures, ["no diagram sources were written."]
     for path in sorted(src_dir.iterdir()):
@@ -445,9 +459,14 @@ def render_figures(src_dir: Path, out_dir: Path, topic: str, **kwargs) -> tuple[
         except diagrams.DiagramTooComplex as exc:
             complaints.append(f"{path.name}: {exc}")
         except RuntimeError as exc:
-            # A renderer that is not installed is not the diagrammer's fault, so
-            # it is not fed back as a retry instruction.
-            complaints.append(f"{path.name}: could not render, {exc}")
+            unrenderable.append(f"{path.name}: {exc}")
+    if unrenderable and not figures:
+        raise RendererMissing(
+            "no diagram source could be rendered on this machine. "
+            + " ".join(unrenderable[:2])
+            + " Install mermaid-cli for .mmd and plantuml for .puml."
+        )
+    complaints.extend(f"could not render {item}" for item in unrenderable)
     return figures, complaints
 
 
