@@ -157,3 +157,23 @@ def test_check_stop_reads_its_payload_from_stdin(monkeypatch, capsys):
 def test_the_check_stop_demo_still_passes(capsys):
     check_stop.demo()
     assert "all demo assertions passed" in capsys.readouterr().out
+
+
+def test_cost_budget_stops():
+    assert check_stop.check(0, 3, ["value"], None, usd=2.0, max_usd=2.0) == {
+        "stop": True,
+        "reason": "cost budget spent",
+    }
+
+
+def test_max_turns_stops():
+    assert check_stop.check(0, 3, ["value"], None, turns=12, max_turns=12) == {
+        "stop": True,
+        "reason": "max turns",
+    }
+
+
+def test_a_stall_is_reported_before_cost():
+    assert check_stop.check(1, 3, ["value"], ["value"], usd=9.0, max_usd=1.0)["reason"] == (
+        "same signature two rounds running"
+    )

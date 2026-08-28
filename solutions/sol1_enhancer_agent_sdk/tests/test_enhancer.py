@@ -90,28 +90,39 @@ class FakeBackend:
 
     name = "fake"
 
-    def __init__(self, judgments: list, draft: str | None = None, ok: bool = True):
+    def __init__(
+        self,
+        judgments: list,
+        draft: str | None = None,
+        ok: bool = True,
+        usd: float = 0.0,
+        stop_reason: str | None = None,
+    ):
         self.judgments = list(judgments)
         self.draft = draft
         self.ok = ok
+        self.usd = usd
+        self.stop_reason = stop_reason
         self.prompts: list[str] = []
         self.allows: list[list[str]] = []
 
-    def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
+    def run(self, *, repo: Path, prompt: str, allow: list[str], **extra) -> DoerResult:
         self.prompts.append(prompt)
         self.allows.append(list(allow))
         if not self.ok:
-            return DoerResult(ok=False, output="backend exploded")
-        if "judge subagent" in prompt:
+            return DoerResult(
+                ok=False, output="backend exploded", usd=self.usd, stop_reason=self.stop_reason
+            )
+        if "judge" in prompt:
             verdict = self.judgments.pop(0)
-            return DoerResult(output=verdict if isinstance(verdict, str) else json.dumps(verdict))
-        target = prompt.split("Write the full rewritten ticket to ")[1].split(" and ", maxsplit=1)[
-            0
-        ]
-        path = Path(repo) / target
-        if self.draft is not None:
-            path.write_text(self.draft, encoding="utf-8")
-        return DoerResult(wrote=[target], output="wrote the candidate")
+            structured = None if isinstance(verdict, str) else verdict
+            return DoerResult(
+                output=verdict if isinstance(verdict, str) else json.dumps(verdict),
+                structured=structured,
+                usd=self.usd,
+                stop_reason=self.stop_reason,
+            )
+        return DoerResult(output=self.draft or "", wrote=[], usd=self.usd, stop_reason=self.stop_reason)
 
 
 def judged(kind: str = "feature", present: list[str] | None = None) -> dict:
@@ -380,7 +391,7 @@ def test_the_doer_is_scoped_to_tickets_and_the_judge_to_nothing(target):
     engine(target, backend, FakeGh()).poll()
     judge_allow, doer_allow = backend.allows[0], backend.allows[1]
     assert judge_allow == [], "the judge holds no write tool, so it gets no scope"
-    assert doer_allow == ["tickets/**"]
+    assert doer_allow == [], "the doer holds no write tool; Python writes the candidate"
 
 
 def test_a_doer_that_writes_nothing_is_an_error_not_a_silent_pass(target):
@@ -804,3 +815,42 @@ def test_commenting_and_labeling_and_setting_a_body_all_name_the_repo(gh_calls):
     api.set_body(7, "new body")
     for call in calls:
         assert "me/crm" in call, f"{call} would act on whatever the cwd happens to be"
+
+
+# -- cost, max turns, complete ----------------------------------------------
+
+
+def test_cost_budget_stops_a_ticket_that_is_not_ready(target):
+    gh = FakeGh()
+    backend = FakeBackend([judged()], usd=2.0)
+    [outcome] = Enhancer(repo=target, backend=backend, gh=gh, max_usd=2.0).poll()
+    assert outcome.status == "escalated"
+    assert outcome.detail == "cost budget spent"
+    assert "needs-human" in gh.added
+
+
+def test_cost_budget_does_not_block_a_completed_ticket(target):
+    """Completing wins. A green ticket with LGTM is done even if this poll cost money."""
+    gh = FakeGh()
+    backend = FakeBackend([judged(present=FEATURE)], usd=5.0)
+    [outcome] = Enhancer(
+        repo=target, backend=backend, gh=gh, max_usd=1.0
+    ).poll("T001", simulate_comment="LGTM")
+    assert outcome.status == "passed"
+
+
+def test_max_turns_stops_before_the_doer_runs(target):
+    backend = FakeBackend([judged(), judged(present=["problem", "proposal", "value", "criteria"])], draft=DRAFT)
+    [outcome] = Enhancer(
+        repo=target, backend=backend, gh=FakeGh(), max_turns=1
+    ).poll()
+    assert outcome.status == "escalated"
+    assert outcome.detail == "max turns"
+    assert len(backend.prompts) == 1, "the doer must not run after max turns"
+
+
+def test_a_sdk_max_turns_result_escalates(target):
+    backend = FakeBackend([judged()], ok=False, stop_reason="max turns")
+    [outcome] = engine(target, backend, FakeGh()).poll()
+    assert outcome.status == "escalated"
+    assert outcome.detail == "max turns"
