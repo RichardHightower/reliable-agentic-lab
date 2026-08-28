@@ -40,6 +40,17 @@ having to learn your abstraction.
 `AGENTS.md` is a symlink to this file. Keep it that way.
 
 <!-- worklog:policy:start -->
+<!--
+PAUSED. Work is tracked as GitHub issues while a second session owns the
+worklog in the parent checkout. Two sessions writing `.work/*.jsonl` from
+separate worktrees is how the log gets a merge conflict nobody can hand-resolve,
+because the file is append-only event JSON.
+
+Every commit still references an issue. The commit-msg hook enforces that.
+
+Turn this back on by deleting the comment markers, once one session owns the log
+again.
+
 ## Work tracking policy
 
 - Every plan MUST end by running `worklog plan-capture` — it writes
@@ -54,4 +65,5 @@ having to learn your abstraction.
   switch branches under each other and solve the same problem twice; give each
   its own `git worktree`. `worklog` warns when it sees more than one, but the
   warning is advisory and arrives after the fact.
+-->
 <!-- worklog:policy:end -->
