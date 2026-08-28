@@ -14,12 +14,10 @@ Slide s2-43 at 50 minutes.
 Expanded from the original 22-slide outline to 52 slides. Same narrative.
 Same lab. More architecture, more evidence, more failure modes.
 
-Diagram coverage, Session 2: 31 mermaid figures on 45 substantive slides (69%).
-PlantUML source for the same architecture lives in `slides/diagrams/plantuml/`
-as `s2-*.puml`.
-
-If a PNG or JPG is missing, the mermaid block is the figure.
-Run `python scripts/build_slides.py` before Marp so mermaid becomes SVG.
+Diagram coverage, Session 2: 31 Imagine diagrams on 45 substantive slides (69%).
+Mermaid source for the same architecture lives in `slides/diagrams/mermaid/`
+as `s2-*.mmd`. PlantUML source lives in `slides/diagrams/plantuml/` as `s2-*.puml`.
+The audience sees the Imagine JPEG, never the diagram syntax.
 
 Do not reteach Session 1. Point back, then type.
 Do not demo `create_deep_agent` live unless the room is ahead.
