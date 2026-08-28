@@ -155,10 +155,17 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
         tools = [reader]
         if role.can_write:
             tools.append(scoped_write_tool(repo, role))
+        # Mount or inline, not both. Deep Agents loads a skill in two levels:
+        # its metadata sits in the system prompt at startup, and its
+        # instructions join the context only when the skill is invoked. Pasting
+        # the body in here as well makes it always resident, which is the exact
+        # cost the mount exists to avoid. A role with a directory gets the
+        # mount below. A role without one keeps its prompt line.
         prompt = f"You are the {role.name}. {role.purpose}"
-        skill = _skill_text(role.name)
-        if skill:
-            prompt = f"{prompt}\n\n{skill}"
+        if not (SKILLS_DIR / role.name).is_dir():
+            skill = _skill_text(role.name)
+            if skill:
+                prompt = f"{prompt}\n\n{skill}"
         spec = {
             "name": role.name.replace("_", "-"),
             "description": role.purpose,
@@ -168,8 +175,13 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
         }
         if role.name == "judge":
             spec["response_format"] = JUDGE_RESPONSE
-        if role.name == "doer" and (SKILLS_DIR / "doer").is_dir():
-            spec["skills"] = ["/skills/doer/"]
+        # Every role with a directory, not just the doer. `skills/judge/SKILL.md`
+        # has existed since this folder was written and never mounted, because
+        # this line named one role. Its text still reached the judge through the
+        # prompt above, which is the inline half of the same idea, so nothing
+        # looked broken.
+        if (SKILLS_DIR / role.name).is_dir():
+            spec["skills"] = [f"/skills/{role.name}/"]
         out.append(spec)
     return out
 

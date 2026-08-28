@@ -29,7 +29,10 @@ def test_the_doer_holds_a_reader_and_a_write_tool(contract, fake_langchain):
 def test_each_subagent_carries_its_purpose(contract, fake_langchain):
     judge = _by_name(roles.subagents_for(contract, loop="enhancer"))["judge"]
     assert "judge" in judge["system_prompt"]
-    assert judge["description"] == "Scores the attempt. Reads reports and the diff. Holds no write path."
+    assert (
+        judge["description"]
+        == "Scores the attempt. Reads reports and the diff. Holds no write path."
+    )
 
 
 def test_the_write_tool_writes_inside_the_scope(contract, target_repo, fake_langchain):
@@ -86,9 +89,29 @@ def test_the_judge_asks_for_structured_output(contract, fake_langchain):
     assert "ready" not in schema["properties"]
 
 
-def test_the_doer_prompt_loads_its_skill(contract, fake_langchain):
-    doer = _by_name(roles.subagents_for(contract, loop="enhancer"))["doer"]
-    assert "tickets/<id>.enhancer-candidate.md" in doer["system_prompt"]
+def test_a_role_with_a_skill_mounts_it_instead_of_pasting_it(contract, fake_langchain):
+    """This test asserted the opposite, and the assertion was the bug.
+
+    Deep Agents loads a skill in two levels: metadata in the system prompt at
+    startup, instructions only when the skill is invoked. The folder used to
+    paste the whole body into `system_prompt` AND mount it, so the body was
+    always resident and the mount saved nothing.
+    """
+    specs = _by_name(roles.subagents_for(contract, loop="enhancer"))
+    body = (roles.SKILLS_DIR / "doer" / "SKILL.md").read_text(encoding="utf-8")
+    distinctive = "tickets/<id>.enhancer-candidate.md"
+    assert distinctive in body
+
+    doer = specs["doer"]
+    assert distinctive not in doer["system_prompt"]
+    assert doer["skills"] == ["/skills/doer/"]
+
+
+def test_the_judge_skill_mounts_too(contract, fake_langchain):
+    """It has had a SKILL.md since this folder was written. The line that set
+    the key named only the doer, so it never mounted."""
+    judge = _by_name(roles.subagents_for(contract, loop="enhancer"))["judge"]
+    assert judge["skills"] == ["/skills/judge/"]
 
 
 def _install_fake_deepagents(monkeypatch, seen):
@@ -145,9 +168,7 @@ def test_build_agent_hands_the_subagents_to_deepagents(contract, monkeypatch, fa
     assert set(_by_name(seen["subagents"])) == {"doer", "judge"}
 
 
-def test_build_agent_turns_off_the_general_purpose_subagent(
-    contract, monkeypatch, fake_langchain
-):
+def test_build_agent_turns_off_the_general_purpose_subagent(contract, monkeypatch, fake_langchain):
     seen = {}
     _install_fake_deepagents(monkeypatch, seen)
 
@@ -160,9 +181,7 @@ def test_build_agent_turns_off_the_general_purpose_subagent(
     assert harness[1]["general_purpose_subagent"] == ("gp", {"enabled": False})
 
 
-def test_build_agent_mounts_the_crm_as_a_virtual_filesystem(
-    contract, monkeypatch, fake_langchain
-):
+def test_build_agent_mounts_the_crm_as_a_virtual_filesystem(contract, monkeypatch, fake_langchain):
     seen = {}
     _install_fake_deepagents(monkeypatch, seen)
 

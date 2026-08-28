@@ -30,6 +30,10 @@ them left off is a hole the other two cannot see.
      walk off the repo through a **built-in** filesystem tool. A custom
      tool is not covered, so `read_file` and the write tool resolve and
      contain the path themselves.
+   - `CompositeBackend` routes `/skills/` and `/memory/`. A role with a skill
+     directory mounts it and does not also paste the body into its prompt: the
+     mount exists so instructions load when the role is invoked, not always.
+     `/memory/` routes at `memory/`, one file, rather than at this folder.
      walk off the target repo.
    - `permissions=` deny every write on the orchestrator. Each subagent
      carries its own rules: the deny list first, the allow list second, and a

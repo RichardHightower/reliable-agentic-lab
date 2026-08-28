@@ -13,8 +13,10 @@ of it is enforced by something other than a prompt:
     5. The code implementer writes code until the suite is green. It cannot
        touch tests, so it cannot reach green by weakening one.
     6. The rubric judge scores ten rows. No model call.
-    7. The final judge reads the ticket, the plan, and the diff, and says
-       whether this is actually done.
+    7. The final judge subagent exists and answers in JSON, but `run()` does
+       not pass its verdict to `gates.decide`. `judge_done` stays None, so a
+       green rubric is enough on this path. Session 2 teaches the model judge;
+       this port teaches the deterministic one.
     8. Pass, retry, or escalate.
 
 Run it against any repo that satisfies the contract:

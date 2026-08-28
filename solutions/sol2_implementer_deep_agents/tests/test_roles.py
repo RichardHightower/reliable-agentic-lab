@@ -101,3 +101,52 @@ def test_build_agent_passes_every_subagent_permission(contract, fake_langchain, 
     for spec in fake_deepagents["subagents"]:
         assert spec["permissions"], spec["name"]
         assert spec["permissions"][-1].mode == "deny"
+
+
+# -- what the judge may say -------------------------------------------------
+
+
+def test_the_judge_carries_a_response_format(contract, fake_langchain):
+    """Without it the parent receives the subagent's last message text as-is.
+    With it the parent always gets valid JSON matching this schema."""
+    import roles  # noqa: PLC0415
+
+    judge = next(s for s in roles.subagents_for(contract, "implementer") if s["name"] == "judge")
+    assert judge["response_format"] is roles.JUDGE_RESPONSE
+
+
+def test_only_the_judge_carries_one(contract, fake_langchain):
+    import roles  # noqa: PLC0415
+
+    for spec in roles.subagents_for(contract, "implementer"):
+        if spec["name"] != "judge":
+            assert "response_format" not in spec, spec["name"]
+
+
+def test_the_judge_cannot_name_a_gate():
+    """`done` is the verdict and belongs here. A gate is not a verdict, it is
+    the decision Python makes from one, and a stop condition a model can phrase
+    its way past is not a stop condition."""
+    import roles  # noqa: PLC0415
+
+    properties = roles.JUDGE_RESPONSE["properties"]
+    assert set(properties) == {"done", "why"}
+    for banned in ("gate", "pass", "retry", "escalate", "rubric", "score", "ready"):
+        assert banned not in properties
+
+
+def test_the_schema_refuses_extra_properties():
+    """`additionalProperties: False` is what stops the judge adding `gate`
+    anyway."""
+    import roles  # noqa: PLC0415
+
+    assert roles.JUDGE_RESPONSE["additionalProperties"] is False
+    assert roles.JUDGE_RESPONSE["required"] == ["done", "why"]
+
+
+def test_the_description_tells_the_judge_what_not_to_decide():
+    import roles  # noqa: PLC0415
+
+    text = roles.JUDGE_RESPONSE["description"].lower()
+    assert "do not name a gate" in text
+    assert "pass, retry, or escalate" in text

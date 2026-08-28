@@ -42,6 +42,37 @@ ORCHESTRATOR_EXCLUDED_TOOLS = frozenset({"write_file", "edit_file", "delete", "e
 DENY_EVERY_WRITE = {"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"}
 
 
+# The judge answers one question and names no gate.
+#
+# The consumer is the framework, not this folder's Python. From the Deep Agents
+# docs: without `response_format` the parent receives the subagent's last
+# message text as-is; with it the parent always gets valid JSON matching the
+# schema, JSON-serialized into the ToolMessage the parent reads.
+#
+# `gates.decide` takes a `judge_done` argument and `implementer.py` does not pass it today, so the live path
+# passes on a green rubric alone. Naming a gate is
+# still the one thing the judge may not do, the same reason sol1's schema
+# forbids `ready`: a stop condition a model can phrase its way past is not a
+# stop condition.
+JUDGE_RESPONSE = {
+    "type": "object",
+    "title": "JudgeVerdict",
+    "description": (
+        "Whether the diff does what the ticket asked for. One question, one answer, one sentence "
+        "of reason. Do not name a gate. Do not say pass, retry, or escalate. "
+        "Do not score the rubric. Python does that."
+    ),
+    "properties": {
+        "done": {"type": "boolean"},
+        "why": {"type": "string"},
+    },
+    "required": ["done", "why"],
+    "additionalProperties": False,
+}
+
+RESPONSE_FORMATS = {"judge": JUDGE_RESPONSE}
+
+
 def _inside(repo: Path, path: str):
     """Resolve `path` under `repo`, or None when it escapes.
 
@@ -160,15 +191,16 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
         tools = [reader]
         if role.can_write:
             tools.append(scoped_write_tool(repo, role))
-        out.append(
-            {
-                "name": role.name.replace("_", "-"),
-                "description": role.purpose,
-                "system_prompt": f"You are the {role.name}. {role.purpose}",
-                "tools": tools,
-                "permissions": permission_rules(role),
-            }
-        )
+        spec = {
+            "name": role.name.replace("_", "-"),
+            "description": role.purpose,
+            "system_prompt": f"You are the {role.name}. {role.purpose}",
+            "tools": tools,
+            "permissions": permission_rules(role),
+        }
+        if role.name in RESPONSE_FORMATS:
+            spec["response_format"] = RESPONSE_FORMATS[role.name]
+        out.append(spec)
     return out
 
 
