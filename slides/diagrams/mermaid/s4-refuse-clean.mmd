@@ -1,0 +1,4 @@
+flowchart TB
+  C["git checkout broken-pr"] --> Ok{"returncode 0?"}
+  Ok -->|yes| Go["Run the loop"]
+  Ok -->|local changes| Stop["SystemExit\nstash, or discard. You choose."]

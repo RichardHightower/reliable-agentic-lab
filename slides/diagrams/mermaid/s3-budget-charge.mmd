@@ -1,0 +1,10 @@
+flowchart TB
+  Ask["Researcher.ask(question)"] --> Ch["Budget.charge(usd)"]
+  Ch --> Calls{"calls + 1 > max_calls?"}
+  Calls -->|yes| E1["BudgetExceeded\ncall budget spent"]
+  Calls -->|no| Money{"spent + usd > max_usd?"}
+  Money -->|yes| E2["BudgetExceeded\nmoney budget spent"]
+  Money -->|no| Ok["calls += 1. spent += usd"]
+  Ok --> Soft{"over soft_usd?"}
+  Soft -->|yes| Warn["Warn. Do not stop"]
+  Soft -->|no| Go["search()"]

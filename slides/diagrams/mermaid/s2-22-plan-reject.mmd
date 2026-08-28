@@ -1,0 +1,5 @@
+flowchart TB
+  V["Plan.validate()"] --> R1["A step has no validation statement"]
+  V --> R2["A criterion maps to no step"]
+  V --> R3["A step is marked done with no evidence"]
+  V --> R4["No step writes a test"]

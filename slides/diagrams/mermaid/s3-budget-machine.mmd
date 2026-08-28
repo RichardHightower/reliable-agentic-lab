@@ -1,0 +1,15 @@
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Charging: ask(question)
+  Charging --> Searching: under hard cap
+  Charging --> Exceeded: call budget 8 or dollar cap
+  Searching --> SoftWarn: spent over soft_usd
+  Searching --> Idle: Finding recorded
+  SoftWarn --> Idle: Finding recorded
+  Exceeded --> Escalate: BudgetExceeded
+  Idle --> Pass: BriefScore green
+  Idle --> Retry: fixable gap and budget left
+  Idle --> Escalate: same signature twice
+  Retry --> Charging
+  Pass --> [*]
+  Escalate --> [*]

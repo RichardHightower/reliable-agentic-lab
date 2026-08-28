@@ -1,0 +1,9 @@
+stateDiagram-v2
+  [*] --> Running
+  Running --> Pass: rubric green
+  Running --> Retry: fixable gap and budget left
+  Running --> Escalate: budget spent
+  Running --> Escalate: same signature twice
+  Retry --> Running
+  Pass --> [*]
+  Escalate --> [*]

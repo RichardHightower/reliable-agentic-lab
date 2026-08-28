@@ -1,0 +1,7 @@
+flowchart TB
+  DA["create_deep_agent"]
+  DA --> O["Orchestrator. No write tool. Holds task"]
+  DA --> R["Researcher. search only. Isolated context"]
+  DA --> W["Writer. briefs/ only"]
+  DA --> J["Judge. read tools. check_brief in Python"]
+  Py["Python owns Budget and gates.decide"] --> DA

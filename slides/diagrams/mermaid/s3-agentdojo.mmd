@@ -1,0 +1,5 @@
+flowchart LR
+  Tool["Tool output\nA document the internet wrote"] --> Inj["Hidden instruction"]
+  Inj --> Agent["Agent treats it as trusted"]
+  Agent --> Redir["Redirected action"]
+  Bound["Boundary sanitizes output"] --> Safe["Treat as untrusted input"]

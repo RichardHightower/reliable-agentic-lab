@@ -9,6 +9,11 @@ Open plus four modules plus close. Three breaks. 240 minutes.
 slides/
   README.md
   FEATURE-MAP.md              which loop feature each session introduces
+  mermaid.json                Spillwave theme for mermaid-cli
+  themes/spillwave.css        reusable Marp theme
+  diagrams/mermaid/           editable .mmd source
+  diagrams/plantuml/          editable .puml source plus SVG
+  diagrams/imagen/            Spillwave theme contract for raster enhancement
   session-1-system-architecture/
   session-2-harness-engineering/
   session-3-research-loops-mcp/
@@ -19,15 +24,31 @@ Each session folder:
 
 | File | Role |
 |---|---|
-| `slides.md` | Deck. One Marp slide per `---` block. |
+| `slides.md` | Deck. One Marp slide per `---` block. Source of truth. |
+| `slides.build.md` | Generated. Mermaid blocks replaced with SVG. |
 | `notes.md` | Narrative for that session. Same images, spoken order. |
-| `images/` | Rendered art later. Prompts live on the slide. |
+| `images/` | Editorial JPGs plus mermaid-cli SVGs. |
 
-Render later with [Marp](https://marp.app/). Images can stay as prompts until Friday.
+Mermaid is not drawn by Marp. Render first:
 
 ```bash
-npx @marp-team/marp-cli slides/session-1-system-architecture/slides.md --pdf
+python scripts/build_slides.py
+npx @marp-team/marp-cli slides/session-1-system-architecture/slides.build.md --pdf \
+  --allow-local-files --html
 ```
+
+If Chromium is not where mermaid-cli expects it, set
+`PUPPETEER_EXECUTABLE_PATH` or `MERMAID_PUPPETEER_CONFIG`. The build script
+also looks for Playwright's `chrome-headless-shell` under `/opt/pw-browsers`.
+
+Optional Marp theme, if you do not want the inline CSS in `slides.md`:
+
+```bash
+npx @marp-team/marp-cli --theme-set slides/themes slides/session-1-system-architecture/slides.build.md --pdf
+```
+
+Images can stay as prompts until Friday. Editorial stills live next to the
+deck; architecture diagrams prefer mermaid-cli SVG over raster drafts.
 
 ## Layouts. Mix them.
 
@@ -53,10 +74,11 @@ id: s1-04
 layout: split-right
 minutes: 1
 beat: talk
-image: images/prompting-volume.png
+image: images/prompting-volume.jpg
 image_prompt: >
   16:9 editorial. One engineer, many identical chat windows.
   Cool gray. One green signal. No logos. No readable UI text.
+notes: Ask the room who has a prompt that worked once and never again.
 -->
 ```
 

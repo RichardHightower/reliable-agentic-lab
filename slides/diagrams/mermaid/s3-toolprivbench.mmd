@@ -1,0 +1,6 @@
+flowchart TB
+  Need["Task needs a small tool"] --> Choice{"Agent picks a tool"}
+  Choice -->|enough| Low["Lower privilege"]
+  Choice -->|often| High["Higher privilege"]
+  Fail["Transient failure"] --> Choice
+  Prompt["Prompt-based control"] -.->|"limited mitigation"| Choice

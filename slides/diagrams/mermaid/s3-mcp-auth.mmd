@@ -1,0 +1,6 @@
+flowchart TB
+  Client["Agent / client"] -->|"request + audience"| Server["MCP server"]
+  Server --> V{"Validate token audience\nserver side"}
+  V -->|match| Ok["Serve the tool"]
+  V -->|mismatch| No["Refuse"]
+  Client -.->|"never pass a token through"| X["Confused deputy"]

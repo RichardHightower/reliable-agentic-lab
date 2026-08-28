@@ -1,0 +1,9 @@
+flowchart TB
+  T["Trigger<br/>workflow_dispatch / pull_request / cron"] --> L["Fixer loop<br/>orchestrator / doer / judge"]
+  L --> S[".harness/state.json"]
+  L --> R[".harness/receipt.json"]
+  L --> E{"Exit"}
+  E -->|0| Pass["Pass"]
+  E -->|2| Esc["Escalate for a human"]
+  E -->|1| Crash["Crash"]
+  Pass --> H["Human merge box"]

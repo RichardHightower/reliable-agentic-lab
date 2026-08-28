@@ -1,0 +1,20 @@
+flowchart TB
+  subgraph untrusted ["Untrusted. Model output."]
+    Draft["Doer patch"]
+    Claim["Judge prose"]
+    Story["Invented test passes"]
+  end
+  subgraph trusted ["Trusted process. Python."]
+    Scope["WriteScope.check()"]
+    Gate["gates.decide()"]
+    Py["pytest, junit.xml"]
+    Rec["receipt.json"]
+  end
+  subgraph human ["Human."]
+    Merge["LGTM and merge"]
+  end
+  Draft --> Scope
+  Claim --> Gate
+  Story --> Py
+  Py --> Rec
+  Rec --> Merge

@@ -1,0 +1,19 @@
+sequenceDiagram
+  participant Poll as Orchestrator skill
+  participant Judge as enhancer-judge
+  participant Doer as enhancer-doer
+  participant Disk as Ticket file
+  participant Human as Human
+  Poll->>Disk: load draft ticket
+  Poll->>Judge: score ticket
+  Judge-->>Poll: ready? missing[]
+  alt not ready and signature changed
+    Poll->>Doer: draft replacement
+    Doer-->>Poll: text only
+    Poll->>Disk: write candidate
+    Poll->>Poll: retry
+  else same gaps twice
+    Poll-->>Human: escalate
+  else ready
+    Poll-->>Human: wait for LGTM
+  end

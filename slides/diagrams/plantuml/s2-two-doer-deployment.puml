@@ -1,0 +1,46 @@
+@startuml s2-two-doer-deployment
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam node {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+skinparam component {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+skinparam database {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+title Two doers. Disjoint write scope.
+node "Engine. reliable-agentic-lab" as E {
+  component "roles.build()" as B
+  component "test_implementer\nDoer" as T
+  component "code_implementer\nDoer" as C
+  component "Judge\nno write method" as J
+}
+node "Target. northwind-field-crm" as CRM {
+  database "tests/**" as TESTS
+  database "app/**" as APP
+  database "tickets/**" as TK
+}
+B --> T
+B --> C
+B --> J
+T --> TESTS : write_allow tests/**
+C --> APP : write_allow app/**
+C ..> TESTS : write_deny tests/**\nScopeViolation
+J ..> TESTS : no write method
+J ..> APP : no write method
+note bottom of C
+  The code implementer cannot weaken a test.
+  Not because it was told not to.
+  Because tests/** is denied.
+end note
+@enduml

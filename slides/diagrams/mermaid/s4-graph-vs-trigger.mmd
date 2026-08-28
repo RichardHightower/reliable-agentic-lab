@@ -1,0 +1,13 @@
+flowchart LR
+  subgraph keep ["Keep. Orchestrator, doer, judge."]
+    O["Orchestrator"] --> D["Doer"]
+    O --> J["Judge"]
+  end
+  subgraph swap ["Swap. How work starts."]
+    F["File on disk"]
+    W["Webhook"]
+    C["Cron, and only if HEAD moved"]
+  end
+  F --> O
+  W --> O
+  C --> O

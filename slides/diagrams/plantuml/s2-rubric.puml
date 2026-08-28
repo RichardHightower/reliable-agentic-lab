@@ -1,0 +1,64 @@
+@startuml s2-rubric
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam class {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+  AttributeFontColor #8aa0ad
+  HeaderBackgroundColor #0d1e2c
+}
+skinparam package {
+  BackgroundColor #0d1e2c
+  BorderColor #d4a84b
+  FontColor #eef4f6
+}
+title Ten-row rubric. No model call.
+class Row {
+  name: str
+  passed: bool
+  detail: str
+}
+class Score {
+  rows: list<Row>
+  passed()
+  failed_rows()
+  signature()
+  report()
+}
+package "Evidence. Files, not claims." {
+  class junit.xml
+  class coverage.xml
+  class steps.jsonl
+  class git_diff
+}
+package "Ten rows. loops/rubric.py" {
+  class tests_ran
+  class tests_passed
+  class red_first
+  class coverage_floor
+  class criteria_covered
+  class steps_done
+  class ui_has_e2e
+  class format_clean
+  class lint_clean
+  class write_scope
+}
+Score *-- Row
+junit.xml --> tests_ran
+junit.xml --> tests_passed
+junit.xml --> red_first
+coverage.xml --> coverage_floor
+steps.jsonl --> criteria_covered
+steps.jsonl --> steps_done
+git_diff --> ui_has_e2e
+git_diff --> write_scope
+note right of Score
+  signature is the failed names,
+  not the wording.
+  Two equal signatures mean
+  the last attempt changed nothing.
+end note
+@enduml

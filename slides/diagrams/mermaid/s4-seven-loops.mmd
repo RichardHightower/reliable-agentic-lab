@@ -1,0 +1,9 @@
+flowchart TB
+  G["One graph. Orchestrator, doer, judge."]
+  G --> T["Daily triage. Enhancer on cron."]
+  G --> B["PR babysitter. Fixer on check failure."]
+  G --> S["CI sweeper. Fixer on cron if HEAD moved."]
+  G --> R["Ticket groomer. Enhancer on issue opened."]
+  G --> I["Ready-ticket implementer. Label ready."]
+  G --> Q["Research brief. A question queue."]
+  G --> E["Nightly eval. The harness, weekly."]

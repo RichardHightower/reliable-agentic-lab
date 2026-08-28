@@ -1,0 +1,6 @@
+flowchart LR
+  T["Trigger\nDraft ticket on disk"] --> A["Action\nDoer edits inside scope"]
+  A --> V["Verify\nJudge scores. Reports only."]
+  V -->|"not ready"| A
+  V -->|"ready"| M["Memory\nTicket file and trace"]
+  M --> H["Human\nAccepts, or does not"]

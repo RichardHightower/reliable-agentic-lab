@@ -1,0 +1,10 @@
+stateDiagram-v2
+  [*] --> Running
+  Running --> Pass: suite green
+  Running --> Retry: fixable gap and budget left
+  Running --> Escalate: budget spent
+  Running --> Escalate: same failing ids twice
+  Running --> Escalate: the suite never ran
+  Retry --> Running
+  Pass --> [*]
+  Escalate --> [*]

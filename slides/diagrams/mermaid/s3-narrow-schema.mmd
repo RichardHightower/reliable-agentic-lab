@@ -1,0 +1,9 @@
+flowchart LR
+  subgraph Safe["A tool"]
+    N["add_review_comment\nissue_id, body"]
+  end
+  subgraph Liability["A client"]
+    H["HTTP client\nholding credentials"]
+  end
+  Safe -->|"narrow schema"| Bound["Safe boundary"]
+  Liability -->|"can do anything the token can"| Risk["Confused deputy"]

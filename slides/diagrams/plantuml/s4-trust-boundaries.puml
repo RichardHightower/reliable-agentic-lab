@@ -1,0 +1,45 @@
+@startuml s4-trust-boundaries
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam package {
+  BackgroundColor #07141f
+  BorderColor #d4a84b
+  FontColor #d4a84b
+}
+skinparam rectangle {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+title Trust boundaries for unattended
+
+package "Untrusted model output" {
+  rectangle "Doer patch"
+  rectangle "Judge prose"
+  rectangle "Invented test passes"
+  rectangle "File edits that never happened"
+}
+
+package "Trusted process. Python." {
+  rectangle "WriteScope.check()"
+  rectangle "gates.decide()"
+  rectangle "pytest plus junit.xml"
+  rectangle "receipt.json"
+  rectangle "PreToolUse deny tests/**"
+}
+
+package "Human" {
+  rectangle "Read the trace at 2 a.m."
+  rectangle "Merge box. Human only."
+}
+
+"Doer patch" --> "WriteScope.check()"
+"Judge prose" --> "gates.decide()"
+"Invented test passes" --> "pytest plus junit.xml"
+"File edits that never happened" --> "receipt.json"
+"pytest plus junit.xml" --> "receipt.json"
+"PreToolUse deny tests/**" --> "WriteScope.check()"
+"gates.decide()" --> "Read the trace at 2 a.m." : escalate
+"receipt.json" --> "Merge box. Human only." : pass
+@enduml

@@ -1,0 +1,8 @@
+flowchart LR
+  subgraph chat ["Chat client. A person is here."]
+    H["Human types"] --> C["ClaudeSDKClient"]
+  end
+  subgraph night ["Unattended. Nobody is here."]
+    T["Trigger"] --> Q["query()"]
+    Q --> P["Python owns exits"]
+  end

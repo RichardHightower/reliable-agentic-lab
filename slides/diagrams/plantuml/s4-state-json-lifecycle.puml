@@ -1,0 +1,44 @@
+@startuml s4-state-json-lifecycle
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam activity {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+skinparam diamond {
+  BackgroundColor #122536
+  BorderColor #d4a84b
+  FontColor #eef4f6
+}
+skinparam note {
+  BackgroundColor #122536
+  BorderColor #d4a84b
+  FontColor #eef4f6
+}
+title state.json lifecycle
+
+start
+:load_state(repo);
+if (file exists and parses?) then (yes)
+  :read runs, last_gate,\nlast_reason, last_run_at, loop;
+else (missing or corrupt)
+  :runs 0;\nlast_reason: previous state was unreadable;
+endif
+:run fixer, implementer, or enhancer;
+:runs += 1;
+:last_gate = trace.gate;
+:last_reason = trace.reason;
+:last_run_at = UTC now;
+:loop = chosen loop;
+:save_state to .harness/state.json;
+:return exit 0, 2, or 1;
+stop
+
+note right
+  Five fields.
+  Survives the process.
+  Next cron reads this first.
+end note
+@enduml

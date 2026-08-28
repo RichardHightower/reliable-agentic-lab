@@ -1,0 +1,34 @@
+@startuml s2-ci-receipt
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam sequence {
+  LifeLineBorderColor #2dd4bf
+  ActorBorderColor #d4a84b
+  ActorBackgroundColor #0d1e2c
+  ParticipantBackgroundColor #0d1e2c
+  ParticipantBorderColor #2dd4bf
+}
+title CI receipt flow. Push is a privilege.
+actor Agent
+participant "PreToolUse hook" as H
+participant "scripts/receipt.py" as R
+participant ".harness/receipt.json" as F
+participant "reports/junit.xml" as J
+Agent -> Agent : task test
+Agent -> J : write report
+Agent -> R : write(repo, exit_code)
+R -> J : read failures
+R -> R : tree_hash, newest mtime
+R -> F : green, tree_hash, written_at
+Agent -> H : git push
+H -> R : check(repo)
+alt no receipt, not green, stale hash, or newer source
+  R --> H : refuse
+  H --> Agent : BLOCKED by pre-tool hook: git push
+else green and this tree and after last edit
+  R --> H : allow
+  H --> Agent : push proceeds
+end
+@enduml

@@ -1,0 +1,22 @@
+sequenceDiagram
+  participant O as Orchestrator
+  participant R as Researcher
+  participant B as search(question)
+  participant W as Writer
+  participant J as check_brief
+  participant D as Disk
+  O->>R: plan_questions(question)
+  R->>B: ask each sub-question
+  B-->>R: Finding + citations
+  R-->>O: summary, never the dump
+  O->>W: assemble brief
+  W->>D: write briefs/brief.md
+  O->>J: check_brief(body, sources)
+  J-->>O: BriefScore arithmetic
+  alt pass
+    O-->>O: stop
+  else same gaps twice
+    O-->>O: escalate
+  else budget left
+    O->>R: retry
+  end

@@ -1,0 +1,35 @@
+@startuml s2-harness-components
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam packageBorderColor #d4a84b
+skinparam packageFontColor #d4a84b
+skinparam rectangleBorderColor #2dd4bf
+skinparam rectangleBackgroundColor #0d1e2c
+title Module 2 harness. Four planes.
+
+package "Intent" {
+  rectangle "Ready ticket\nAC a test can fail"
+  rectangle "steps.jsonl\nvalidation on every step"
+}
+package "Execution" {
+  rectangle "Test implementer\ntests/ only"
+  rectangle "Code implementer\napp/ only, deny tests/"
+}
+package "Verification" {
+  rectangle "Rubric judge\nten rows, no model"
+  rectangle "Final judge\nis the ticket done"
+}
+package "Control" {
+  rectangle "gates.decide()\npass / retry / escalate"
+  rectangle "Receipt + push gate"
+}
+"Ready ticket\nAC a test can fail" --> "steps.jsonl\nvalidation on every step"
+"steps.jsonl\nvalidation on every step" --> "Test implementer\ntests/ only"
+"Test implementer\ntests/ only" --> "Code implementer\napp/ only, deny tests/"
+"Code implementer\napp/ only, deny tests/" --> "Rubric judge\nten rows, no model"
+"Rubric judge\nten rows, no model" --> "Final judge\nis the ticket done"
+"Final judge\nis the ticket done" --> "gates.decide()\npass / retry / escalate"
+"gates.decide()\npass / retry / escalate" --> "Receipt + push gate"
+@enduml

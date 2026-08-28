@@ -1,0 +1,4 @@
+flowchart LR
+  Fail["20 percent per-step failure"] --> Replay["Retry replays the whole context"]
+  Replay --> Bill["Bill roughly doubles"]
+  Arch["Architecture\nbudget, signature, stop"] --> Cap["Hard cap raises"]

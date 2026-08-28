@@ -1,0 +1,12 @@
+flowchart TB
+  T[".github/workflows/unattended.yml"]
+  T --> D["workflow_dispatch\nfixer, implementer, enhancer"]
+  T --> P["pull_request"]
+  T --> C["schedule\ncron 0 15 * * 1-5"]
+  D --> U["python -m loops.unattended"]
+  P --> U
+  C --> U
+  U --> X{"exit"}
+  X -->|0| Pass["pass"]
+  X -->|2| Esc["escalate. A human reads."]
+  X -->|1| Crash["crash. A different problem."]

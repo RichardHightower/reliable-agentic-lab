@@ -1,0 +1,7 @@
+This is a slide diagram for a technical presentation about MCP trust boundaries.
+Clean minimalist technical illustration. Boxes, arrows, labels. Landscape 16:9.
+Palette: background #07141f, surface #0d1e2c, primary #2dd4bf, accent #d4a84b, ink #eef4f6.
+No source syntax, no ASCII, no tiny labels, no watermarks, no logos, no em dash characters.
+Diagram type: flowchart.
+Left untrusted internet search results, a thick wall labeled TOOL BOUNDARY with one narrow socket SEARCH, right side orchestrator receiving a summary only, judge checking citations as arithmetic. Denied tools capped: merge, deploy, delete.
+Convert the visual boxes, arrows, and labels. The image must show a finished diagram, not Mermaid or PlantUML code.

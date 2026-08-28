@@ -1,0 +1,10 @@
+# imagen-diagrams config for this deck.
+# Auto backend is imagen, then grok, then codex.
+# None of those CLIs were on PATH in the build environment,
+# so raster enhancement used the image generation backend directly.
+# Prompt sidecars still live next to the assets.
+
+backend: auto
+theme: spillwave-navy
+density: slide
+aspect: "16:9"

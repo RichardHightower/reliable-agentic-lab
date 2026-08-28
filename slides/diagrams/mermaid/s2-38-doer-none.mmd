@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant O as Orchestrator
+  participant N as none backend
+  participant J as junit.xml
+  participant G as red_gate
+  O->>J: baseline
+  O->>N: write tests
+  N-->>O: wrote nothing
+  O->>J: after_tests
+  O->>G: _new_test_ids
+  G-->>O: empty
+  O-->>O: escalate

@@ -1,0 +1,7 @@
+flowchart LR
+  Net["Untrusted search results"] --> Bound["Tool boundary<br/>search only"]
+  Bound --> Sub["Researcher subagent<br/>isolated context"]
+  Sub --> Sum["Summary + citations"]
+  Sum --> Orch["Orchestrator"]
+  Orch --> Judge["check_brief<br/>arithmetic"]
+  Bound -.->|denied| X["merge / deploy / delete"]

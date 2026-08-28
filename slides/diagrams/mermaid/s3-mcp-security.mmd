@@ -1,0 +1,11 @@
+flowchart TB
+  Threats["MCP threat surface"]
+  Threats --> P["Tool poisoning"]
+  Threats --> R["Rug pulls"]
+  Threats --> I["Prompt injection via tool output"]
+  Threats --> E["Capability escalation through composition"]
+  Controls["Controls"]
+  Controls --> M["Pinned manifests"]
+  Controls --> S["Output sanitization"]
+  Controls --> C["Scoped credentials"]
+  Controls --> T["Transport-level policy"]

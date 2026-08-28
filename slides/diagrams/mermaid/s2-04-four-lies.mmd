@@ -1,0 +1,5 @@
+flowchart TB
+  L["Loop without a harness"] --> F1["False completeness\nDone on a red test"]
+  L --> F2["Runaway iteration\nNo hard stop"]
+  L --> F3["Context rot\nWhole repo in the window"]
+  L --> F4["Stagnation\nSame two failures forever"]

@@ -1,0 +1,6 @@
+flowchart TB
+  T["Trigger. Something outside the model starts the work."]
+  T --> F["File on disk\nA draft ticket exists"]
+  T --> W["Webhook\nIssue opened, PR failed, comment posted"]
+  T --> C["Schedule\nCron, and only if HEAD moved"]
+  T --> X["Anti-pattern\nA timer that fires on no change"]

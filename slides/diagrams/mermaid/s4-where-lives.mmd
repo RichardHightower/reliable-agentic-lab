@@ -1,0 +1,14 @@
+flowchart TB
+  subgraph engine ["reliable-agentic-lab"]
+    Loops["loops/\nNever imports the CRM"]
+    Labs["labs/lab1-4"]
+    Take["labs/takehome/"]
+    Sol["solutions/"]
+  end
+  subgraph target ["work/northwind-field-crm"]
+    TF["Taskfile.yml"]
+    Har[".harness/state.json\n.harness/receipt.json"]
+    App["application"]
+  end
+  Loops -->|"path only"| TF
+  Loops --> Har

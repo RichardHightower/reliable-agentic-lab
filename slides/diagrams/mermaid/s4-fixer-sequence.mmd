@@ -1,0 +1,25 @@
+sequenceDiagram
+  participant Trig as Trigger
+  participant U as unattended.py
+  participant O as Orchestrator
+  participant J as pytest plus judge
+  participant D as code_implementer
+  participant Disk as state.json and receipt
+  participant Human as Human
+  Trig->>U: dispatch, pull_request, or cron
+  U->>Disk: load_state
+  U->>O: run fixer
+  O->>J: contract.run test
+  alt suite green
+    O-->>U: PASS
+  else same failing ids twice
+    O-->>U: ESCALATE with comment
+  else budget spent
+    O-->>U: ESCALATE with comment
+  else retry
+    O->>D: repair inside scope
+    D-->>O: wrote
+    O->>J: contract.run test
+  end
+  U->>Disk: save_state
+  U-->>Human: exit 0, 2, or 1
