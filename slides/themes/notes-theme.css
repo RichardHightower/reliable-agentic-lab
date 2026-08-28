@@ -1,0 +1,131 @@
+/* @theme notes-a4 */
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+:root {
+  --bg: #f4f6fa;
+  --ink: #1b2437;
+  --muted: #4a5b70;
+  --navy: #1a365d;
+  --orange: #d9772a;
+  --teal: #2aa8bb;
+  --line: #c9d4e0;
+  --stripe: #1e3a6e;
+}
+
+section {
+  width: 210mm;
+  height: 297mm;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+  padding: 12mm 14mm 16mm;
+  font-size: 13.5px;
+  line-height: 1.38;
+  justify-content: flex-start;
+}
+
+section::before {
+  content: "SPEAKER NOTES  ·  LOOP ENGINEERING WORKSHOP";
+  display: block;
+  color: var(--navy);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 5px;
+  margin-bottom: 8px;
+}
+
+section::after {
+  color: #7a8b9c;
+  font-size: 10px;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+  line-height: 1.12;
+}
+
+h2 {
+  font-size: 15px;
+  color: var(--navy);
+  margin: 8px 0 4px;
+  font-weight: 700;
+}
+
+p, li { color: var(--ink); font-size: 13.5px; }
+ul { margin: 3px 0 6px; padding-left: 18px; }
+li { margin: 2px 0; }
+
+code, pre {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  background: #e4eaf2;
+}
+
+pre {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+  margin: 6px 0;
+}
+
+table { font-size: 12px; width: 100%; }
+th {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+td { border-color: var(--line); padding: 3px 8px 3px 0; vertical-align: top; }
+
+img {
+  display: block;
+  margin: 6px auto;
+  max-height: 168px;
+  object-fit: contain;
+}
+
+small, cite { color: var(--muted); font-size: 11px; }
+
+.say {
+  background: #fff;
+  border-left: 4px solid var(--orange);
+  padding: 6px 10px;
+  margin: 6px 0;
+}
+
+.why {
+  background: #fff;
+  border-left: 4px solid var(--teal);
+  padding: 6px 10px;
+  margin: 6px 0;
+}
+
+.lab {
+  background: #fff;
+  border-left: 4px solid var(--navy);
+  padding: 6px 10px;
+  margin: 6px 0;
+}
+
+.ask {
+  background: #fff;
+  border-left: 4px solid #7a8b9c;
+  padding: 6px 10px;
+  margin: 6px 0;
+}
+
+section.lead::before { display: none; }
+section.lead {
+  border-left: 10px solid var(--stripe);
+  padding-left: 16mm;
+  justify-content: center;
+}
+section.lead h1 { font-size: 32px; }
+section.lead img { max-height: 160px; }

@@ -4,13 +4,16 @@ Marp markdown. Four sessions. Same titles as Eventbrite.
 
 Saturday 29 August 2026. Teach 10:00 to 15:00 Central.
 Open plus four modules plus close. Three breaks. 240 minutes.
+Teaching block is 10:00 to 14:00 Central. The extra Eventbrite hour is buffer.
 
 ```
 slides/
   README.md
   FEATURE-MAP.md              which loop feature each session introduces
   mermaid.json                Spillwave theme for mermaid-cli
-  themes/spillwave.css        reusable Marp theme
+  themes/spillwave.css        reusable Marp theme for projected decks
+  themes/notes-theme.css      A4 portrait theme for the facilitator packet
+  Speaker-Notes-Loop-Engineering.md
   diagrams/mermaid/           editable .mmd source
   diagrams/plantuml/          editable .puml source plus SVG
   diagrams/imagen/            Spillwave theme contract for raster enhancement
@@ -28,6 +31,14 @@ Each session folder:
 | `slides.build.md` | Generated. Mermaid blocks replaced with SVG. |
 | `notes.md` | Narrative for that session. Same images, spoken order. |
 | `images/` | Editorial JPGs plus mermaid-cli SVGs. |
+
+`Speaker-Notes-Loop-Engineering.md` is the page, not the slide. Denser text. Smaller figures. Say, Why, and Lab boxes. Build it with the A4 theme:
+
+```bash
+npx @marp-team/marp-cli slides/Speaker-Notes-Loop-Engineering.md \
+  --theme-set slides/themes/notes-theme.css \
+  --allow-local-files --pdf
+```
 
 Mermaid is not drawn by Marp. Render first:
 
@@ -89,7 +100,7 @@ notes: Ask the room who has a prompt that worked once and never again.
 ## Clock
 
 | Block | Minutes | Deck |
-|---|---|---|
+|---|---|
 | Open | 10 | session 1, slides 01 to 08 |
 | Module 1 talk | 15 | session 1, anatomy |
 | Module 1 lab | 25 | session 1, lab |
