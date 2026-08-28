@@ -16,6 +16,10 @@ tasks:
   setup:
     desc: Create the virtualenv, install, clone the target repo, and verify.
     cmds:
+      # Point this clone at the tracked Worklog hooks. Git's default is
+      # .git/hooks/; without this, hooks/ is just files. --local so it
+      # never touches the CRM clone or a global gitconfig. Idempotent.
+      - git config --local core.hooksPath hooks
       - python3 -m venv .venv
       - '{{.PY}} -m pip install --quiet --upgrade pip'
       - '{{.PY}} -m pip install --quiet -r requirements.txt'
