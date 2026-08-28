@@ -27,6 +27,9 @@ them left off is a hole the other two cannot see.
 3. The harness is fenced the way the product actually works in 0.7:
 
    - `FilesystemBackend(root_dir=repo, virtual_mode=True)` so `..` cannot
+     walk off the repo through a **built-in** filesystem tool. A custom
+     tool is not covered, so `read_file` and the write tool resolve and
+     contain the path themselves.
      walk off the target repo.
    - `permissions=` deny every write on the orchestrator. Each subagent
      carries its own rules: the deny list first, the allow list second, and a

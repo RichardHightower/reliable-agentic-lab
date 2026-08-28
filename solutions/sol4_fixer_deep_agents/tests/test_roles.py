@@ -178,7 +178,11 @@ def test_build_agent_hides_the_built_in_write_tools(contract, fake_langchain, fa
 def test_build_agent_mounts_the_repo_as_a_virtual_filesystem(
     contract, fake_langchain, fake_deepagents
 ):
-    """Virtual mode is what stops `..` walking off the target repo."""
+    """Virtual mode fences the built-in filesystem tools.
+
+    It does not fence `read_file` or the scoped write tool, which this folder
+    wrote. Those carry their own containment check, pinned in test_adapter.py.
+    """
     roles.build_agent(contract, loop=LOOP)
 
     backend = fake_deepagents["backend"]

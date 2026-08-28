@@ -36,7 +36,7 @@ LOOPS = {
     "fixer": ("orchestrator", "code_implementer", "judge"),
 }
 
-DEFAULT_LOOP = "implementer"
+DEFAULT_LOOP = "fixer"
 
 PURPOSE = {
     "orchestrator": "Owns the budget and the order. Writes nothing.",

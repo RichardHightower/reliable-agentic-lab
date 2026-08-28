@@ -30,9 +30,7 @@ DEFAULT_MODEL = "anthropic:claude-sonnet-5"
 
 # Built-in harness tools that write or execute. The orchestrator must not hold
 # these. Deep Agents adds them by default unless a harness profile hides them.
-ORCHESTRATOR_EXCLUDED_TOOLS = frozenset(
-    {"write_file", "edit_file", "delete", "execute"}
-)
+ORCHESTRATOR_EXCLUDED_TOOLS = frozenset({"write_file", "edit_file", "delete", "execute"})
 
 JUDGE_RESPONSE = {
     "type": "object",
@@ -49,6 +47,23 @@ JUDGE_RESPONSE = {
     "required": ["kind", "present_fields"],
     "additionalProperties": False,
 }
+
+
+def _inside(repo: Path, path: str):
+    """Resolve `path` under `repo`, or None when it escapes.
+
+    `virtual_mode` on the Deep Agents backend fences the built-in filesystem
+    tools. It does not fence a tool this folder wrote. Without this check,
+    `read_file("../../secrets")` walks straight off the target repo, and the
+    harness never sees the call.
+
+    The write scope refuses `..` by glob, which works only while every caller
+    spells the escape the same way. Resolving first means the check does not
+    depend on how the path was written.
+    """
+    target = (repo / path).resolve()
+    root = Path(repo).resolve()
+    return target if target == root or root in target.parents else None
 
 
 def scoped_write_tool(repo: Path, role: RolePlan):
@@ -70,7 +85,9 @@ def scoped_write_tool(repo: Path, role: RolePlan):
             scope.check(path)
         except ScopeViolation:
             return f"REFUSED. {role.name} may write {allowed}. {path} is outside that scope."
-        target = repo / path
+        target = _inside(repo, path)
+        if target is None:
+            return f"REFUSED. {path} is outside the target repo."
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return f"wrote {path}"
@@ -84,7 +101,9 @@ def read_tool(repo: Path):
     @tool
     def read_file(path: str) -> str:
         """Read a file from the target repo."""
-        target = repo / path
+        target = _inside(repo, path)
+        if target is None:
+            return f"REFUSED. {path} is outside the target repo."
         if not target.exists():
             return f"no such file: {path}"
         return target.read_text(encoding="utf-8")

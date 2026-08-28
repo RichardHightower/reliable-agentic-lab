@@ -10,7 +10,7 @@ Configuration port. It does **not** run the fixer.
 
 This is the role graph. The live harness is `sol4_fixer_agent_sdk`.
 
-No `fixer.py`, `gates.py`, `doers.py`, or tests. `task test` is `--table-only`.
+No `fixer.py`, `gates.py`, or `doers.py`. `task test` runs the folder's own suite.
 
 
 ---
@@ -130,9 +130,9 @@ cd solutions/sol4_fixer_deep_agents
 python loop.py --table-only
 ```
 
-`DEFAULT_LOOP` in this copy is `"implementer"`. So is sol1's. Both inherited it from the shared `roleplan.py` this repo deleted, and neither changed it. `loop.py` sets `LOOP = "fixer"` and passes it at every call site. Without that you get five roles instead of three.
+`DEFAULT_LOOP` and `LOOP` are both `"fixer"`. They were not. This copy inherited `"implementer"` from the shared `roleplan.py` the repo deleted, so a bare `roleplan.plan(contract)` built five roles instead of three.
 
-The rule is that a caller names its loop. A test in each folder pins it, because the default is one edit away from being wrong everywhere.
+A caller still names its loop at every site. The default agreeing with it is the belt to that suspenders, and a test in the folder pins both.
 
 ---
 
@@ -142,9 +142,11 @@ The rule is that a caller names its loop. A test in each folder pins it, because
 SPEC.md  Taskfile.yml
 adapter.py  contract.py  loop.py
 roleplan.py  roles.py  write_scope.py
+tests/
 ```
 
-Missing on purpose: `fixer.py`, `doers.py`, `gates.py`, `tests/`.
+Missing on purpose: `fixer.py`, `doers.py`, `gates.py`. This port is the graph
+without the loop. The tests pin the graph.
 
 ---
 

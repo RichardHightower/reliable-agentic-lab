@@ -42,6 +42,23 @@ ORCHESTRATOR_EXCLUDED_TOOLS = frozenset({"write_file", "edit_file", "delete", "e
 DENY_EVERY_WRITE = {"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"}
 
 
+def _inside(repo: Path, path: str):
+    """Resolve `path` under `repo`, or None when it escapes.
+
+    `virtual_mode` on the Deep Agents backend fences the built-in filesystem
+    tools. It does not fence a tool this folder wrote. Without this check,
+    `read_file("../../secrets")` walks straight off the target repo, and the
+    harness never sees the call.
+
+    The write scope refuses `..` by glob, which works only while every caller
+    spells the escape the same way. Resolving first means the check does not
+    depend on how the path was written.
+    """
+    target = (repo / path).resolve()
+    root = Path(repo).resolve()
+    return target if target == root or root in target.parents else None
+
+
 def scoped_write_tool(repo: Path, role: RolePlan):
     """A write tool that refuses a path outside this role's scope."""
     from langchain.tools import tool  # noqa: PLC0415
@@ -56,7 +73,9 @@ def scoped_write_tool(repo: Path, role: RolePlan):
             scope.check(path)
         except ScopeViolation:
             return f"REFUSED. {role.name} may write {allowed}. {path} is outside that scope."
-        target = repo / path
+        target = _inside(repo, path)
+        if target is None:
+            return f"REFUSED. {path} is outside the target repo."
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return f"wrote {path}"
@@ -70,7 +89,9 @@ def read_tool(repo: Path):
     @tool
     def read_file(path: str) -> str:
         """Read a file from the target repo."""
-        target = repo / path
+        target = _inside(repo, path)
+        if target is None:
+            return f"REFUSED. {path} is outside the target repo."
         if not target.exists():
             return f"no such file: {path}"
         return target.read_text(encoding="utf-8")

@@ -57,6 +57,20 @@ def _messages(result):
     return messages
 
 
+def _role_of(message) -> str:
+    return (
+        getattr(message, "type", None)
+        or (message.get("role") if isinstance(message, dict) else None)
+        or ""
+    )
+
+
+def _content_of(message):
+    if isinstance(message, dict):
+        return message.get("content")
+    return getattr(message, "content", "")
+
+
 def _content_text(content) -> str:
     """Flatten message content into the text the model meant to send.
 
@@ -89,15 +103,31 @@ def _content_text(content) -> str:
 
 
 def last_ai_text(result) -> str:
-    """The last model reply, not `str(the whole graph state)`.
+    """The answer this run produced. Not an older one, not the state repr.
 
-    `str(result)` is a repr of every message, every tool call, and every id in
-    the run. Handing that to a JSON parser or into the next prompt is how a
-    working loop starts failing on nothing anyone changed.
+    Walk backward and take the first non-empty content from an assistant or a
+    tool message. One line, and it is the only rule that survives all four
+    shapes a graph actually returns.
 
-    The search runs backward for a message the runtime labeled as the model's.
-    Taking `messages[-1]` outright returns a tool result as if the model had
-    said it, whenever the graph ends on a tool call.
+    Three ways to get this wrong, and this repo has shipped two of them.
+
+    `str(result)` is a repr of every message, every tool call, and every id.
+    Handing that to a JSON parser is how a working loop starts failing on
+    nothing anyone changed.
+
+    `messages[-1]` reads whichever message happens to be last without asking
+    what it is.
+
+    Walking backward for the last non-empty *assistant* message returns an
+    answer from BEFORE the last tool ran. A tool-calling assistant message
+    carries `tool_calls` and empty content, so that walk steps over it onto an
+    earlier turn. A stale verdict that parses is worse than no verdict, because
+    nothing reports it.
+
+    A ToolMessage exists only because an assistant asked for it. So "the model
+    has not spoken since the tool ran" and "the tool holds the answer" are the
+    same state, and a subagent with a `response_format` puts its structured
+    result exactly there, JSON-serialized.
     """
     if isinstance(result, str):
         return result
@@ -105,22 +135,14 @@ def last_ai_text(result) -> str:
     if not messages:
         return str(result)
     for message in reversed(messages):
-        role = getattr(message, "type", None) or (
-            message.get("role") if isinstance(message, dict) else None
-        )
-        if role not in ("ai", "assistant"):
+        if _role_of(message) not in ("ai", "assistant", "tool"):
             continue
-        content = (
-            message.get("content") if isinstance(message, dict) else getattr(message, "content", "")
-        )
-        text = _content_text(content).strip()
+        text = _content_text(_content_of(message)).strip()
         if text:
             return text
-    # Nothing named itself as the model's reply. The last message is the best
-    # answer left, and returning "" here would look like a successful empty run.
-    last = messages[-1]
-    content = last.get("content") if isinstance(last, dict) else getattr(last, "content", last)
-    return _content_text(content)
+    # Nothing carried content. The last message is the best answer left, and
+    # returning "" here would look like a successful empty run.
+    return _content_text(_content_of(messages[-1]))
 
 
 def last_usd(result) -> float:

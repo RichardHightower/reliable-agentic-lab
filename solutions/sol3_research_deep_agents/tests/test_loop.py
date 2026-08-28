@@ -85,9 +85,11 @@ def test_the_second_brain_is_used_when_it_is_there(monkeypatch, tmp_path):
 
 def test_the_entry_point_names_its_own_loop():
     """This copy's `DEFAULT_LOOP` already matches the loop it runs. Four other
-    ports inherit 'research' from the original shared `roleplan.py` and rely on
-    every caller naming its loop instead. This test pins the explicit name here
-    too, so the two never drift apart.
+    ports inherited `'implementer'` from the shared `roleplan.py` the repo
+    deleted. The Deep Agents enhancer and fixer now agree with their own loop.
+    Two Agent SDK copies still carry the old value.
+
+    This test pins the explicit name here, so the two never drift apart.
     """
     assert loop.LOOP == "research"
     assert set(loop.cast(None)) == set(roleplan.LOOPS["research"])
