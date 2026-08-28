@@ -60,7 +60,8 @@ Do not filter by comment author instead. The loop runs as the attendee's own
 comment this loop must never miss.
 
 If step 3's query prints nothing, every comment on the issue is one of this
-loop's own. Treat that exactly like no new comment.
+loop's own. That is not a stop. There is no `LGTM`. Continue. Enhance the
+ticket if the rubric is still red.
 
 ## Step 0: discover open tickets
 
@@ -133,7 +134,7 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    Persist it even on a branch that stops early, such as step 6's "ready,
    waiting for `LGTM`". Write it on the search path too. A state file that
    appears only on some later poll leaves every later poll looking like a
-   first poll, and step 3 skips the comment fetch on a first poll.
+   first poll. That must not delay enhancement. Comments are only for `LGTM`.
 
 3. Look at the newest human comment only to detect an exact `LGTM`.
    Comments never start an enhance round. A missing comment never stops one.
@@ -145,7 +146,9 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      to test `LGTM`, not to drive an edit.
    - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq '[.[] | select((.body // "") | contains("<!-- enhancer-loop -->") | not)] | sort_by(.id) | .[-1] // empty | {id, body}'`.
    - If that comment is exactly `LGTM`, keep it for step 6.
-   - Otherwise there is no comment that matters. Continue. Do not stop.
+   - Otherwise there is no comment that matters. Continue to step 4.
+     Do not stop. Do not wait. A missing comment is not a reason to skip
+     the judge or the doer. Labels are not a reason to skip them either.
 
 
 4. If the issue already carries `needs-human`, this ticket already reached a
