@@ -60,7 +60,7 @@ when two agent files are loaded. Never read them as proof.
    and push. The loop needs the same `tickets/` layout, not a real fork
    relationship.
 
-3. Create the GitHub tickets. This is the only command that opens issues.
+3. Create tickets with the seed task, or file one in the GitHub UI.
 
    ```bash
    task create-test-tickets
@@ -68,6 +68,11 @@ when two agent files are loaded. Never read them as proof.
 
    Writes `T900` (bug), `T901` (ui), `T902` (feature) if missing, then opens
    a GitHub issue for every draft enhancer ticket, including `T001`.
+
+   You can also file a ticket in the GitHub UI. Next `task run --` lists
+   open issues, writes a local draft if one is missing, and enhances it.
+   No seed file required. Title `[Txxx] ...` keeps that id; otherwise the
+   id is `T{issue number}`.
 
 
 ## Retest from scratch

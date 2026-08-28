@@ -22,6 +22,7 @@ Hard rules. A poll that breaks any of these has failed:
   ticket file is a failed poll.
 - Seed stubs (a title plus one or two sentences) are never ready. You must
   call the doer and write a better ticket.
+- An issue opened in the GitHub UI is a ticket. Materialize a local file for it and enhance it. Do not wait for a file that is not there yet.
 - `ready` comes from `check_fields.py`, never from the judge's own claim,
   never from a label, never from a comment other than exact `LGTM`.
 
@@ -71,19 +72,29 @@ ticket if the rubric is still red.
 
 ## Step 0: discover open tickets
 
-Skip this step if the invocation named `--ticket`; consider that one ticket
-only. Skipping discovery does not skip the state rule. Step 1 applies
-`state: draft` and `loop: enhancer` to every ticket, however it was chosen.
+GitHub is the source of tickets. A human creating an issue in the GitHub UI
+must be picked up on this poll. Local markdown is a working copy, not the
+inbox.
 
-Otherwise, list `<repo>/tickets/*.md`, excluding any `*.ready.md` file and
-any `*.enhancer-candidate.md` file. A candidate file is scratch written by
-step 7, and a run that dies before deleting one leaves it behind. Left in
-scope it gets discovered as a ticket of its own and groomed as if it were
-real work.
+1. List open issues:
+   `gh issue list --repo <owner>/<repo> --state open --limit 100 --json number,title,labels,body`
+2. Skip any title that starts with `[retired-`.
+3. Skip any issue that already carries the `ready` label.
+4. For each remaining issue, the ticket id is `[Txxx]` from the start of the
+   title if present, otherwise `T{number}`.
+5. If `<repo>/tickets/<id>.md` does not exist, write it now:
+   frontmatter `id`, `state: draft`, `loop: enhancer`, `github_issue: <number>`.
+   Body is the issue body. If the body has no `# ` heading, use the issue
+   title (without the `[Txxx]` prefix) as the H1.
+6. Then list `<repo>/tickets/*.md`, excluding `*.ready.md` and
+   `*.enhancer-candidate.md`. Keep `state: draft` and `loop: enhancer`.
+   Run steps 1 to 8 for each one found, in any order.
 
-Read the frontmatter of each file that survives that filter. Keep the ones
-with `state: draft` and `loop: enhancer`. Run steps 1 to 8 for each one
-found, in any order.
+Do not require a local file to already exist. That is the whole point of
+filing a ticket in the GitHub UI.
+
+If the invocation named `--ticket`, still ingest from GitHub first, then
+consider only that id.
 
 ## Setup, once per run: read config.json
 

@@ -52,6 +52,10 @@ class FakeGh:
         self.bodies: list[str] = []
         self.created: list[tuple[str, str]] = []
         self.closed: set[int] = set()
+        self.open_issues: list[dict] = []
+
+    def list_open(self):
+        return list(self.open_issues)
 
     def find_issue(self, ticket_id):
         return self.existing
@@ -651,6 +655,74 @@ def test_an_outcome_prints_as_one_aligned_line():
 def test_a_poll_over_an_empty_tickets_directory_reports_nothing(tmp_path):
     (tmp_path / "tickets").mkdir()
     assert engine(tmp_path, FakeBackend([]), FakeGh()).poll() == []
+
+
+def test_a_github_ui_issue_with_no_local_file_is_picked_up(tmp_path):
+    """A human filing an issue in the GitHub UI is enough. No seed file required."""
+    (tmp_path / "tickets").mkdir()
+    gh = FakeGh(issue=31)
+    gh.existing = 31
+    gh.open_issues = [
+        {
+            "number": 31,
+            "title": "Customers cannot filter by region",
+            "body": "Need a filter on the customer list.",
+            "labels": [],
+        }
+    ]
+    better = (
+        "---\nid: T31\nstate: draft\nloop: enhancer\n---\n\n"
+        "# Customers cannot filter by region\n\nNeed a filter.\n"
+    )
+    backend = FakeBackend([judged(), judged(present=["problem"])], draft=better)
+    [outcome] = engine(tmp_path, backend, gh).poll()
+    text = (tmp_path / "tickets" / "T31.md").read_text(encoding="utf-8")
+    assert "id: T31" in text
+    assert "github_issue: 31" in text
+    assert outcome.status == "waiting"
+    assert gh.added[0] == "enhanced"
+
+
+def test_a_github_ui_issue_keeps_a_bracket_id_from_its_title(tmp_path):
+    (tmp_path / "tickets").mkdir()
+    gh = FakeGh(issue=40)
+    gh.existing = 40
+    gh.open_issues = [
+        {
+            "number": 40,
+            "title": "[T903] Export invoices as PDF",
+            "body": "Reps want a PDF.",
+            "labels": [],
+        }
+    ]
+    backend = FakeBackend([judged(), judged(present=["problem"])], draft=DRAFT.replace("T001", "T903"))
+    engine(tmp_path, backend, gh).poll()
+    assert (tmp_path / "tickets" / "T903.md").exists()
+    assert not (tmp_path / "tickets" / "T40.md").exists()
+
+
+def test_a_ready_github_issue_is_not_ingested_as_a_new_draft(tmp_path):
+    (tmp_path / "tickets").mkdir()
+    gh = FakeGh()
+    gh.open_issues = [
+        {"number": 9, "title": "Done work", "body": "shipped", "labels": ["ready", "enhanced"]}
+    ]
+    assert engine(tmp_path, FakeBackend([]), gh).poll() == []
+    assert list((tmp_path / "tickets").glob("*.md")) == []
+
+
+def test_a_retired_github_issue_is_not_ingested(tmp_path):
+    (tmp_path / "tickets").mkdir()
+    gh = FakeGh()
+    gh.open_issues = [
+        {
+            "number": 8,
+            "title": "[retired-T900-1] Search crashes on an empty query",
+            "body": "old",
+            "labels": [],
+        }
+    ]
+    assert engine(tmp_path, FakeBackend([]), gh).poll() == []
 
 
 # -- the gh wrapper ---------------------------------------------------------

@@ -48,7 +48,7 @@ You need `codex`, `gh`, `jq`, `task`, and `python3`.
    See [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) if it reports
    `TRUSTED`.
 
-4. Create the GitHub tickets. This is the only command that opens issues.
+4. Create tickets with the seed task, or file one in the GitHub UI.
 
    ```bash
    task create-test-tickets
@@ -56,6 +56,11 @@ You need `codex`, `gh`, `jq`, `task`, and `python3`.
 
    Writes `T900` (bug), `T901` (ui), `T902` (feature) if missing, then opens
    a GitHub issue for every draft enhancer ticket, including `T001`.
+
+   You can also file a ticket in the GitHub UI. Next `task run --` lists
+   open issues, writes a local draft if one is missing, and enhances it.
+   No seed file required. Title `[Txxx] ...` keeps that id; otherwise the
+   id is `T{issue number}`.
 
 
 ## Retest from scratch

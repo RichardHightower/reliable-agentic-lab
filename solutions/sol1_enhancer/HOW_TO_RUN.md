@@ -32,7 +32,7 @@ this folder depends on the repo root or on any other folder outside it.
    care whether the relationship is a real GitHub fork, it only needs a
    repo with the same `tickets/` layout.
 
-3. Create the GitHub tickets. This is the only command that opens issues.
+3. Create tickets with the seed task, or file one in the GitHub UI.
 
    ```bash
    task create-test-tickets
@@ -43,8 +43,10 @@ this folder depends on the repo root or on any other folder outside it.
    `T001`. Stamps `github_issue:` into each file. Reuses an existing issue
    with the same `[Txxx]` title. Reopens a closed one. Safe to run again.
 
-   `task run` never creates issues. If a draft has no GitHub issue, the
-   loop stops and tells you to run this task.
+   You can also file a ticket in the GitHub UI. Next `task run --` lists
+   open issues, writes a local draft if one is missing, and enhances it.
+   No seed file required. Title `[Txxx] ...` keeps that id; otherwise the
+   id is `T{issue number}`.
 
 
 ## Retest from scratch

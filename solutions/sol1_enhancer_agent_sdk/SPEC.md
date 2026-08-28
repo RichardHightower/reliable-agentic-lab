@@ -122,7 +122,9 @@ task run --
 condition trusted to a model's own judgment is a stop condition a model can talk
 itself past. The model drafts and grades. Everything else is computed.
 
-1. Find every `tickets/*.md` with `state: draft` and `loop: enhancer`. Skip
+1. List open GitHub issues. A UI-created issue is a ticket. Write a local
+   draft if one is missing (`[Txxx]` from the title, or `T{number}`), then
+   keep every `tickets/*.md` with `state: draft` and `loop: enhancer`. Skip
    `*.ready.md` and `*.enhancer-candidate.md`.
 2. Find the ticket's GitHub issue. Never create one. Add the `enhanced` label on first touch, not at create time.
 3. Read the newest human comment only to detect exact `LGTM`. Comments never start an enhance round.

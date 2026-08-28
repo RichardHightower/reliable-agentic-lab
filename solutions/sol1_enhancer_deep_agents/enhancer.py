@@ -202,6 +202,28 @@ class Gh:
             raise EnhancerError(f"gh {' '.join(args)} failed: {proc.stderr.strip()}")
         return proc.stdout.strip()
 
+    def list_open(self) -> list[dict]:
+        """Every open GitHub issue. The UI is a valid way to file a ticket."""
+        out = self._run(
+            "issue",
+            "list",
+            "--repo",
+            self.slug,
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,title,labels,body",
+        )
+        rows = json.loads(out or "[]")
+        for row in rows:
+            row["labels"] = [
+                entry["name"] if isinstance(entry, dict) else entry
+                for entry in row.get("labels") or []
+            ]
+        return rows
+
     def find_issue(self, ticket_id: str) -> int | None:
         """The ticket's issue, whatever state it is in.
 
@@ -295,6 +317,15 @@ class Gh:
 # -- tickets ----------------------------------------------------------------
 
 
+_TITLE_ID = re.compile(r"^\[(T\d+)\]")
+
+
+def ticket_id_from_issue(title: str, number: int) -> str:
+    """`[T900] ...` keeps its id. A UI issue with no prefix becomes T{number}."""
+    match = _TITLE_ID.match((title or "").strip())
+    return match.group(1) if match else f"T{number}"
+
+
 def strip_front_matter(text: str) -> str:
     """The issue body, without the raw `---` block.
 
@@ -326,6 +357,20 @@ def open_tickets(repo: Path, loop: str = "enhancer") -> list[ticket_mod.Ticket]:
         if parsed.state == "draft" and parsed.meta.get("loop") == loop:
             found.append(parsed)
     return found
+
+
+def issue_to_ticket_text(tid: str, number: int, title: str, body: str) -> str:
+    heading = _TITLE_ID.sub("", (title or "").strip()).strip() or (title or tid)
+    body = (body or "").strip()
+    if not body:
+        body = f"# {heading}\n"
+    elif not any(line.startswith("# ") for line in body.splitlines()):
+        body = f"# {heading}\n\n{body}\n"
+    elif not body.endswith("\n"):
+        body += "\n"
+    return (
+        f"---\nid: {tid}\nstate: draft\nloop: enhancer\ngithub_issue: {number}\n---\n\n{body}"
+    )
 
 
 def set_front_matter(path: Path, **fields: str) -> None:
@@ -430,10 +475,51 @@ class Enhancer:
             raise EnhancerError(f"the doer wrote no candidate at {relative}")
         return candidate
 
+    def ingest_github_issues(self) -> None:
+        """GitHub is the ticket source. A UI-created issue becomes a local draft."""
+        list_open = getattr(self.gh, "list_open", None)
+        if list_open is None:
+            return
+        folder = Path(self.repo) / "tickets"
+        folder.mkdir(parents=True, exist_ok=True)
+        for issue in list_open():
+            title = (issue.get("title") or "").strip()
+            if title.lower().startswith("[retired-"):
+                continue
+            labels = issue.get("labels") or []
+            names = [entry if isinstance(entry, str) else entry.get("name", "") for entry in labels]
+            if "ready" in names:
+                continue
+            number = int(issue["number"])
+            tid = ticket_id_from_issue(title, number)
+            path = folder / f"{tid}.md"
+            if not path.exists():
+                for candidate in folder.glob("*.md"):
+                    if candidate.name.endswith((".ready.md", CANDIDATE_SUFFIX)):
+                        continue
+                    parsed = ticket_mod.parse(
+                        candidate.read_text(encoding="utf-8"), ticket_id=candidate.stem
+                    )
+                    if parsed.meta.get("github_issue") == str(number):
+                        path = candidate
+                        break
+            if not path.exists():
+                path.write_text(
+                    issue_to_ticket_text(tid, number, title, issue.get("body") or ""),
+                    encoding="utf-8",
+                )
+                continue
+            parsed = ticket_mod.parse(path.read_text(encoding="utf-8"), ticket_id=path.stem)
+            if parsed.state == "ready" or parsed.meta.get("loop") not in (None, "", "enhancer"):
+                continue
+            if parsed.meta.get("github_issue") != str(number):
+                set_front_matter(path, github_issue=str(number))
+
     def poll(
         self, ticket_id: str | None = None, *, simulate_comment: str | None = None
     ) -> list[Outcome]:
         """One poll over every open ticket, or over the one that was named."""
+        self.ingest_github_issues()
         if ticket_id:
             path = Path(self.repo) / "tickets" / f"{ticket_id}.md"
             if not path.exists():
