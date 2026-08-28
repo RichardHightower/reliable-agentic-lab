@@ -381,11 +381,22 @@ def test_a_stopped_doer_writes_its_diagnostic_before_escalating(target):
     assert (target / ".harness" / "last-doer-T001.md").read_text(encoding="utf-8") == "partial SDK events"
 
 
-def test_a_draft_with_literal_escaped_layout_is_rejected_before_github_is_updated(target):
-    backend = FakeBackend([judged()], draft="---\n\\n30\\tbroken wireframe")
+def test_a_draft_with_literal_escaped_layout_blocks_only_that_ticket(target):
+    (target / "tickets" / "T002.md").write_text(DRAFT.replace("T001", "T002"), encoding="utf-8")
+    backend = FakeBackend(
+        [judged(), judged(present=FEATURE)], draft="---\n\\n30\\tbroken wireframe"
+    )
     gh = FakeGh()
-    with pytest.raises(EnhancerError, match="literal escaped layout"):
-        engine(target, backend, gh).poll()
+    # The shared fake normally exposes one label list. This case needs the
+    # second ticket's distinct issue to remain unblocked after T001 escalates.
+    gh.labels = lambda issue: []
+    outcomes = engine(target, backend, gh).poll()
+    assert [(outcome.ticket_id, outcome.status) for outcome in outcomes] == [
+        ("T001", "escalated"),
+        ("T002", "waiting"),
+    ]
+    assert "literal escaped layout" in outcomes[0].detail
+    assert "needs-human" in gh.added
     assert gh.bodies == []
 
 

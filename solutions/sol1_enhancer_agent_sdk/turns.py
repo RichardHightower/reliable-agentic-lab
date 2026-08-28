@@ -94,7 +94,9 @@ def draft(enhancer, tkt, kind: str, missing: list[str], comment: str | None) -> 
     if not body.strip():
         raise EnhancerError(f"the doer wrote no candidate at {candidate.relative_to(enhancer.repo)}")
     if _ESCAPED_LAYOUT.search(body):
-        raise EnhancerError("the doer returned literal escaped layout characters; rejecting candidate")
+        # This is a bad draft for one ticket, not an orchestrator failure.  Keep
+        # the other tickets in this poll moving just as a timed-out query does.
+        raise TicketBlocked("the doer returned literal escaped layout characters; rejecting candidate")
     candidate.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
     return candidate
 
