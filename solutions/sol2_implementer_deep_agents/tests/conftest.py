@@ -78,3 +78,52 @@ def fake_langchain(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setitem(sys.modules, "langchain", package)
     monkeypatch.setitem(sys.modules, "langchain.tools", module)
     return module
+
+
+@pytest.fixture
+def fake_deepagents(monkeypatch: pytest.MonkeyPatch):
+    """Record what `build_agent` asks the SDK for, without the SDK.
+
+    The three fencing layers are only real if `create_deep_agent` actually
+    receives them. This captures the call so a test can assert on it.
+    """
+    seen: dict = {}
+
+    def create_deep_agent(**kwargs):
+        seen.update(kwargs)
+        return "agent"
+
+    def register_harness_profile(model, profile):
+        seen["harness_model"] = model
+        seen["harness_profile"] = profile
+
+    class FilesystemPermission:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class GeneralPurposeSubagentProfile:
+        def __init__(self, enabled=True):
+            self.enabled = enabled
+
+    class HarnessProfile:
+        def __init__(self, excluded_tools=(), general_purpose_subagent=None):
+            self.excluded_tools = excluded_tools
+            self.general_purpose_subagent = general_purpose_subagent
+
+    class FilesystemBackend:
+        def __init__(self, root_dir="", virtual_mode=False):
+            self.root_dir = root_dir
+            self.virtual_mode = virtual_mode
+
+    package = types.ModuleType("deepagents")
+    package.create_deep_agent = create_deep_agent
+    package.register_harness_profile = register_harness_profile
+    package.FilesystemPermission = FilesystemPermission
+    package.GeneralPurposeSubagentProfile = GeneralPurposeSubagentProfile
+    package.HarnessProfile = HarnessProfile
+    backends = types.ModuleType("deepagents.backends")
+    backends.FilesystemBackend = FilesystemBackend
+    package.backends = backends
+    monkeypatch.setitem(sys.modules, "deepagents", package)
+    monkeypatch.setitem(sys.modules, "deepagents.backends", backends)
+    return seen

@@ -30,7 +30,11 @@ import subprocess
 import time
 from pathlib import Path
 
-import doers, gates, loop_roles as roles, rubric, steps
+import doers
+import gates
+import loop_roles as roles
+import rubric
+import steps
 import ticket as tickets
 from contract import Contract, ContractError
 

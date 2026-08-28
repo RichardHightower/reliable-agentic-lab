@@ -1,11 +1,24 @@
 """The five implementer roles, as LangChain Deep Agents subagents.
 
-Deep Agents scopes by handing each subagent its own tool list. A subagent can
-only call what it was given, so the judge is separated the same way it is in
-every other runtime: it holds no tool that writes.
+Deep Agents scopes three ways, and this port uses all three.
 
-Path scope lives inside the write tool. Python still owns the red gate and
-the Pass / Retry / Escalate decision. The model never counts its own retries.
+1. Each subagent gets its own tool list. A subagent can only call what it was
+   given, so the judge is separated the same way it is in every other runtime:
+   it holds no tool that writes.
+2. Path scope lives inside the write tool. The code implementer cannot weaken a
+   test, because `tests/**` is not in its allow list.
+3. The harness itself is fenced: no general-purpose subagent, no built-in
+   `write_file` on the orchestrator, `FilesystemBackend(virtual_mode=True)` so
+   `..` cannot walk off the repo, and declarative `permissions=` underneath
+   everything.
+
+Layer 3 is the one people skip. The default general-purpose subagent ships with
+the harness filesystem tools, and leaving it enabled is how a carefully scoped
+agent writes anywhere it likes. `build_agent` turns it off.
+
+(1) and (2) are what the tests pin down with no SDK installed. Python still owns
+the red gate and the Pass / Retry / Escalate decision. The model never counts
+its own retries.
 """
 
 from __future__ import annotations
@@ -15,6 +28,18 @@ from pathlib import Path
 
 from roleplan import DEFAULT_LOOP, RolePlan, plan
 from write_scope import ScopeViolation, WriteScope
+
+DEFAULT_MODEL = "anthropic:claude-sonnet-5"
+
+# Built-in harness tools that write or execute. The orchestrator must not hold
+# these. Deep Agents adds them by default unless a harness profile hides them.
+# `run_tests` is not among them: running the suite is a different permission
+# from editing it, and the orchestrator needs the first one.
+ORCHESTRATOR_EXCLUDED_TOOLS = frozenset({"write_file", "edit_file", "delete", "execute"})
+
+# The last rule every role gets. First match wins, so anything not allowed above
+# this line lands here.
+DENY_EVERY_WRITE = {"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"}
 
 
 def scoped_write_tool(repo: Path, role: RolePlan):
@@ -73,6 +98,36 @@ def run_tests_tool(repo: Path):
     return run_tests
 
 
+def permission_rules(role: RolePlan) -> list[dict]:
+    """Declarative filesystem rules for one role. First match wins.
+
+    Plain dicts so the tests can read them with no SDK. `build_agent` turns them
+    into `FilesystemPermission` objects.
+    """
+    if not role.can_write or not role.allow:
+        return [DENY_EVERY_WRITE]
+    rules: list[dict] = []
+    if role.deny:
+        # Deny first. A role's own deny list beats its own allow list, the same
+        # rule WriteScope enforces, so the two layers cannot disagree.
+        rules.append({"operations": ["write"], "paths": _both_forms(role.deny), "mode": "deny"})
+    rules.append({"operations": ["write"], "paths": _both_forms(role.allow), "mode": "allow"})
+    rules.append(DENY_EVERY_WRITE)
+    return rules
+
+
+def _both_forms(patterns) -> list[str]:
+    """Each pattern rooted and unrooted. The backend sees `/app/x`, the role
+    table says `app/**`, and a rule that spells only one of them matches
+    nothing."""
+    out = []
+    for pattern in patterns:
+        out.append(pattern)
+        if not pattern.startswith("/"):
+            out.append("/" + pattern)
+    return out
+
+
 def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
     """One Deep Agents subagent per role in this loop's cast, with its own tools."""
     repo = Path(contract.repo)
@@ -90,18 +145,51 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
                 "description": role.purpose,
                 "system_prompt": f"You are the {role.name}. {role.purpose}",
                 "tools": tools,
+                "permissions": permission_rules(role),
             }
         )
     return out
 
 
-def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = "anthropic:claude-sonnet-5"):
-    """The orchestrator. Holds `task` plus `run_tests`. Holds no write tool."""
-    from deepagents import create_deep_agent  # noqa: PLC0415
+def _as_permissions(rules: list[dict]):
+    from deepagents import FilesystemPermission  # noqa: PLC0415
 
-    repo = Path(contract.repo)
+    return [FilesystemPermission(**rule) for rule in rules]
+
+
+def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
+    """The orchestrator. Holds `run_tests`. Holds nothing that writes.
+
+    Needs `deepagents>=0.7`. The default general-purpose subagent is turned off.
+    Built-in write tools are hidden from the main agent. The target repo is
+    mounted as a virtual filesystem so `..` cannot walk off it.
+    """
+    from deepagents import (  # noqa: PLC0415  (optional dependency)
+        FilesystemPermission,
+        GeneralPurposeSubagentProfile,
+        HarnessProfile,
+        create_deep_agent,
+        register_harness_profile,
+    )
+    from deepagents.backends import FilesystemBackend  # noqa: PLC0415
+
+    repo = Path(contract.repo).resolve()
+    register_harness_profile(
+        model,
+        HarnessProfile(
+            excluded_tools=ORCHESTRATOR_EXCLUDED_TOOLS,
+            general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+        ),
+    )
+    subagents = []
+    for spec in subagents_for(contract, loop):
+        item = dict(spec)
+        item["permissions"] = _as_permissions(spec["permissions"])
+        subagents.append(item)
     return create_deep_agent(
         model=model,
         tools=[run_tests_tool(repo)],
-        subagents=subagents_for(contract, loop),
+        subagents=subagents,
+        backend=FilesystemBackend(root_dir=str(repo), virtual_mode=True),
+        permissions=[FilesystemPermission(**DENY_EVERY_WRITE)],
     )

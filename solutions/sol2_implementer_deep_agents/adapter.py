@@ -58,5 +58,6 @@ class DeepAgentsBackend(Backend):
             scope = WriteScope(allow=allow)
             wrote = sorted(path for path in (after - before) if scope.permits(path))
             return DoerResult(wrote=wrote, output=str(result))
-        except Exception as exc:  # noqa: BLE001  (mirrors CliBackend.run: never raise, report it)
+        # Mirrors CliBackend.run: never raise, report it.
+        except Exception as exc:
             return DoerResult(ok=False, output=f"deep_agents backend failed: {exc}")
