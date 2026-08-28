@@ -20,6 +20,9 @@ from pathlib import Path
 
 from write_scope import WriteScope
 
+_TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
+_COST_STOP = {"error_max_budget_usd", "error_max_budget"}
+
 
 @dataclass
 class DoerResult:
@@ -27,6 +30,34 @@ class DoerResult:
     output: str = ""
     usd: float = 0.0
     ok: bool = True
+    stop_reason: str | None = None
+
+
+def _from_message(message) -> tuple[str, float, bool | None, str | None]:
+    """Pull text, cost, the error flag, and the stop reason off one message.
+
+    `str(message)` flattened all four into a log line. The cost was the
+    expensive loss: `fixer.py` calls `boss.spend(result.usd)` and
+    `gates.decide` has a live `usd_left <= 0` branch, so a `usd` pinned at zero
+    meant the money gate could never fire. An unattended fixer with no cost
+    ceiling is the surprise bill `gates.py` says it exists to prevent.
+
+    The fake used in tests yields strings, so those still work.
+    """
+    if isinstance(message, str):
+        return message, 0.0, None, None
+    text = getattr(message, "result", None) or ""
+    usd = float(getattr(message, "total_cost_usd", None) or 0.0)
+    is_error = getattr(message, "is_error", None)
+    subtype = getattr(message, "subtype", None) or ""
+    reason = None
+    if subtype in _TURN_STOP:
+        reason = "max turns"
+    elif subtype in _COST_STOP:
+        reason = "cost budget spent"
+    if text or usd or is_error is not None or reason:
+        return str(text), usd, is_error, reason
+    return str(message), 0.0, None, None
 
 
 class Backend:
@@ -61,14 +92,26 @@ class AgentSdkBackend(Backend):
             scope = WriteScope(allow=list(allow))
             before = _changed_files(repo)
 
-            async def collect() -> str:
-                chunks = []
+            async def collect() -> tuple[str, float, bool, str | None]:
+                chunks: list[str] = []
+                usd = 0.0
+                ok = True
+                reason = None
                 async for message in query(prompt=prompt, options=self.options):
-                    chunks.append(str(message))
-                return "\n".join(chunks)
+                    text, cost, error, stop = _from_message(message)
+                    if text:
+                        chunks.append(text)
+                    if cost:
+                        usd = cost
+                    if error is True:
+                        ok = False
+                    if stop:
+                        reason = stop
+                        ok = False
+                return "\n".join(chunks), usd, ok, reason
 
-            output = asyncio.run(collect())
+            output, usd, ok, reason = asyncio.run(collect())
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]
-            return DoerResult(wrote=wrote, output=output)
-        except Exception as exc:  # noqa: BLE001  (graceful failure, mirrors CliBackend.run)
+            return DoerResult(wrote=wrote, output=output, usd=usd, ok=ok, stop_reason=reason)
+        except Exception as exc:
             return DoerResult(ok=False, output=f"agent sdk backend failed: {exc}")

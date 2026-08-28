@@ -9,9 +9,8 @@ Four loops, four casts. The implementer needs five roles. The fixer needs three.
 The table below is the only place that difference is written down, so a runtime
 never gets to invent a role or widen a scope.
 
-If the table and a runtime ever disagree, the runtime is wrong. That is what
-This folder's own tests check the cast, without either SDK
-installed.
+If the table and a runtime ever disagree, the runtime is wrong. This folder's
+own tests check the cast with no SDK installed.
 """
 
 from __future__ import annotations
@@ -69,6 +68,19 @@ FALLBACK_SCOPE = {
 }
 NO_WRITE_SCOPE = ((), ("**",))
 
+# Where one loop needs a role to differ from the tables above. The key is
+# (loop, role) and the value names only the fields that change.
+#
+# No role in the fixer cast holds `Bash`. The judge held one, and a shell is
+# the path around the PreToolUse hook: the hook matches `Edit`, `Write`, and
+# `NotebookEdit`, and none of those is `sed -i`. Python runs the suite through
+# `contract.run("test")` and parses the report, so the judge reads files and
+# nothing else.
+OVERRIDES: dict[tuple[str, str], dict] = {
+    ("fixer", "code_implementer"): {"tools": (*READ_TOOLS, "Edit", "Write")},
+    ("fixer", "judge"): {"tools": READ_TOOLS},
+}
+
 
 @dataclass(frozen=True)
 class RolePlan:
@@ -114,21 +126,28 @@ def plan(contract, loop: str = DEFAULT_LOOP) -> dict[str, RolePlan]:
 
     roles: dict[str, RolePlan] = {}
     for name in LOOPS[loop]:
+        override = OVERRIDES.get((loop, name), {})
         if name in READERS:
-            roles[name] = RolePlan(
-                name=name,
-                purpose=PURPOSE[name],
-                tools=TOOLS_FOR_READER[name],
-            )
-            continue
-        allow, deny = _scope(contract, name)
-        roles[name] = RolePlan(
-            name=name,
-            purpose=PURPOSE[name],
-            tools=(*READ_TOOLS, "Edit", "Write", "Bash"),
-            allow=allow,
-            deny=deny,
-        )
+            fields = {
+                "purpose": PURPOSE[name],
+                "tools": TOOLS_FOR_READER[name],
+                "allow": (),
+                "deny": (),
+            }
+        else:
+            allow, deny = _scope(contract, name)
+            fields = {
+                "purpose": PURPOSE[name],
+                "tools": (*READ_TOOLS, "Edit", "Write", "Bash"),
+                "allow": allow,
+                "deny": deny,
+            }
+        fields.update(override)
+        # An override that widens a reader into a writer is a mistake, not a
+        # feature. Catching it here beats finding it in a diff of the CRM.
+        if name in READERS and any(tool in WRITE_TOOLS for tool in fields["tools"]):
+            raise ValueError(f"{loop}/{name} is a reader but its override grants a write tool")
+        roles[name] = RolePlan(name=name, **fields)
     return roles
 
 

@@ -1,0 +1,5 @@
+{
+  "name": "pr-fixer",
+  "description": "The code implementer and judge that turn a red branch green, unattended, or explain why they could not.",
+  "version": "0.1.0"
+}
