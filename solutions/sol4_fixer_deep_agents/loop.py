@@ -45,7 +45,7 @@ def build(contract):
     return deep.subagents_for(contract, loop=LOOP)
 
 
-def backend(contract) -> "DeepAgentsBackend":
+def backend(contract):
     """A `doers.Backend` that runs the code_implementer role through this runtime.
 
     See `adapter.py`. Needs `deepagents` only once this is called.

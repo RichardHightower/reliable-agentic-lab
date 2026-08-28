@@ -20,6 +20,7 @@ jobs:
       matrix:
         folder:
           - solutions/sol3_research_deep_agents
+          - solutions/sol4_fixer_deep_agents
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,15 +28,9 @@ jobs:
           python-version: '3.12'
       - name: install pytest only
         run: python -m pip install --quiet pytest
+      # Each folder's own suite runs its check scripts and its role table, so
+      # this job stays one step and adding a folder stays one matrix line. A
+      # step naming a file only one folder has fails every folder without it.
       - name: the folder's own tests
         working-directory: ${{ matrix.folder }}
         run: python -m pytest tests -q
-      - name: the deterministic check scripts
-        working-directory: ${{ matrix.folder }}
-        run: |
-          for module in evidence paper_check diagrams publish mcp_tools; do
-            python "$module.py" --demo
-          done
-      - name: the role table, with no SDK installed
-        working-directory: ${{ matrix.folder }}
-        run: python loop.py --table-only --paper
