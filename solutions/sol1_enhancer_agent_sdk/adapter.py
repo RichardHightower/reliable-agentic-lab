@@ -72,8 +72,17 @@ def _from_message(message) -> tuple[str, float, dict | None, bool | None, str | 
     if isinstance(message, str):
         return message, 0.0, None, None, None
     text = getattr(message, "result", None)
+    has_content = hasattr(message, "content")
     if text is None:
-        text = ""
+        # AssistantMessage carries its prose in typed TextBlock objects, not
+        # in ``result``.  That is especially important when
+        # ``forward_subagent_text`` is enabled: the doer's answer is nested
+        # below the parent Agent call and otherwise never reaches Python.
+        text = "\n".join(
+            str(block.text)
+            for block in (getattr(message, "content", None) or [])
+            if getattr(block, "text", None) is not None
+        )
     usd = float(getattr(message, "total_cost_usd", None) or 0.0)
     structured = getattr(message, "structured_output", None)
     if structured is not None and not isinstance(structured, dict):
@@ -85,7 +94,7 @@ def _from_message(message) -> tuple[str, float, dict | None, bool | None, str | 
         reason = "max turns"
     elif subtype in _COST_STOP:
         reason = "cost budget spent"
-    if text or usd or structured is not None or is_error is not None or reason:
+    if text or usd or structured is not None or is_error is not None or reason or has_content:
         return str(text or ""), usd, structured, is_error, reason
     return str(message), 0.0, None, None, None
 
@@ -110,6 +119,7 @@ class AgentSdkBackend(Backend):
                 if dataclasses.is_dataclass(options)
                 else set()
             )
+            return_subagent_text = bool(extra.pop("return_subagent_text", False))
             overlay = {
                 key: value
                 for key, value in extra.items()
@@ -120,6 +130,7 @@ class AgentSdkBackend(Backend):
 
             async def collect() -> tuple[str, float, dict | None, bool, str | None]:
                 chunks: list[str] = []
+                subagent_chunks: list[str] = []
                 usd = 0.0
                 structured = None
                 ok = True
@@ -128,6 +139,8 @@ class AgentSdkBackend(Backend):
                     text, cost, parsed, error, stop = _from_message(message)
                     if text:
                         chunks.append(text)
+                        if getattr(message, "parent_tool_use_id", None):
+                            subagent_chunks.append(text)
                     if cost:
                         usd = cost
                     if parsed is not None:
@@ -137,7 +150,11 @@ class AgentSdkBackend(Backend):
                     if stop:
                         reason = stop
                         ok = False
-                return "\n".join(chunks), usd, structured, ok, reason
+                # The parent may summarize the Agent result instead of
+                # repeating it.  A doer needs the nested agent's markdown,
+                # whereas a judge needs the parent's structured ResultMessage.
+                output = subagent_chunks if return_subagent_text and subagent_chunks else chunks
+                return "\n".join(output), usd, structured, ok, reason
 
             output, usd, structured, ok, reason = asyncio.run(collect())
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]

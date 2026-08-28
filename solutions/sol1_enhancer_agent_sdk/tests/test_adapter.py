@@ -91,6 +91,37 @@ def test_run_returns_the_messages_the_query_yielded(tmp_path, monkeypatch, chang
     assert result.output == "first\nsecond"
 
 
+def test_run_returns_forwarded_subagent_text_for_a_doer(tmp_path, monkeypatch, changed):
+    class ToolOnlySubagentMessage:
+        content = []
+        parent_tool_use_id = "toolu_doer"
+
+    class Text:
+        text = "---\nid: T001\n---\n\n# Rewritten ticket"
+
+    class SubagentMessage:
+        content = [Text()]
+        parent_tool_use_id = "toolu_doer"
+
+    class ParentResult:
+        result = "The doer completed the draft."
+        total_cost_usd = 0
+        structured_output = None
+        is_error = False
+        subtype = "success"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "claude_agent_sdk",
+        make_sdk_module([ToolOnlySubagentMessage(), SubagentMessage(), ParentResult()]),
+    )
+    changed.extend([set(), set()])
+    result = AgentSdkBackend(options=None).run(
+        repo=tmp_path, prompt="draft", allow=[], return_subagent_text=True
+    )
+    assert result.output == "---\nid: T001\n---\n\n# Rewritten ticket"
+
+
 def test_run_reports_a_new_file_inside_the_allow_list(tmp_path, monkeypatch, changed):
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", make_sdk_module(["done"]))
     changed.extend([set(), {"tickets/T001.md"}])

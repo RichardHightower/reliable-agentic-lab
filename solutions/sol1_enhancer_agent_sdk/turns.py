@@ -69,6 +69,7 @@ def draft(enhancer, tkt, kind: str, missing: list[str], comment: str | None) -> 
         "Your entire final message is the full rewritten ticket as plain markdown, frontmatter "
         "included, and nothing else.",
         allow=[],
+        return_subagent_text=True,
     )
     if not result.ok:
         raise EnhancerError(f"the doer failed: {result.output}")
