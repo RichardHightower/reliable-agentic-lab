@@ -8,6 +8,9 @@ This folder is standalone. Every module it needs is a file next to this spec:
 `roleplan.py`, `contract.py`, `write_scope.py`, `roles.py`, `adapter.py`, and
 `loop.py`. Nothing imports a shared engine.
 
+The Saturday live path is `solutions/sol1_enhancer`. Do not copy these harness
+fences into that folder.
+
 ## The cast for this loop
 
 - `orchestrator`
