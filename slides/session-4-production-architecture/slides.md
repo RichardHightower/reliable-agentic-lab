@@ -3,69 +3,187 @@ marp: true
 paginate: true
 title: Session 4. Production Architecture
 description: Engineering Reliable Agentic AI Systems. Packt. 29 August 2026.
-footer: spillwave · session 4 · production architecture
+footer: Spillwave Solutions | spillwave.com
 style: |
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,550&family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600&display=swap');
+  /* @theme spillwave */
+  @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap");
 
   :root {
-    --bg: #07141f;
-    --ink: #eef4f6;
-    --muted: #8aa0ad;
-    --teal: #2dd4bf;
-    --gold: #d4a84b;
-    --line: rgba(45, 212, 191, 0.22);
+    --bg: #eef2f7;
+    --surface: #ffffff;
+    --ink: #1b2437;
+    --muted: #4a5b70;
+    --faint: #7a8b9c;
+    --navy: #1a365d;
+    --orange: #d9772a;
+    --teal: #2aa8bb;
+    --line: #c9d4e0;
+    --stripe: #1e3a6e;
   }
 
   section {
     background: var(--bg);
     color: var(--ink);
-    font-family: Outfit, "Segoe UI", sans-serif;
-    padding: 48px 56px 64px;
-    font-size: 28px;
-    line-height: 1.35;
+    font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+    padding: 34px 52px 68px;
+    font-size: 22px;
+    line-height: 1.32;
+    justify-content: flex-start;
+  }
+
+  section::before {
+    content: "SPILLWAVE SOLUTIONS  ·  LOOP ENGINEERING WORKSHOP";
+    display: block;
+    color: var(--navy);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px;
+    margin-bottom: 18px;
   }
 
   section::after {
-    color: var(--muted);
+    color: var(--faint);
     font-size: 12px;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.04em;
+    font-weight: 500;
   }
 
   h1 {
-    font-family: Fraunces, Georgia, serif;
-    font-style: italic;
-    font-weight: 550;
-    color: var(--gold);
-    font-size: 44px;
-    line-height: 1.12;
-    letter-spacing: -0.03em;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-style: normal;
+    font-weight: 800;
+    color: var(--ink);
+    font-size: 32px;
+    line-height: 1.14;
+    letter-spacing: -0.028em;
+    margin: 0 0 16px 0;
   }
 
-  h2, h3 { color: var(--teal); font-weight: 600; }
+  h2,
+  h3 {
+    color: var(--navy);
+    font-weight: 700;
+  }
 
-  p, li { color: var(--ink); }
-  small, cite { color: var(--muted); font-size: 16px; }
+  p,
+  li {
+    color: var(--ink);
+  }
 
-  code, pre {
+  ul {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+  }
+
+  ul li {
+    position: relative;
+    padding: 10px 0 10px 22px;
+    border-bottom: 1px solid var(--line);
+    font-size: 21px;
+    line-height: 1.35;
+  }
+
+  ul li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 1.05em;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--navy);
+  }
+
+  ul li:last-child {
+    border-bottom: none;
+  }
+
+  ul li:last-child::before {
+    background: var(--orange);
+  }
+
+  small,
+  cite {
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  code,
+  pre {
     font-family: "IBM Plex Mono", ui-monospace, monospace;
-    background: #061018;
-    color: #d7ece8;
+    background: #e4eaf2;
+    color: var(--ink);
+    font-size: 15px;
   }
 
-  table { font-size: 22px; }
-  th { color: var(--muted); font-weight: 500; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; }
-  td { border-color: var(--line); }
+  pre {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    max-height: 360px;
+    overflow: auto;
+  }
 
-  img { display: block; margin-left: auto; margin-right: auto; }
+  table {
+    font-size: 18px;
+    width: 100%;
+  }
+
+  th {
+    color: var(--muted);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  td {
+    border-color: var(--line);
+    padding: 8px 10px 8px 0;
+  }
+
+  img {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 100%;
+    max-height: 390px;
+    object-fit: contain;
+  }
 
   footer {
     color: var(--muted);
     font-size: 12px;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.02em;
   }
 
-  section.lead h1 { font-size: 56px; }
-  section.lead p { color: var(--muted); }
+  section.lead::before {
+    display: none;
+  }
+
+  section.lead {
+    border-left: 16px solid var(--stripe);
+    padding: 48px 56px 56px 48px;
+    justify-content: center;
+  }
+
+  section.lead h1 {
+    font-size: 52px;
+    font-weight: 800;
+    color: var(--ink);
+    font-style: normal;
+    line-height: 1.08;
+  }
+
+  section.lead p {
+    color: var(--navy);
+    font-weight: 500;
+    font-size: 22px;
+  }
 ---
 
 <!--
