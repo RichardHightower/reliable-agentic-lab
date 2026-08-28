@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test sol1 Ticket Enhancer"
+  short_description: "Run and review the sol1 enhancer demo"
+  default_prompt: "Use $test-sol1-ticket-enhancer to run and review the sol1 ticket-enhancer demo."
