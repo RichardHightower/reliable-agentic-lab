@@ -235,6 +235,11 @@ class Claim:
     confidence: float = 0.5
     important: bool = False
     note: str = ""
+    # Whether a verifier took a second, independent look. Distinct from the
+    # truth state, which only counts sources. Two URLs inside one search answer
+    # are two sources and one look, and a reader is entitled to know which
+    # claims nobody went back and checked.
+    cross_checked: bool = False
     id: str = ""
     as_of: str = ""
 
@@ -268,6 +273,7 @@ class Claim:
                 "as_of": self.as_of,
                 "truth_state": self.truth_state,
                 "important": self.important,
+                "cross_checked": self.cross_checked,
                 "links": [{"rel": "sourced_from", "target": sid} for sid in self.source_ids],
             }
         )
@@ -374,6 +380,10 @@ class Ledger:
     def important(self) -> list[Claim]:
         return [claim for claim in self.claims.values() if claim.important]
 
+    def unchecked(self) -> list[Claim]:
+        """Important claims no verifier looked at a second time."""
+        return [claim for claim in self.important() if not claim.cross_checked]
+
     def unusable(self) -> list[Claim]:
         return [claim for claim in self.claims.values() if not claim.usable]
 
@@ -436,6 +446,7 @@ class Ledger:
                         truth_state=fields.get("truth_state", PROPOSED),
                         confidence=float(fields.get("confidence", 0.5)),
                         important=bool(fields.get("important", False)),
+                        cross_checked=bool(fields.get("cross_checked", False)),
                         id=fields["id"],
                         as_of=fields.get("as_of", ""),
                     )
@@ -457,7 +468,7 @@ class Ledger:
         return self
 
 
-def demo() -> None:
+def demo() -> None:  # noqa: PLR0915  (one assertion per rule, deliberately flat)
     """Assertions this module must never stop satisfying."""
     assert slug("SQLAlchemy: nullable DateTime!") == "sqlalchemy-nullable-datetime"
     assert new_id() != new_id()
@@ -487,6 +498,18 @@ def demo() -> None:
     corroborate(claim, contradicted=True)
     assert claim.truth_state == CONTRADICTED
     assert not claim.usable, "a contradicted claim never reaches the paper"
+
+    # Source count and a second look are different facts. Counting sources does
+    # not make one, and a claim built from two URLs in a single search answer is
+    # two sources and one look.
+    corroborate(claim)
+    assert claim.truth_state == CORROBORATED
+    assert claim.cross_checked is False
+    fields, _ = parse_front_matter(claim.to_markdown())
+    assert fields["cross_checked"] is False
+    claim.cross_checked = True
+    fields, _ = parse_front_matter(claim.to_markdown())
+    assert fields["cross_checked"] is True
 
     # Front matter round-trips, links included.
     corroborate(claim)

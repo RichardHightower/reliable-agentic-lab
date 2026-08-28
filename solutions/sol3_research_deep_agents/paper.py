@@ -47,6 +47,16 @@ DEFAULT_SEARCH_CALLS = 24
 DONE, COST, MAX_TURNS = "done", "cost", "max turns"
 
 
+class BudgetSpent(RuntimeError):
+    """The money ran out mid-stage. Not a gate failure, so never a retry.
+
+    A gate failure means the model produced something unusable and another
+    attempt might fix it. A spent budget means another attempt costs money the
+    run does not have. Retrying on this is how a cost cap turns into a cost
+    multiplier.
+    """
+
+
 def check_stop(*, done: bool, spent_usd: float, max_usd: float, exhausted: bool = False) -> dict:
     """Three exits, and no fourth. Done first, then cost, then turns.
 
@@ -175,6 +185,7 @@ class Paper:
     work_dir: Path
     docs_backend: research.Backend | None = None
     max_usd: float = DEFAULT_MAX_USD
+    max_verify: int = stages.MAX_VERIFY_CLAIMS
     attempts: int = DEFAULT_STAGE_ATTEMPTS
     theme: str = "spillwave-light"
     polish: bool = True
@@ -190,6 +201,9 @@ class Paper:
     budget: research.Budget = field(init=False)
     # Diagram names the complexity gate rejected, so a retry redraws only those.
     _redraw: set = field(default_factory=set, init=False)
+    # The most expensive call seen per role. The budget check reads it as the
+    # headroom the next call of that kind is likely to need.
+    _worst: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         self.work_dir = Path(self.work_dir)
@@ -221,8 +235,32 @@ class Paper:
         return self.work_dir / "whitepaper.md"
 
     def _ask(self, role: str, prompt: str) -> Reply:
+        """One model call, checked against the cap before it is made.
+
+        Checking only between stages is not a cost cap. A stage that loops over
+        six sections makes six calls with nothing between them, so the run
+        discovers it is over budget once the money is already gone. Measured on
+        the recorded fixtures with a realistic price per role, a $3.00 cap spent
+        $4.45 that way.
+
+        The check needs headroom, not just a "have we passed it" test, or the
+        last call still starts with one cent left and finishes two dollars over.
+        `_worst` is the most expensive call this run has seen for this role, so
+        after the first writer turn the loop knows what a writer turn costs.
+        Before that it has no basis for an estimate and says so by allowing the
+        call, which is why the cap is documented as enforced to within one call
+        per role rather than exactly.
+        """
+        left = self.max_usd - self.state.total_cost_usd
+        headroom = self._worst.get(role, 0.0)
+        if left <= 0 or left < headroom:
+            raise BudgetSpent(
+                f"the {role} call needs about ${headroom:.2f} and ${max(0.0, left):.2f} is left "
+                f"of the ${self.max_usd:.2f} cap"
+            )
         reply = self.runner.ask(role, prompt)
         self.state.spend(reply.usd)
+        self._worst[role] = max(self._worst.get(role, 0.0), reply.usd)
         self.budget.spent_usd = self.state.total_cost_usd
         return reply
 
@@ -268,6 +306,10 @@ class Paper:
             self.state.save()
             try:
                 result = handler(extra)
+            except BudgetSpent as spent:
+                self.state.mark_failed(name, str(spent))
+                self.state.save()
+                return self._escalate(name, COST, str(spent))
             except GateFailed as failure:
                 signature = failure.signature
                 decision = gates.decide(
@@ -306,6 +348,7 @@ class Paper:
 
     def stage_plan(self, extra: str = "") -> StageResult:
         path = self.work_dir / "plan.json"
+        usd = 0.0
         if path.exists() and not extra:
             self.plan = json.loads(path.read_text(encoding="utf-8"))
         else:
@@ -315,12 +358,14 @@ class Paper:
                 f"on this topic.\n{extra}",
             )
             self.plan = reply.json()
+            usd = reply.usd
         self.plan = stages.normalize_plan(self.plan)
         stages.plan_gate(self.plan)
         path.write_text(json.dumps(self.plan, indent=2), encoding="utf-8")
         self.state.record("plan", path)
         return StageResult(
             "plan",
+            usd=usd,
             artifacts={"questions": len(self.plan["questions"])},
             summary=f"{len(self.plan['questions'])} questions, "
             f"{len(self.plan['diagrams'])} figures planned",
@@ -349,6 +394,9 @@ class Paper:
             )
             usd += reply.usd
             stages.record_findings(self.ledger, question, reply.json())
+            # Persist per question. A stop between questions must not discard
+            # the answers this run already paid for.
+            self.ledger.write()
         stages.search_gate(self.ledger, self.plan)
         self.ledger.write()
         return StageResult(
@@ -362,11 +410,14 @@ class Paper:
 
     def stage_verify(self, extra: str = "") -> StageResult:
         self._need_ledger()
-        pending = [c for c in self.ledger.important() if c.truth_state == evidence.PROPOSED]
+        # The list handed to the verifier is the size of the work, because it
+        # searches once per claim. Bounded, shakiest first. Everything past the
+        # cap is written down as not cross-checked rather than quietly dropped.
+        pending, skipped = stages.verify_batch(self.ledger, self.max_verify)
+        stages.note_uncrosschecked(skipped)
         if not pending:
-            pending = self.ledger.important()
-        if not pending:
-            self.state.mark_skipped("verify", "no claim was marked important")
+            self.ledger.write()
+            self.state.mark_skipped("verify", "no claim needed a second look")
             return StageResult("verify", summary="no important claims to check")
 
         listing = "\n".join(f"- {claim.id}: {claim.text}" for claim in pending)
@@ -388,7 +439,8 @@ class Paper:
             artifacts=counts,
             summary=f"{counts.get('corroborated', 0)} corroborated, "
             f"{counts.get('single_source', 0)} single source, "
-            f"{counts.get('contradicted', 0)} contradicted",
+            f"{counts.get('contradicted', 0)} contradicted"
+            + (f", {len(skipped)} past the cap" if skipped else ""),
         )
 
     # -- 4. outline --------------------------------------------------------
@@ -517,8 +569,8 @@ class Paper:
             # retry re-asks for it and leaves its neighbours alone.
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body
-        path = self.work_dir / "sections.json"
-        path.write_text(json.dumps(self.written, indent=2), encoding="utf-8")
+            self._save_sections()
+        self._save_sections()
         words = sum(len(body.split()) for body in self.written.values())
         return StageResult(
             "write",
@@ -526,6 +578,17 @@ class Paper:
             artifacts={"sections": len(self.written), "words": words},
             summary=f"{len(self.written)} sections, about {words} words",
         )
+
+    def _save_sections(self) -> Path:
+        """Checkpoint the prose written so far.
+
+        Called after every section, not once at the end of the stage. A stage
+        that persists only on success makes a mid-stage stop cost the whole
+        stage again, which is the opposite of what a cost cap is for.
+        """
+        path = self.work_dir / "sections.json"
+        path.write_text(json.dumps(self.written, indent=2), encoding="utf-8")
+        return path
 
     # -- 7. review ---------------------------------------------------------
 

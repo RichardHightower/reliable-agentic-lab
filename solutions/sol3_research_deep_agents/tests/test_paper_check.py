@@ -127,3 +127,54 @@ def test_the_signature_is_what_failed_not_how_it_was_worded():
     first = paper_check.check(GOOD.replace("[2]", "[9]"), URLS).signature()
     second = paper_check.check(GOOD.replace("[2]", "[8]"), URLS).signature()
     assert first == second == ("grounded",)
+
+
+# -- the body --------------------------------------------------------------
+
+HOLLOW = (
+    "# Exit conditions\n\n## Abstract\n\n## Introduction\n\n## Limitations\n\n"
+    "## References\n\n1. https://a.example/one\n2. https://b.example/two\n"
+)
+
+
+def test_a_paper_with_no_body_is_blocked():
+    """Every other gate checks content that is not there. Grounding passes with
+    no citations to dangle, `cited` passes with no claim paragraphs, and style
+    passes with no text to hold an em dash. Only the soft word count noticed."""
+    score = paper_check.check(HOLLOW, URLS)
+    assert not score.passed
+    assert score.signature() == ("has_body",)
+
+
+def test_every_other_hard_gate_passes_on_the_hollow_paper():
+    """This is why `has_body` had to be added rather than tightened."""
+    score = paper_check.check(HOLLOW, URLS)
+    green = {c.name for c in score.checks if c.passed}
+    assert {"grounded", "cited", "style", "sections", "references"} <= green
+
+
+def test_a_stub_section_is_blocked():
+    thin = GOOD.replace("Three exits cover the observed cases. [1][2]", "Yes. [1]")
+    assert "has_body" in paper_check.check(thin, URLS).signature()
+
+
+def test_a_section_of_only_a_figure_is_blocked():
+    """A figure still owes the reader an explanation."""
+    figure_only = GOOD.replace(
+        "Three exits cover the observed cases. [1][2]\n\n"
+        "![A flowchart of the three exits](figures/exits.svg)",
+        "![A flowchart of the three exits](figures/exits.svg)",
+    )
+    assert "has_body" in paper_check.check(figure_only, URLS).signature()
+
+
+def test_references_and_figures_owe_no_prose():
+    appendix = GOOD.replace(
+        "## References",
+        "## Figures\n\n![A sequence of the roles](figures/roles.svg)\n\n## References",
+    )
+    assert "has_body" not in paper_check.check(appendix, URLS).signature()
+
+
+def test_a_real_paper_still_passes():
+    assert paper_check.check(GOOD, URLS).passed

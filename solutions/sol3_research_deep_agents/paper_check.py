@@ -45,6 +45,19 @@ SOURCE_SYNTAX = re.compile(
 
 MIN_WORDS = 400
 
+# The fewest words a section can carry and still count as written.
+#
+# Deliberately low. This gate answers "is there prose here", which is a fact.
+# Whether a section says enough is a judgment, and judgment belongs to the
+# reviewer, where being wrong costs a retry instead of blocking a good paper.
+MIN_SECTION_WORDS = 5
+
+SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
+
+# Sections that legitimately carry no prose. References is a generated list, and
+# a Figures appendix is images with their alt text.
+PROSE_EXEMPT = ("references", "figures")
+
 
 @dataclass
 class Check:
@@ -116,6 +129,35 @@ def visible_source_syntax(body: str) -> list[str]:
         if language.lower() in ("mermaid", "plantuml", "puml") or SOURCE_SYNTAX.search(block):
             found.append(language or block.strip().split("\n", 1)[0][:40])
     return found
+
+
+def sections_without_prose(body: str) -> list[str]:
+    """Headings with no real prose under them.
+
+    Every other check on this page is a check on content that exists. Grounding
+    passes when there are no citations to dangle, `cited` passes when there are
+    no claim paragraphs to be uncited, and style passes when there is no text to
+    hold an em dash. A paper of nothing but headings and a reference list
+    therefore passed every hard gate, and only the soft word count noticed.
+
+    A gate suite that a hollow document satisfies is measuring the wrong thing,
+    so this is the check that says the paper has a body.
+    """
+    thin = []
+    matches = list(SECTION_HEADING.finditer(body))
+    for index, match in enumerate(matches):
+        heading = match.group(2).strip()
+        if heading.lower() in PROSE_EXEMPT:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        chunk = body[match.end() : end]
+        # Images and fenced code are not prose. A section that is one figure and
+        # nothing else still owes the reader an explanation.
+        chunk = IMAGE.sub("", FENCE.sub("", chunk))
+        words = re.findall(r"\b[\w'-]+\b", chunk)
+        if len(words) < MIN_SECTION_WORDS:
+            thin.append(f"{heading} ({len(words)} words)")
+    return thin
 
 
 def reference_rows(body: str) -> list[str]:
@@ -327,6 +369,15 @@ def check(
         )
     )
 
+    thin = sections_without_prose(body)
+    checks.append(
+        Check(
+            "has_body",
+            not thin,
+            "every section carries prose" if not thin else f"empty or near empty: {thin[:3]}",
+        )
+    )
+
     words = word_count(body)
     checks.append(
         Check(
@@ -358,6 +409,30 @@ def demo() -> None:
 
     score = check(good, urls)
     assert score.passed, score.report()
+
+    # A paper of headings and a reference list satisfies every other gate,
+    # because each of them checks content that is not there.
+    hollow = (
+        "# Exit conditions\n\n## Abstract\n\n## Introduction\n\n"
+        "## Limitations\n\n## References\n\n"
+        "1. https://a.example/one\n2. https://b.example/two\n"
+    )
+    score = check(hollow, urls)
+    assert not score.passed, score.report()
+    assert score.signature() == ("has_body",), score.signature()
+
+    # One sentence under a heading is not a section either.
+    thin = good.replace(
+        "Three exits cover the observed cases: done, cost, and turns. [1][2]", "Yes. [1]"
+    )
+    assert "has_body" in check(thin, urls).signature()
+
+    # A Figures appendix is images and alt text, and owes no prose.
+    appendix = good.replace(
+        "## References",
+        "## Figures\n\n![A flowchart of the three exits](figures/exits.svg)\n\n## References",
+    )
+    assert "has_body" not in check(appendix, urls).signature(), check(appendix, urls).report()
 
     # A dangling citation is not a style opinion.
     score = check(good.replace("[2]", "[9]"), urls)

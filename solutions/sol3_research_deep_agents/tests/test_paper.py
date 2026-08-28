@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import ClassVar
 
 import paper
 import pytest
@@ -210,3 +211,97 @@ def test_a_fenced_diagram_reply_is_unfenced():
         "flowchart LR\n  A --> B\n"
     )
     assert paper._strip_fence("flowchart LR\n  A --> B") == "flowchart LR\n  A --> B\n"
+
+
+# -- the cost cap ----------------------------------------------------------
+
+
+class Priced(paper.FixtureRunner):
+    """Recorded replies at a realistic price. Writing costs, searching does not."""
+
+    PRICE: ClassVar[dict] = {
+        "planner": 0.05,
+        "researcher": 0.05,
+        "verifier": 0.05,
+        "diagrammer": 0.05,
+        "writer": 2.00,
+        "reviewer": 0.10,
+    }
+
+    def ask(self, role, prompt):
+        reply = super().ask(role, prompt)
+        reply.usd = self.PRICE[role]
+        return reply
+
+
+def priced_run(work_dir, cap):
+    import research  # noqa: PLC0415  (sys.path is set by conftest first)
+    from conftest import FIXTURES  # noqa: PLC0415
+
+    return paper.Paper(
+        topic="Exit conditions in production agent loops",
+        runner=Priced(FIXTURES / "replies.json"),
+        backend=research.FixtureBackend(FIXTURES / "research.json"),
+        work_dir=work_dir,
+        polish=False,
+        quiet=True,
+        max_usd=cap,
+    )
+
+
+def test_the_cap_holds_inside_a_stage(run_dir):
+    """Checking only between stages is not a cap. A stage that loops over six
+    sections makes six calls with nothing between them, so the run learns it is
+    over budget once the money is gone. This case used to spend $4.45 of $3.00."""
+    run = priced_run(run_dir, 3.00)
+    assert run.run() == 2
+    assert run.state.total_cost_usd <= 3.00, f"spent ${run.state.total_cost_usd:.2f} of $3.00"
+
+
+def test_the_run_says_which_call_it_could_not_afford(run_dir, capsys):
+    run = priced_run(run_dir, 3.00)
+    run.quiet = False
+    run.run()
+    out = capsys.readouterr().out
+    assert "writer call needs" in out
+    assert "cost" in out
+
+
+def test_a_spent_budget_is_never_retried(run_dir):
+    """A gate failure might be fixed by another attempt. A spent budget will not
+    be, and retrying on it turns a cost cap into a cost multiplier."""
+    run = priced_run(run_dir, 3.00)
+    run.run()
+    assert run.state.attempts("write") == 1
+
+
+def test_a_cheap_run_still_finishes(run_dir):
+    run = priced_run(run_dir, 100.0)
+    assert run.run() == 0
+    assert run.state.total_cost_usd <= 100.0
+
+
+def test_the_total_counts_each_call_once(run_dir):
+    """`spend` and `mark_complete` both used to add."""
+    run = priced_run(run_dir, 100.0)
+    run.run()
+    by_stage = sum(entry.cost_usd for entry in run.state.stages.values())
+    assert run.state.total_cost_usd == pytest.approx(by_stage), (
+        "the total and the per-stage costs describe the same calls"
+    )
+
+
+def test_sections_written_before_a_stop_survive(run_dir):
+    """A stage that persists only on success makes a mid-stage stop cost the
+    whole stage again, which is the opposite of what a cost cap is for."""
+    run = priced_run(run_dir, 5.10)
+    run.run()
+    sections = run_dir / "sections.json"
+    if sections.exists():
+        assert json.loads(sections.read_text()), "a partial stage still checkpoints"
+
+
+def test_findings_are_written_per_question(offline, run_dir):
+    offline.stage_plan()
+    offline.stage_search()
+    assert list((run_dir / "evidence").glob("finding.*.md"))
