@@ -146,6 +146,15 @@ class FakeClaudeAgentOptions:
     env: dict = field(default_factory=dict)
 
 
+@dataclass
+class FakeResultMessage:
+    result: str = ""
+    total_cost_usd: float = 0.0
+    structured_output: dict | None = None
+    is_error: bool | None = False
+    subtype: str = "success"
+
+
 def make_sdk_module(messages: list | None = None) -> types.ModuleType:
     """A stand-in for `claude_agent_sdk`, holding only what this folder imports.
 
@@ -157,10 +166,11 @@ def make_sdk_module(messages: list | None = None) -> types.ModuleType:
     module.AgentDefinition = FakeAgentDefinition
     module.HookMatcher = FakeHookMatcher
     module.ClaudeAgentOptions = FakeClaudeAgentOptions
+    module.ResultMessage = FakeResultMessage
 
     async def query(*, prompt: str, options):
         for message in messages or []:
-            yield message
+            yield FakeResultMessage(result=message) if isinstance(message, str) else message
 
     module.query = query
     return module

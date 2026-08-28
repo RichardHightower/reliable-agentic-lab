@@ -118,6 +118,10 @@ def options_for(contract, loop: str = DEFAULT_LOOP):
         tools = list(source["tools"]) if source else list(role.tools)
         if enhancer:
             tools = [tool for tool in tools if tool not in NO_WRITE]
+            if role.name == "doer":
+                # Explore is a built-in read-only subagent. Python still owns
+                # every candidate and real-ticket write.
+                tools.append("Agent")
         prompt = source["prompt"] if source else f"You are the {role.name}. {role.purpose}"
         description = source["description"] if source else role.purpose
         name = source["name"] if source else plugin_name
@@ -146,9 +150,8 @@ def options_for(contract, loop: str = DEFAULT_LOOP):
         setting_sources=["project"],
         max_turns=DEFAULT_MAX_TURNS,
         max_budget_usd=_budget_usd(contract),
-        # The parent only has Agent.  Forward the nested doer text so the
-        # Python harness can persist the actual candidate instead of a parent
-        # summary of it.
+        # The parent only has Agent. The adapter selects one ticket-shaped
+        # child result instead of concatenating an event stream.
         forward_subagent_text=True,
     )
     if enhancer:
@@ -156,9 +159,7 @@ def options_for(contract, loop: str = DEFAULT_LOOP):
             allowed_tools=["Agent"],
             disallowed_tools=NO_WRITE,
             plugins=[{"type": "local", "path": str(PLUGIN)}],
-            skills=["ticket-enhancer:enhancer-loop"],
             system_prompt=PARENT_PROMPT,
-            env={"CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1"},
         )
     else:
         kwargs["allowed_tools"] = sorted(

@@ -17,7 +17,7 @@ from pathlib import Path
 import adapter
 import pytest
 from adapter import AgentSdkBackend, Backend, DoerResult
-from tests.conftest import make_sdk_module
+from tests.conftest import FakeResultMessage, make_sdk_module
 
 
 @pytest.fixture
@@ -83,15 +83,15 @@ def test_changed_files_on_a_clean_tree_is_empty(tmp_path, monkeypatch):
 # -- the success path ------------------------------------------------------
 
 
-def test_run_returns_the_messages_the_query_yielded(tmp_path, monkeypatch, changed):
+def test_run_returns_only_the_last_result_message(tmp_path, monkeypatch, changed):
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", make_sdk_module(["first", "second"]))
     changed.extend([set(), set()])
     result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="do it", allow=["tickets/**"])
     assert result.ok is True
-    assert result.output == "first\nsecond"
+    assert result.output == "second"
 
 
-def test_run_returns_forwarded_subagent_text_for_a_doer(tmp_path, monkeypatch, changed):
+def test_run_returns_the_last_ticket_shaped_subagent_block_for_a_doer(tmp_path, monkeypatch, changed):
     class ToolOnlySubagentMessage:
         content = []
         parent_tool_use_id = "toolu_doer"
@@ -103,23 +103,75 @@ def test_run_returns_forwarded_subagent_text_for_a_doer(tmp_path, monkeypatch, c
         content = [Text()]
         parent_tool_use_id = "toolu_doer"
 
-    class ParentResult:
-        result = "The doer completed the draft."
-        total_cost_usd = 0
-        structured_output = None
-        is_error = False
-        subtype = "success"
-
     monkeypatch.setitem(
         sys.modules,
         "claude_agent_sdk",
-        make_sdk_module([ToolOnlySubagentMessage(), SubagentMessage(), ParentResult()]),
+        make_sdk_module(
+            [
+                ToolOnlySubagentMessage(),
+                SubagentMessage(),
+                FakeResultMessage(result="The doer completed the draft."),
+            ]
+        ),
     )
     changed.extend([set(), set()])
     result = AgentSdkBackend(options=None).run(
         repo=tmp_path, prompt="draft", allow=[], return_subagent_text=True
     )
     assert result.output == "---\nid: T001\n---\n\n# Rewritten ticket"
+
+
+def test_run_prefers_a_ticket_shaped_parent_result_over_subagent_text(tmp_path, monkeypatch, changed):
+    class Text:
+        text = "# Older child ticket"
+
+    class SubagentMessage:
+        content = [Text()]
+        parent_tool_use_id = "toolu_doer"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "claude_agent_sdk",
+        make_sdk_module([SubagentMessage(), FakeResultMessage(result="# Parent ticket")]),
+    )
+    changed.extend([set(), set()])
+    result = AgentSdkBackend(options=None).run(
+        repo=tmp_path, prompt="draft", allow=[], return_subagent_text=True
+    )
+    assert result.output == "# Parent ticket"
+
+
+def test_run_never_joins_intermediate_tool_output_into_a_ticket(tmp_path, monkeypatch, changed):
+    class Text:
+        text = "\\n30\\tintermediate Grep dump"
+
+    class ToolMessage:
+        content = [Text()]
+        parent_tool_use_id = "toolu_doer"
+
+    class TicketText:
+        text = "---\nid: T001\n---\n\n# Clean candidate"
+
+    class FinalSubagentMessage:
+        content = [TicketText()]
+        parent_tool_use_id = "toolu_doer"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "claude_agent_sdk",
+        make_sdk_module(
+            [
+                ToolMessage(),
+                FinalSubagentMessage(),
+                FakeResultMessage(result="The doer completed the draft."),
+            ]
+        ),
+    )
+    changed.extend([set(), set()])
+    result = AgentSdkBackend(options=None).run(
+        repo=tmp_path, prompt="draft", allow=[], return_subagent_text=True
+    )
+    assert result.output == "---\nid: T001\n---\n\n# Clean candidate"
 
 
 def test_run_reports_a_new_file_inside_the_allow_list(tmp_path, monkeypatch, changed):
@@ -241,14 +293,12 @@ def test_a_failed_run_never_claims_a_write(tmp_path, monkeypatch, changed):
 
 
 def test_run_reads_result_message_cost_and_structured_output(tmp_path, monkeypatch, changed):
-    class Msg:
-        result = '{"kind": "bug", "present_fields": ["title"]}'
-        total_cost_usd = 1.25
-        structured_output = {"kind": "bug", "present_fields": ["title"]}
-        is_error = False
-        subtype = "success"
-
-    monkeypatch.setitem(sys.modules, "claude_agent_sdk", make_sdk_module([Msg()]))
+    message = FakeResultMessage(
+        result='{"kind": "bug", "present_fields": ["title"]}',
+        total_cost_usd=1.25,
+        structured_output={"kind": "bug", "present_fields": ["title"]},
+    )
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", make_sdk_module([message]))
     changed.extend([set(), set()])
     result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="grade", allow=[])
     assert result.usd == 1.25
@@ -257,15 +307,26 @@ def test_run_reads_result_message_cost_and_structured_output(tmp_path, monkeypat
 
 
 def test_run_maps_max_turns_subtype_to_a_stop_reason(tmp_path, monkeypatch, changed):
-    class Msg:
-        result = ""
-        total_cost_usd = 0.1
-        structured_output = None
-        is_error = True
-        subtype = "error_max_turns"
-
-    monkeypatch.setitem(sys.modules, "claude_agent_sdk", make_sdk_module([Msg()]))
+    message = FakeResultMessage(total_cost_usd=0.1, is_error=True, subtype="error_max_turns")
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", make_sdk_module([message]))
     changed.extend([set(), set()])
     result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="grade", allow=[])
     assert result.ok is False
     assert result.stop_reason == "max turns"
+
+
+def test_run_times_out_a_hung_query(tmp_path, monkeypatch, changed):
+    module = make_sdk_module([])
+
+    async def query(*, prompt, options):
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="# never reached")
+
+    module.query = query
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 0.001)
+    changed.extend([set(), set()])
+    result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="draft", allow=[])
+    assert result.ok is False
+    assert result.stop_reason == "query timeout"
+    assert result.raw_output == ""

@@ -381,13 +381,19 @@ class Enhancer:
             print(f"[enhancer] {message}", flush=True)
 
     def _ask(self, prompt: str, allow: list[str] | None = None, **extra):
+        raise_on_stop = extra.pop("raise_on_stop", True)
+        if self.max_usd is not None:
+            remaining = self.max_usd - self.spent_usd
+            if remaining <= 0:
+                raise TicketBlocked("cost budget spent")
+            extra.setdefault("max_budget_usd", remaining)
         result = self.backend.run(
             repo=Path(self.repo), prompt=prompt, allow=allow or [], **extra
         )
         self.turns += 1
         self.spent_usd += float(getattr(result, "usd", 0.0) or 0.0)
         reason = getattr(result, "stop_reason", None)
-        if reason:
+        if reason and raise_on_stop:
             raise TicketBlocked(reason)
         return result
 
@@ -500,6 +506,10 @@ class Enhancer:
         return outcomes
 
     def _one(self, tkt: ticket_mod.Ticket, simulate_comment: str | None) -> Outcome:
+        # A ticket receives its own budget. One expensive ticket must not
+        # silently consume the cap intended for every other ticket in this poll.
+        self.spent_usd = 0.0
+        self.turns = 0
         state = State.load(Path(self.repo), tkt.id)
 
         # 2. find the issue. Never create one. First hit wins, in this order: the state

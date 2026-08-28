@@ -97,18 +97,24 @@ class FakeBackend:
         ok: bool = True,
         usd: float = 0.0,
         stop_reason: str | None = None,
+        doer_stop_reason: str | None = None,
+        raw_output: str = "",
     ):
         self.judgments = list(judgments)
         self.draft = draft
         self.ok = ok
         self.usd = usd
         self.stop_reason = stop_reason
+        self.doer_stop_reason = doer_stop_reason
+        self.raw_output = raw_output
         self.prompts: list[str] = []
         self.allows: list[list[str]] = []
+        self.extras: list[dict] = []
 
     def run(self, *, repo: Path, prompt: str, allow: list[str], **extra) -> DoerResult:
         self.prompts.append(prompt)
         self.allows.append(list(allow))
+        self.extras.append(dict(extra))
         if not self.ok:
             return DoerResult(
                 ok=False, output="backend exploded", usd=self.usd, stop_reason=self.stop_reason
@@ -121,8 +127,15 @@ class FakeBackend:
                 structured=structured,
                 usd=self.usd,
                 stop_reason=self.stop_reason,
+                raw_output=self.raw_output,
             )
-        return DoerResult(output=self.draft or "", wrote=[], usd=self.usd, stop_reason=self.stop_reason)
+        return DoerResult(
+            output=self.draft or "",
+            wrote=[],
+            usd=self.usd,
+            stop_reason=self.doer_stop_reason or self.stop_reason,
+            raw_output=self.raw_output,
+        )
 
 
 def judged(kind: str = "feature", present: list[str] | None = None) -> dict:
@@ -339,6 +352,65 @@ def test_the_first_poll_runs_a_round_with_no_comment(target):
     assert "read tickets/T001.md" in backend.prompts[1]
     assert "under app/" in backend.prompts[1]
     assert "<current-ticket path=\"tickets/T001.md\">" in backend.prompts[1]
+    assert "T001-due-dates.ready.md" in backend.prompts[1]
+    assert "Do not add a wireframe" in backend.prompts[1]
+
+
+def test_a_ui_ticket_is_told_to_include_a_wireframe(target):
+    backend = FakeBackend([judged(kind="ui"), judged(kind="ui", present=["problem"])], draft=DRAFT)
+    engine(target, backend, FakeGh()).poll()
+    assert "Include a concrete UI wireframe" in backend.prompts[1]
+
+
+def test_raw_doer_events_are_written_before_the_candidate_is_judged(target):
+    backend = FakeBackend(
+        [judged(), judged(present=FEATURE)], draft=DRAFT, raw_output="raw SDK events"
+    )
+    engine(target, backend, FakeGh()).poll()
+    assert (target / ".harness" / "last-doer-T001.md").read_text(encoding="utf-8") == "raw SDK events"
+
+
+def test_a_stopped_doer_writes_its_diagnostic_before_escalating(target):
+    backend = FakeBackend(
+        [judged()], doer_stop_reason="query timeout", raw_output="partial SDK events"
+    )
+    gh = FakeGh()
+    [outcome] = engine(target, backend, gh).poll()
+    assert outcome.status == "escalated"
+    assert "needs-human" in gh.added
+    assert (target / ".harness" / "last-doer-T001.md").read_text(encoding="utf-8") == "partial SDK events"
+
+
+def test_a_draft_with_literal_escaped_layout_blocks_only_that_ticket(target):
+    (target / "tickets" / "T002.md").write_text(DRAFT.replace("T001", "T002"), encoding="utf-8")
+    backend = FakeBackend(
+        [judged(), judged(present=FEATURE)], draft="---\n\\n30\\tbroken wireframe"
+    )
+    gh = FakeGh()
+    # The shared fake normally exposes one label list. This case needs the
+    # second ticket's distinct issue to remain unblocked after T001 escalates.
+    gh.labels = lambda issue: []
+    outcomes = engine(target, backend, gh).poll()
+    assert [(outcome.ticket_id, outcome.status) for outcome in outcomes] == [
+        ("T001", "escalated"),
+        ("T002", "waiting"),
+    ]
+    assert "literal escaped layout" in outcomes[0].detail
+    assert "needs-human" in gh.added
+    assert gh.bodies == []
+
+
+def test_strip_reply_keeps_an_embedded_wireframe_fence():
+    import turns
+
+    ticket = "# Notes\n\n## Wireframe\n\n```\n+-----+\n| UI |\n+-----+\n```\n\n## Acceptance criteria\n\n- (AC-1) works\n"
+    assert turns.strip_reply(ticket) == ticket.strip()
+
+
+def test_strip_reply_unwraps_only_a_whole_markdown_reply():
+    import turns
+
+    assert turns.strip_reply("```markdown\n# Ticket\n```") == "# Ticket"
 
 
 def test_the_first_poll_leaves_no_comment_id_behind(target):
@@ -839,6 +911,14 @@ def test_cost_budget_stops_a_ticket_that_is_not_ready(target):
     assert outcome.status == "escalated"
     assert outcome.detail == "cost budget spent"
     assert "needs-human" in gh.added
+
+
+def test_each_ticket_gets_a_fresh_cost_budget(target):
+    (target / "tickets" / "T002.md").write_text(DRAFT.replace("T001", "T002"), encoding="utf-8")
+    backend = FakeBackend([judged(present=FEATURE), judged(present=FEATURE)], usd=0.5)
+    outcomes = Enhancer(repo=target, backend=backend, gh=FakeGh(), max_usd=1.0).poll()
+    assert [outcome.ticket_id for outcome in outcomes] == ["T001", "T002"]
+    assert [extra["max_budget_usd"] for extra in backend.extras] == [1.0, 1.0]
 
 
 def test_cost_budget_does_not_block_a_completed_ticket(target):
