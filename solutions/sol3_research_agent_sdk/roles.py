@@ -5,17 +5,18 @@ The Agent SDK enforces scope in two places, and you need both.
     tools=[...]        decides whether a role can write at all
     PreToolUse hook    decides which paths it may write
 
-The researcher, the verifier, and the judge hold no `Edit` and no `Write`, so
-there is nothing for a hook to guard. The planner, the diagrammer, and the
-writer hold `Write`, and the hook is what keeps each one inside its own
-directory.
+Six of the seven roles hold no `Edit` and no `Write`, so for them there is
+nothing for a hook to guard. The writer holds `Write`, scoped to `sections/**`,
+and the hook is what keeps it there and out of `paper.md`.
 
-One hook serves all three writers. sol1 registers one hook per writing role
-because the enhancer has exactly one. That does not generalize: register three
-hooks on `Write` and every one of them runs, an empty dict means "no opinion",
-and the first role that shrugs lets another role's write through. This hook
-reads `agent_type` off the tool call instead, which the SDK populates whenever
-the call comes from inside a spawned subagent, and looks up that role's scope.
+One hook serves the whole cast, not one hook per writer. sol1 registers one per
+writing role because the enhancer has exactly one. That does not generalize:
+register several hooks on `Write` and every one of them runs, an empty dict
+means "no opinion", and the first role that shrugs lets another role's write
+through. This hook reads `agent_type` off the tool call instead, which the SDK
+populates whenever the call comes from inside a spawned subagent, and looks up
+that role's scope. A write with no `agent_type` came from the parent, and the
+parent has no business writing anything.
 
 Nothing here calls a model. `options_for` returns configuration, and `paper.py`
 is what runs it.
@@ -225,8 +226,13 @@ def options_for(work_dir: Path | str, *, max_usd: float | None = None, loop: str
         # cannot change what this folder can reach.
         mcp_servers=mcp_servers(),
         strict_mcp_config=True,
+        # `plugins=` and not `skills=`. The plugin is what makes the agent
+        # markdown visible, because `cwd` is the work directory and not this
+        # folder. The loop skill stays on disk as the readable specification
+        # and is deliberately not loaded: a parent that can invoke it is a
+        # second orchestrator, and asking it not to in the system prompt was a
+        # sentence where a missing capability belongs.
         plugins=[{"type": "local", "path": str(PLUGIN)}],
-        skills=["research-loop:research-loop"],
         system_prompt=PARENT_PROMPT,
         max_turns=DEFAULT_MAX_TURNS,
         max_budget_usd=max_usd,

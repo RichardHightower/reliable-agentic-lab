@@ -17,9 +17,17 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # `include` rather than a bare folder list, because the demo modules and
+      # the table flag differ per port. A folder whose tests do not run in CI
+      # is a folder whose documentation drifts back.
       matrix:
-        folder:
-          - solutions/sol3_research_deep_agents
+        include:
+          - folder: solutions/sol3_research_deep_agents
+            demos: evidence paper_check diagrams publish mcp_tools
+            table: loop.py --table-only --paper
+          - folder: solutions/sol3_research_agent_sdk
+            demos: checks gates publish rkc
+            table: loop.py --table-only
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,9 +41,9 @@ jobs:
       - name: the deterministic check scripts
         working-directory: ${{ matrix.folder }}
         run: |
-          for module in evidence paper_check diagrams publish mcp_tools; do
+          for module in ${{ matrix.demos }}; do
             python "$module.py" --demo
           done
       - name: the role table, with no SDK installed
         working-directory: ${{ matrix.folder }}
-        run: python loop.py --table-only --paper
+        run: python ${{ matrix.table }}

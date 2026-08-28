@@ -8,6 +8,7 @@ from pathlib import Path
 import diagrams
 import paper
 import pytest
+from turns import Escalate, TurnFailed
 
 
 def make_run(work, turns, **kwargs):
@@ -52,7 +53,7 @@ def test_prior_art_reads_the_brain_when_it_is_there(work, turns, tmp_path):
 
 def test_a_plan_with_no_questions_stops_the_run(work, turns):
     class Empty(turns):
-        def plan(self, topic, prior_art, budget=None):
+        def plan(self, topic, prior_art, budget=None, note=""):
             return {
                 "title": "t",
                 "sections": [{"id": "s", "heading": "h", "goal": "g"}],
@@ -84,6 +85,14 @@ def test_a_claim_carries_the_section_it_serves(work, turns):
 
 
 # -- verification -----------------------------------------------------------
+
+
+def prepared_plan(work, turns_obj, **kwargs):
+    """A run with prior art and a plan, ready for the research phase."""
+    run = make_run(work, turns_obj, **kwargs)
+    paper.prior_art(run)
+    paper.plan(run)
+    return run
 
 
 def prepared(work, turns_obj):
@@ -132,7 +141,6 @@ def test_an_unclear_verdict_is_unverified(work, turns):
 
 def test_a_verifier_that_fails_leaves_the_claim_unverified(work, turns):
     """Fail open, never fail silent. A weaker sentence, not a wrong one."""
-    from turns import TurnFailed  # noqa: PLC0415
 
     class Broken(turns):
         def verify(self, claim):
@@ -330,7 +338,7 @@ def test_the_plan_is_held_to_a_question_budget(work, turns):
     an uncapped bill, and the planner has no idea what a turn costs."""
 
     class Ambitious(turns):
-        def plan(self, topic, prior_art, budget=None):
+        def plan(self, topic, prior_art, budget=None, note=""):
             return {
                 "title": "t",
                 "sections": [{"id": f"s{i}", "heading": "H", "goal": "g"} for i in range(9)],
@@ -348,7 +356,7 @@ def test_the_plan_is_held_to_a_question_budget(work, turns):
 
 def test_truncation_never_leaves_a_heading_with_nothing_under_it(work, turns):
     class Ambitious(turns):
-        def plan(self, topic, prior_art, budget=None):
+        def plan(self, topic, prior_art, budget=None, note=""):
             return {
                 "title": "t",
                 "sections": [{"id": f"s{i}", "heading": "H", "goal": "g"} for i in range(4)],
@@ -369,7 +377,7 @@ def test_research_stops_when_the_money_runs_out(work, turns):
     times over before the gate ever sees it."""
 
     class Costly(turns):
-        def plan(self, topic, prior_art, budget=None):
+        def plan(self, topic, prior_art, budget=None, note=""):
             return {
                 "title": "t",
                 "sections": [{"id": "s1", "heading": "H", "goal": "g"}],
@@ -563,3 +571,124 @@ def test_the_manifest_is_written_even_when_there_is_nothing_in_it(work, turns, n
     """A reader has to tell "no flags" from "this run never looked"."""
     paper.run_paper(make_run(work, turns()))
     assert json.loads((Path(work) / "unresolved.json").read_text()) == {"flags": []}
+
+
+# -- retrying the failing unit ----------------------------------------------
+
+
+def test_a_planner_that_fails_once_gets_the_gates_complaint(work, turns, no_renderer):
+    """One malformed answer used to kill a run before it had a plan."""
+
+    class Flaky(turns):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.tries = 0
+
+        def plan(self, topic, prior_art, budget=None, note=""):
+            self.tries += 1
+            self.asked.append(("plan", topic, prior_art, budget, note))
+            if self.tries == 1:
+                raise TurnFailed("research-planner returned no JSON object")
+            return super().plan(topic, prior_art, budget, note)
+
+    run = make_run(work, Flaky())
+    paper.prior_art(run)
+    assert paper.plan(run)["questions"] == 1
+    notes = [args[4] for args in run.turns.asked if args[0] == "plan"]
+    assert notes[0] == "", "the first attempt has nothing to react to"
+    assert "no JSON object" in notes[1], "the second is told what failed"
+
+
+def test_a_planner_that_fails_twice_escalates_on_the_stall(work, turns):
+    """Two identical failures are not converging, and the reason says so."""
+
+    class Broken(turns):
+        def plan(self, topic, prior_art, budget=None, note=""):
+            self.asked.append(("plan", topic, prior_art, budget, note))
+            raise TurnFailed("research-planner returned no JSON object")
+
+    run = make_run(work, Broken())
+    paper.prior_art(run)
+    with pytest.raises(paper.RunFailed, match="not converging"):
+        paper.plan(run)
+    assert len([a for a in run.turns.asked if a[0] == "plan"]) == 2
+
+
+def test_a_runtime_ceiling_is_not_retried(work, turns):
+    """Retrying a ceiling spends the rest of the budget rediscovering it."""
+
+    class Capped(turns):
+        def plan(self, topic, prior_art, budget=None, note=""):
+            self.asked.append(("plan", topic, prior_art, budget, note))
+            raise Escalate("max turns")
+
+    run = make_run(work, Capped())
+    paper.prior_art(run)
+    with pytest.raises(Escalate):
+        paper.plan(run)
+    assert len([a for a in run.turns.asked if a[0] == "plan"]) == 1
+
+
+def test_one_bad_question_does_not_kill_the_research_phase(work, turns, no_renderer):
+    """A thinner paper, and a record of why. Not a dead run."""
+
+    class Partial(turns):
+        def plan(self, topic, prior_art, budget=None, note=""):
+            self.asked.append(("plan", topic, prior_art, budget, note))
+            return {
+                "title": "t",
+                "abstract": "a",
+                "sections": [{"id": "s1", "heading": "H", "goal": "g"}],
+                "questions": [
+                    {"id": "q1", "text": "good", "section": "s1"},
+                    {"id": "q2", "text": "bad", "section": "s1"},
+                ],
+                "diagrams": [],
+            }
+
+        def research(self, question, note=""):
+            self.asked.append(("research", question, note))
+            if question == "bad":
+                raise TurnFailed("research-researcher returned no JSON object")
+            return super().research(question, note)
+
+    run = make_run(work, Partial())
+    paper.prior_art(run)
+    paper.plan(run)
+    meta = paper.do_research(run)
+    assert meta["failed"] == 1
+    assert meta["claims"] == 1
+    recorded = json.loads((Path(work) / "sources.json").read_text())["failed"]
+    assert recorded[0]["id"] == "q2"
+    assert "no JSON object" in recorded[0]["reason"]
+
+
+def test_a_failing_question_is_retried_once_before_it_is_recorded(work, turns):
+    tries = []
+
+    class Flaky(turns):
+        def research(self, question, note=""):
+            self.asked.append(("research", question, note))
+            tries.append(note)
+            raise TurnFailed("no JSON")
+
+    run = prepared_plan(work, Flaky())
+    with pytest.raises(paper.RunFailed):
+        paper.do_research(run)
+    assert len(tries) == 2
+    assert tries[0] == "" and "no JSON" in tries[1]
+
+
+def test_a_retry_does_not_run_when_the_budget_is_spent(work, turns):
+    """A retry must consult the ceiling before it spends."""
+
+    class Flaky(turns):
+        def research(self, question, note=""):
+            self.asked.append(("research", question, note))
+            run.state.total_usd = 99.0
+            raise TurnFailed("no JSON")
+
+    run = prepared_plan(work, Flaky(), max_usd=1.0)
+    with pytest.raises(paper.RunFailed):
+        paper.do_research(run)
+    assert len([a for a in run.turns.asked if a[0] == "research"]) == 1

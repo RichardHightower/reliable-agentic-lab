@@ -1,6 +1,6 @@
 ---
 name: research-diagrammer
-description: Writes Mermaid or PlantUML source for one figure, then runs the renderer that turns it into a publication image. Writes only under diagrams/.
+description: Returns Mermaid or PlantUML source for one figure, and simplifies it when the harness reports what the render lost. Holds no shell and no write tool.
 tools: Read, Glob, Grep
 ---
 

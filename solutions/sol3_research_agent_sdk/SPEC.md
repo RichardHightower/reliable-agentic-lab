@@ -244,6 +244,31 @@ budget watching it fail identically buys a surprise bill, not a paper. The
 signature is what failed, not how it was worded, so a model rephrasing its own
 complaint does not read as progress.
 
+### What retries, and at what size
+
+The unit retries, never the phase. Re-running the whole research phase because
+the fourth question came back without JSON makes you pay again for the three
+that worked.
+
+| Unit | Attempts | On giving up |
+| --- | --- | --- |
+| the plan | 2 | the run escalates, nothing downstream has input |
+| one research question | 2 | recorded in `sources.json` under `failed`, the run goes on |
+| one claim | 1 | falls back to `unverified` |
+| one figure | 3 | keeps the closest image and records what it lost |
+| the writing | `--max-iterations` | the write cycle's own gate |
+
+`gates.decide` owns all of it, including the linear phases, which had no retry
+at all until one malformed answer killed a run that had already paid for its
+research. The signature is the failure kind, not its wording, so two identical
+failures read as a stall and escalate with "not converging" rather than
+spending the last attempt watching it happen again.
+
+A runtime ceiling passes through untouched. It is not a turn to retry, and
+retrying it spends the rest of the budget rediscovering it. A retry also checks
+`--max-usd` before it spends, so a run that is out of money does not buy a
+second attempt it cannot afford.
+
 ### Three budgets, not one
 
 `--max-questions`, `--max-claims`, and `--max-usd`, and each one exists because
@@ -296,8 +321,19 @@ shared engine.
 It is not a general research framework. It produces one artifact, a technical
 white paper, and every phase is shaped by that.
 
+It is not the Saturday hour. This folder is the take-home report generator.
+Saturday Lab 3 is `labs/lab3_research`, where attendees fill `plan_questions`
+and `check_brief` and keep a cited brief. Nobody should run ten phases to learn
+that citations are arithmetic.
+
 `.cache/` holds a clone of the diagram renderer and any gist clones. It is
 disposable, `task setup` rebuilds it, and nothing in it is edited by hand.
+
+`plugin/skills/research-loop/SKILL.md` is not a runnable skill here. It is the
+readable specification of what `paper.py` implements, and `options_for` does
+not pass `skills=`, so the parent cannot invoke it. An earlier draft loaded it
+and asked the model not to run it in the system prompt. A parent that can
+invoke the loop is a second orchestrator, and a sentence is not a fence.
 
 ### Known upstream mismatch
 

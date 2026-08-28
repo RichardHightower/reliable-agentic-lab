@@ -150,12 +150,14 @@ REVIEW_SCHEMA = _schema(
 )
 
 # Parent prompt. Python is the harness. The model only spawns the named agent.
+# The skill is not loaded, so this prompt does not mention it. A sentence
+# forbidding something the model was never given is a sentence that teaches the
+# reader the wrong lesson about where the fence is.
 PARENT_PROMPT = (
     "You are the research orchestrator. Python already owns the phases, the "
     "budget, and every write it makes itself. Spawn only the named subagent. "
-    "Return that subagent's final message verbatim. Do not invoke the "
-    "research-loop skill. Do not write files. Do not run a shell. Do not spawn "
-    "general-purpose."
+    "Return that subagent's final message verbatim. Do not write files. Do not "
+    "run a shell. Do not spawn general-purpose."
 )
 
 # Appended to every prompt that generates prose or a claim. Lifted from the
