@@ -10,6 +10,17 @@ real ticket file or talks to GitHub. You do this by calling the
 `enhancer-judge` and `enhancer-doer` agents and following the steps below,
 not by grading or drafting tickets yourself.
 
+Hard rules. A poll that breaks any of these has failed:
+
+- A missing comment does not stop you. Do not fetch comments until
+  `check_fields.py` says the ticket is ready.
+- The `enhanced` label is not the work. Adding it without rewriting the
+  ticket file is a failed poll.
+- Seed stubs (a title plus one or two sentences) are never ready. You must
+  call the doer and write a better ticket.
+- `ready` comes from `check_fields.py`, never from the judge's own claim,
+  never from a label, never from a comment other than exact `LGTM`.
+
 This skill runs **one step** and exits. Nothing in this skill schedules the
 next check by itself, but you can, using the built-in `loop` skill, in the
 Report step below. Whether that actually works depends on how you were
@@ -145,20 +156,9 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    appears only on some later poll leaves every later poll looking like a
    first poll. That must not delay enhancement. Comments are only for `LGTM`.
 
-3. Look at the newest human comment only to detect an exact `LGTM`.
-   Comments never start an enhance round. A missing comment never stops one.
-
-   Skip this loop's own replies using the marker. If every comment is one of
-   this loop's own, there is no human comment.
-
-   - `--simulate-comment`, if given, stands in for that human comment. Use it
-     to test `LGTM`, not to drive an edit.
-   - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq '[.[] | select((.body // "") | contains("<!-- enhancer-loop -->") | not)] | sort_by(.id) | .[-1] // empty | {id, body}'`.
-   - If that comment is exactly `LGTM`, keep it for step 6.
-   - Otherwise there is no comment that matters. Continue to step 4.
-     Do not stop. Do not wait. A missing comment is not a reason to skip
-     the judge or the doer. Labels are not a reason to skip them either.
-
+3. Skip comments for now. Go to step 4. You will look for `LGTM` only in
+   step 6, and only after `check_fields.py` says ready. Fetching comments
+   here is how earlier runs labeled the issue and then stopped.
 
 4. If the issue already carries `needs-human`, this ticket already reached a
    stable-failure or budget escalation on an earlier poll: stop here, wait
@@ -167,49 +167,44 @@ expects a reply: this skill runs headlessly and cannot wait for one.
 5. Call the `enhancer-judge` agent on the real ticket file, and parse its
    JSON. Run
    `python3 .claude/skills/enhancer-loop/scripts/check_fields.py '<judge json>'`
-   to get the authoritative `{kind, missing_fields, ready}`. Do this before
-   looking at `LGTM`: a human's `LGTM` is not a substitute for the rubric,
-      it can only confirm a ticket the rubric already accepts.
+   to get the authoritative `{kind, missing_fields, ready}`. Do not add the
+   `enhanced` label here.
 
-   If the issue does not already carry `enhanced`, add it now:
-   `gh issue edit <issue> --repo <owner>/<repo> --add-label enhanced`.
-   This is the first time the enhancer has touched the ticket.
-   `task create-test-tickets` must not add this label.
+6. Decide from step 5's `ready`:
 
-6. Decide what happens next from step 5's `ready` and this round's comment
-   (if any), trimmed:
-
-   - `ready` is true and the comment is exactly `LGTM`: set `state: ready`
-     and `loop: implementer` in the ticket file (the `loop: implementer`
-     module discovers its work the same way this one does, by that field,
-     so a ticket left at `loop: enhancer` would never be picked up next).
-     Run `gh issue edit <issue> --repo <owner>/<repo> --add-label ready`.
-     Keep the `enhanced` label; do not remove it. Delete
-     `<repo>/.harness/last-enhancer-<id>.json`. Done with this ticket.
-   - `ready` is true and the comment is not `LGTM` (or there is none): do not
-     call the Doer. If you have not already asked for `LGTM` on this ticket,
-     post that it meets the rubric and is waiting for `LGTM`, with the marker.
+   - `ready` is false: go to step 7 now. The four seed tickets in this demo
+     are stubs. They are not ready. Do not look at comments. Do not stop
+     because the issue already has `enhanced`.
+   - `ready` is true: now fetch the newest human comment with
+     `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq '[.[] | select((.body // "") | contains("<!-- enhancer-loop -->") | not)] | sort_by(.id) | .[-1] // empty | {id, body}'`.
+     `--simulate-comment`, if given, stands in for that comment.
+     If the comment is exactly `LGTM`: set `state: ready` and
+     `loop: implementer` in the ticket file. Run
+     `gh issue edit <issue> --repo <owner>/<repo> --add-label ready`.
+     Keep `enhanced`. Delete `<repo>/.harness/last-enhancer-<id>.json`. Done.
+     If the comment is not `LGTM` (or there is none): do not call the Doer.
+     If you have not already asked, post that it meets the rubric and is
+     waiting for `LGTM`, with the marker. Add `enhanced` if it is missing.
      Stop.
-   - `ready` is false: go to step 7. Do this whether or not anyone commented.
-     A human comment is not an instruction to the Doer. The Doer investigates
-     the app. `LGTM` on a red rubric does not mark the ticket ready.
 
 7. Call the `enhancer-doer` agent with the ticket's current body, its kind,
-   its `missing_fields`, and tell it there is no comment to follow. It investigates the target app. Write its returned
-   text to `<repo>/tickets/<id>.enhancer-candidate.md`. Call `enhancer-judge`
+   its `missing_fields`, and tell it there is no comment to follow. It
+   investigates the target app. This step is mandatory when step 6 sent you
+   here. Write its returned text to
+   `<repo>/tickets/<id>.enhancer-candidate.md`. Call `enhancer-judge`
    again on that candidate file, and run it through `check_fields.py` the
    same way. Compare candidate `missing_fields` to the current ticket's
    `missing_fields` from step 5:
 
    - Strict improvement (candidate's missing set is a proper subset):
      copy the candidate over the real ticket file, then update the issue
-     body to match it, with the frontmatter stripped (GitHub would render
-     the raw `---` YAML block as a stray horizontal rule otherwise):
+     body to match it, with the frontmatter stripped:
      `gh issue edit <issue> --repo <owner>/<repo> --body "$(awk '/^---$/{c++; next} c>=2' <repo>/tickets/<id>.md)"`.
-     A reviewer needs to see the actual current ticket to judge it, not a
-     comment's prose description of a change they cannot verify.
+     Then, and only then:
+     `gh issue edit <issue> --repo <owner>/<repo> --add-label enhanced`.
+     A reviewer needs to see the actual current ticket to judge it.
    - Not an improvement: leave the real ticket file, and the issue body,
-     untouched.
+     untouched. Do not add `enhanced` for a no-op.
 
    Either way, delete the candidate file, then post one issue comment,
    ending its body with the marker line: on improvement, what changed and

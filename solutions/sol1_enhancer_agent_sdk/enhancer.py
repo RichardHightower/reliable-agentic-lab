@@ -437,17 +437,15 @@ class Enhancer:
         # 5. grade the real ticket. The rubric decides ready, never the comment.
         verdict = self.judge(tkt.path)
 
-        # First touch. Creation must not pre-stamp this label.
-        if "enhanced" not in self.gh.labels(issue):
-            self.gh.add_label(issue, "enhanced")
-
-        # 6. decide from `ready` and LGTM only.
+        # 6. decide from `ready` and LGTM only. Label after a real write, not here.
         if verdict["ready"] and (comment or "").strip() == LGTM:
             set_front_matter(tkt.path, state="ready", loop="implementer")
             self.gh.add_label(issue, "ready")
             state.clear(Path(self.repo), tkt.id)
             return Outcome(tkt.id, "passed", "rubric green and a human said LGTM")
         if verdict["ready"]:
+            if "enhanced" not in self.gh.labels(issue):
+                self.gh.add_label(issue, "enhanced")
             if state.last_comment_id != "asked-lgtm":
                 self.gh.comment(issue, "This ticket meets the rubric. Comment `LGTM` to release it.")
                 state.last_comment_id = "asked-lgtm"
@@ -522,6 +520,7 @@ class Enhancer:
                     tkt.path, id=tkt.id, state="draft", loop="enhancer", github_issue=str(issue)
                 )
                 self.gh.set_body(issue, strip_front_matter(tkt.path.read_text(encoding="utf-8")))
+                self.gh.add_label(issue, "enhanced")
                 still = after_verdict["missing_fields"]
                 self.gh.comment(
                     issue,
