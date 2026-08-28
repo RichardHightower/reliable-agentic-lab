@@ -186,17 +186,17 @@ def test_an_enhancer_error_reports_and_exits_nonzero(target_repo, polling, capsy
 
 
 def test_the_entry_point_names_its_own_loop():
-    """`DEFAULT_LOOP` in this copy is 'implementer', inherited from the original
-    shared `roleplan.py`. `sol1_enhancer_deep_agents` carries the same value.
-    Nothing misbehaves because every caller names its loop, and this test is
-    what keeps that true.
+    """A bare `roleplan.plan(contract)` must build this folder's own cast.
 
-    A caller that relied on the default would get the implementer cast instead of
-    the enhancer one, which is a different set of roles and a different set of
-    write scopes.
+    This copy inherited `DEFAULT_LOOP = "implementer"` from the shared
+    `roleplan.py` the repo deleted, and never changed it. Every caller named its
+    loop, so nothing misbehaved, and an earlier version of this test asserted
+    the mismatch was harmless. That made the footgun permanent: the one call
+    site that forgot would build the wrong cast with the wrong write scopes.
+
+    The default now agrees with the loop, which is a stronger claim than the one
+    this test used to make.
     """
-    assert loop.LOOP == "enhancer"
-    assert set(loop.cast(None)) == set(roleplan.LOOPS["enhancer"])
-    assert set(roleplan.plan(None, "enhancer")) != set(
-        roleplan.plan(None, roleplan.DEFAULT_LOOP)
-    ), "this test only means something while the default differs from the loop"
+    assert roleplan.DEFAULT_LOOP == loop.LOOP
+    assert set(loop.cast(None)) == set(roleplan.LOOPS[loop.LOOP])
+    assert set(roleplan.plan(None)) == set(roleplan.LOOPS[loop.LOOP])
