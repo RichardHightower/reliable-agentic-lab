@@ -69,6 +69,22 @@ FALLBACK_SCOPE = {
 }
 NO_WRITE_SCOPE = ((), ("**",))
 
+# Where one loop needs a role to differ from the tables above. The key is
+# (loop, role) and the value names only the fields that change.
+#
+# No role in the implementer cast holds `Bash`. Python runs the suite through
+# `contract.run("test")`, so a shell buys the cast nothing and costs it the
+# whole fence: the PreToolUse hook below matches `Edit`, `Write`, and
+# `NotebookEdit`, and a role with a shell walks around all three. A code
+# implementer that can run `sed -i` on a failing test does not need `Write` to
+# edit that test into passing.
+OVERRIDES: dict[tuple[str, str], dict] = {
+    ("implementer", "planner"): {"tools": (*READ_TOOLS, "Edit", "Write")},
+    ("implementer", "test_implementer"): {"tools": (*READ_TOOLS, "Edit", "Write")},
+    ("implementer", "code_implementer"): {"tools": (*READ_TOOLS, "Edit", "Write")},
+    ("implementer", "judge"): {"tools": READ_TOOLS},
+}
+
 
 @dataclass(frozen=True)
 class RolePlan:
@@ -114,21 +130,28 @@ def plan(contract, loop: str = DEFAULT_LOOP) -> dict[str, RolePlan]:
 
     roles: dict[str, RolePlan] = {}
     for name in LOOPS[loop]:
+        override = OVERRIDES.get((loop, name), {})
         if name in READERS:
-            roles[name] = RolePlan(
-                name=name,
-                purpose=PURPOSE[name],
-                tools=TOOLS_FOR_READER[name],
-            )
-            continue
-        allow, deny = _scope(contract, name)
-        roles[name] = RolePlan(
-            name=name,
-            purpose=PURPOSE[name],
-            tools=(*READ_TOOLS, "Edit", "Write", "Bash"),
-            allow=allow,
-            deny=deny,
-        )
+            fields = {
+                "purpose": PURPOSE[name],
+                "tools": TOOLS_FOR_READER[name],
+                "allow": (),
+                "deny": (),
+            }
+        else:
+            allow, deny = _scope(contract, name)
+            fields = {
+                "purpose": PURPOSE[name],
+                "tools": (*READ_TOOLS, "Edit", "Write", "Bash"),
+                "allow": allow,
+                "deny": deny,
+            }
+        fields.update(override)
+        # An override that widens a reader into a writer is a mistake, not a
+        # feature. Catching it here beats finding it in a diff of the CRM.
+        if name in READERS and any(tool in WRITE_TOOLS for tool in fields["tools"]):
+            raise ValueError(f"{loop}/{name} is a reader but its override grants a write tool")
+        roles[name] = RolePlan(name=name, **fields)
     return roles
 
 
