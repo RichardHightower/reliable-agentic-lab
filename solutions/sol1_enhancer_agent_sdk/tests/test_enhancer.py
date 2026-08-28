@@ -317,6 +317,15 @@ def test_the_first_touch_adds_the_enhanced_label(target):
     assert gh.added[0] == "enhanced"
 
 
+def test_a_poll_logs_progress_by_default(target, capsys):
+    backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
+    engine(target, backend, FakeGh()).poll()
+    output = capsys.readouterr().out
+    assert "[enhancer] starting poll" in output
+    assert "[enhancer] T001: running judge" in output
+    assert "[enhancer] T001: running doer" in output
+
+
 def test_the_first_poll_runs_a_round_with_no_comment(target):
     """A fresh ticket always gets one round, so the human has something to react to."""
     backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
@@ -327,6 +336,9 @@ def test_the_first_poll_runs_a_round_with_no_comment(target):
     )
     assert outcome.status == "waiting"
     assert "There is no comment yet" in backend.prompts[1]
+    assert "read tickets/T001.md" in backend.prompts[1]
+    assert "under app/" in backend.prompts[1]
+    assert "<current-ticket path=\"tickets/T001.md\">" in backend.prompts[1]
 
 
 def test_the_first_poll_leaves_no_comment_id_behind(target):

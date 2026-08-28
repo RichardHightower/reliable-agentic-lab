@@ -9,6 +9,8 @@ You need `python3`, `gh`, `jq`, `task`, and an `ANTHROPIC_API_KEY`.
 Python is the harness. The model drafts and grades. It does not write files
 and it does not run `/enhancer-loop`.
 
+Both the judge and doer use the `sonnet` model alias.
+
 ## One-time setup
 
 1. Copy the config template and fill in your GitHub username:
@@ -20,7 +22,8 @@ and it does not run `/enhancer-loop`.
    `config.json` also holds `poll_interval` (`"10m"` by default). Use a
    short one (`"1m"`, `"30s"`) while testing.
 
-2. Install the Claude Agent SDK.
+2. Create the folder-local Python virtual environment and install the Claude
+   Agent SDK. This does not modify Homebrew's system Python.
 
    ```bash
    task setup
@@ -98,7 +101,10 @@ the rubric is already green, does the loop mark the ticket ready.
 task run --
 ```
 
-It prints one line per ticket: `passed`, `escalated`, or `waiting`.
+It prints each step as it happens, including GitHub discovery and every judge
+or doer model call, then one final line per ticket: `passed`, `escalated`, or
+`waiting`. Use `task run -- --quiet` when an automation-friendly final report
+is all you need.
 
 Cap it while you are developing. A first poll starts three model calls
 (judge, doer, judge again):

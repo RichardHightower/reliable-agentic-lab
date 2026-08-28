@@ -128,7 +128,7 @@ def options_for(contract, loop: str = DEFAULT_LOOP):
             disallowedTools=NO_WRITE if enhancer or not role.can_write else NO_SHELL,
             maxTurns=DEFAULT_MAX_TURNS,
             background=False,
-            model="haiku" if role.name == "judge" else None,
+            model="sonnet",
         )
 
     writers = [role for role in roles.values() if role.can_write]

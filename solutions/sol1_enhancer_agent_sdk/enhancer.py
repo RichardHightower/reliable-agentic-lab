@@ -373,6 +373,12 @@ class Enhancer:
     prompts: dict = field(default_factory=dict)
     spent_usd: float = 0.0
     turns: int = 0
+    verbose: bool = True
+
+    def _log(self, message: str) -> None:
+        """Print a human-readable progress event without exposing model prompts."""
+        if self.verbose:
+            print(f"[enhancer] {message}", flush=True)
 
     def _ask(self, prompt: str, allow: list[str] | None = None, **extra):
         result = self.backend.run(
@@ -397,7 +403,11 @@ class Enhancer:
         """Grade one ticket file. The judge holds no write tool."""
         import turns
 
-        return turns.judge(self, path)
+        self._log(f"{path.stem}: running judge (model call; may take a minute)")
+        verdict = turns.judge(self, path)
+        missing = ", ".join(verdict["missing_fields"]) or "nothing"
+        self._log(f"{path.stem}: judge finished; missing {missing}")
+        return verdict
 
     def draft(
         self, tkt: ticket_mod.Ticket, kind: str, missing: list[str], comment: str | None
@@ -405,7 +415,10 @@ class Enhancer:
         """Ask the doer for a body. Python writes the candidate, matching the plugin."""
         import turns
 
-        return turns.draft(self, tkt, kind, missing, comment)
+        self._log(f"{tkt.id}: running doer (model call; may take a minute)")
+        candidate = turns.draft(self, tkt, kind, missing, comment)
+        self._log(f"{tkt.id}: doer returned candidate {candidate.name}")
+        return candidate
 
     def ingest_github_issues(self) -> None:
         """GitHub is the ticket source. A UI-created issue becomes a local draft."""
@@ -414,7 +427,10 @@ class Enhancer:
             return
         folder = Path(self.repo) / "tickets"
         folder.mkdir(parents=True, exist_ok=True)
-        for issue in list_open():
+        self._log("fetching open GitHub issues")
+        issues = list_open()
+        self._log(f"found {len(issues)} open GitHub issue(s)")
+        for issue in issues:
             title = (issue.get("title") or "").strip()
             if title.lower().startswith("[retired-"):
                 continue
@@ -440,6 +456,7 @@ class Enhancer:
                     issue_to_ticket_text(tid, number, title, issue.get("body") or ""),
                     encoding="utf-8",
                 )
+                self._log(f"{tid}: created local draft from GitHub issue #{number}")
                 continue
             parsed = ticket_mod.parse(path.read_text(encoding="utf-8"), ticket_id=path.stem)
             if parsed.state == "ready" or parsed.meta.get("loop") not in (None, "", "enhancer"):
@@ -451,6 +468,7 @@ class Enhancer:
         self, ticket_id: str | None = None, *, simulate_comment: str | None = None
     ) -> list[Outcome]:
         """One poll over every open ticket, or over the one that was named."""
+        self._log(f"starting poll in {self.repo}")
         self.ingest_github_issues()
         if ticket_id:
             path = Path(self.repo) / "tickets" / f"{ticket_id}.md"
@@ -470,11 +488,14 @@ class Enhancer:
             raise EnhancerError("--simulate-comment needs --ticket, it acts on one ticket")
         else:
             tickets = open_tickets(Path(self.repo))
+        self._log(f"processing {len(tickets)} enhancer draft ticket(s)")
         outcomes = []
         for tkt in tickets:
+            self._log(f"{tkt.id}: starting")
             try:
                 outcomes.append(self._one(tkt, simulate_comment))
             except TicketBlocked as blocked:
+                self._log(f"{tkt.id}: blocked — {blocked}")
                 outcomes.append(Outcome(tkt.id, "blocked", str(blocked)))
         return outcomes
 
@@ -486,6 +507,7 @@ class Enhancer:
         # The frontmatter matters because it outlives the state file, which the
         # `LGTM` pass deletes.
         recorded = tkt.meta.get("github_issue")
+        self._log(f"{tkt.id}: resolving its GitHub issue")
         issue = state.github_issue or (int(recorded) if recorded else None) or self.gh.find_issue(
             tkt.id
         )
@@ -496,6 +518,7 @@ class Enhancer:
             raise TicketBlocked(f"issue {issue} is closed; reopen it")
         if issue is None:
             raise TicketBlocked(f"{tkt.id}: no GitHub issue; run task create-test-tickets")
+        self._log(f"{tkt.id}: using GitHub issue #{issue}")
         set_front_matter(tkt.path, github_issue=str(issue))
         state.github_issue = issue
 
@@ -505,22 +528,26 @@ class Enhancer:
 
         # 4. an escalated ticket waits for a human, not for another poll.
         if "needs-human" in self.gh.labels(issue):
+            self._log(f"{tkt.id}: needs-human label already set")
             return Outcome(tkt.id, "escalated", "needs-human is already set")
 
         # 5. grade the real ticket. The rubric decides ready, never the comment.
         try:
             verdict = self.judge(tkt.path)
         except TicketBlocked as blocked:
+            self._log(f"{tkt.id}: judge stopped — {blocked}; adding needs-human")
             self.gh.add_label(issue, "needs-human")
             return Outcome(tkt.id, "escalated", str(blocked))
 
         # 6. decide from `ready` and LGTM only. Label after a real write, not here.
         if verdict["ready"] and (comment or "").strip() == LGTM:
+            self._log(f"{tkt.id}: rubric green and LGTM received; marking ready")
             set_front_matter(tkt.path, state="ready", loop="implementer")
             self.gh.add_label(issue, "ready")
             state.clear(Path(self.repo), tkt.id)
             return Outcome(tkt.id, "passed", "rubric green and a human said LGTM")
         if verdict["ready"]:
+            self._log(f"{tkt.id}: rubric green; waiting for LGTM")
             if "enhanced" not in self.gh.labels(issue):
                 self.gh.add_label(issue, "enhanced")
             if state.last_comment_id != "asked-lgtm":
@@ -531,6 +558,7 @@ class Enhancer:
 
         exhausted = self._exhausted()
         if exhausted:
+            self._log(f"{tkt.id}: {exhausted}; adding needs-human")
             self.gh.add_label(issue, "needs-human")
             return Outcome(tkt.id, "escalated", exhausted)
 
@@ -538,6 +566,7 @@ class Enhancer:
         try:
             signature = self._improve(tkt, verdict, None, issue)
         except TicketBlocked as blocked:
+            self._log(f"{tkt.id}: doer stopped — {blocked}; adding needs-human")
             self.gh.add_label(issue, "needs-human")
             return Outcome(tkt.id, "escalated", str(blocked))
 
@@ -553,6 +582,7 @@ class Enhancer:
             max_turns=self.max_turns,
         )
         if stop["stop"]:
+            self._log(f"{tkt.id}: {stop['reason']}; adding needs-human")
             self.gh.add_label(issue, "needs-human")
             return Outcome(tkt.id, "escalated", stop["reason"])
         state.round += 1
