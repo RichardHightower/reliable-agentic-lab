@@ -148,13 +148,25 @@ def test_the_parent_is_kept_from_writing_by_the_hook_not_the_allowlist(fake_sdk,
     )
 
 
-def test_the_plugin_is_loaded_and_not_invoked(fake_sdk, work):
+def test_the_plugin_loads_and_the_skill_does_not(fake_sdk, work):
+    """The parent cannot invoke what it was never given.
+
+    `plugins=` is what makes the agent markdown visible, because `cwd` is the
+    work directory and not this folder. `skills=` would hand the parent the
+    loop as a runnable action, and a second orchestrator is exactly the failure
+    Python owning the phases is meant to prevent.
+    """
     fake_sdk()
     options = roles.options_for(work)
     assert options.plugins == [{"type": "local", "path": str(roles.PLUGIN)}]
-    assert options.skills == ["research-loop:research-loop"]
-    # Python owns the phases. Two orchestrators disagree about whose turn it is.
-    assert "Do not invoke the research-loop skill" in options.system_prompt
+    assert options.skills == []
+
+
+def test_the_parent_prompt_does_not_forbid_a_ghost(fake_sdk, work):
+    """A sentence banning something the model was never given teaches the
+    reader the wrong lesson about where the fence is."""
+    fake_sdk()
+    assert "skill" not in roles.options_for(work).system_prompt.lower()
 
 
 def test_the_folder_declares_its_own_search_boundary(fake_sdk, work, monkeypatch):

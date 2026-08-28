@@ -20,6 +20,7 @@ jobs:
       matrix:
         folder:
           - solutions/sol3_research_deep_agents
+          - solutions/sol3_research_agent_sdk
           - solutions/sol4_fixer_deep_agents
           - solutions/sol2_implementer_deep_agents
     steps:

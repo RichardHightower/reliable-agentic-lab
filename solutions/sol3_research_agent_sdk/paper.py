@@ -172,6 +172,57 @@ class Run:
         return None
 
 
+class UnitFailed(RuntimeError):
+    """One unit gave up after its attempts. The caller decides what that costs."""
+
+
+def attempt(run: Run, *, kind: str, do, attempts: int = 2):
+    """Run one unit, and hand it the gate's complaint once before giving up.
+
+    The write cycle has had this since the beginning. Phases 0 to 4 did not, so
+    one malformed answer killed a run that had already paid for its research.
+
+    The unit is the retry granularity, never the phase. Re-running the whole
+    research phase because the fourth question came back without JSON makes you
+    pay again for the three that worked.
+
+    `gates.decide` owns the arithmetic, exactly as it does for the writing. The
+    signature is the failure kind, not its wording, so two identical failures
+    read as a stall and escalate with "not converging" rather than burning the
+    last attempt to watch it happen again.
+
+    `Escalate` passes through untouched. A runtime ceiling is not a turn to
+    retry, and retrying it spends the rest of the budget rediscovering it.
+    """
+    previous: tuple[str, ...] | None = None
+    note = ""
+    for iteration in range(1, attempts + 1):
+        # Never spend on a retry the budget cannot cover.
+        spent = run.exhausted()
+        if spent and iteration > 1:
+            raise UnitFailed(f"{kind}: {spent}")
+        try:
+            return do(note)
+        except Escalate:
+            raise
+        except (TurnFailed, RunFailed) as exc:
+            signature = (kind,)
+            decision = gates.decide(
+                passed=False,
+                iteration=iteration,
+                budget=attempts,
+                signature=signature,
+                previous_signature=previous,
+                usd_left=0.0 if run.exhausted() else 1.0,
+            )
+            run.log(f"    {kind} attempt {iteration}: {exc}")
+            if decision.stop:
+                raise UnitFailed(f"{kind}: {exc}. {decision.reason}") from exc
+            previous = signature
+            note = gates.retry_instruction(decision, [str(exc)])
+    raise UnitFailed(kind)
+
+
 # ---------------------------------------------------------------------------
 # Phases 0 to 4. Each runs once, and skips when its output already exists.
 
@@ -240,13 +291,25 @@ def plan(run: Run) -> dict:
     has no idea what a turn costs.
     """
     prior = run.file("prior-art.md")
-    result = run.turns.plan(
-        run.topic,
-        prior.read_text(encoding="utf-8") if prior.exists() else "",
-        {"questions": run.max_questions, "diagrams": run.max_diagrams},
-    )
-    if not result.get("sections") or not result.get("questions"):
-        raise RunFailed("the planner returned no sections or no questions")
+    prior_text = prior.read_text(encoding="utf-8") if prior.exists() else ""
+
+    def once(note: str) -> dict:
+        drafted = run.turns.plan(
+            run.topic,
+            prior_text,
+            {"questions": run.max_questions, "diagrams": run.max_diagrams},
+            note,
+        )
+        if not drafted.get("sections") or not drafted.get("questions"):
+            raise RunFailed("the planner returned no sections or no questions")
+        return drafted
+
+    try:
+        result = attempt(run, kind="plan", do=once)
+    except UnitFailed as exc:
+        # The plan is the one unit with no partial success to keep. Nothing
+        # downstream has anything to work from.
+        raise RunFailed(str(exc)) from exc
 
     asked, drawn = len(result["questions"]), len(result.get("diagrams", []))
     # A section the planner never asked a question about is a section it meant
@@ -286,6 +349,7 @@ def do_research(run: Run) -> dict:
     planned = run.read_json("plan.json")
     findings: list[dict] = []
     claims: list[dict] = []
+    failed: list[dict] = []
     stopped = None
 
     for question in planned["questions"]:
@@ -296,7 +360,16 @@ def do_research(run: Run) -> dict:
         if stopped:
             break
         try:
-            answer = run.turns.research(question["text"])
+            answer = attempt(
+                run,
+                kind=f"research:{question['id']}",
+                do=lambda note, q=question: run.turns.research(q["text"], note),
+            )
+        except UnitFailed as exc:
+            # One question that will not answer is not a dead run. Record it
+            # and move on. The paper is thinner, and the record says why.
+            failed.append({"id": question["id"], "text": question["text"], "reason": str(exc)})
+            continue
         except research.BudgetExceeded as exc:
             stopped = str(exc)
             break
@@ -324,7 +397,10 @@ def do_research(run: Run) -> dict:
                 seen.add(source["url"])
                 sources.append(source)
 
-    run.write_json("sources.json", {"findings": findings, "sources": sources, "stopped": stopped})
+    run.write_json(
+        "sources.json",
+        {"findings": findings, "sources": sources, "failed": failed, "stopped": stopped},
+    )
     run.write_json("claims.json", {"claims": claims})
     if not claims:
         # Two different failures, and the reason is what a person acts on.
@@ -337,6 +413,7 @@ def do_research(run: Run) -> dict:
         "findings": len(findings),
         "claims": len(claims),
         "sources": len(sources),
+        "failed": len(failed),
         "stopped": stopped,
     }
 

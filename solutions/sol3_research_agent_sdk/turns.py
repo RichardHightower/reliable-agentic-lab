@@ -88,10 +88,10 @@ def extract_json(text: str) -> dict | None:
 class Turns:
     """What a runtime must be able to do. Six calls, and no seventh."""
 
-    def plan(self, topic: str, prior_art: str, budget: dict | None = None) -> dict:
+    def plan(self, topic: str, prior_art: str, budget: dict | None = None, note: str = "") -> dict:
         raise NotImplementedError
 
-    def research(self, question: str) -> dict:
+    def research(self, question: str, note: str = "") -> dict:
         raise NotImplementedError
 
     def verify(self, claim: str) -> dict:
@@ -143,7 +143,7 @@ class SdkTurns(Turns):
             raise TurnFailed(f"{agent} returned no JSON object: {(result.output or '')[:400]}")
         return parsed
 
-    def plan(self, topic: str, prior_art: str, budget: dict | None = None) -> dict:
+    def plan(self, topic: str, prior_art: str, budget: dict | None = None, note: str = "") -> dict:
         known = (
             f"Prior art on this topic is in prior-art.md. Read it first.\n{prior_art[:2000]}"
             if prior_art
@@ -163,14 +163,16 @@ class SdkTurns(Turns):
         )
         return self._json(
             "research-planner",
-            f"Plan a technical white paper on: {topic}\n\n{limits}\n\n{known}\n\n{GROUNDING}",
+            f"Plan a technical white paper on: {topic}\n\n{limits}\n\n{known}\n"
+            f"{note}\n\n{GROUNDING}",
             PLAN_SCHEMA,
         )
 
-    def research(self, question: str) -> dict:
+    def research(self, question: str, note: str = "") -> dict:
         return self._json(
             "research-researcher",
-            f"Answer this research question from primary sources: {question}\n\n{GROUNDING}",
+            f"Answer this research question from primary sources: {question}\n"
+            f"{note}\n\n{GROUNDING}",
             RESEARCH_SCHEMA,
         )
 
@@ -241,7 +243,7 @@ class OfflineTurns(Turns):
 
     backend: research.Backend
 
-    def plan(self, topic: str, prior_art: str, budget: dict | None = None) -> dict:
+    def plan(self, topic: str, prior_art: str, budget: dict | None = None, note: str = "") -> dict:
         sections = [
             {"id": "problem", "heading": "The problem", "goal": f"State what {topic} must solve."},
             {
@@ -270,7 +272,7 @@ class OfflineTurns(Turns):
             ],
         }
 
-    def research(self, question: str) -> dict:
+    def research(self, question: str, note: str = "") -> dict:
         finding = self.backend.search(question)
         # One claim per finding. The fixture records a paragraph, not a claim
         # list, and inventing more claims than the source supports is the exact

@@ -128,8 +128,8 @@ class RecordingTurns:
         # is the fallback path and therefore the default under test.
         self.root = root
 
-    def plan(self, topic, prior_art, budget=None):
-        self.asked.append(("plan", topic, prior_art, budget))
+    def plan(self, topic, prior_art, budget=None, note=""):
+        self.asked.append(("plan", topic, prior_art, budget, note))
         return {
             "title": f"On {topic}",
             "abstract": "An abstract.",
@@ -138,8 +138,8 @@ class RecordingTurns:
             "diagrams": [],
         }
 
-    def research(self, question):
-        self.asked.append(("research", question))
+    def research(self, question, note=""):
+        self.asked.append(("research", question, note))
         claims = self.claims
         if claims is None:
             claims = [
