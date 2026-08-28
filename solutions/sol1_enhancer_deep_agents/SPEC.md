@@ -183,8 +183,11 @@ grades. Everything else is computed.
 7. The doer writes `tickets/<id>.enhancer-candidate.md`. The judge grades that
    file. The draft replaces the real ticket only when its missing set is a
    proper subset of the current one. "Not worse" is not good enough.
-8. `check_stop.py` decides the other two exits: budget spent, or the same gaps
-   two rounds running. Either one adds `needs-human` and stops.
+8. `check_stop.py` decides the three loop exits: done, cost, or max turns.
+   Done is a green rubric. Cost is `spent_usd >= budget.usd`. Max turns is
+   `turns + 1 >= budget.iterations`. A repeated missing-field signature is
+   stuck work, not an exit. Cost and max turns add `needs-human` and stop.
+   Done waits for a human `LGTM`.
 
 The doer is the only role holding a write tool, and the scope check inside that
 tool keeps it within `tickets/**`. The candidate file lives there, so the one

@@ -97,61 +97,58 @@ def test_the_check_fields_demo_still_passes(capsys):
 # -- check_stop ------------------------------------------------------------
 
 
+def _stop(**kwargs):
+    defaults = dict(done=False, turns=0, max_turns=3, spent_usd=0.0, max_usd=2.0)
+    defaults.update(kwargs)
+    return check_stop.check(**defaults)
+
+
 def test_the_first_round_does_not_stop():
-    assert check_stop.check(0, 3, ["value"], None) == {"stop": False, "reason": None}
+    assert _stop(turns=0) == {"stop": False, "reason": None}
 
 
-def test_a_changed_signature_inside_budget_does_not_stop():
-    assert check_stop.check(1, 3, ["value"], ["other"]) == {"stop": False, "reason": None}
+def test_a_changed_round_inside_the_caps_does_not_stop():
+    assert _stop(turns=1, spent_usd=0.4) == {"stop": False, "reason": None}
 
 
-def test_the_same_signature_two_rounds_running_stops():
-    """A loop that keeps finding the same gap is not converging, it is stuck."""
-    result = check_stop.check(1, 3, ["value"], ["value"])
-    assert result == {"stop": True, "reason": "same signature two rounds running"}
+def test_done_stops_even_when_the_caps_are_spent():
+    """The rubric is green. Cost and turns do not override that."""
+    assert _stop(done=True, turns=2, spent_usd=9.0) == {"stop": True, "reason": "done"}
 
 
-def test_a_spent_budget_stops_even_when_the_signature_changed():
-    """Round 2 is the third round. `round + 1 == budget` spends it."""
-    assert check_stop.check(2, 3, ["value"], ["other"]) == {"stop": True, "reason": "budget spent"}
+def test_cost_stops_before_max_turns():
+    """Both caps can fire. Dollars are the more useful reason to report."""
+    assert _stop(turns=2, spent_usd=2.0, max_usd=2.0) == {"stop": True, "reason": "cost"}
 
 
-def test_a_repeated_signature_is_reported_before_a_spent_budget():
-    """Both exits fire here. The stall is the more useful reason to report."""
-    assert check_stop.check(2, 3, ["value"], ["value"])["reason"] == (
-        "same signature two rounds running"
-    )
+def test_max_turns_stops_when_cost_is_still_under():
+    """Round 2 is the third round. `turns + 1 == max_turns` spends it."""
+    assert _stop(turns=2, spent_usd=0.1) == {"stop": True, "reason": "max turns"}
 
 
-def test_an_empty_signature_repeated_still_stops():
-    """Two clean rounds in a row is a stall, not a reason to keep spending."""
-    assert check_stop.check(0, 5, [], [])["stop"] is True
+def test_a_turn_cap_of_one_stops_on_the_first_round():
+    assert _stop(turns=0, max_turns=1) == {"stop": True, "reason": "max turns"}
 
 
-def test_a_first_round_with_no_previous_signature_never_compares():
-    """`None` means "there was no previous round", which is not a match."""
-    assert check_stop.check(0, 5, [], None)["stop"] is False
-
-
-def test_a_budget_of_one_stops_on_the_first_round():
-    assert check_stop.check(0, 1, ["value"], None) == {"stop": True, "reason": "budget spent"}
+def test_hitting_the_dollar_cap_exactly_stops():
+    assert _stop(spent_usd=2.0, max_usd=2.0)["reason"] == "cost"
 
 
 def test_check_stop_reads_its_payload_from_the_command_line(monkeypatch, capsys):
-    payload = json.dumps({"round": 2, "budget": 3, "signature": ["value"]})
+    payload = json.dumps({"done": False, "turns": 2, "max_turns": 3, "spent_usd": 0.1, "max_usd": 2.0})
     monkeypatch.setattr("sys.argv", ["check_stop.py", payload])
     check_stop.main()
-    assert json.loads(capsys.readouterr().out) == {"stop": True, "reason": "budget spent"}
+    assert json.loads(capsys.readouterr().out) == {"stop": True, "reason": "max turns"}
 
 
 def test_check_stop_reads_its_payload_from_stdin(monkeypatch, capsys):
     payload = json.dumps(
-        {"round": 1, "budget": 3, "signature": ["value"], "previous_signature": ["value"]}
+        {"done": False, "turns": 0, "max_turns": 3, "spent_usd": 2.0, "max_usd": 2.0}
     )
     monkeypatch.setattr("sys.argv", ["check_stop.py"])
     monkeypatch.setattr("sys.stdin", io.StringIO(payload))
     check_stop.main()
-    assert json.loads(capsys.readouterr().out)["stop"] is True
+    assert json.loads(capsys.readouterr().out) == {"stop": True, "reason": "cost"}
 
 
 def test_the_check_stop_demo_still_passes(capsys):

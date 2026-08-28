@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import adapter
+import pytest
 
 
 class FakeAgent:
@@ -123,3 +124,28 @@ def test_run_returns_the_last_message_not_the_state_repr(tmp_path, monkeypatch):
     result = adapter.DeepAgentsBackend(agent).run(repo=tmp_path, prompt="judge", allow=[])
     assert result.output == verdict
     assert "messages" not in result.output
+    assert result.usd == 0.0
+
+
+def test_last_usd_sums_usage_metadata_costs():
+    state = {
+        "messages": [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "ok", "usage_metadata": {"total_cost_usd": 0.4}},
+            {"role": "assistant", "content": "done", "usage_metadata": {"total_cost": 0.1}},
+        ]
+    }
+    assert adapter.last_usd(state) == pytest.approx(0.5)
+
+
+def test_run_charges_the_cost_check_stop_will_see(tmp_path, monkeypatch):
+    _diffs(monkeypatch, before=set(), after=set())
+    agent = FakeAgent(
+        result={
+            "messages": [
+                {"role": "assistant", "content": "done", "usage_metadata": {"cost": 0.25}},
+            ]
+        }
+    )
+    result = adapter.DeepAgentsBackend(agent).run(repo=tmp_path, prompt="draft", allow=[])
+    assert result.usd == pytest.approx(0.25)

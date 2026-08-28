@@ -32,6 +32,7 @@ import check_stop
 import ticket as ticket_mod
 
 BUDGET = 3
+MAX_USD = 2.0
 CANDIDATE_SUFFIX = ".enhancer-candidate.md"
 LGTM = "LGTM"
 
@@ -118,6 +119,7 @@ class State:
     last_comment_id: str | None = None
     round: int = 0
     previous_signature: list[str] | None = None
+    spent_usd: float = 0.0
     # True until a poll has saved this ticket's state at least once. Derived
     # from the file, never from `github_issue`: step 2 fills that in before
     # step 3 asks, so reading it there would make every first poll look like a
@@ -141,6 +143,7 @@ class State:
             ),
             round=int(raw.get("round", 0)),
             previous_signature=raw.get("previous_signature"),
+            spent_usd=float(raw.get("spent_usd") or 0.0),
             fresh=False,
         )
 
@@ -420,10 +423,14 @@ class Enhancer:
     backend: object
     gh: object
     budget: int = BUDGET
+    max_usd: float = MAX_USD
     prompts: dict = field(default_factory=dict)
+    _round_usd: float = field(default=0.0, repr=False, compare=False)
 
     def _ask(self, prompt: str, allow: list[str] | None = None):
-        return self.backend.run(repo=Path(self.repo), prompt=prompt, allow=allow or [])
+        result = self.backend.run(repo=Path(self.repo), prompt=prompt, allow=allow or [])
+        self._round_usd += float(getattr(result, "usd", 0.0) or 0.0)
+        return result
 
     def judge(self, path: Path) -> dict:
         """Grade one ticket file. The judge holds no write tool, so `allow` is empty."""
@@ -548,6 +555,7 @@ class Enhancer:
 
     def _one(self, tkt: ticket_mod.Ticket, simulate_comment: str | None) -> Outcome:
         state = State.load(Path(self.repo), tkt.id)
+        self._round_usd = 0.0
 
         # 2. find the issue. Never create one. First hit wins, in this order: the state
         # file, the ticket frontmatter, then a title search across every state.
@@ -598,15 +606,26 @@ class Enhancer:
         # 7. enhance because the ticket still needs work, not because someone commented.
         signature = self._improve(tkt, verdict, None, issue)
 
-        # 8. the exits, computed rather than judged.
-        stop = check_stop.check(state.round, self.budget, signature, state.previous_signature)
+        # 8. the exits, computed rather than judged. Three of them: cost, max
+        # turns, or done. A repeated signature is stuck work, not an exit.
+        state.spent_usd += self._round_usd
+        stop = check_stop.check(
+            done=not signature,
+            turns=state.round,
+            max_turns=self.budget,
+            spent_usd=state.spent_usd,
+            max_usd=self.max_usd,
+        )
+        if stop["reason"] == "done":
+            # `_improve` already told the issue the draft is ready for LGTM.
+            state.last_comment_id = "asked-lgtm"
+            state.save(Path(self.repo), tkt.id)
+            return Outcome(tkt.id, "waiting", "done, waiting for LGTM")
         if stop["stop"]:
             self.gh.add_label(issue, "needs-human")
             return Outcome(tkt.id, "escalated", stop["reason"])
         state.round += 1
         state.previous_signature = signature
-        if not signature:
-            state.last_comment_id = "asked-lgtm"
         state.save(Path(self.repo), tkt.id)
         return Outcome(
             tkt.id, "waiting", f"round {state.round}, still missing {', '.join(signature)}"
