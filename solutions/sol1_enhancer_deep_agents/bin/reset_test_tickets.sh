@@ -5,8 +5,9 @@
 # title equals the ticket H1. Closing is not enough. This script rewrites
 # every matching title, open or closed, to [retired-Txxx-<timestamp>] ...,
 # then closes it. It also drops github_issue from the ticket files, deletes
-# enhancer state, restores tracked tickets from git, and removes T900/T901/T902
-# so they get rewritten as fresh drafts.
+# enhancer state, restores tracked tickets from git, and removes every
+# untracked ticket file so the seeds and any GitHub-ingested ticket are
+# rewritten as fresh drafts.
 set -euo pipefail
 
 TARGET="${1:-}"
@@ -214,9 +215,17 @@ for path in "$TICKETS"/T*.md; do
   fi
 done
 
-for id in T900 T901 T902; do
-  rm -f "$TICKETS/${id}.md" "$TICKETS/${id}.enhancer-candidate.md"
-done
+# Every ticket file this harness made is untracked: the seed stubs, a ticket
+# ingested from a GitHub issue (T<number>.md), and any candidate a dead run
+# left behind. A tracked ticket shipped with the repo, and the git restore
+# above already put it back. Delete by that rule, not by a hardcoded id list,
+# so a ticket nobody named here still gets cleaned up.
+git -C "$TARGET" ls-files --others --exclude-standard tickets \
+  | grep -E '/T[^/]*\.md$' \
+  | while IFS= read -r rel; do
+      rm -f "$TARGET/$rel"
+      echo "removed untracked $rel"
+    done || true
 
 echo
 echo "retired. Next: task create-test-tickets"
