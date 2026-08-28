@@ -24,7 +24,7 @@ Do not survey seven production loops as labs. Name them. Build one graph.
 Say the shape of the hour: build for 12 minutes, type for 18, land for 5, then
 close for 10.
 
-13:45 Central. 14:45 Eastern.
+13:15 Central. 14:15 Eastern.
 
 ---
 
@@ -57,10 +57,10 @@ budget for no work. They saw this anti-pattern in Module 1.
 
 ## s4-05. Four things around the loop
 
-This is `loops/unattended.py` in one picture. Durable state, a hard budget, a
+This is `solutions/sol4_fixer_agent_sdk/loop.py` in one picture. Durable state, a hard budget, a
 written trace, an exit code.
 
-The loop itself is `loops/fixer.py`. Unattended wraps it.
+The loop itself is `solutions/sol4_fixer_agent_sdk/fixer.py`. The SDK port wraps it.
 
 ---
 
@@ -86,7 +86,8 @@ The Agent SDK port is the takehome: `solutions/sol4_fixer_agent_sdk/`. Issue #12
 
 Read the five lines.
 
-`permission_mode: acceptEdits` because nobody is there to click Allow.
+`permission_mode: dontAsk` because nobody is there to click Allow, and `dontAsk` fails closed.
+`acceptEdits` auto-accepts every file edit before the allow list is read, which was the bug.
 PreToolUse deny `tests/**` because the fixer cannot weaken a test to reach green.
 `max_turns` is the SDK iteration budget. Python still owns the outer budget.
 Tests after every turn are pytest, not a claim.
@@ -207,7 +208,8 @@ CI needs a number, not a paragraph.
 
 Then flash the workflow. `workflow_dispatch`, `pull_request`, cron `0 15 * * 1-5`.
 
-`loops/unattended.py`:
+There is no `unattended.py`. The live fixer is `solutions/sol4_fixer_agent_sdk/loop.py`.
+The CI contract this hour is teaching:
 
     return {gates.PASS: 0, gates.ESCALATE: 2}.get(state["last_gate"], 1)
 
@@ -239,7 +241,7 @@ The target repo still holds Module 2's work, and `git checkout broken-pr` refuse
 rather than deleting it. That refusal is on brand, but it costs 30 seconds if you
 let them find it.
 
-`loops/fixer.py` `checkout()` raises `SystemExit` naming both ways out: stash, or
+`solutions/sol4_fixer_agent_sdk/fixer.py` `checkout()` raises `SystemExit` naming both ways out: stash, or
 discard. The work is still there. The loop did not decide for the human.
 
 ---
@@ -262,7 +264,7 @@ Name the failing tests and the first real error line.
 Sending the log would put the failure in the middle of a long context, which is
 where accuracy is worst. Callback to Lost in the Middle from Module 1.
 
-The engine answer is `loops/fixer.py` `failure_summary`.
+The engine answer is `solutions/sol4_fixer_agent_sdk/fixer.py` `failure_summary`.
 
 ---
 
@@ -527,7 +529,7 @@ The loop is the product. The prompt is not.
 ## Agent SDK unattended
 
 `query()`, not `ClaudeSDKClient`. Nobody is chatting.
-`permission_mode` is `acceptEdits`.
+`permission_mode` is `dontAsk`.
 PreToolUse is write scope. `tests/**` is denied.
 `max_turns` is the iteration budget.
 Tests after every turn are pytest.

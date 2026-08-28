@@ -228,7 +228,7 @@ layout: title
 minutes: 1
 beat: talk
 _class: lead
-notes: You are here to build one research assistant, not to tour nine frameworks. Say the time out loud. 12:35 Central. Forty minutes. Artifact is a working cited brief, not a survey.
+notes: You are here to build one research assistant, not to tour nine frameworks. Say the time out loud. 12:20 Central. Forty minutes. Artifact is a working cited brief, not a survey.
 -->
 
 <!-- _class: lead -->
@@ -240,7 +240,7 @@ notes: You are here to build one research assistant, not to tour nine frameworks
 
 Session 3. Same graph. A question in. A cited brief out.
 
-Saturday 29 August 2026. 12:35 Central. Forty minutes.
+Saturday 29 August 2026. 12:20 Central. Forty minutes.
 
 Rick Hightower. Spillwave. Packt workshop.
 
@@ -264,11 +264,11 @@ notes: Point at the day. This hour is artifact 03. Same graph they already built
 
 | Block | Start | Minutes |
 |---|---|---|
-| Module 3 research + MCP | 12:35 | 40 |
-| Talk. Tool contracts | 12:35 | 10 |
-| Lab. One research assistant | 12:45 | 25 |
-| Retries, budgets, failure | 13:10 | 5 |
-| Break | 13:15 | 15 |
+| Module 3 research + MCP | 12:20 | 40 |
+| Talk. Tool contracts | 12:20 | 10 |
+| Lab. One research assistant | 12:30 | 25 |
+| Retries, budgets, failure | 12:55 | 5 |
+| Break | 13:00 | 15 |
 
 Artifact they keep: one working research assistant. Not a survey.
 

@@ -147,7 +147,7 @@ House style forbids em dashes. A model will argue. Python will not.
 
 ---
 
-# Commands. Live first. The README still prints a dead task.
+# Commands. Live first.
 
 `task loop:research` is gone with `loops/`.
 

@@ -23,6 +23,7 @@ PlantUML source for the same architecture lives in `slides/diagrams/plantuml/`.
 ## s1-01. title
 
 You are here to engineer a loop, not to collect prompts.
+The subtitle is Loop Engineering. Say it as the first spoken line.
 Say the time out loud. 10:00 Central, 11:00 Eastern.
 
 ## s1-03. Four artifacts

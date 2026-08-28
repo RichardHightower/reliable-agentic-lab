@@ -39,7 +39,7 @@ Locked beats:
 
 Say what this hour is not: a tour of nine frameworks.
 
-Say the time out loud. 12:35 Central. Forty minutes.
+Say the time out loud. 12:20 Central. Forty minutes.
 
 Artifact: one working research assistant. Not a survey.
 
@@ -278,7 +278,7 @@ No model call. Point at `BriefScore.passed`.
 
 ---
 
-## s3-25. loops/brief.py
+## s3-25. labs/lab3_research/brief.py
 
 `ungrounded_citations` and `strip_em_dashes`.
 
@@ -307,7 +307,7 @@ Stop on the alt. Same gaps twice is escalate. Budget left is retry.
 Nothing is never an option. A research loop that silently returns no evidence
 is worse than one that refuses.
 
-Saturday path is `--backend fixture`. File is `loops/fixtures/research.json`.
+Saturday path is `--backend fixture`. File is `solutions/sol3_research_deep_agents/fixtures/research.json`.
 
 ---
 
@@ -389,7 +389,7 @@ A budget that only warns is a budget that gets ignored at three in the morning.
 
 `BudgetExceeded` is a `RuntimeError`. Not a warning, not a nudge.
 
-Live loop in `loops/researcher.py`: `max_usd=0.20`, `max_calls=8`, `soft_usd=0.10`.
+Live loop in `solutions/sol3_research_deep_agents/researcher.py`: `max_usd=0.20`, `max_calls=8`, `soft_usd=0.10`.
 
 Perplexity costs `0.006` per call. Fixture costs nothing, which is why Saturday
 still teaches the cap.

@@ -63,7 +63,7 @@ Teaching block is 10:00 to 14:00 Central. Eventbrite lists 15:00. The extra hour
 
 If a lab runs long, cut talk. Do not cut Module 2. Do not skip the close.
 
-Session 3 title cards that still say 12:35 are stale. Say 12:20. Session 4 title cards that still say 13:45 are stale. Say 13:15.
+Title cards match this table. Session 3 starts 12:20. Session 4 starts 13:15.
 
 ---
 
@@ -307,7 +307,7 @@ A check that reports success while measuring the wrong thing is worse than no ch
 
 That bug class is the whole hour. Callback when you hit the receipt.
 
-Maker means doer. Checker means judge. Say the mapping once on s2-08. Then drop the old words.
+Maker means doer. Checker means judge. Say the mapping once on s2-08. Keep both. Maker and Checker are doctrine. Doer and judge are the Saturday roles.
 
 ---
 
@@ -405,7 +405,7 @@ Break at 12:05. Fifteen minutes. Next module points the same graph at a question
 
 # Module 3. 12:20. Same graph, new object.
 
-Say 12:20 Central, not 12:35.
+Say 12:20 Central.
 
 This hour is not a tour of nine frameworks. Artifact: one working research assistant that cites what it retrieved.
 
@@ -529,7 +529,7 @@ Break at 13:00. Fifteen minutes. Next: nobody at the keyboard.
 
 # Module 4. 13:15. What changes when you walk away.
 
-Say 13:15 Central, not 13:45. Energy is lowest. Keep moving.
+Say 13:15 Central. Energy is lowest. Keep moving.
 
 Build 12. Type 18. Land 5. Close 10.
 
@@ -551,7 +551,7 @@ return {gates.PASS: 0, gates.ESCALATE: 2}.get(state["last_gate"], 1)
 
 Unattended means `query()`, not `ClaudeSDKClient`. Nobody is chatting. Saturday lab stays two functions in `loop.py`. Agent SDK port is takehome, issue 120.
 
-`permission_mode: acceptEdits` because nobody is there to click Allow. PreToolUse deny `tests/**`. Merge is never a tool.
+`permission_mode: dontAsk` because nobody is there to click Allow, and `dontAsk` fails closed. `acceptEdits` auto-accepts every file edit before the allow list is read, so the hook is the only fence, and the hook fails open on a typo. That was the bug. PreToolUse deny `tests/**`. Merge is never a tool.
 
 **Clock.** s4-18 at 12 minutes. Then the lab.
 

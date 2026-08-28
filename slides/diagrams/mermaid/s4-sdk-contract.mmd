@@ -1,6 +1,6 @@
 flowchart TB
   Q["query(). Not a chat client."]
-  Q --> M["permission_mode: acceptEdits"]
+  Q --> M["permission_mode: dontAsk"]
   Q --> H["PreToolUse hook. Deny tests/**"]
   Q --> N["max_turns is the iteration budget"]
   Q --> T["Tests after every turn are pytest"]

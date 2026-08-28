@@ -393,7 +393,7 @@ layout: section
 minutes: 0
 beat: talk
 _class: lead
-notes: Section card. Say the mapping once. Maker means doer. Checker means judge. Then drop the old words.
+notes: Section card. Say the mapping once. Maker means doer. Checker means judge. Keep both. Maker and Checker are doctrine. Doer and judge are the Saturday roles.
 -->
 
 # Maker and Checker
@@ -1161,7 +1161,7 @@ notes: The common stall is score_attempt. People try to compute rows. Tell them 
 
 # The common stall is `score_attempt`.
 
-![w:1000](images/diagram-s2-40.jpg)
+![h:280](images/diagram-s2-40.jpg)
 
 If you stall, read `solutions/sol2_implementer_deep_agents/implementer.py`, `rubric.py`, and `gates.py` in that folder. They are the answer, not a hint.
 

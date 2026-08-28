@@ -84,7 +84,7 @@ denied `tests/**`. Judge writes nothing.
 ## s2-10. Five roles
 
 Orchestrator writes nothing. Planner writes `steps.jsonl`. Two doers. Judge
-reads. Same graph as Session 1, two more parts. `loops/roles.py` · `build()`.
+reads. Same graph as Session 1, two more parts. `solutions/sol2_implementer_deep_agents/roles.py` · `build()`.
 
 ## s2-11. Scope is a type
 
