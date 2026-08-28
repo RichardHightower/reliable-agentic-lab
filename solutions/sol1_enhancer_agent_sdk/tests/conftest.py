@@ -142,6 +142,7 @@ class FakeClaudeAgentOptions:
     max_turns: int | None = None
     max_budget_usd: float | None = None
     output_format: dict | None = None
+    forward_subagent_text: bool = False
     env: dict = field(default_factory=dict)
 
 

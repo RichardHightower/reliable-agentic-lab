@@ -146,6 +146,10 @@ def options_for(contract, loop: str = DEFAULT_LOOP):
         setting_sources=["project"],
         max_turns=DEFAULT_MAX_TURNS,
         max_budget_usd=_budget_usd(contract),
+        # The parent only has Agent.  Forward the nested doer text so the
+        # Python harness can persist the actual candidate instead of a parent
+        # summary of it.
+        forward_subagent_text=True,
     )
     if enhancer:
         kwargs.update(

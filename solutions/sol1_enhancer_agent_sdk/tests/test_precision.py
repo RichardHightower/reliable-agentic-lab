@@ -62,6 +62,7 @@ def test_the_parent_can_only_spawn_a_subagent(contract, fake_sdk):
     assert "Write" in options.disallowed_tools
     assert "Bash" in options.disallowed_tools
     assert options.permission_mode == "dontAsk"
+    assert options.forward_subagent_text is True
 
 
 def test_the_plugin_is_loaded_from_this_folder_not_the_target_repo(contract, fake_sdk):
