@@ -93,9 +93,18 @@ issue_state() {
 find_issue() {
   local id="$1"
   local h1="$2"
-  gh issue list --repo "$REPO" --state all --limit 100 --json number,title \
-    | jq -r --arg id "$id" --arg h1 "$h1" '
-        [ .[] | select((.title | startswith("[" + $id + "]")) or .title == $h1) | .number ]
+  {
+    gh issue list --repo "$REPO" --state open --limit 200 --json number,title
+    gh issue list --repo "$REPO" --state closed --limit 200 --json number,title
+  } | jq -s -r --arg id "$id" --arg h1 "$h1" '
+        add
+        | unique_by(.number)
+        | [ .[]
+            | .title |= gsub("^\\s+|\\s+$";"")
+            | select(.title | startswith("[retired-") | not)
+            | select((.title | startswith("[" + $id + "]")) or .title == $h1)
+            | .number
+          ]
         | first // empty
       '
 }
