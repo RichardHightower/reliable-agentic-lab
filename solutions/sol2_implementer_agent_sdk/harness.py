@@ -20,10 +20,10 @@ from __future__ import annotations
 
 import argparse
 
-from contract import Contract, ContractError
 import roleplan
 import roles as sdk
 from adapter import AgentSdkBackend
+from contract import Contract, ContractError
 
 LOOP = "implementer"
 
@@ -50,9 +50,12 @@ def build(contract):
 def backend(contract) -> AgentSdkBackend:
     """A `doers.Backend` that runs a role's prompt through this runtime.
 
-    This is what a driver hands to `loops.implementer.run(doer=...)` in place
-    of the `reference` stand-in, per GitHub issue #2. Needs `claude-agent-sdk`
-    installed; `build()` is what raises if it is not.
+    A driver hands this to its doer slot in place of a stand-in. The shared
+    `loops/` package this docstring used to name was deleted in #130, and the
+    working Lab 2 loop now lives in `sol2_implementer_deep_agents`. This folder
+    is the cast, the scope, and the runtime wiring, not the driver.
+
+    Needs `claude-agent-sdk` installed. `build()` is what raises if it is not.
     """
     return AgentSdkBackend(build(contract))
 

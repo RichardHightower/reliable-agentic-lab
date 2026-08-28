@@ -1,13 +1,31 @@
-# Standalone. No dependency on the root Taskfile. `claude-agent-sdk` is not
-# installed here, so the only task that can run without it is the role table.
+# Standalone. No dependency on the root Taskfile.
+#
+# `task test` and `task table` need no SDK, no API key, and no clone. The
+# `test` target used to be `--table-only`, which printed a table and asserted
+# nothing while SPEC.md claimed it checked two things.
 version: '3'
+
+vars:
+  PY: '{{.PY | default "python3"}}'
 
 tasks:
   default:
     cmds: [task --list]
 
   test:
-    desc: Print the role table and stop. No SDK needed.
+    desc: Unit tests for this folder. No SDK, no API key, no clone.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 harness.py --table-only
+      - '{{.PY}} -m pytest tests -q'
+
+  table:
+    desc: Print the role table and stop, with no SDK installed.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - '{{.PY}} harness.py --table-only'
+
+  setup:
+    desc: Install the Agent SDK and pytest into the venv you activated.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - '{{.PY}} -m pip install --quiet claude-agent-sdk pytest'

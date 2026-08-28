@@ -10,7 +10,7 @@ Take-home **configuration port**. It does not run the eight-step loop.
 
 This is the role graph. The live harness is `sol2_implementer_deep_agents`.
 
-It prints the role table and builds `ClaudeAgentOptions`. There is no `implementer.py`, no `gates.py`, no `rubric.py`, no `tests/`.
+It prints the role table and builds `ClaudeAgentOptions`. There is no `implementer.py`, no `gates.py`, and no `rubric.py`. The driver lives in the Deep Agents twin. There is a `tests/` now, and it is what keeps the fence honest.
 
 
 ---
@@ -54,7 +54,7 @@ python3 harness.py --repo CRM
   └── ClaudeAgentOptions
          agents for planner, test_implementer, code_implementer, judge
          permission_mode=dontAsk
-         PreToolUse scope_hook on every writing role
+         one PreToolUse scope_hook for the whole cast
 ```
 
 No call to `implementer.run`.
@@ -73,7 +73,7 @@ hookSpecificOutput.hookEventName = PreToolUse
 hookSpecificOutput.permissionDecision = deny
 ```
 
-A typo fails **open**. `max_turns=12` is per subagent, not the harness budget.
+A typo fails **open**. The field is `maxTurns`, camelCase: `max_turns=` raises `TypeError` on the real SDK, and a test fake taking `**kwargs` hides it.
 
 
 ---
@@ -84,7 +84,7 @@ A typo fails **open**. `max_turns=12` is per subagent, not the harness budget.
 cd solutions/sol2_implementer_agent_sdk
 python3 harness.py --table-only
 python3 harness.py --repo ../../work/northwind-field-crm
-task test    # that is --table-only
+task test    # pytest. task table is --table-only
 ```
 
 `--table-only` with a missing repo still prints the table and exits 0.
@@ -117,7 +117,7 @@ If judge prints `yes`, the port is wrong. Stop.
 
 - [ ] table: five roles, judge `no`
 - [ ] no `implementer.py` in this folder (on purpose)
-- [ ] `task test` needs no key
+- [ ] `task test` needs no key, no SDK, and no clone
 - [ ] you can name the folder that actually runs the loop
 
 
