@@ -525,7 +525,7 @@ notes: Read the exit codes. 0 pass, 2 escalate, 1 crash. Escalate is not a crash
 
 ```mermaid
 flowchart LR
-  U["python -m loops.unattended"] --> G{"last_gate"}
+  G{"last_gate"}
   G -->|pass| E0["exit 0"]
   G -->|escalate| E2["exit 2"]
   G -->|anything else| E1["exit 1"]
