@@ -1,0 +1,47 @@
+# Standalone extra credit 2. Copy the Lab 1 plugin here, then expose it
+# with ngrok. Every path is built from TASKFILE_DIR.
+version: '3'
+
+vars:
+  TARGET: '{{.TARGET | default (printf "%s/../../../work/northwind-field-crm" .TASKFILE_DIR)}}'
+
+tasks:
+  default:
+    cmds: [task --list]
+
+  copy-plugin:
+    desc: Copy solutions/sol1_enhancer/.claude (and config example) into this folder.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/copy_plugin.sh
+
+  clone:
+    desc: Clone your fork (from config.json) into work/. Skips if it is already there.
+    status:
+      - test -d {{.TARGET}}/.git
+    cmds:
+      - test -f {{.TASKFILE_DIR}}/config.json || (echo "copy config.json.example to config.json first, and fill in your GitHub username" && exit 1)
+      - test -d {{.TASKFILE_DIR}}/.claude/skills/enhancer-loop || (echo "run task copy-plugin first" && exit 1)
+      - mkdir -p {{.TASKFILE_DIR}}/../../../work
+      - git clone --quiet https://github.com/$(jq -r .fork_owner {{.TASKFILE_DIR}}/config.json)/$(jq -r .repo_name {{.TASKFILE_DIR}}/config.json).git {{.TARGET}}
+
+  create-test-tickets:
+    desc: Write a few draft tickets into the target repo, for testing.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - test -x bin/setup_test_tickets.sh || (echo "run task copy-plugin first" && exit 1)
+      - bin/setup_test_tickets.sh {{.TARGET}}
+
+  run:
+    desc: One poll-and-act step of the copied enhancer plugin.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - test -d {{.TASKFILE_DIR}}/.claude/skills/enhancer-loop || (echo "run task copy-plugin first" && exit 1)
+      - claude -p "/enhancer-loop --repo {{.TARGET}} {{.CLI_ARGS}}"
+
+  listen:
+    desc: Start the ngrok adapter on WEBHOOK_PORT (default 8765).
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - test -d {{.TASKFILE_DIR}}/.claude/skills/enhancer-loop || (echo "run task copy-plugin first" && exit 1)
+      - python3 bin/webhook_trigger.py

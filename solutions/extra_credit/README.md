@@ -5,7 +5,7 @@ One folder per assignment. `s_ext_<n>` matches `ext_<n>` under
 
 | Folder | Assignment | Holds |
 |---|---|---|
-| `s_ext_2_ngrok` | the public tunnel | `SPEC.md` |
+| `s_ext_2_ngrok` | ngrok adapter for the Lab 1 enhancer plugin | `SPEC.md`, `bin/`, `Taskfile.yml`, `tests/` |
 | `s_ext_5_digitalocean` | the Droplet deployment | `SPEC.md` |
 
 The webhook, groom-ticket, and fix-pr solution folders are gone.
@@ -19,8 +19,10 @@ Those answers live in the Saturday lab folders instead.
 | `fake_github.py` | a client that records instead of calling, for the tests |
 | `__init__.py` | `ROOT` and `TARGET`, defined once |
 
-Assignments 2 and 5 hold no Python. They put a receiver somewhere GitHub can
-reach it, so their answer is a procedure.
+Assignment 2 copies `solutions/sol1_enhancer` into its own folder, then
+adapts GitHub webhooks through ngrok onto `task run`. It does not import the
+Lab 1 folder at runtime. Assignment 5 is still a procedure that puts a
+receiver somewhere GitHub can reach.
 
 ## Run the tests
 
@@ -28,9 +30,11 @@ reach it, so their answer is a procedure.
 task test
 ```
 
-The GitHub paths use `fake_github.py` and need no token.
+The GitHub paths use `fake_github.py` and need no token. The ngrok adapter
+tests need no ngrok and no Claude.
 
 ## The rule these assignments exist to show
 
-The trigger moves out of the loop. The exits stay in it. A workflow file starts
-the run. It never decides when to stop. There is no shared engine.
+The trigger moves out of the loop. The exits stay in it. A workflow file or
+a webhook starts the run. It never decides when to stop. There is no shared
+engine.
