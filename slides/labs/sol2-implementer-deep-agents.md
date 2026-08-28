@@ -13,16 +13,55 @@ Python holds Pass / Retry / Escalate. Deep Agents is the maker. The red gate is 
 
 ---
 
-# What this folder actually is
+# What this folder is
 
 | File | Role |
 |---|---|
-| `harness.py` | `red_gate`, `run_loop`, CLI `--table-only` / `--doer` |
-| `implementer.py` | eight-step loop (278 lines) |
-| `doers.py` | `none` / `reference` / `cli` / Deep Agents backend |
-| `rubric.py` / `gates.py` / `contract.py` | copies, not imports from a library |
-| `roles.py` | `create_deep_agent`, per-subagent tools |
-| `tests/` | judge read-only, refuse `tests/**`, red-gate ids, same-signature escalate |
+| `harness.py` | `red_gate`, `run_loop`, CLI |
+| `implementer.py` | eight-step loop |
+| `doers.py` | `none` / `reference` / `cli` / Deep Agents |
+| `rubric.py` / `gates.py` / `contract.py` | copies, not a library |
+| `roles.py` | `create_deep_agent` |
+| `tests/` | judge read-only, refuse `tests/**` |
+
+
+---
+
+# Why it exists
+
+Saturday fills three stubs. There is no drop-in `harness.py`. This folder is the shipped eight-step answer.
+
+`task loop:implementer` is gone from the root Taskfile. Demo from here.
+
+
+---
+
+# Learning objectives
+
+- Walk `implementer.run` step by step
+- Prove `--doer none` escalates
+- Prove `--doer reference` can pass under WriteScope
+- Configure Deep Agents so the judge holds `read_file` only
+- Grep for `from loops` and fail if it returns
+
+
+---
+
+# Starting architecture
+
+```
+orchestrator  writes nothing, owns budget
+  planner            steps.jsonl
+  test_implementer   tests/**
+  code_implementer   app/**, denied tests/**
+  judge              read_file only
+           │
+           ▼
+     red gate  →  ten-row rubric  →  gates.decide
+           │
+           ▼
+     .harness/last-implementer.json
+```
 
 
 ---
@@ -30,13 +69,27 @@ Python holds Pass / Retry / Escalate. Deep Agents is the maker. The red gate is 
 # Eight steps in `implementer.run`
 
 1. Read ticket. Refuse if not `ready`.
-2. Planner writes `steps.jsonl`. `Plan.validate` requires a validation statement and at least one `test_implementer` step.
+2. `plan_for`: one test step and one code step per criterion. Derived, not generated.
 3. `test_implementer` writes under `tests/**`.
-4. Red gate on `reports/junit.xml`. Empty new-ids → escalate.
-5. `code_implementer` writes `app/**`, denied `tests/**`, until green.
+4. Red gate. Empty new-ids → escalate.
+5. `code_implementer` writes `app/**` until green.
 6. Ten-row rubric. No model.
-7. Final judge is described in the Session 2 deck. This port passes `judge_done=None`, so a green rubric is enough.
-8. `gates.decide`. Trace → `.harness/last-implementer.json`.
+7. `judge_done=None`, so a green rubric is enough. Session 2 still teaches a model judge.
+8. `gates.decide`. Trace to `.harness/last-implementer.json`.
+
+
+---
+
+# Red gate
+
+```python
+def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
+    return {test_id for test_id in after_failed if test_id not in before}
+```
+
+A test that already existed and still fails is not proof of a new contract.
+
+`--doer none` hits this every time. If that run were green, the harness would be lying.
 
 
 ---
@@ -46,12 +99,12 @@ Python holds Pass / Retry / Escalate. Deep Agents is the maker. The red gate is 
 ```python
 return create_deep_agent(
     model="anthropic:claude-sonnet-5",
-    tools=[run_tests_tool(repo)],   # orchestrator runs tests, cannot edit them
+    tools=[run_tests_tool(repo)],
     subagents=subagents_for(contract, loop),
 )
 ```
 
-Judge tools = `["read_file"]`. Code-implementer write tool refuses `tests/**` with a sentence, not an exception.
+Judge tools = `["read_file"]`. Code-implementer write tool refuses `tests/**` with a sentence.
 
 `create_deep_agent` does **not** count retries. Python still owns `gates.decide`.
 
@@ -64,18 +117,55 @@ Judge tools = `["read_file"]`. Code-implementer write tool refuses `tests/**` wi
 cd solutions/sol2_implementer_deep_agents
 python3 -m pytest tests -q
 python3 harness.py --table-only
-python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
 python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer none
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
 python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer deep
 ```
 
-`--doer deep` needs `deepagents` and `ANTHROPIC_API_KEY`. Tests do not.
+`--doer deep` needs `deepagents` and a key. Tests do not.
+
+
+---
+
+# Expected results
+
+`--doer none`:
+
+```
+gate: escalate
+reason: red gate: no new test was observed failing.
+```
+
+`--doer reference`: copies `known-good` into `tests/**` then `app/**`, each phase bound by that role's WriteScope. Ten PASS rows. `gate: pass`.
+
+
+---
+
+# Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `task loop:implementer` missing | engine deleted | run this `harness.py` |
+| `--doer none` is green | red gate not stopping | empty new-ids must escalate |
+| Wrote `tests/**` as coder | write tool not scoped | sentence refusal |
+| `from loops` in a file | design leaked | `test_standalone.py` fails the build |
+
+
+---
+
+# Validation
+
+- [ ] pytest: judge tools `== ["read_file"]`
+- [ ] coder write to `tests/test_due.py` returns REFUSED
+- [ ] `_new_test_ids({"old"}, {"old","new"}) == {"new"}`
+- [ ] same signature twice → `ESCALATE`
+- [ ] `--table-only` prints `judge` with no repo
 
 
 ---
 
 # Recap
 
-Same role table as Saturday. Enforcement is a missing tool on the subagent, plus a path check inside the write tool, plus Python on the outside.
+Same role table as Saturday. Enforcement is a missing tool, plus a path check, plus Python on the outside.
 
-If a port imports `loops`, the design leaked. `test_standalone.py` greps for that import and fails the build.
+If a port imports `loops`, the design leaked.

@@ -17,13 +17,29 @@ Work from `labs/lab3_research`.
 
 ---
 
+# What you will build
+
+Two function bodies:
+
+```python
+def plan_questions(question: str) -> list[str]: ...
+def check_brief(body: str, sources: list[str]) -> brief.BriefScore: ...
+```
+
+Already shipped: `brief.py` (the judge). Do not reimplement grounding.
+
+**Final outcome.** Three checkable sub-questions. Four arithmetic rows on the brief. No model in the judge.
+
+
+---
+
 # Why this lab exists
 
 A code loop stops when tests go green. A research loop has no equivalent. "Keep searching until confident" is not a stop condition.
 
-Tool output is untrusted input. Your search results are a document the internet wrote, not a system prompt.
+Tool output is untrusted input. Search results are a document the internet wrote, not a system prompt.
 
-**Artifact.** A working research assistant that cites what it retrieved. Saturday path uses the fixture backend. No signup form.
+Saturday uses the fixture backend. No signup form.
 
 
 ---
@@ -31,19 +47,15 @@ Tool output is untrusted input. Your search results are a document the internet 
 # Learning objectives
 
 - Implement `plan_questions` as three checkable sub-questions
-- Implement `check_brief` as `return brief.check(body, sources)` with no model
+- Implement `check_brief` as `return brief.check(body, sources)`
 - Configure a tool boundary: search in, merge denied
-- Validate four arithmetic rows: `has_sources`, `grounded`, `cited`, `style`
+- Validate `has_sources`, `grounded`, `cited`, `style`
 - Troubleshoot the stall of reaching for a model judge
 
 
 ---
 
 # Starting architecture
-
-Already in the folder: `brief.py` (the judge), prompts, settings.
-
-You fill: `plan_questions` and `check_brief` in `loop.py`.
 
 ```
 orchestrator  owns budget + exits. Writes nothing. Sees summaries.
@@ -65,9 +77,11 @@ cd labs/lab3_research
 claude -p "$(cat prompts/claude-code.md)"
 ```
 
-Worth reading before you type: `brief.py`, `MCP.md`.
+Worth reading: `brief.py`, `MCP.md`.
 
 `.mcp.json` at the repo root ships `context7`. Perplexity is optional. Fixture when the room has no wifi.
+
+`.claude/settings.json` denies writes to `loops/`, `scripts/`, and CRM tests. There is no `loops/` package.
 
 
 ---
@@ -82,7 +96,7 @@ def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
     raise NotImplementedError("fill me in")
 ```
 
-`brief.check` is already shipped. Do not reimplement grounding.
+Fill only `loop.py`. Do not edit `brief.py`. Do not edit `solutions/`.
 
 
 ---
@@ -119,7 +133,16 @@ def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
 | `cited` | every claim paragraph has a `[n]` |
 | `style` | zero em dashes outside code spans |
 
-A confident sentence nobody can trace is the failure that matters. House style forbids em dashes. A model will argue. Python will not.
+A confident sentence nobody can trace is the failure that matters.
+
+
+---
+
+# Why style is a row
+
+House style forbids em dashes. A model will argue. Python will not.
+
+`brief.strip_em_dashes` stashes code spans, then comma-heavy lines become `: `, light lines become `; `.
 
 
 ---
@@ -134,7 +157,7 @@ Saturday self-check:
 task test    # import loop; print('ok')
 ```
 
-The runnable filled loop:
+Runnable filled loop, after class or as the instructor demo:
 
 ```bash
 cd ../../solutions/sol3_research_deep_agents
@@ -156,17 +179,16 @@ PASS  style          0 em dashes
 
 backend: fixture   budget: $0.00 / $0.20 (soft $0.10), 3/8 calls
 gate:    pass
-reason:  the rubric is green
 ```
 
-Empty findings → no body claims → `has_sources` fails → escalate. It never ships an uncited brief.
+Empty findings → no body claims → `has_sources` fails → escalate. Never ship an uncited brief.
 
 
 ---
 
 # Budget. Soft warns. Hard raises
 
-Live loop: `max_usd=0.20`, `max_calls=8`, `soft_usd=0.10`. Perplexity costs 0.006 per call. Fixture costs nothing, which is why Saturday still teaches the cap.
+Live: `max_usd=0.20`, `max_calls=8`, `soft_usd=0.10`. Perplexity costs 0.006 per call. Fixture costs nothing, which is why Saturday still teaches the cap.
 
 The ninth search does not run. `BudgetExceeded` is a `RuntimeError`, not a nudge.
 
@@ -177,13 +199,26 @@ Four stops: call budget, dollar budget, stable failure, no-source escalates.
 
 # Troubleshooting
 
-| Symptom | Likely cause | Resolution |
+| Symptom | Cause | Fix |
 |---|---|---|
-| Reaching for a model in `check_brief` | stall | `return brief.check(body, sources)` |
+| Reaching for a model in `check_brief` | stall | `return brief.check(...)` |
 | Over-designed planner | stall | three strings |
-| `task loop:research` missing | engine deleted | run `sol3_research_deep_agents/loop.py` |
-| Uncited brief shipped | skipped `has_sources` | empty findings must escalate |
+| `task loop:research` missing | engine deleted | `sol3_research_deep_agents/loop.py` |
+| Uncited brief shipped | skipped `has_sources` | empty findings escalate |
 | Em dashes in the brief | model argued | `brief.strip_em_dashes` |
+
+
+---
+
+# Fall behind
+
+```bash
+cp loop.py loop.py.my-attempt
+```
+
+Watch Rick type. There is no drop-in. Later: `git checkout -- loop.py`.
+
+Take-home ports are a different runtime, not a drop-in for this stub.
 
 
 ---
@@ -193,3 +228,10 @@ Four stops: call budget, dollar budget, stable failure, no-source escalates.
 Same graph as Module 1. New object: a question. New wall: one search tool.
 
 Cost is an architecture problem, not a pricing problem. Do not shop for a cheaper model first.
+
+**Takeaways**
+
+1. Three sub-questions is a plan you can check.
+2. Citations are arithmetic.
+3. The orchestrator sees a summary, never the dump.
+4. Merge is not a tool this loop holds.
