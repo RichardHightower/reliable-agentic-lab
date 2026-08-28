@@ -77,12 +77,12 @@ agent writes anywhere it likes.
 | --- | --- | --- | --- |
 | 1 | plan | yes | Three to eight questions, each with a check, at least one important |
 | 2 | search | yes | Every claim names a source that resolves |
-| 3 | verify | yes | Every important claim has a decided truth state |
+| 3 | verify | yes | Every important claim has a decided truth state, and anything past the cap says it was skipped |
 | 4 | outline | yes | Every body section names claim ids that exist and may be used |
 | 5 | diagram | yes | At most twelve nodes per figure, and every figure has alt text |
 | 6 | write | yes | A section cites only the numbers its claims support |
 | 7 | review | yes | Every rubric row passes |
-| 8 | assemble | no | Every hard gate in `paper_check` |
+| 8 | assemble | no | Every hard gate in `paper_check`, including that the paper has a body |
 | 9 | publish | no | The gates passed. Opt-in only |
 
 ## Three exits, and no fourth
@@ -98,10 +98,38 @@ Checked before every stage, in this order:
 Done beats a spent budget. A run that finished and then noticed it was over its
 cap did finish, and reporting that as a cost failure discards the paper.
 
+The cost cap is checked before every model call, not between stages. Checking
+only at the stage boundary is not a cap: a stage that loops over six sections
+makes six calls with nothing between them, so the run learns it is over budget
+once the money is gone. The check needs headroom too, or the last call starts
+with a cent left and finishes two dollars over, so the loop remembers what a
+call of each kind cost and refuses to start one it cannot afford. The cap is
+therefore exact to within the first call of each role, which is the first time
+the loop has any basis for an estimate.
+
+A spent budget is never a retry. A gate failure might be fixed by another
+attempt. A budget will not be, and retrying on it turns a cost cap into a cost
+multiplier.
+
 Inside a stage, `gates.decide` returns pass, retry, or escalate. It short
 circuits the one case worth catching early: the same rows failing twice, which
 means the loop is not converging. Spending the rest of the budget to watch it
 fail identically buys a bill, not a fix.
+
+## Verification is bounded
+
+The verifier searches once per claim it is handed, so the length of that list is
+the size of the work. `--max-verify` caps it at twelve, shakiest first: lowest
+confidence, then fewest sources. A cap that took claims in whatever order the
+dictionary held them would spend the budget confirming the facts nobody doubted.
+
+Anything past the cap is written down as not cross-checked, and the gate refuses
+a skip that says nothing, because silence reads exactly like a pass.
+
+A claim records two separate facts. `truth_state` counts sources.
+`cross_checked` says whether a verifier took a second, independent look. Two
+URLs inside one search answer are two sources and one look, and a reader is
+entitled to know which claims nobody went back and checked.
 
 ## One boundary, four backends
 
@@ -153,7 +181,7 @@ The loop never learns which one answered.
 ## Verify
 
 ```bash
-task test      # 198 tests, no SDK, no key, no network
+task test      # 220 tests, no SDK, no key, no network
 task table     # the reviewer prints no in the writes column
 task checks    # every module's own assertions
 task brief -- --question "sqlalchemy nullable datetime column"

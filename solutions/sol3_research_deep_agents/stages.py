@@ -239,6 +239,48 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
         )
 
 
+# How many claims one verify stage will cross-check.
+#
+# The verifier searches for each claim it is handed, so the size of this list is
+# the size of the work. Handing it every important claim is how four research
+# questions became a hundred and eleven verification turns in a live run: the
+# stage had no upper bound at all, and neither the money cap nor the turn cap
+# was checked until it finished.
+#
+# Twelve is a working default, not a discovered constant. Raise it with
+# `--max-verify` when a paper genuinely rests on more than twelve load-bearing
+# facts, and expect the bill to scale with it.
+MAX_VERIFY_CLAIMS = 12
+
+
+def verify_batch(ledger: evidence.Ledger, limit: int = MAX_VERIFY_CLAIMS):
+    """Split important claims into the ones to check and the ones to skip.
+
+    The shakiest go first: lowest confidence, then fewest sources. A cap that
+    took claims in whatever order the dictionary held them would spend the
+    budget confirming the facts nobody doubted.
+    """
+    pending = [claim for claim in ledger.important() if not claim.cross_checked]
+    ranked = sorted(pending, key=lambda claim: (claim.confidence, len(set(claim.source_ids))))
+    return ranked[:limit], ranked[limit:]
+
+
+def note_uncrosschecked(skipped: list) -> None:
+    """Say in the record that these were never looked at twice.
+
+    Silence would read as a pass. The truth state still reflects the sources the
+    claim has, because that count did not change, but `cross_checked` stays
+    false and the note says why.
+    """
+    for claim in skipped:
+        evidence.corroborate(claim)
+        if not claim.note:
+            claim.note = (
+                f"Not cross-checked. This run verified the {MAX_VERIFY_CLAIMS} least "
+                "certain claims and this was not among them."
+            )
+
+
 # A recorded reply cannot name a claim id, because ids are minted at run time.
 # It names `*subject*N` instead, meaning the Nth claim recorded for that subject.
 PLACEHOLDER = re.compile(r"\*([\w-]+)\*(\d+)")
@@ -288,6 +330,7 @@ def apply_verification(ledger: evidence.Ledger, report: dict) -> dict:
         if claim is None:
             counts["unknown"] += 1
             continue
+        claim.cross_checked = True
         status = row.get("corroborate_status")
         if status == "agreed":
             url = str(row.get("second_source_url", "")).strip()
@@ -319,14 +362,23 @@ def verify_gate(ledger: evidence.Ledger) -> None:
     is simply not allowed to use it. What fails the gate is an important claim
     the verifier never looked at, because that is silence being read as consent.
     """
-    unchecked = [
+    undecided = [
         claim.text[:50] for claim in ledger.important() if claim.truth_state == evidence.PROPOSED
     ]
-    if unchecked:
+    if undecided:
         raise GateFailed(
-            f"these important claims were never checked: {unchecked[:3]}. "
+            f"these important claims were never checked: {undecided[:3]}. "
             "Check each one against a second, independent source.",
             ("unchecked_important",),
+        )
+    # A claim past the cap may go through, but only because the record says
+    # nobody looked at it twice. A silent skip reads exactly like a pass.
+    silent = [claim.text[:50] for claim in ledger.unchecked() if not claim.note]
+    if silent:
+        raise GateFailed(
+            f"these important claims were skipped without a note: {silent[:3]}. "
+            "A skipped check must say it was skipped.",
+            ("silent_skip",),
         )
     if not any(claim.usable for claim in ledger.claims.values()):
         raise GateFailed(

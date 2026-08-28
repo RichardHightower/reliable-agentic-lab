@@ -131,6 +131,14 @@ class PaperState:
         self.current_stage = name
 
     def mark_complete(self, name: str, *, cost_usd: float = 0.0, **metadata: Any) -> None:
+        """Record what this stage cost, without moving the total.
+
+        `spend` is the only thing that changes `total_cost_usd`, and it is
+        called once per model call. Adding here as well double counted every
+        call: a run whose calls came to $2.25 reported $4.45, so the cap fired
+        at roughly half the real spend and the number in the summary was one
+        nobody was charged.
+        """
         entry = self._entry(name)
         entry.status = COMPLETE
         entry.timestamp = now()
@@ -138,7 +146,6 @@ class PaperState:
         entry.error = None
         entry.metadata.update(metadata)
         self.current_stage = name
-        self.total_cost_usd += cost_usd
 
     def mark_skipped(self, name: str, reason: str = "") -> None:
         entry = self._entry(name)
@@ -148,19 +155,20 @@ class PaperState:
             entry.metadata["skipped_because"] = reason
 
     def mark_failed(self, name: str, error: str, *, cost_usd: float = 0.0) -> None:
+        """Record the failure and what the stage cost. `spend` owns the total."""
         entry = self._entry(name)
         entry.status = FAILED
         entry.timestamp = now()
         entry.cost_usd += cost_usd
         entry.error = error
         self.current_stage = name
-        self.total_cost_usd += cost_usd
 
     def record(self, name: str, path: str | Path) -> None:
         """Name an artifact this run produced, so a later stage can find it."""
         self.artifacts[name] = str(path)
 
     def spend(self, usd: float, calls: int = 1) -> None:
+        """The one place the running total moves. Called once per model call."""
         self.total_cost_usd += usd
         self.total_calls += calls
 

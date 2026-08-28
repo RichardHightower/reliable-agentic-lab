@@ -28,7 +28,7 @@ def plan(**overrides):
     return base
 
 
-def ledger_with(n=1, important=True, truth=evidence.CORROBORATED):
+def ledger_with(n=1, important=True, truth=evidence.CORROBORATED, cross_checked=True):
     led = evidence.Ledger("/nonexistent")
     a = led.add_source(evidence.SourceDocument(title="a", url="https://a.example", subject="s1"))
     b = led.add_source(evidence.SourceDocument(title="b", url="https://b.example", subject="s1"))
@@ -36,7 +36,11 @@ def ledger_with(n=1, important=True, truth=evidence.CORROBORATED):
     for i in range(n):
         claim = led.add_claim(
             evidence.Claim(
-                text=f"fact {i}", subject="s1", source_ids=[a.id, b.id], important=important
+                text=f"fact {i}",
+                subject="s1",
+                source_ids=[a.id, b.id],
+                important=important,
+                cross_checked=cross_checked,
             )
         )
         claim.truth_state = truth
@@ -418,3 +422,99 @@ def test_assemble_gate_raises_on_a_failing_paper():
     with pytest.raises(GateFailed) as exc:
         stages.assemble_gate("# T\n\nno sections, no citations\n", led)
     assert "hard gates" in str(exc.value)
+
+
+# -- the verification cap --------------------------------------------------
+
+
+def wide_ledger(n):
+    led = evidence.Ledger("/nonexistent")
+    a = led.add_source(evidence.SourceDocument(title="a", url="https://a.example", subject="s1"))
+    for i in range(n):
+        led.add_claim(
+            evidence.Claim(
+                text=f"fact {i}",
+                subject="s1",
+                source_ids=[a.id],
+                important=True,
+                confidence=i / n,
+            )
+        )
+    return led
+
+
+def test_the_verify_list_is_bounded():
+    """The verifier searches once per claim, so this list is the size of the
+    work. Unbounded, four research questions became 111 verification turns."""
+    check, skip = stages.verify_batch(wide_ledger(40))
+    assert len(check) == stages.MAX_VERIFY_CLAIMS
+    assert len(skip) == 40 - stages.MAX_VERIFY_CLAIMS
+
+
+def test_the_shakiest_claims_are_checked_first():
+    """A cap that took claims in dictionary order would spend the budget
+    confirming the facts nobody doubted."""
+    check, _ = stages.verify_batch(wide_ledger(40), limit=3)
+    assert [claim.text for claim in check] == ["fact 0", "fact 1", "fact 2"]
+
+
+def test_a_small_ledger_is_not_capped():
+    check, skip = stages.verify_batch(wide_ledger(4))
+    assert len(check) == 4
+    assert skip == []
+
+
+def test_a_claim_past_the_cap_says_so():
+    """Silence would read as a pass."""
+    _, skip = stages.verify_batch(wide_ledger(20), limit=2)
+    stages.note_uncrosschecked(skip)
+    assert all("Not cross-checked" in claim.note for claim in skip)
+    assert all(claim.cross_checked is False for claim in skip)
+
+
+def test_the_gate_refuses_a_silent_skip():
+    led = wide_ledger(20)
+    check, skip = stages.verify_batch(led, limit=2)
+    for claim in check:
+        claim.cross_checked = True
+        evidence.corroborate(claim)
+    for claim in skip:
+        evidence.corroborate(claim)  # decided, but nobody said it was skipped
+    with pytest.raises(GateFailed) as exc:
+        stages.verify_gate(led)
+    assert exc.value.signature == ("silent_skip",)
+
+    stages.note_uncrosschecked(skip)
+    stages.verify_gate(led)
+
+
+def test_verification_marks_the_claims_it_reported_on():
+    led, claims = ledger_with(truth=evidence.PROPOSED, cross_checked=False)
+    stages.apply_verification(
+        led,
+        {
+            "checked": [
+                {
+                    "claim_id": claims[0].id,
+                    "second_source_url": "https://c.example",
+                    "corroborate_status": "agreed",
+                    "quote": "q",
+                }
+            ]
+        },
+    )
+    assert claims[0].cross_checked is True
+
+
+def test_a_source_count_is_not_a_second_look():
+    """Two URLs inside one search answer are two sources and one look."""
+    led = evidence.Ledger("/nonexistent")
+    a = led.add_source(evidence.SourceDocument(title="a", url="https://a.example", subject="s"))
+    b = led.add_source(evidence.SourceDocument(title="b", url="https://b.example", subject="s"))
+    claim = led.add_claim(
+        evidence.Claim(text="x", subject="s", source_ids=[a.id, b.id], important=True)
+    )
+    evidence.corroborate(claim)
+    assert claim.truth_state == evidence.CORROBORATED
+    assert claim.cross_checked is False
+    assert led.unchecked() == [claim]

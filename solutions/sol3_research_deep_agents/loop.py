@@ -77,6 +77,7 @@ def run_paper(args) -> int:
         work_root=args.work_root,
         brain=second_brain(),
         max_usd=args.max_usd,
+        max_verify=args.max_verify,
         attempts=args.attempts,
         theme=args.theme,
         polish=not args.no_polish,
@@ -99,6 +100,13 @@ def main(argv: list[str] | None = None) -> int:
     paper_args.add_argument("--work-root", default=None, help="where runs are kept")
     paper_args.add_argument("--max-usd", type=float, default=5.0, help="the hard cost cap")
     paper_args.add_argument("--attempts", type=int, default=3, help="retries per stage")
+    paper_args.add_argument(
+        "--max-verify",
+        type=int,
+        default=12,
+        help="how many claims one verify stage cross-checks. The verifier "
+        "searches once per claim, so this is the size of the work.",
+    )
     paper_args.add_argument("--theme", default="spillwave-light")
     paper_args.add_argument("--no-polish", action="store_true", help="SVG figures only")
     paper_args.add_argument("--publish", action="store_true", help="push to a secret gist")
