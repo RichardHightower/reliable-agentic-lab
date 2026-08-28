@@ -53,17 +53,12 @@ Needs `deepagents>=0.7`.
 1. Create the environment. The tests need pytest and nothing else.
 
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install pytest
+   task setup
    ```
 
-   Install the runtime only when you are ready for step 5. The table and the
-   tests do not need it.
-
-   ```bash
-   pip install -r ../../requirements-takehome.txt
-   ```
+   This creates `.venv` locally and installs `deepagents>=0.7` plus pytest.
+   The table does not require that runtime, but `task run` uses it automatically
+   when you are ready for step 5.
 
 2. Read the cast before you configure anything.
 
@@ -130,7 +125,7 @@ target repo.
 2. Install the runtime and clone your fork.
 
    ```bash
-   pip install -r ../../requirements-takehome.txt
+   task setup
    task clone
    ```
 
