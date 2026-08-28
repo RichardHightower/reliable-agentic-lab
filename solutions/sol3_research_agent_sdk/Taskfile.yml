@@ -1,13 +1,94 @@
-# Standalone. No dependency on the root Taskfile. Needs no SDK installed:
-# --table-only prints the role table and stops.
+# Standalone. No dependency on the root Taskfile. Every command runs from this
+# folder, start to finish.
+#
+# `task test`, `task table`, and `task checks` need no SDK, no API key, and no
+# network. `task demo` needs the renderer. `task run` and `task publish` need a
+# key, and `task publish` also needs `gh` with the `gist` scope.
 version: '3'
+
+# Task loads these for every task below. The repo root `.env` is the normal
+# place for a key. The folder file is optional and fills in only what the root
+# does not set, because Task lets the FIRST file that defines a variable win.
+# A missing file is fine, and nothing in the first section needs one.
+dotenv: ['../../.env', '.env']
+
+vars:
+  # TASKFILE_DIR is Task's own absolute path to this file's directory. Every
+  # path below is built from it on purpose. A relative path depends on the
+  # invoking process's cwd being exactly right, and when it is not, this port
+  # can end up writing a paper into a different checkout.
+  PY: '{{.PY | default "python3"}}'
+  TOPIC: '{{.TOPIC | default "loop engineering exit criteria"}}'
+  RENDERER: 'https://github.com/SpillwaveSolutions/imagen-diagrams'
+  RENDERER_TAG: 'v0.1.0'
 
 tasks:
   default:
     cmds: [task --list]
 
+  # -- no SDK, no key, no network -------------------------------------------
+
   test:
+    desc: Unit tests for this folder. No SDK, no API key, no network.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - '{{.PY}} -m pytest tests -q'
+
+  table:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py --table-only
+      - '{{.PY}} loop.py --table-only'
+
+  checks:
+    desc: Run the deterministic modules against their own assertions.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - '{{.PY}} checks.py --demo'
+      - '{{.PY}} gates.py --demo'
+      - '{{.PY}} publish.py --demo'
+      - '{{.PY}} rkc.py --demo'
+
+  # -- setup ----------------------------------------------------------------
+
+  setup:
+    desc: Install the Agent SDK and clone the diagram renderer into .cache/.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - '{{.PY}} -m pip install --quiet claude-agent-sdk pytest'
+      - task: renderer
+
+  renderer:
+    desc: Clone imagen-diagrams at a pinned tag. Skips if it is already there.
+    dir: '{{.TASKFILE_DIR}}'
+    status:
+      - test -d .cache/imagen-diagrams/.git
+    cmds:
+      - mkdir -p .cache
+      - git clone --quiet --depth 1 --branch {{.RENDERER_TAG}} {{.RENDERER}} .cache/imagen-diagrams
+
+  # -- the loop -------------------------------------------------------------
+
+  demo:
+    desc: A full offline run over the recorded fixture. No key, no network.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - '{{.PY}} loop.py --topic "{{.TOPIC}}" --backend fixture --fresh'
+
+  run:
+    desc: Research a topic and write the paper. Needs a key. TOPIC=... to set it.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - '{{.PY}} loop.py --topic "{{.TOPIC}}" {{.CLI_ARGS}}'
+
+  publish:
+    desc: Run, then push the paper and its figures to a private gist.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - '{{.PY}} loop.py --topic "{{.TOPIC}}" --publish {{.CLI_ARGS}}'
+
+  clean:
+    desc: Delete every run under work/. The renderer clone in .cache/ stays.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - rm -rf work

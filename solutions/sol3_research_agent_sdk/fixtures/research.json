@@ -1,0 +1,35 @@
+{
+  "_note": "Recorded answers, so this folder runs in a room with no network. Every URL here was checked and every statement is one the cited page supports. A fixture that records a plausible-looking answer teaches the loop to accept plausible-looking answers.",
+  "loop engineering exit criteria": {
+    "question": "loop engineering exit criteria",
+    "answer": "An agent loop needs an exit condition that the model does not get a vote on. The Claude Agent SDK exposes two runtime ceilings for this, max_turns and max_budget_usd, and ends the query itself when either fires rather than asking the model whether to continue.",
+    "citations": ["https://github.com/anthropics/claude-agent-sdk-python"],
+    "sources": [
+      {"url": "https://github.com/anthropics/claude-agent-sdk-python", "title": "claude-agent-sdk-python"}
+    ]
+  },
+  "loop engineering exit criteria common mistake": {
+    "question": "loop engineering exit criteria common mistake",
+    "answer": "The common mistake is trusting a model to report that it is finished. A stop condition a model evaluates is a stop condition a model can talk past, so a reliable loop computes done from a rubric in code and treats the model's claim as input rather than as the verdict.",
+    "citations": ["https://github.com/anthropics/claude-agent-sdk-python"],
+    "sources": [
+      {"url": "https://github.com/anthropics/claude-agent-sdk-python", "title": "claude-agent-sdk-python"}
+    ]
+  },
+  "loop engineering exit criteria how to verify": {
+    "question": "loop engineering exit criteria how to verify",
+    "answer": "Verify an exit by making it observable. Record the failure signature of each attempt, compare it with the previous attempt, and stop when two attempts fail in exactly the same way, because a loop that repeats a failure is not converging and the remaining budget buys nothing.",
+    "citations": ["https://github.com/anthropics/claude-agent-sdk-python"],
+    "sources": [
+      {"url": "https://github.com/anthropics/claude-agent-sdk-python", "title": "claude-agent-sdk-python"}
+    ]
+  },
+  "mcp tool boundary": {
+    "question": "mcp tool boundary",
+    "answer": "The Model Context Protocol defines how a host exposes tools, resources, and prompts to a model over a transport, which lets a loop name its boundary once and stay ignorant of what is behind it.",
+    "citations": ["https://modelcontextprotocol.io/specification"],
+    "sources": [
+      {"url": "https://modelcontextprotocol.io/specification", "title": "Model Context Protocol specification"}
+    ]
+  }
+}

@@ -2,16 +2,17 @@
 
 Three runtimes enforce write scope three different ways. Plain Python uses a
 missing method. The Claude Agent SDK uses a tool list and a PreToolUse hook.
-Deep Agents uses a per-subagent tool list. All three read the same table, which
-comes from `.loop.yml` in the target repo.
+Deep Agents uses a per-subagent tool list. All three read the same table.
 
-Four loops, four casts. The implementer needs five roles. The fixer needs three.
-The table below is the only place that difference is written down, so a runtime
-never gets to invent a role or widen a scope.
+Four loops, four casts. The research cast is the largest, at seven roles. A
+role earns a line here by holding a tool set no other role holds, never by
+being another name for work an existing role already does. The researcher
+searches and cannot write. The verifier searches a second time and never sees
+the researcher's answer. The diagrammer is the only role with `Bash`, because
+it is the only role that runs the renderer.
 
-If the table and a runtime ever disagree, the runtime is wrong. That is what
-This folder's own tests check the cast, without either SDK
-installed.
+If the table and a runtime ever disagree, the runtime is wrong. This folder's
+own tests check the cast with no SDK installed.
 """
 
 from __future__ import annotations
@@ -21,6 +22,16 @@ from dataclasses import dataclass
 # Tools that can change a file. A role holding none of these cannot write.
 WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 READ_TOOLS = ("Read", "Glob", "Grep")
+
+# The research boundary, as the MCP server names the coding agent sees. A role
+# without these in its list cannot reach the outside world, whatever its prompt
+# says it should do.
+SEARCH_TOOLS = (
+    "WebSearch",
+    "mcp__perplexity-ask__perplexity_ask",
+    "mcp__context7__resolve-library-id",
+    "mcp__context7__query-docs",
+)
 
 # One cast per loop, in the order the loop uses them.
 LOOPS = {
@@ -32,7 +43,15 @@ LOOPS = {
         "code_implementer",
         "judge",
     ),
-    "research": ("orchestrator", "researcher", "writer", "judge"),
+    "research": (
+        "orchestrator",
+        "planner",
+        "researcher",
+        "verifier",
+        "diagrammer",
+        "writer",
+        "judge",
+    ),
     "fixer": ("orchestrator", "code_implementer", "judge"),
 }
 
@@ -45,18 +64,21 @@ PURPOSE = {
     "test_implementer": "Writes the failing tests. Nothing else.",
     "code_implementer": "Writes the code until the tests pass. Cannot touch tests.",
     "researcher": "Calls the tool boundary and returns findings. Writes nothing.",
-    "writer": "Assembles the brief from the findings. Writes the brief and nothing else.",
+    "verifier": "Checks a claim against a second source. Writes nothing.",
+    "diagrammer": "Draws the figures and runs the renderer. Writes diagrams only.",
+    "writer": "Assembles the paper from verified claims. Writes prose only.",
     "judge": "Scores the attempt. Reads reports and the diff. Holds no write path.",
 }
 
 # Roles that hold no tool that writes. The separation is the tool list, not a
 # rule in a prompt, so there is nothing for a model to talk its way past.
-READERS = ("orchestrator", "judge", "researcher")
+READERS = ("orchestrator", "judge", "researcher", "verifier")
 
 TOOLS_FOR_READER = {
     "orchestrator": ("Task",),
     "judge": (*READ_TOOLS, "Bash"),
     "researcher": (*READ_TOOLS, "WebSearch"),
+    "verifier": ("Read", *SEARCH_TOOLS),
 }
 
 # Where a role may write when `.loop.yml` says nothing about it. A target repo
@@ -68,6 +90,59 @@ FALLBACK_SCOPE = {
     "writer": (("brief.md", "work/research/**"), ()),
 }
 NO_WRITE_SCOPE = ((), ("**",))
+
+# Where one loop needs a role to differ from the tables above. The key is
+# (loop, role) and the value names only the fields that change.
+#
+# An override that names `allow` must also name `deny`. The fallback for an
+# undeclared role is "deny everything", and deny beats allow in `WriteScope`,
+# so an override that sets only `allow` produces a role that looks scoped in
+# the table and can write nothing at all.
+#
+# Two roles share a name across casts and mean different things. The
+# implementer's planner writes `steps.jsonl` against a repo. The research
+# planner writes `plan.json` against a topic. Overriding here is how the two
+# stay in one table without one quietly inheriting the other's write scope.
+OVERRIDES: dict[tuple[str, str], dict] = {
+    ("research", "planner"): {
+        "purpose": "Turns the topic into sections and questions. Returns a plan.",
+        # No write tool. The plan comes back as schema-checked structured
+        # output and Python writes `plan.json` from it. Letting the planner
+        # write the file too would give the run two plans that can disagree.
+        "tools": READ_TOOLS,
+        "allow": (),
+        "deny": ("**",),
+    },
+    ("research", "researcher"): {
+        "tools": (*READ_TOOLS, *SEARCH_TOOLS),
+    },
+    ("research", "diagrammer"): {
+        # No write tool and no shell. It returns the diagram source, and Python
+        # writes it and runs the renderer. A research tool that hands a model a
+        # shell has widened its blast radius from "a wrong paper" to "anything
+        # this machine can run", and it bought nothing: the renderer is one
+        # subprocess with fixed arguments.
+        "tools": READ_TOOLS,
+        "allow": (),
+        "deny": ("**",),
+    },
+    ("research", "writer"): {
+        # The one role in this cast that writes, and the reason the PreToolUse
+        # hook is not decorative. A section is long prose, and returning it
+        # through a message costs a round trip and invites truncation.
+        #
+        # It cannot reach `paper.md`. Assembly is deterministic, in Python, so
+        # a writer that decided to rewrite the whole paper is denied.
+        "tools": (*READ_TOOLS, "Write"),
+        "allow": ("sections/**",),
+        "deny": (),
+    },
+    ("research", "judge"): {
+        # No `Bash` here. The enhancer's judge reads a junit file, which is why
+        # it has a shell. This one reads markdown and a JSON check report.
+        "tools": READ_TOOLS,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -106,29 +181,38 @@ def _scope(contract, name: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
 def plan(contract, loop: str = DEFAULT_LOOP) -> dict[str, RolePlan]:
     """Describe every role in one loop's cast, once.
 
-    `contract` may be None. The research loop runs against a question, not a
-    repo, so it has no `.loop.yml` to read.
+    `contract` may be None. The research loop runs against a topic, not a repo,
+    so it has no `.loop.yml` to read.
     """
     if loop not in LOOPS:
         raise ValueError(f"unknown loop {loop!r}. Known: {', '.join(sorted(LOOPS))}")
 
     roles: dict[str, RolePlan] = {}
     for name in LOOPS[loop]:
+        override = OVERRIDES.get((loop, name), {})
         if name in READERS:
-            roles[name] = RolePlan(
-                name=name,
-                purpose=PURPOSE[name],
-                tools=TOOLS_FOR_READER[name],
-            )
-            continue
-        allow, deny = _scope(contract, name)
-        roles[name] = RolePlan(
-            name=name,
-            purpose=PURPOSE[name],
-            tools=(*READ_TOOLS, "Edit", "Write", "Bash"),
-            allow=allow,
-            deny=deny,
-        )
+            fields = {
+                "purpose": PURPOSE[name],
+                "tools": TOOLS_FOR_READER[name],
+                "allow": (),
+                "deny": (),
+            }
+        else:
+            allow, deny = _scope(contract, name)
+            fields = {
+                "purpose": PURPOSE[name],
+                "tools": (*READ_TOOLS, "Edit", "Write", "Bash"),
+                "allow": allow,
+                "deny": deny,
+            }
+        fields.update(override)
+        # An override that widens a reader into a writer is a mistake, not a
+        # feature. Catching it here beats finding it in a diff of the CRM.
+        if name in READERS and any(tool in WRITE_TOOLS for tool in fields["tools"]):
+            raise ValueError(f"{loop}/{name} is a reader but its override grants a write tool")
+        if "allow" in override and "deny" not in override:
+            raise ValueError(f"{loop}/{name} overrides allow without deny. Deny beats allow.")
+        roles[name] = RolePlan(name=name, **fields)
     return roles
 
 
