@@ -117,22 +117,29 @@ backend drops any file the scope does not permit.
 
 ## Run the loop
 
+The live test is the same three commands as `sol1_enhancer`,
+`sol1_enhancer_opencode`, and `sol1_enhancer_grok_build`. See
+[HOW_TO_RUN.md](HOW_TO_RUN.md).
+
 `loop.py --table-only` needs nothing. The loop itself needs three things: the
-`deepagents` package, an API key, and a clone of the target repo.
+`deepagents` package (`>=0.7`), an `ANTHROPIC_API_KEY`, and a clone of the
+target repo.
 
 1. Copy `config.json.example` to `config.json` and fill in your GitHub username.
 
-2. Clone your fork and seed a few draft tickets.
+2. Install the runtime and clone your fork.
 
    ```bash
+   pip install -r ../../requirements-takehome.txt
    task clone
-   task create-test-tickets
    ```
 
-3. Run one poll-and-act step.
+3. Retest from scratch. This is the demo.
 
    ```bash
-   task run
+   task reset-test-tickets
+   task create-test-tickets
+   task run --
    ```
 
    It prints one line per ticket: `passed`, `escalated`, or `waiting`.
@@ -140,16 +147,17 @@ backend drops any file the scope does not permit.
 4. Poll on an interval, until you stop it.
 
    ```bash
-   task poll-forever
+   task poll-forever --
    ```
 
    That script is a seminar stand-in for a scheduler. In production the trigger
    is cron, or a scheduled GitHub Actions workflow.
 
-To work one ticket without waiting on a real comment, pass your own:
+To work one ticket without waiting on a real comment, pass `--ticket` and
+`--simulate-comment` after `--`:
 
 ```bash
-task run --
+task run -- --ticket T001 --simulate-comment LGTM
 ```
 
 ## What one poll does
@@ -216,4 +224,3 @@ exits. Skip comments that contain `<!-- enhancer-loop -->`. Set
 
 Grok on hosted runners is a poor fit. Prefer Claude Code, Agent SDK, or
 Deep Agents in Actions. Keep Grok on a laptop or `ext_5_digitalocean`.
-
