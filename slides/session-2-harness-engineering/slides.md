@@ -22,32 +22,35 @@ style: |
   }
 
   section {
-    background: var(--bg);
+    background-color: var(--bg);
+    background-size: contain !important;
+    background-repeat: no-repeat !important;
+    background-position: center right !important;
     color: var(--ink);
     font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
-    padding: 34px 52px 68px;
-    font-size: 22px;
+    padding: 28px 48px 50px;
+    font-size: 20px;
     line-height: 1.32;
     justify-content: flex-start;
+    overflow: hidden;
   }
 
   section::before {
     content: "SPILLWAVE SOLUTIONS  ·  LOOP ENGINEERING WORKSHOP";
     display: block;
     color: var(--navy);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     border-bottom: 1px solid var(--line);
-    padding-bottom: 10px;
-    margin-bottom: 18px;
+    padding-bottom: 6px;
+    margin-bottom: 12px;
   }
 
   section::after {
     color: var(--faint);
-    font-size: 12px;
-    letter-spacing: 0.04em;
+    font-size: 11px;
     font-weight: 500;
   }
 
@@ -56,10 +59,10 @@ style: |
     font-style: normal;
     font-weight: 800;
     color: var(--ink);
-    font-size: 32px;
-    line-height: 1.14;
+    font-size: 28px;
+    line-height: 1.12;
     letter-spacing: -0.028em;
-    margin: 0 0 16px 0;
+    margin: 0 0 12px 0;
   }
 
   h2,
@@ -81,19 +84,19 @@ style: |
 
   ul li {
     position: relative;
-    padding: 10px 0 10px 22px;
+    padding: 8px 0 8px 20px;
     border-bottom: 1px solid var(--line);
-    font-size: 21px;
-    line-height: 1.35;
+    font-size: 20px;
+    line-height: 1.32;
   }
 
   ul li::before {
     content: "";
     position: absolute;
     left: 0;
-    top: 1.05em;
-    width: 8px;
-    height: 8px;
+    top: 0.95em;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--navy);
   }
@@ -109,7 +112,7 @@ style: |
   small,
   cite {
     color: var(--muted);
-    font-size: 14px;
+    font-size: 13px;
   }
 
   code,
@@ -117,62 +120,62 @@ style: |
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     background: #e4eaf2;
     color: var(--ink);
-    font-size: 15px;
+    font-size: 14px;
   }
 
   pre {
     border: 1px solid var(--line);
     border-radius: 10px;
-    padding: 14px 16px;
-    max-height: 360px;
+    padding: 12px 14px;
+    max-height: 300px;
     overflow: auto;
   }
 
   table {
-    font-size: 18px;
+    font-size: 16px;
     width: 100%;
   }
 
   th {
     color: var(--muted);
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
 
   td {
     border-color: var(--line);
-    padding: 8px 10px 8px 0;
+    padding: 6px 10px 6px 0;
   }
 
   img {
     display: block;
-    margin-left: auto;
-    margin-right: auto;
+    margin: 8px auto 0;
     max-width: 100%;
-    max-height: 390px;
+    height: auto;
     object-fit: contain;
+    object-position: center;
   }
 
   footer {
     color: var(--muted);
-    font-size: 12px;
-    letter-spacing: 0.02em;
+    font-size: 11px;
   }
 
+  /* Title */
   section.lead::before {
     display: none;
   }
 
   section.lead {
-    border-left: 16px solid var(--stripe);
-    padding: 48px 56px 56px 48px;
+    border-left: 14px solid var(--stripe);
+    padding: 40px 48px 40px 40px;
     justify-content: center;
   }
 
   section.lead h1 {
-    font-size: 52px;
+    font-size: 44px;
     font-weight: 800;
     color: var(--ink);
     font-style: normal;
@@ -182,7 +185,40 @@ style: |
   section.lead p {
     color: var(--navy);
     font-weight: 500;
-    font-size: 22px;
+    font-size: 20px;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 20px;
+    align-items: center;
+    width: 100%;
+  }
+
+  .hero img {
+    max-height: 420px;
+    width: 100%;
+    object-fit: contain;
+    margin: 0;
+  }
+
+  /* Diagram-first slides: the drawing is the slide */
+  section.diagram h1 {
+    font-size: 26px;
+    margin-bottom: 8px;
+  }
+
+  section.diagram img {
+    max-height: 340px;
+    width: auto;
+    max-width: 100%;
+    margin-top: 4px;
+  }
+
+  section.diagram p,
+  section.diagram small {
+    margin-top: 8px;
   }
 ---
 
@@ -195,6 +231,11 @@ _class: lead
 notes: This is the hour that makes the other three worth having. Say the time. 11:10 Central. 55 minutes. This module never gets cut.
 -->
 
+<!-- _class: lead -->
+
+<div class="hero">
+<div>
+
 # Harness Engineering, the validation layer
 
 Session 2. The center of gravity. 55 minutes.
@@ -202,6 +243,12 @@ Session 2. The center of gravity. 55 minutes.
 Saturday 29 August 2026. 11:10 Central.
 
 Rick Hightower. Spillwave. Packt workshop.
+
+</div>
+
+![w:480](images/title-mark.jpg)
+
+</div>
 
 ---
 
@@ -213,14 +260,11 @@ beat: talk
 notes: Point at 55. If a lab runs long, cut talk. Do not cut this module. Artifact they keep: a reusable evaluation harness.
 -->
 
+<!-- _class: diagram -->
+
 # 55 minutes. This is the one that does not get cut.
 
-```mermaid
-flowchart LR
-  M1["Session 1\nA loop that can run once"] --> M2["Session 2\n55 min. Never cut"]
-  M2 --> H["Reusable evaluation harness"]
-  H --> M3["Session 3\nSame graph, a question"]
-```
+![w:1000](images/diagram-s2-02.jpg)
 
 | Block | Minutes | What they keep |
 |---|---|---|
@@ -250,8 +294,6 @@ notes: Three ways it lies. Edit forever, declare victory on red, stuff the windo
 - It can stuff the whole repo into the next call.
 - A harness is how you stop that. Not a better prompt.
 
-![bg right:42%](images/loop-without-harness.jpg)
-
 ---
 
 <!--
@@ -262,15 +304,11 @@ beat: talk
 notes: Four collapses from Session 1, now named as harness gaps. Each one is a missing check, not a model failure.
 -->
 
+<!-- _class: diagram -->
+
 # Four ways a loop lies. Each is a missing harness piece.
 
-```mermaid
-flowchart TB
-  L["Loop without a harness"] --> F1["False completeness\nDone on a red test"]
-  L --> F2["Runaway iteration\nNo hard stop"]
-  L --> F3["Context rot\nWhole repo in the window"]
-  L --> F4["Stagnation\nSame two failures forever"]
-```
+![w:1000](images/diagram-s2-04.jpg)
 
 | Failure | Missing piece | What this hour adds |
 |---|---|---|
@@ -289,14 +327,11 @@ beat: talk
 notes: Liu et al. from Session 1. The planner is its own subagent so the plan never sits in the orchestrator window. Big output goes to a file.
 -->
 
+<!-- _class: diagram -->
+
 # Context is not memory. The window is a scratch pad.
 
-```mermaid
-flowchart TB
-  Big["Plan, patch, research dump"] --> File["On disk\nsteps.jsonl, the ticket, the trace"]
-  File --> Sum["Short summary plus a score"]
-  Sum --> Orch["Orchestrator window\nNever the diff"]
-```
+![w:1000](images/diagram-s2-05.jpg)
 
 The orchestrator sees summaries. Never the whole plan. Never the patch.
 
@@ -314,6 +349,8 @@ beat: talk
 notes: Tell it as a story. Seven tests, green on every run, testing the wrong tree. Land the closing line hard.
 -->
 
+<!-- _class: diagram -->
+
 # A true story from this repo.
 
 Seven tests. Green on every run. They had never tested the thing they named.
@@ -324,12 +361,7 @@ CRM_ROOT = Path(__file__).resolve().parents[2] / "crm"
 sys.path.insert(0, str(CRM_ROOT))   # wins over the PYTHONPATH the loop sets
 ```
 
-```mermaid
-flowchart LR
-  Loop["Loop sets PYTHONPATH\nto the work copy"] --> Tests["pytest"]
-  Conf["conftest.py inserts\nthe finished CRM first"] --> Tests
-  Tests --> Green["Green. Against anything."]
-```
+![w:1000](images/diagram-s2-06.jpg)
 
 The loop pointed the tests at the work copy. The conftest pointed them at the finished answer.
 
@@ -343,15 +375,11 @@ beat: talk
 notes: This is the bug class the whole hour is about. A silent skip wearing a green shirt. Callback when you hit the receipt.
 -->
 
+<!-- _class: diagram -->
+
 # A check that measures the wrong thing is worse than no check.
 
-```mermaid
-flowchart TB
-  C["A green report"] --> Q{"What did it measure?"}
-  Q -->|"the work copy"| Real["Evidence"]
-  Q -->|"the finished CRM"| Lie["A comfortable lie"]
-  Q -->|"nothing, empty suite"| Skip["Silent skip"]
-```
+![w:1000](images/diagram-s2-07.jpg)
 
 The fail-then-pass demo had never once worked. Nothing reported an error.
 
@@ -396,8 +424,6 @@ notes: Say the mapping once, here: maker means doer, checker means judge. Then d
 
 The code implementer cannot weaken a test to reach green. Not because it was told not to. Because it holds no write path to one.
 
-![bg left:38%](images/two-doers.jpg)
-
 ---
 
 <!--
@@ -408,16 +434,11 @@ beat: talk
 notes: Five roles. Orchestrator writes nothing. Planner writes steps.jsonl. Two doers. Judge reads. Same graph as Session 1, two more parts.
 -->
 
+<!-- _class: diagram -->
+
 # Five roles. Write scope is the point.
 
-```mermaid
-flowchart TB
-  O["Orchestrator\nOwns the budget. Writes nothing.\nSees summaries, never the diff"]
-  O --> P["Planner\nWrites steps.jsonl. Own context."]
-  O --> T["test_implementer\nWrites tests/**"]
-  O --> C["code_implementer\nWrites app/**. Denied tests/**"]
-  O --> J["Judge\nScores. No write method."]
-```
+![w:1000](images/diagram-s2-10.jpg)
 
 <small>`loops/roles.py` · `build()`</small>
 
@@ -460,16 +481,11 @@ beat: talk
 notes: Deny always beats allow. The code implementer has app/** allowed and tests/** denied. An empty allow list permits nothing.
 -->
 
+<!-- _class: diagram -->
+
 # Deny always beats allow.
 
-```mermaid
-flowchart TB
-  W["Doer.write(path, text)"] --> C{"WriteScope.permits?"}
-  C -->|"deny tests/**"| X["ScopeViolation"]
-  C -->|"allow app/**"| OK["Write"]
-  C -->|"unmatched"| X
-  J["Judge"] --> N["No write method to call"]
-```
+![w:1000](images/diagram-s2-12.jpg)
 
 ```python
 code_implementer:
@@ -489,19 +505,9 @@ beat: talk
 notes: Walk the diagram once, top to bottom. Stop on the diamond. If the new tests are not failing, the loop stops there. Python holds the loop, so the model never counts its own retries. You should be near 12 minutes.
 -->
 
-```mermaid
-flowchart LR
-  P["Planner\nsteps.jsonl"] --> T["test_implementer\ntests/ only"]
-  T --> R{"New tests\nfailing?"}
-  R -->|no| S["STOP\nnothing was proven"]
-  R -->|yes| C["code_implementer\napp/ only"]
-  C --> J["Rubric judge\nten rows, no model"]
-  J --> F["Final judge\nactually done?"]
-  F --> G{"Gate"}
-  G -->|pass| D["Stop"]
-  G -->|retry| C
-  G -->|escalate| H["Human"]
-```
+<!-- _class: diagram -->
+
+![w:1000](images/diagram-s2-13.jpg)
 
 # The orchestrator owns the budget and sees summaries, never the diff.
 
@@ -517,17 +523,11 @@ beat: talk
 notes: Four planes. One graph. The model proposes. The harness decides. That is the whole module.
 -->
 
+<!-- _class: diagram -->
+
 # Four planes. One graph.
 
-```mermaid
-flowchart TB
-  I["Intent\nThe ready ticket. A contract a test can fail."]
-  E["Execution\nMaker. Writes inside a declared scope."]
-  V["Verification\nChecker. Read-only, or Python over junit."]
-  C["Control\nHarness. Budget, retry, stop. Outside the model."]
-  I --> E --> V --> C
-  C -->|retry| E
-```
+![w:1000](images/diagram-s2-14.jpg)
 
 | Plane | Who | Job |
 |---|---|---|
@@ -546,17 +546,11 @@ beat: talk
 notes: Hallucination containment is architectural. The model may claim done. The harness will not take its word.
 -->
 
+<!-- _class: diagram -->
+
 # Hallucination containment is a missing method, not a better prompt.
 
-```mermaid
-flowchart LR
-  Claim["Model claim\nIt is done. Trust me."] --> Gate{"Harness"}
-  Gate -->|"junit is red"| No["Refuse"]
-  Gate -->|"no new failing ids"| No
-  Gate -->|"unparseable verdict"| No
-  Gate -->|"same signature twice"| No
-  Gate -->|"ten rows green"| Yes["Believe the files"]
-```
+![w:1000](images/diagram-s2-15.jpg)
 
 The model proposes. The harness decides. Claims are not evidence. Files are.
 
@@ -570,18 +564,13 @@ beat: talk
 notes: Deep Agents is a harness, not a chat wrapper. Subagent tools list REPLACES the parent. Judge gets read_file only. Do not demo create_deep_agent live unless the room is ahead. Saturday they fill harness.py.
 -->
 
+<!-- _class: diagram -->
+
 # This graph in Deep Agents.
 
 `create_deep_agent` is a harness, not a chat wrapper.
 
-```mermaid
-flowchart TB
-  O["Orchestrator\ncreate_deep_agent\ntools: run_tests. No write."]
-  O --> P["planner\nwrite tool, steps.jsonl"]
-  O --> T["test-implementer\nwrite tool, tests/**"]
-  O --> C["code-implementer\nwrite tool, app/**"]
-  O --> J["judge\ntools: read_file only"]
-```
+![w:1000](images/diagram-s2-16.jpg)
 
 - Each subagent gets its own `tools` list. That list **replaces** the parent.
 - The judge's list is `read_file`. No `write_file`.
@@ -599,13 +588,11 @@ beat: talk
 notes: Closing of the first block. create_deep_agent does not count retries. Python still owns the red gate and gates.decide. You should be at 15 minutes here.
 -->
 
+<!-- _class: diagram -->
+
 # Python owns the gate. `create_deep_agent` does not count retries.
 
-```mermaid
-flowchart LR
-  DA["Deep Agents\nMakers. Tool lists."] --> Py["Python\nred_gate, rubric.score,\ngates.decide"]
-  Py --> X{"pass / retry / escalate"}
-```
+![w:1000](images/diagram-s2-17.jpg)
 
 ```python
 return create_deep_agent(
@@ -661,8 +648,6 @@ Seven acceptance criteria. Each one names a condition a test can be red about.
 
 "Should be intuitive" names nothing.
 
-![bg right:42%](images/ready-ticket-rubric.jpg)
-
 ---
 
 <!--
@@ -673,15 +658,11 @@ beat: talk
 notes: Graph engineering. Intent becomes a graph of steps. Each criterion maps to a test step and a code step. The planner is derived today, a subagent as stretch.
 -->
 
+<!-- _class: diagram -->
+
 # Graph engineering. Intent becomes a graph of steps.
 
-```mermaid
-flowchart TB
-  T["Ready ticket\nAC-1 .. AC-7"] --> P["plan_for(ticket)"]
-  P --> S1["S1T test_implementer\nAC-1"]
-  P --> S2["S1C code_implementer\nAC-1"]
-  P --> Sn["one test step and one\ncode step per criterion"]
-```
+![w:1000](images/diagram-s2-20.jpg)
 
 `loops/implementer.py` · `plan_for()`. Derived, not generated. Swapping this for a planner subagent is the stretch. The schema it must satisfy is already enforced.
 
@@ -720,15 +701,11 @@ beat: talk
 notes: Name the three rejections. Plus two more the code actually raises: no test step, marking done without evidence. Keep it to the three the outline names, then the evidence rule.
 -->
 
+<!-- _class: diagram -->
+
 # The plan is rejected when it cannot be checked.
 
-```mermaid
-flowchart TB
-  V["Plan.validate()"] --> R1["A step has no validation statement"]
-  V --> R2["A criterion maps to no step"]
-  V --> R3["A step is marked done with no evidence"]
-  V --> R4["No step writes a test"]
-```
+![w:1000](images/diagram-s2-22.jpg)
 
 `PlanRejected`. The orchestrator refuses to run it.
 
@@ -759,8 +736,6 @@ notes: Three steps, and step three is the one that matters. A test that passes b
 
 A test that passes before any code exists proves nothing. It is the most comfortable kind of nothing, because it is green.
 
-![bg left:40%](images/red-gate.jpg)
-
 ---
 
 <!--
@@ -771,6 +746,8 @@ beat: talk
 notes: Show the function. New failing ids, not any failing ids. A test that already existed and still fails is not proof of a new contract.
 -->
 
+<!-- _class: diagram -->
+
 # New failing ids. Not any failing ids.
 
 ```python
@@ -779,14 +756,7 @@ def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
     return {test_id for test_id in after_failed if test_id not in before}
 ```
 
-```mermaid
-flowchart LR
-  B["known_ids\npassed union failed"] --> G["_new_test_ids"]
-  A["after_tests.failed_ids"] --> G
-  G --> R{"red_ids?"}
-  R -->|empty| X["escalate\nnothing was proven"]
-  R -->|present| C["code_implementer starts"]
-```
+![w:1000](images/diagram-s2-24.jpg)
 
 <small>`loops/implementer.py` · `_new_test_ids` · `require_red` in `.loop.yml`</small>
 
@@ -829,21 +799,11 @@ beat: talk
 notes: That reframing is what they take back to their team. A judge that checks only tests_passed can be satisfied by one trivial test.
 -->
 
+<!-- _class: diagram -->
+
 # "The tests passed" is one row of ten.
 
-```mermaid
-flowchart TB
-  S["rubric.score()"] --> R1["tests_ran"]
-  S --> R2["tests_passed"]
-  S --> R3["red_first"]
-  S --> R4["coverage_floor"]
-  S --> R5["criteria_covered"]
-  S --> R6["steps_done"]
-  S --> R7["ui_has_e2e"]
-  S --> R8["format_clean"]
-  S --> R9["lint_clean"]
-  S --> R10["write_scope"]
-```
+![w:1000](images/diagram-s2-26.jpg)
 
 A judge that checks only `tests_passed` can be satisfied by an agent that writes one trivial test and deletes the rest.
 
@@ -877,8 +837,6 @@ Use a model only where you must.
 
 The implementer's judge is deterministic. The enhancer's judge reads ticket prose and needs a model.
 
-![bg right:42%](images/two-judges.jpg)
-
 ---
 
 <!--
@@ -889,19 +847,13 @@ beat: talk
 notes: This is your own measured data. Say so. 41 articles. Deterministic detector gates at 70. LLM quality judge saturates near 0.97 and flags 41 of 41. A judge that approves everything is not a judge.
 -->
 
+<!-- _class: diagram -->
+
 # Why a model judge cannot be the gate.
 
 Measured across 41 published articles in a production pipeline:
 
-```mermaid
-flowchart LR
-  subgraph Det["Deterministic tell-detector"]
-    D["Gates at 70"] --> Sep["Separates good from bad"]
-  end
-  subgraph Llm["Large Language Model quality judge"]
-    S["Saturates near 0.97"] --> All["Flags 41 of 41"]
-  end
-```
+![w:1000](images/diagram-s2-28.jpg)
 
 | Judge | Behavior |
 |---|---|
@@ -920,6 +872,8 @@ beat: talk
 notes: Three rules. A pass carrying a critical issue is not a decision. Output that will not parse is a FAIL, never a pass. Absent evidence is never clean.
 -->
 
+<!-- _class: diagram -->
+
 # So make the model's verdict a schema.
 
 ```python
@@ -927,14 +881,7 @@ if verdict.done and verdict.blocking_issues:
     return synthetic_fail("says done while listing blocking issues")
 ```
 
-```mermaid
-flowchart TB
-  Text["Model reply"] --> P["parse_verdict()"]
-  P -->|"no JSON / no done / not a bool"| F["synthetic_fail. Never a pass."]
-  P -->|"done and blocking issues"| F
-  P -->|"not done and no issues"| F
-  P -->|"schema holds"| V["Verdict"]
-```
+![w:1000](images/diagram-s2-29.jpg)
 
 - A pass carrying a critical issue is not a decision. Reject it.
 - Output that will not parse is a **FAIL**, never a pass.
@@ -971,8 +918,6 @@ A Claude Code `PreToolUse` hook refuses `git push` without a green receipt.
 No push and no pull request until the suite runs green locally.
 
 Your agent will hit this today.
-
-![bg left:40%](images/push-gate.jpg)
 
 ---
 
@@ -1025,13 +970,11 @@ beat: lab
 notes: The order is the whole point. Leave this up while they type. tests first, prove them red, code until green, judge, gate.
 -->
 
+<!-- _class: diagram -->
+
 # Three functions. The order is the lesson.
 
-```mermaid
-flowchart LR
-  R["red_gate\nprove the new tests red"] --> S["score_attempt\nten rows, no model"]
-  S --> L["run_loop\nPython holds the retries"]
-```
+![w:1000](images/diagram-s2-33.jpg)
 
 ```
 tests first  ->  prove them red  ->  code until green  ->  judge  ->  gate
@@ -1076,6 +1019,8 @@ beat: lab
 notes: Common stall lives here. People try to compute rows instead of forwarding the evidence. The answer is one line. Absent kwargs become failing rows.
 -->
 
+<!-- _class: diagram -->
+
 # `score_attempt`. Forward the evidence. Do not invent rows.
 
 ```python
@@ -1088,11 +1033,7 @@ def score_attempt(contract: Contract, **evidence) -> rubric.Score:
     return rubric.score(contract=contract, **evidence)
 ```
 
-```mermaid
-flowchart LR
-  E["junit, coverage, steps,\ndiff, red_ids, violations"] --> S["rubric.score(**evidence)"]
-  S --> Ten["Ten Row objects"]
-```
+![w:1000](images/diagram-s2-35.jpg)
 
 Do not compute the rows yourself. `loops/rubric.py` already does.
 
@@ -1105,6 +1046,8 @@ minutes: 1
 beat: lab
 notes: Python holds the loop. run_loop calls implementer.run. The model does not get to count its own retries. budget defaults to 3.
 -->
+
+<!-- _class: diagram -->
 
 # `run_loop`. Python holds the retries.
 
@@ -1122,15 +1065,7 @@ def run_loop(contract: Contract, budget: int = 3, ticket_id: str = "T001") -> di
     )
 ```
 
-```mermaid
-stateDiagram-v2
-  [*] --> Running
-  Running --> Pass: rubric green
-  Running --> Retry: fixable gap and budget left
-  Running --> Escalate: budget spent
-  Running --> Escalate: same signature twice
-  Retry --> Running
-```
+![w:1000](images/diagram-s2-36.jpg)
 
 <small>`loops/gates.py` · `decide()`</small>
 
@@ -1169,22 +1104,11 @@ beat: lab
 notes: Walk this if they ask why none fails. No test was ever red, so nothing has been proven. Refuse to continue.
 -->
 
+<!-- _class: diagram -->
+
 # `--doer none` is the red gate doing its job.
 
-```mermaid
-sequenceDiagram
-  participant O as Orchestrator
-  participant N as none backend
-  participant J as junit.xml
-  participant G as red_gate
-  O->>J: baseline
-  O->>N: write tests
-  N-->>O: wrote nothing
-  O->>J: after_tests
-  O->>G: _new_test_ids
-  G-->>O: empty
-  O-->>O: escalate
-```
+![w:1000](images/diagram-s2-38.jpg)
 
 `test_a_doer_that_writes_nothing_is_stopped_by_the_red_gate`.
 
@@ -1228,14 +1152,11 @@ beat: lab
 notes: The common stall is score_attempt. People try to compute rows. Tell them to forward **evidence. If they stall on red_gate, they forgot passed_ids union failed_ids.
 -->
 
+<!-- _class: diagram -->
+
 # The common stall is `score_attempt`.
 
-```mermaid
-flowchart TB
-  Stall["Trying to compute ten rows by hand"] --> Fix["return rubric.score(contract=contract, **evidence)"]
-  Stall2["red_gate returns after.failed_ids"] --> Fix2["subtract known ids first"]
-  Stall3["Editing loops/"] --> Fix3["Fill only harness.py"]
-```
+![w:1000](images/diagram-s2-40.jpg)
 
 If you stall, read `loops/implementer.py`, `loops/rubric.py`, and `loops/gates.py`. They are the answer, not a hint.
 
@@ -1251,12 +1172,11 @@ beat: lab
 notes: After class. Same eight steps. Python still owns the gate. Do not demo live unless the room is ahead. Issue 118.
 -->
 
+<!-- _class: diagram -->
+
 # After class. The same eight steps on Deep Agents.
 
-```mermaid
-flowchart LR
-  Sat["Saturday\nFill harness.py\nClaude Code"] --> Home["Takehome\nsol2_implementer_deep_agents\nIssue 118"]
-```
+![w:1000](images/diagram-s2-41.jpg)
 
 ```bash
 cd solutions/sol2_implementer_deep_agents
@@ -1293,6 +1213,8 @@ beat: talk
 notes: Three claims or nothing. Passed, this tree, after the newest edit. Callback to conftest: a zero exit code with no test report is the silent-skip bug wearing a green shirt.
 -->
 
+<!-- _class: diagram -->
+
 # A receipt proves three things, or it proves nothing.
 
 ```json
@@ -1302,12 +1224,7 @@ notes: Three claims or nothing. Passed, this tree, after the newest edit. Callba
  "report_usable": true}
 ```
 
-```mermaid
-flowchart TB
-  R[".harness/receipt.json"] --> A["The suite passed"]
-  R --> B["It ran against this tree, not an older one"]
-  R --> C["It ran after the newest source edit"]
-```
+![w:1000](images/diagram-s2-43.jpg)
 
 A zero exit code with no test report is not green. It is the silent-skip bug wearing a green shirt.
 
@@ -1323,20 +1240,11 @@ beat: talk
 notes: tree_hash is content, not git status. Staged, unstaged, and untracked all count. written_at must beat newest_source_mtime. Show check() reasons.
 -->
 
+<!-- _class: diagram -->
+
 # `tree_hash` and `written_at`. Stale is a refusal.
 
-```mermaid
-flowchart TB
-  C["receipt.check(repo)"] --> N{"receipt exists?"}
-  N -->|no| X1["No receipt"]
-  N -->|yes| G{"green and report_usable?"}
-  G -->|no| X2["Last run FAILED"]
-  G -->|yes| H{"tree_hash matches?"}
-  H -->|no| X3["The tree changed. Receipt is stale."]
-  H -->|yes| T{"newest mtime <= written_at?"}
-  T -->|no| X4["A source file is newer. Re-run."]
-  T -->|yes| OK["Allow the push"]
-```
+![w:1000](images/diagram-s2-44.jpg)
 
 <small>`scripts/receipt.py` · `check()`</small>
 
@@ -1350,14 +1258,13 @@ beat: talk
 notes: The agent is a subprocess. In-process scope stops the loop's own doer. write_scope reads the diff and catches the subprocess. Defense at one layer is a demo.
 -->
 
+<!-- _class: diagram -->
+
 # One gate is never enough.
 
 The write scope lives in the loop. Your agent is a **subprocess**.
 
-```mermaid
-flowchart LR
-  In["in-process scope\nWriteScope.check\nstops the loop's own doer"] --> Out["rubric write_scope\nreads the diff\ncatches the subprocess"]
-```
+![w:1000](images/diagram-s2-45.jpg)
 
 ```
 in-process scope   stops the loop's own doer
@@ -1380,6 +1287,8 @@ beat: talk
 notes: Walk one trace. .harness/last-implementer.json. Ten rows, the gate, and the reason. The interesting run is the one that stops.
 -->
 
+<!-- _class: diagram -->
+
 # Read the trace. Name the row that blocked.
 
 ```
@@ -1388,12 +1297,7 @@ gate: escalate
 reason: the same rows failed twice: coverage_floor. Not converging.
 ```
 
-```mermaid
-flowchart LR
-  Trace[".harness/last-implementer.json"] --> Rows["rows per iteration"]
-  Trace --> Gate["gate: pass or escalate"]
-  Trace --> Why["reason: the row that blocked"]
-```
+![w:1000](images/diagram-s2-46.jpg)
 
 - `pass` and you are done.
 - `retry` and the doer gets one more scoped attempt.
@@ -1411,18 +1315,11 @@ beat: talk
 notes: signature is what failed, not how it was worded. Two equal signatures mean the last attempt changed nothing. gates.decide has the same signature twice as escalate. Also: green rubric but final judge says not done is escalate.
 -->
 
+<!-- _class: diagram -->
+
 # `gates.decide()`. Same signature twice is escalate.
 
-```mermaid
-stateDiagram-v2
-  [*] --> Running
-  Running --> Pass: rubric green
-  Running --> Retry: new signature and budget left
-  Running --> Escalate: same signature twice
-  Running --> Escalate: budget spent
-  Running --> Escalate: rubric green, judge says not done
-  Retry --> Running
-```
+![w:1000](images/diagram-s2-47.jpg)
 
 `signature` is the failed row names, not the wording.
 
@@ -1440,6 +1337,8 @@ beat: talk
 notes: One minute. A doer that spends its last turn on a naming nit leaves the blocking row unfixed. retry_instruction narrows on final_attempt.
 -->
 
+<!-- _class: diagram -->
+
 # On the final attempt, narrow the ask.
 
 ```
@@ -1447,11 +1346,7 @@ FINAL ATTEMPT. Fix only what blocks: tests_passed.
 Do not refactor. Do not address anything else.
 ```
 
-```mermaid
-flowchart LR
-  D["Decision.final_attempt"] --> N["retry_instruction\nnarrow to the blocking rows"]
-  D2["ordinary retry"] --> W["These rubric rows failed. Fix them."]
-```
+![w:1000](images/diagram-s2-48.jpg)
 
 A doer that spends its last turn on a naming nit leaves the blocking row unfixed.
 
@@ -1467,16 +1362,13 @@ beat: talk
 notes: Name the artifact: a harness that fails, iterates, passes on its own, and refuses to ship when it should not.
 -->
 
+<!-- _class: diagram -->
+
 # What you keep.
 
 A harness that fails, iterates, and passes on its own, and refuses to ship when it should not.
 
-```mermaid
-flowchart LR
-  M1["Session 1 loop"] --> M2["Session 2 harness"]
-  M2 --> Score["Ten rows and a gate"]
-  Score --> PR["A pull request\nor an honest escalation"]
-```
+![w:1000](images/diagram-s2-49.jpg)
 
 The reusable evaluation harness is `harness.py` plus `loops/rubric.py`, `loops/gates.py`, and `scripts/receipt.py`.
 
