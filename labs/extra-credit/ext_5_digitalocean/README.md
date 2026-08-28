@@ -1,107 +1,61 @@
 # Extra credit. DigitalOcean Droplet plus webhooks
 
-Not Saturday. A cheap permanent public endpoint. Same FastAPI receiver as ngrok.
+Not Saturday. A cheap permanent public endpoint.
 
-## Goal
+The virtual private server is a DigitalOcean Droplet. Cheapest Basic plan.
+Ubuntu 24.04 LTS. One virtual CPU. One gigabyte of RAM. About six dollars a month.
 
-A Droplet that:
+The receiver is `solutions/extra_credit/s_ext_1_webhook`. An `issues` opened
+delivery shells out to [`solutions/sol1_enhancer`](../../../solutions/sol1_enhancer):
 
-- Exposes HTTPS `/github-webhook`
-- Receives `issues`, `check_suite`, and `pull_request` events
-- Routes to the Saturday loops (enhancer, implementer, or fixer)
-- Works with the Python loops, Claude Code headless, OpenCode, Codex, Grok Build, Agent SDK, or LangGraph
+```bash
+cd solutions/sol1_enhancer
+task run -- --ticket T001
+```
 
-`AGENT_BACKEND=python` is the working default. Change it only after the Python path is green.
-
-## 1. Create the Droplet
-
-1. Sign up at DigitalOcean and create a Droplet.
-2. Cheapest Basic plan is enough for demos (about $6 per month, 1 vCPU, 1 GB RAM).
-3. Ubuntu 24.04 LTS.
-4. Add your SSH key.
-5. Create the Droplet and note the public IP.
-
-## 2. Basic server setup
+## One command on the box
 
 ```bash
 ssh root@YOUR_DROPLET_IP
-apt update && apt upgrade -y
-apt install -y python3 python3-pip python3-venv nginx certbot python3-certbot-nginx git
 git clone https://github.com/YOUR-FORK/reliable-agentic-lab.git /opt/agents
-python3 -m venv /opt/agent-env
-source /opt/agent-env/bin/activate
-pip install -r /opt/agents/requirements.txt
+bash /opt/agents/labs/extra-credit/ext_5_digitalocean/deploy/bootstrap.sh
 ```
 
-Optional SDKs:
+Then edit `/opt/agents/.env` from `.env.example`. Point a subdomain at the
+Droplet. Run `certbot --nginx -d your-domain`. Point the CRM fork's webhook at
+`https://your-domain/github-webhook`.
 
-```bash
-pip install -r /opt/agents/requirements-agents.txt
-```
+## What bootstrap installs
 
-## 3. Secrets
+| Piece | Path |
+|---|---|
+| `.env.example` | `labs/extra-credit/ext_5_digitalocean/.env.example` |
+| systemd unit | `deploy/agent-webhook.service` |
+| nginx | `deploy/nginx.conf` (loopback only to uvicorn) |
+| sol1 config | `deploy/write-sol1-config.sh` writes `solutions/sol1_enhancer/config.json` |
+| handoff | `deploy/call-sol1-enhancer.sh T001` |
+| smoke | `deploy/smoke.sh` |
 
-`/opt/agents/.env` (never commit this):
+The unit binds `127.0.0.1:8000`. Nothing but nginx should reach the agent. The
+agent holds a token.
 
-```
-GITHUB_TOKEN=ghp_...
-GITHUB_REPO=your-user/reliable-agentic-lab
-GITHUB_WEBHOOK_SECRET=your_random_secret
-AGENT_BACKEND=python
-AGENT_MAX_ATTEMPTS=3
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
-XAI_API_KEY=
-```
+## GitHub webhook
 
-## 4. Run the server
+On the **CRM fork** (`GITHUB_REPO`), not the lab repo:
 
-Run your FastAPI receiver on `127.0.0.1:8000` so Nginx can proxy to it.
-
-```bash
-cd /opt/agents
-source /opt/agent-env/bin/activate
-export PYTHONPATH=/opt/agents
-set -a && source /opt/agents/.env && set +a
-```
-
-Copy `agent-webhook.service` into systemd so it survives reboot.
-
-## 5. HTTPS with Nginx and Let's Encrypt
-
-Point a domain at the Droplet. Copy `nginx.conf`. Then:
-
-```bash
-certbot --nginx -d your-domain.com
-```
-
-## 6. GitHub webhook
-
-Repo, Settings, Webhooks:
-
-- Payload URL: `https://your-domain.com/github-webhook`
+- Payload URL: `https://your-domain/github-webhook`
 - Content type: `application/json`
 - Secret: same as `GITHUB_WEBHOOK_SECRET`
-- Events: Issues, Check suites, Pull requests
+- Events: Issues, Issue comments, Check suites
 
-## 7. How the backends plug in
+Issue titles must include `[T001]` so the receiver can pick a ticket.
 
-Set `AGENT_BACKEND` on the Droplet.
+## Call sol1 without GitHub
 
-| Value | What the webhook runs |
-|---|---|
-| `python` | Saturday lab loops. Working default. |
-| `claude` | `claude -p` headless |
-| `opencode` | `opencode run` |
-| `codex` | `codex exec` |
-| `grok` | `grok -p` |
-| `agent-sdk` | lab stub script |
-| `langgraph` | lab stub script |
+```bash
+sudo -u agent bash -lc 'source /opt/agents/.env && /opt/agents/labs/extra-credit/ext_5_digitalocean/deploy/call-sol1-enhancer.sh T001 --print'
+sudo -u agent bash -lc 'source /opt/agents/.env && /opt/agents/labs/extra-credit/ext_5_digitalocean/deploy/call-sol1-enhancer.sh T001'
+```
 
-Same entry point. Only the agent implementation changes.
-
-## Safety
-
-- Always verify the GitHub signature.
-- File lock plus `agent-in-progress` so two runs cannot overlap.
-- Same max-iteration budget as polling.
+`AGENT_BACKEND=claude` is the default. That is the Claude Code plugin in
+`solutions/sol1_enhancer`.
