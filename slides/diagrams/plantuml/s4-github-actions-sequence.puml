@@ -1,0 +1,47 @@
+@startuml s4-github-actions-sequence
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam sequence {
+  LifeLineBorderColor #2dd4bf
+  ActorBorderColor #d4a84b
+  ActorBackgroundColor #0d1e2c
+  ParticipantBackgroundColor #0d1e2c
+  ParticipantBorderColor #2dd4bf
+}
+skinparam note {
+  BackgroundColor #122536
+  BorderColor #d4a84b
+  FontColor #eef4f6
+}
+title GitHub Actions sequence. Unattended loop.
+
+actor Human
+participant "unattended.yml" as WF
+participant "unattended.py" as U
+participant "fixer.py" as F
+database "state.json" as ST
+database "receipt.json" as RC
+
+Human -> WF : workflow_dispatch, or a PR, or cron
+WF -> U : python -m loops.unattended --loop fixer
+U -> ST : load_state
+U -> F : run(repo, budget, branch)
+F --> U : trace.gate, trace.reason
+U -> ST : save_state
+U -> RC : push gate reads the same receipt
+
+alt last_gate is pass
+  U --> WF : exit 0
+else last_gate is escalate
+  U --> WF : exit 2
+  WF --> Human : a human must read this
+else crash or unknown
+  U --> WF : exit 1
+end
+
+note right of U
+  Escalate is not a crash.
+  It is a decision.
+end note
+@enduml

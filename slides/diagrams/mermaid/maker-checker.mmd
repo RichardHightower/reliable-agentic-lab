@@ -1,0 +1,6 @@
+flowchart LR
+  Maker["Maker / Doer\nProduces the artifact"] --> Artifact["Ticket or patch"]
+  Artifact --> Checker["Checker / Judge\nIndependent score"]
+  Checker -->|"pass"| Done["Done"]
+  Checker -->|"retry"| Maker
+  Checker -->|"escalate"| Human["Human"]

@@ -1,0 +1,46 @@
+@startuml s4-swap-object-keep-graph
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam package {
+  BackgroundColor #07141f
+  BorderColor #d4a84b
+  FontColor #d4a84b
+}
+skinparam rectangle {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+skinparam actor {
+  BackgroundColor #0d1e2c
+  BorderColor #d4a84b
+  FontColor #eef4f6
+}
+title Swap the object. Keep the graph.
+
+package "Keep. You built this today." {
+  rectangle "Orchestrator\nOwns the budget. Writes nothing." as O
+  rectangle "Doer\nWrites inside a declared scope" as D
+  rectangle "Judge\nScores. No write method." as J
+  rectangle "Gate\npass, retry, escalate" as G
+  O --> D
+  O --> J
+  J --> G
+}
+
+package "Swap. This is yours." {
+  rectangle "Your tickets, PRs, or docs" as Obj
+  rectangle "Your trigger\nfile, webhook, or cron" as Trig
+  rectangle "Your rubric rows" as Rub
+}
+
+actor "Human\nmerge stays here" as Human
+
+Trig --> O
+Obj --> D
+Rub --> J
+G --> Human : pass
+G --> D : retry
+G --> Human : escalate
+@enduml

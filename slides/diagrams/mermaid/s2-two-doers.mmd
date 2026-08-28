@@ -1,0 +1,6 @@
+flowchart TB
+  O["Orchestrator\nOwns the budget. Writes nothing.\nSees summaries, never the diff"]
+  O --> P["Planner\nWrites steps.jsonl. Own context."]
+  O --> T["test_implementer\nWrites tests/**"]
+  O --> C["code_implementer\nWrites app/**. Denied tests/**"]
+  O --> J["Judge\nScores. No write method."]

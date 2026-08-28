@@ -1,0 +1,22 @@
+@startuml lab1-plugin
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam component {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+title Lab 1 plugin shape
+package "Claude Code" {
+  component "enhancer-loop skill" as S
+  component "enhancer-doer" as D
+  component "enhancer-judge" as J
+}
+database "tickets/*.md" as T
+cloud "GitHub issue" as G
+S --> D : draft text
+S --> J : score
+S --> T : write candidate
+S --> G : poll / comment
+@enduml

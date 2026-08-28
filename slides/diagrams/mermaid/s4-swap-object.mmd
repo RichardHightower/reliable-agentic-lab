@@ -1,0 +1,13 @@
+flowchart LR
+  subgraph keep ["Keep. You built this today."]
+    O["Orchestrator"] --> D["Doer"]
+    D --> J["Judge"]
+    J --> G["Gate"]
+  end
+  subgraph swap ["Swap. This is yours."]
+    Obj["Your tickets, PRs, or docs"]
+    Trig["Your trigger"]
+    Rub["Your rubric rows"]
+  end
+  Trig --> O
+  Rub --> J

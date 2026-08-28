@@ -1,0 +1,8 @@
+stateDiagram-v2
+  [*] --> Running
+  Running --> Pass: rubric green
+  Running --> Retry: new signature and budget left
+  Running --> Escalate: same signature twice
+  Running --> Escalate: budget spent
+  Running --> Escalate: rubric green, judge says not done
+  Retry --> Running

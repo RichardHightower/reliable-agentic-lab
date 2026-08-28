@@ -1,0 +1,33 @@
+@startuml s2-red-gate-sequence
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam sequence {
+  LifeLineBorderColor #2dd4bf
+  ActorBorderColor #d4a84b
+  ActorBackgroundColor #0d1e2c
+  ParticipantBackgroundColor #0d1e2c
+  ParticipantBorderColor #2dd4bf
+}
+title Red gate. New tests must fail first.
+actor Human
+participant "Orchestrator" as O
+participant "test_implementer" as T
+participant "junit.xml" as J
+participant "red_gate" as R
+participant "code_implementer" as C
+O -> J : baseline. known_ids
+O -> T : write tests/** only
+T --> O : patch
+O -> J : after_tests
+O -> R : _new_test_ids(known, failed)
+alt red_ids empty
+  R --> O : escalate
+  O --> Human : nothing was proven
+else red_ids present
+  R --> O : continue
+  O -> C : write app/**, deny tests/**
+  C --> O : patch
+end
+@enduml

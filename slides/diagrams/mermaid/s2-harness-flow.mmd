@@ -1,0 +1,11 @@
+flowchart LR
+  P["Planner\nsteps.jsonl"] --> T["test_implementer\ntests/ only"]
+  T --> R{"New tests\nfailing?"}
+  R -->|no| S["STOP\nnothing was proven"]
+  R -->|yes| C["code_implementer\napp/ only"]
+  C --> J["Rubric judge\nten rows, no model"]
+  J --> F["Final judge\nactually done?"]
+  F --> G{"Gate"}
+  G -->|pass| D["Stop"]
+  G -->|retry| C
+  G -->|escalate| H["Human"]

@@ -1,0 +1,45 @@
+@startuml s4-receipt-verification
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam activity {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+skinparam diamond {
+  BackgroundColor #122536
+  BorderColor #d4a84b
+  FontColor #eef4f6
+}
+title Receipt verification. scripts/receipt.py
+
+start
+:receipt.py check repo;
+if (file exists?) then (no)
+  :No receipt. The suite has not run against this tree.;
+  stop
+endif
+if (parses?) then (no)
+  :Unreadable. Treating that as a failure, not a pass.;
+  stop
+endif
+if (report_usable?) then (no)
+  :No evidence is not the same as clean.;
+  stop
+endif
+if (green?) then (no)
+  :Last run: FAILED.;
+  stop
+endif
+if (tree_hash matches this tree?) then (no)
+  :The receipt is stale.;
+  stop
+endif
+if (newest source older than written_at?) then (no)
+  :A source file is newer. Re-run the tests.;
+  stop
+endif
+:Receipt is green and matches this tree.;
+stop
+@enduml

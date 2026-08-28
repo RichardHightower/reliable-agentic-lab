@@ -1,0 +1,9 @@
+stateDiagram-v2
+  [*] --> Ready
+  Ready --> Charged: charge within cap
+  Charged --> Ready: under hard cap
+  Charged --> SoftWarn: over soft_usd
+  SoftWarn --> Charged: still under hard cap
+  Charged --> Exceeded: max_calls or max_usd
+  SoftWarn --> Exceeded: hard cap
+  Exceeded --> [*]

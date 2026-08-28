@@ -1,0 +1,11 @@
+flowchart TB
+  S["rubric.score()"] --> R1["tests_ran"]
+  S --> R2["tests_passed"]
+  S --> R3["red_first"]
+  S --> R4["coverage_floor"]
+  S --> R5["criteria_covered"]
+  S --> R6["steps_done"]
+  S --> R7["ui_has_e2e"]
+  S --> R8["format_clean"]
+  S --> R9["lint_clean"]
+  S --> R10["write_scope"]

@@ -1,0 +1,6 @@
+flowchart LR
+  B["known_ids\npassed union failed"] --> G["_new_test_ids"]
+  A["after_tests.failed_ids"] --> G
+  G --> R{"red_ids?"}
+  R -->|empty| X["escalate\nnothing was proven"]
+  R -->|present| C["code_implementer starts"]

@@ -1,0 +1,5 @@
+flowchart LR
+  Loop["Loop calls search(question)"] --> Bound["One function. One boundary."]
+  Bound --> Px["Perplexity MCP\nwhen PERPLEXITY_API_KEY is set"]
+  Bound --> Ws["Agent WebSearch\nwhen the tool is there"]
+  Bound --> Fx["Recorded fixture\noffline, or this room"]

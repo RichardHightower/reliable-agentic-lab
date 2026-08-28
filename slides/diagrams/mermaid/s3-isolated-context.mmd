@@ -1,0 +1,5 @@
+flowchart LR
+  Search["Raw search dump"] --> Sub["Researcher subagent\nIsolated context"]
+  Sub --> File["Findings on disk"]
+  File --> Sum["Short summary + citations"]
+  Sum --> Orch["Orchestrator window"]

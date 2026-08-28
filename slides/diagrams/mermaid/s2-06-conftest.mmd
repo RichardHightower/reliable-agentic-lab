@@ -1,0 +1,4 @@
+flowchart LR
+  Loop["Loop sets PYTHONPATH\nto the work copy"] --> Tests["pytest"]
+  Conf["conftest.py inserts\nthe finished CRM first"] --> Tests
+  Tests --> Green["Green. Against anything."]

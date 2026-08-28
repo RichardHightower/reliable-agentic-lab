@@ -1,0 +1,38 @@
+@startuml s3-least-privilege-tool-wall
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam BorderColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam shadowing false
+skinparam packageBackgroundColor #0d1e2c
+skinparam packageBorderColor #2dd4bf
+skinparam rectangleBackgroundColor #0d1e2c
+skinparam rectangleBorderColor #2dd4bf
+skinparam noteBackgroundColor #122536
+skinparam noteBorderColor #d4a84b
+skinparam noteFontColor #eef4f6
+title Least-privilege tool wall
+package "Shipped" {
+  rectangle "search(question)" as Search
+  rectangle "write into this\nloop output folder" as Write
+}
+package "Capped. No handle" {
+  rectangle "merge" as Merge
+  rectangle "deploy" as Deploy
+  rectangle "ticket state" as Ticket
+  rectangle "production" as Prod
+  rectangle "HTTP client\nwith credentials" as Http
+}
+package "Measured failure" {
+  rectangle "ToolPrivBench 2026\nagents pick the bigger tool" as Bench
+}
+Search --> Write
+Bench ..> Http : agents reach past the screwdriver
+note right of Search
+  add_review_comment(issue_id, body)
+  is a tool.
+  An HTTP client holding credentials
+  is a liability.
+end note
+@enduml

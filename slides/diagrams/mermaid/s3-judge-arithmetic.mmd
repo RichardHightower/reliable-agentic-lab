@@ -1,0 +1,10 @@
+flowchart TB
+  Body["brief.md + sources[]"] --> C["brief.check. No model call"]
+  C --> H["has_sources\nlen(sources) > 0"]
+  C --> G["grounded\nevery [n] resolves"]
+  C --> Ci["cited\nevery paragraph cites"]
+  C --> S["style\n0 em dashes"]
+  H --> Score["BriefScore.passed"]
+  G --> Score
+  Ci --> Score
+  S --> Score

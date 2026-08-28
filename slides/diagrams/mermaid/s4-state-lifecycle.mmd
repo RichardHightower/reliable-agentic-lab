@@ -1,0 +1,5 @@
+flowchart LR
+  Load["load_state()"] --> Run["run the loop"]
+  Run --> Save["save_state()"]
+  Save --> Disk[".harness/state.json"]
+  Disk --> Next["Next cron. Next debug."]

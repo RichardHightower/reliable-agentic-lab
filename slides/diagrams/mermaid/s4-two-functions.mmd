@@ -1,0 +1,3 @@
+flowchart LR
+  S["summarize_failure(run_result)"] --> R["repair_until_green(contract, budget)"]
+  R --> G["pass, or escalate with a comment"]

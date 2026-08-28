@@ -1,0 +1,5 @@
+flowchart LR
+  O["One object"] --> T["One ticket a test can fail"]
+  T --> F["Taskfile.yml emits junit.xml"]
+  F --> D["Split the doer"]
+  D --> G["Arm the push gate"]

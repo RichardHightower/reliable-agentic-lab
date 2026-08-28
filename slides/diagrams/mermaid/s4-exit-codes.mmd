@@ -1,0 +1,5 @@
+flowchart LR
+  U["python -m loops.unattended"] --> G{"last_gate"}
+  G -->|pass| E0["exit 0"]
+  G -->|escalate| E2["exit 2"]
+  G -->|anything else| E1["exit 1"]

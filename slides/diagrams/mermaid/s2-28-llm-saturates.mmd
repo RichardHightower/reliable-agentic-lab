@@ -1,0 +1,7 @@
+flowchart LR
+  subgraph Det["Deterministic tell-detector"]
+    D["Gates at 70"] --> Sep["Separates good from bad"]
+  end
+  subgraph Llm["Large Language Model quality judge"]
+    S["Saturates near 0.97"] --> All["Flags 41 of 41"]
+  end

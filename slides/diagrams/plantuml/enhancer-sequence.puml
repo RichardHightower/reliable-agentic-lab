@@ -1,0 +1,31 @@
+@startuml enhancer-sequence
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam sequence {
+  LifeLineBorderColor #2dd4bf
+  ActorBorderColor #d4a84b
+  ActorBackgroundColor #0d1e2c
+  ParticipantBackgroundColor #0d1e2c
+  ParticipantBorderColor #2dd4bf
+}
+title Ticket enhancer sequence
+actor Human
+participant "Orchestrator" as O
+participant "Judge" as J
+participant "Doer" as D
+database Ticket
+O -> Ticket : load draft
+O -> J : score
+J --> O : verdict + signature
+alt pass
+  O -> Ticket : mark ready
+  O --> Human : wait LGTM
+else retry
+  O -> D : draft from missing rows
+  D --> O : text
+  O -> Ticket : write candidate
+else escalate
+  O --> Human : same gaps twice or budget spent
+end
+@enduml

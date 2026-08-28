@@ -1,0 +1,6 @@
+flowchart TB
+  Text["Model reply"] --> P["parse_verdict()"]
+  P -->|"no JSON / no done / not a bool"| F["synthetic_fail. Never a pass."]
+  P -->|"done and blocking issues"| F
+  P -->|"not done and no issues"| F
+  P -->|"schema holds"| V["Verdict"]

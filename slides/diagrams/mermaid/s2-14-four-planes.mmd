@@ -1,0 +1,7 @@
+flowchart TB
+  I["Intent\nThe ready ticket. A contract a test can fail."]
+  E["Execution\nMaker. Writes inside a declared scope."]
+  V["Verification\nChecker. Read-only, or Python over junit."]
+  C["Control\nHarness. Budget, retry, stop. Outside the model."]
+  I --> E --> V --> C
+  C -->|retry| E

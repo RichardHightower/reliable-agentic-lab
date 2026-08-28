@@ -1,0 +1,7 @@
+flowchart LR
+  Claim["Model claim\nIt is done. Trust me."] --> Gate{"Harness"}
+  Gate -->|"junit is red"| No["Refuse"]
+  Gate -->|"no new failing ids"| No
+  Gate -->|"unparseable verdict"| No
+  Gate -->|"same signature twice"| No
+  Gate -->|"ten rows green"| Yes["Believe the files"]

@@ -1,0 +1,50 @@
+@startuml s3-three-backend-adapter
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam BorderColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam shadowing false
+skinparam class {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+  AttributeFontColor #8aa0ad
+  HeaderBackgroundColor #122536
+}
+skinparam noteBackgroundColor #122536
+skinparam noteBorderColor #d4a84b
+skinparam noteFontColor #eef4f6
+title Three-backend adapter
+abstract class Backend {
+  name
+  cost_per_call
+  available()
+  search(question): Finding
+}
+class PerplexityBackend {
+  cost_per_call = 0.006
+  needs PERPLEXITY_API_KEY
+}
+class WebSearchBackend {
+  cost_per_call = 0.0
+  inbox file
+}
+class FixtureBackend {
+  cost_per_call = 0.0
+  fixtures/research.json
+}
+class Researcher {
+  backend: Backend
+  budget: Budget
+  ask(question)
+}
+Backend <|-- PerplexityBackend
+Backend <|-- WebSearchBackend
+Backend <|-- FixtureBackend
+Researcher --> Backend
+note bottom of Researcher
+  The loop calls one function.
+  It never learns which backend answered.
+end note
+@enduml

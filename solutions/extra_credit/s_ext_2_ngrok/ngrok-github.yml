@@ -1,0 +1,8 @@
+# Optional. Verify GitHub at the ngrok edge as well as in Python.
+# ngrok http 8765 --traffic-policy-file ngrok-github.yml
+on_http_request:
+  - actions:
+      - type: verify-webhook
+        config:
+          provider: github
+          secret: ${GITHUB_WEBHOOK_SECRET}

@@ -1,0 +1,44 @@
+@startuml s2-trust-boundaries
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam package {
+  BackgroundColor #0d1e2c
+  BorderColor #d4a84b
+  FontColor #eef4f6
+}
+skinparam rectangle {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+title Trust boundaries in Module 2
+package "Untrusted model output" {
+  rectangle "test_implementer patch"
+  rectangle "code_implementer patch"
+  rectangle "final_judge prose"
+  rectangle "doer claim: wrote[]"
+}
+package "Trusted process. Python." {
+  rectangle "WriteScope.check()"
+  rectangle "red_gate / _new_test_ids"
+  rectangle "rubric.score() ten rows"
+  rectangle "parse_verdict() / synthetic_fail"
+  rectangle "gates.decide()"
+  rectangle "receipt.check()"
+}
+package "Human" {
+  rectangle "merge box"
+}
+"test_implementer patch" --> "WriteScope.check()"
+"code_implementer patch" --> "WriteScope.check()"
+"WriteScope.check()" --> "red_gate / _new_test_ids"
+"red_gate / _new_test_ids" --> "rubric.score() ten rows"
+"final_judge prose" --> "parse_verdict() / synthetic_fail"
+"parse_verdict() / synthetic_fail" --> "gates.decide()"
+"rubric.score() ten rows" --> "gates.decide()"
+"doer claim: wrote[]" ..> "rubric.score() ten rows" : ignored.\nphase attribution instead
+"gates.decide()" --> "receipt.check()" : pass
+"receipt.check()" --> "merge box" : green receipt only
+@enduml

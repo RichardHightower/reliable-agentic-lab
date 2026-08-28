@@ -1,0 +1,6 @@
+flowchart TB
+  W["Doer.write(path, text)"] --> C{"WriteScope.permits?"}
+  C -->|"deny tests/**"| X["ScopeViolation"]
+  C -->|"allow app/**"| OK["Write"]
+  C -->|"unmatched"| X
+  J["Judge"] --> N["No write method to call"]

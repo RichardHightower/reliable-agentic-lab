@@ -1,0 +1,39 @@
+@startuml s3-prompt-injection-tool-output
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam BorderColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam shadowing false
+skinparam packageBackgroundColor #0d1e2c
+skinparam packageBorderColor #2dd4bf
+skinparam rectangleBackgroundColor #0d1e2c
+skinparam rectangleBorderColor #2dd4bf
+skinparam noteBackgroundColor #122536
+skinparam noteBorderColor #d4a84b
+skinparam noteFontColor #eef4f6
+title Prompt injection via tool output
+package "Outside the trust boundary" {
+  rectangle "Search result\nor MCP payload" as Payload
+  rectangle "Hidden instruction\nIgnore prior rules" as Hidden
+}
+package "Agent, if unsanitized" {
+  rectangle "Treats output\nas system text" as Trust
+  rectangle "Follows the hidden ask" as Follow
+}
+package "Control" {
+  rectangle "Sanitize tool output" as San
+  rectangle "Pinned manifest" as Pin
+  rectangle "check_brief arithmetic" as Check
+}
+Payload --> Hidden
+Hidden --> Trust
+Trust --> Follow
+Payload --> San
+San --> Check
+Pin --> San
+note bottom of Follow
+  AgentDojo: tool output is untrusted input
+  that can carry instructions.
+end note
+@enduml

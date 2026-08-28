@@ -1,0 +1,36 @@
+@startuml roles-scope
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam class {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+  AttributeFontColor #8aa0ad
+}
+title Write scope is a type
+class Role
+class Orchestrator {
+  budget_iterations
+  usd_left
+}
+class Doer {
+  scope: WriteScope
+  write(path, text)
+}
+class Judge {
+  read(path)
+}
+class WriteScope {
+  allow
+  deny
+  permits(path)
+}
+Role <|-- Orchestrator
+Role <|-- Doer
+Role <|-- Judge
+Doer --> WriteScope
+note right of Judge
+  No write method.
+  Adding one ends the split.
+end note
+@enduml

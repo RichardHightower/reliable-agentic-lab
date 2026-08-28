@@ -1,0 +1,8 @@
+flowchart LR
+  B["body"] --> U["ungrounded_citations"]
+  S["sources"] --> U
+  B --> L["uncited_claims"]
+  B --> D["strip_em_dashes"]
+  U --> Score["BriefScore"]
+  L --> Score
+  D --> Score

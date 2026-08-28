@@ -1,0 +1,10 @@
+flowchart TB
+  subgraph Loop["A production loop is a state machine"]
+    S["1 Explicit state\nStart from disk, not chat history"]
+    B["2 Bounded authority\nA declared write scope"]
+    E["3 Observable evidence\nA trace, a score, a file"]
+    T["4 External transition\nYou enforce pass / retry / escalate"]
+  end
+  S --- B
+  B --- E
+  E --- T
