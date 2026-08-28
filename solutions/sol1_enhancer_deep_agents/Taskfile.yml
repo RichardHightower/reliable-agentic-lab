@@ -9,9 +9,18 @@ dotenv: ['../../.env', '.env']
 # Standalone. No includes, no shared vars, nothing outside this folder.
 # `python3` here means the venv you activated. See SPEC.md.
 
+vars:
+  # TASKFILE_DIR is Task's own absolute path to this file's directory. Every
+  # path below is built from it on purpose. A relative path depends on the
+  # invoking process's cwd being exactly right, and when it is not, this port
+  # can end up polling a different checkout that also has a work/ directory.
+  TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
+
 tasks:
   default:
     cmds: [task --list]
+
+  # -- no runtime, no key, no clone -----------------------------------------
 
   test:
     desc: Run this folder's unit tests. No SDK and no target repo needed.
@@ -24,3 +33,41 @@ tasks:
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - python3 loop.py --table-only
+
+  checks:
+    desc: Run the two deterministic check scripts against their own assertions.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 check_fields.py --demo
+      - python3 check_stop.py --demo
+
+  # -- setup ----------------------------------------------------------------
+
+  clone:
+    desc: Clone your fork (from config.json) into work/. Skips if it is already there.
+    status:
+      - test -d {{.TARGET}}/.git
+    cmds:
+      - test -f {{.TASKFILE_DIR}}/config.json || (echo "copy config.json.example to config.json first, and fill in your GitHub username" && exit 1)
+      - mkdir -p {{.TASKFILE_DIR}}/../../work
+      - git clone --quiet https://github.com/$(python3 -c "import json;print(json.load(open('{{.TASKFILE_DIR}}/config.json'))['fork_owner'])")/$(python3 -c "import json;print(json.load(open('{{.TASKFILE_DIR}}/config.json'))['repo_name'])").git {{.TARGET}}
+
+  create-test-tickets:
+    desc: Write a few draft tickets (bug, ui, feature) into the target repo, for testing.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/setup_test_tickets.sh {{.TARGET}}
+
+  # -- the loop. Needs deepagents, a key, and a clone ------------------------
+
+  run:
+    desc: One poll-and-act step over every open ticket.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 loop.py --once --repo {{.TARGET}} {{.CLI_ARGS}}
+
+  poll-forever:
+    desc: Poll forever until killed (Ctrl-C). Seminar-only stand-in for a scheduler.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/poll_forever.sh {{.CLI_ARGS}}
