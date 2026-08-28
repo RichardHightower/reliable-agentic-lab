@@ -9,8 +9,11 @@
 #   task run --
 #
 # `task test`, `task table`, and `task checks` need no SDK, no API key, and no
-# clone. `task run` and `task poll-forever` need all three.
+# clone. `task run` and `task poll-forever` need all three. `task setup` creates
+# `.venv` in this folder so Homebrew Python (PEP 668) is not in the way.
 version: '3'
+
+dotenv: ['../../.env', '.env']
 
 vars:
   # TASKFILE_DIR is Task's own absolute path to this file's directory. Every
@@ -18,7 +21,9 @@ vars:
   # invoking process's cwd being exactly right, and when it is not, this port
   # can end up polling a different checkout that also has a work/ directory.
   TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
+  VENV: '{{.TASKFILE_DIR}}/.venv'
   PY: '{{.PY | default "python3"}}'
+  RUN_PY: '{{.RUN_PY | default (printf "%s/bin/python" .VENV)}}'
 
 tasks:
   default:
@@ -30,7 +35,12 @@ tasks:
     desc: Unit tests for this folder. No SDK and no API key.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} -m pytest tests -q'
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" -m pytest tests -q
+        else
+          {{.PY}} -m pytest tests -q
+        fi
 
   table:
     desc: Print the role table and exit, with no SDK installed.
@@ -48,10 +58,11 @@ tasks:
   # -- setup ----------------------------------------------------------------
 
   setup:
-    desc: Install the Agent SDK and pytest into the repo venv.
+    desc: Create .venv in this folder and install the Agent SDK into it.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} -m pip install --quiet claude-agent-sdk pytest'
+      - test -x {{.RUN_PY}} || {{.PY}} -m venv {{.VENV}}
+      - '{{.RUN_PY}} -m pip install --quiet claude-agent-sdk pytest'
 
   clone:
     desc: Clone your fork (from config.json) into work/. Skips if it is already there.
@@ -84,7 +95,12 @@ tasks:
     # in CLI_ARGS and the plugin/ tree resolve the same way as the other ports.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} loop.py --once --repo {{.TARGET}} {{.CLI_ARGS}}'
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates .venv in this folder and installs claude-agent-sdk."
+          exit 1
+        fi
+        "{{.RUN_PY}}" loop.py --once --repo {{.TARGET}} {{.CLI_ARGS}}
 
   poll-forever:
     desc: Poll forever until killed (Ctrl-C). Seminar-only stand-in for a scheduler.

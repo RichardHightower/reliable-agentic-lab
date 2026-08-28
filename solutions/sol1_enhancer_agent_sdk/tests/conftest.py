@@ -24,6 +24,16 @@ FOLDER = Path(__file__).resolve().parents[1]
 if str(FOLDER) not in sys.path:
     sys.path.insert(0, str(FOLDER))
 
+
+def sdk_installed() -> bool:
+    """True when the real package is importable. Collection-time skipif uses this."""
+    try:
+        import claude_agent_sdk  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 from contract import Contract  # noqa: E402  (needs the sys.path shim above)
 
 # A target repo declares scope for the implementer's roles. It has never heard
