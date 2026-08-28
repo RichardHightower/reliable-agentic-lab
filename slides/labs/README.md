@@ -3,7 +3,8 @@
 Marp. Same Spillwave theme as the four session decks. These are guided
 implementation walkthroughs, not summaries of the READMEs.
 
-Saturday labs first. Then every `solutions/sol*_` variant.
+Saturday labs first. Then every `solutions/sol*_` variant. Then extra
+credit and production triggers.
 
 ```bash
 npx @marp-team/marp-cli slides/labs/lab1-enhancer.md \
@@ -28,10 +29,19 @@ npx @marp-team/marp-cli slides/labs/lab1-enhancer.md \
 | `lab4-fixer.md` | Fill `summarize_failure` and `repair_until_green` | `labs/lab4_fixer` |
 | `sol4-fixer-agent-sdk.md` | Working unattended fixer | `solutions/sol4_fixer_agent_sdk` |
 | `sol4-fixer-deep-agents.md` | Role-table config port | `solutions/sol4_fixer_deep_agents` |
+| `ext1-webhook.md` | FastAPI HMAC receiver, 202, subprocess | `labs/extra-credit/ext_1_webhook` |
+| `ext2-ngrok.md` | ngrok adapter for the copied Lab 1 plugin | `labs/extra-credit/ext_2_ngrok` |
+| `ext5-digitalocean.md` | Droplet, nginx, systemd, loopback uvicorn | `labs/extra-credit/ext_5_digitalocean` |
+| `deploy-github-actions.md` | Actions on issue events, backend matrix | `labs/lab1_enhancer/workflows` |
+| `deploy-aws-fargate.md` | ALB + SQS + Fargate worker (pattern, not a lab) | extra credit 1 mapped to AWS |
 
 Lab 1 deploy notes (GitHub Actions on ticket change events):
 `labs/lab1_enhancer/GITHUB-ACTIONS.md`. Copy-me workflow:
 `labs/lab1_enhancer/workflows/enhance-on-issue.yml`.
+
+`deploy-aws-fargate.md` is a production mapping of extra credit 1. The repo
+does not ship Terraform. HMAC, 202, marker skip, and the three exits stay
+exactly as `s_ext_1_webhook`.
 
 Do not project these during the four-hour clock unless a lab is running
 long and the room needs the code on screen. Module 2 still does not get
