@@ -65,6 +65,8 @@ orchestrator  (writes nothing, owns budget)
      .harness/receipt.json
 ```
 
+This is Graph Engineering: each acceptance criterion becomes two nodes in `steps.jsonl`, a test step and a code step. Derived, not generated.
+
 There is no `loops/` package. Do not recreate it.
 
 
@@ -209,16 +211,9 @@ The code implementer cannot weaken a test, not because it was told not to, but b
 
 ---
 
-# Commands. What the README prints vs what runs
+# Commands. Live first. The README still prints a dead task.
 
-Lab README still says:
-
-```bash
-task loop:implementer -- --ticket T001 --doer reference
-task loop:implementer -- --ticket T001 --doer none
-```
-
-That task is gone from the root Taskfile. `loops/` was deleted on purpose.
+`task loop:implementer` is gone from the root Taskfile. `loops/` was deleted on purpose.
 
 Saturday self-check:
 
@@ -233,6 +228,8 @@ cd ../../solutions/sol2_implementer_deep_agents
 python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
 python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer none
 ```
+
+The lab README still prints `task loop:implementer`. Ignore that line.
 
 
 ---

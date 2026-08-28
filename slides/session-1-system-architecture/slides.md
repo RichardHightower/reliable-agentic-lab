@@ -377,12 +377,14 @@ id: s1-08
 layout: figure-bottom
 minutes: 2
 beat: talk
-notes: ReAct is the inner cycle. The product you ship is the outer control system around it.
+notes: ReAct is the inner cycle. The product you ship is the outer control system around it. Name it: Loop Engineering.
 -->
 
 <!-- _class: diagram -->
 
 # The primitive cycle is still ReAct. The product is the outer control system.
+
+That outer control system is Loop Engineering.
 
 ![w:1000](images/diagram-s1-08.jpg)
 
@@ -662,7 +664,7 @@ class Judge(Role):
         return (self.repo / relative).read_text(encoding="utf-8")
 ```
 
-<small>`loops/roles.py`</small>
+<small>`labs/lab1_enhancer` · judge has no write tool</small>
 
 ---
 
@@ -700,7 +702,7 @@ notes: signature is what failed, not how it was worded. Two equal signatures mea
 
 `signature` is what failed, not how it was worded. Two equal signatures mean the last attempt changed nothing.
 
-<small>`loops/gates.py` · `decide()`</small>
+<small>`labs/lab2_implementer/gates.py` · `decide()`</small>
 
 ---
 
@@ -807,7 +809,7 @@ id: s1-30
 layout: figure-bottom
 minutes: 2
 beat: talk
-notes: This is the map for the whole day. Spend the full two minutes.
+notes: This is the map for the whole day. Spend the full two minutes. Name the collision once: this picture is the role graph. Graph Engineering is the Module 2 plan file. Then drop it.
 -->
 
 <!-- _class: diagram -->
@@ -822,6 +824,8 @@ notes: This is the map for the whole day. Spend the full two minutes.
 | 2 | A ready ticket, and the code that satisfies it | Implementer |
 | 3 | A question | Research |
 | 4 | A failing pull request | Fixer |
+
+This picture is the role graph. Graph Engineering is Module 2: intent becomes `steps.jsonl`. Not LangGraph.
 
 ---
 
@@ -875,7 +879,7 @@ notes: Deterministic where it can be. A criterion that names a section is checka
 
 Deterministic where it can be. A criterion that names a section is checkable without a model.
 
-<small>`loops/criteria.py`</small>
+<small>`labs/lab1_enhancer` · required fields by kind</small>
 
 ---
 
@@ -1092,5 +1096,5 @@ notes: Bibliography. Skip in the room unless asked.
 - Yao et al. ReAct. arXiv:2210.03629
 - Ridnik, Kredo, Friedman. AlphaCodium. arXiv:2401.08500
 - Liu et al. Lost in the Middle. TACL 2024. arXiv:2307.03172
-- `loops/enhancer.py`, `loops/gates.py`, `loops/roles.py`, `loops/criteria.py`
+- `labs/lab1_enhancer/`, `labs/lab2_implementer/gates.py`
 - `labs/lab1_enhancer/ARCHITECTURE.md`

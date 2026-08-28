@@ -10,6 +10,8 @@ footer: Spillwave Solutions | spillwave.com
 
 Not Saturday. A cheap permanent public endpoint.
 
+New trigger. Same exits. Same harness. The graph does not change.
+
 Cheapest Basic plan. Ubuntu 24.04 LTS. One vCPU. 1 GB RAM. About six dollars a month.
 
 No new Python. You put extra credit 1 on a box.

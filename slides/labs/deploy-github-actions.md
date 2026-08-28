@@ -10,6 +10,8 @@ footer: Spillwave Solutions | spillwave.com
 
 Ticket change events. One poll. Then exit.
 
+New trigger. Same exits. Same harness. The graph does not change.
+
 Copy-me workflow: `labs/lab1_enhancer/workflows/enhance-on-issue.yml`
 
 Notes: `labs/lab1_enhancer/GITHUB-ACTIONS.md`

@@ -103,7 +103,7 @@ Fill only `loop.py`. Do not edit `brief.py`. Do not edit `solutions/`.
 
 # `plan_questions`. Three strings is enough
 
-A plan step you cannot check is a wish. The common stall is over-designing this function.
+A plan step you cannot check is a wish. The common stall is over-designing this function. This is Graph Engineering at lab scale: three checkable nodes, not a wish list.
 
 ```python
 def plan_questions(question: str) -> list[str]:
@@ -147,9 +147,9 @@ House style forbids em dashes. A model will argue. Python will not.
 
 ---
 
-# Commands. README drift
+# Commands. Live first. The README still prints a dead task.
 
-README still prints `task loop:research`. That task is gone with `loops/`.
+`task loop:research` is gone with `loops/`.
 
 Saturday self-check:
 
@@ -235,3 +235,4 @@ Cost is an architecture problem, not a pricing problem. Do not shop for a cheape
 2. Citations are arithmetic.
 3. The orchestrator sees a summary, never the dump.
 4. Merge is not a tool this loop holds.
+5. Saturday object is a cited brief. Paper pipelines are take-home.

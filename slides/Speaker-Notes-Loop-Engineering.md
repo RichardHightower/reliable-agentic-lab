@@ -94,6 +94,29 @@ Takehome is not Saturday:
 
 ---
 
+# What Loop Engineering is
+
+<div class="say">
+
+**Say.** You are here to engineer a loop, not to collect prompts. The unit of work is a controlled loop, not a single generation.
+
+</div>
+
+ReAct is the inner cycle: perceive, reason, act, observe. The product you ship is the outer control system around that cycle. That outer control system is Loop Engineering.
+
+Three workshop words. They are not the same thing.
+
+| Phrase | Means | Do not mix with |
+|---|---|---|
+| Loop Engineering | Outer control around ReAct. Trigger, scope, verify, state on disk, three exits. | A better prompt |
+| Graph Engineering | Intent as `steps.jsonl`. Each criterion maps to a test step and a code step. | "Same graph, four objects" |
+| The role graph | Orchestrator, doer, judge. Sessions 1, 3, and 4 reuse this picture. | LangGraph the runtime |
+| Harness Engineering | Graders, write scope, receipt, stop. OpenAI, February 2026. Module 2. | The trigger |
+
+Maker and Checker are doctrine, not job titles. Never let the AI verify its own done. On Saturday, maker is the doer and checker is the judge. Keep both vocabularies.
+
+---
+
 # Open. 10:00. Ten minutes.
 
 Say the time out loud. 10:00 Central, 11:00 Eastern.
@@ -190,6 +213,8 @@ Spend the full two minutes. They will see this graph four times.
 | M4 | Failing pull request | `workflow_dispatch`, cron, or a red suite |
 
 Same orchestrator. Same doer. Same judge. Swap the object.
+
+This picture is the role graph. Graph Engineering is the Module 2 plan file, not this picture, and not LangGraph.
 
 <div class="say">
 
@@ -326,9 +351,12 @@ claude -p "$(cat prompts/claude-code.md)"
 
 Three functions. Nothing else. `red_gate`, `score_attempt`, `run_loop`.
 
+Saturday fills `harness.py`. `task loop:implementer` is gone with `loops/`. Demo the eight-step loop from the Deep Agents port:
+
 ```bash
-task loop:implementer -- --ticket T001 --doer reference
-task loop:implementer -- --ticket T001 --doer none
+cd ../../solutions/sol2_implementer_deep_agents
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer none
 ```
 
 `--doer none` is the red gate doing its job. Tell them that before they run it. If this run were green, the harness would be lying.
@@ -337,7 +365,7 @@ task loop:implementer -- --ticket T001 --doer none
 
 Common stall is `score_attempt`. People try to compute rows. The answer is one line: `return rubric.score(contract=contract, **evidence)`. Absent kwargs become failing rows on purpose.
 
-Do not edit `loops/`. Fill only `harness.py`.
+Do not edit a `loops/` package. There is none. Fill only `harness.py`.
 
 Fall-behind: there is no drop-in `harness.py`. Watch Rick finish. Save the attempt first. See `labs/lab2_implementer/FALL-BEHIND.md`.
 
@@ -440,7 +468,13 @@ Three backends: Perplexity, WebSearch, fixture. The loop calls one function and 
 ```bash
 cd labs/lab3_research
 claude -p "$(cat prompts/claude-code.md)"
-task loop:research -- --question "sqlalchemy nullable datetime column" --backend fixture
+```
+
+`task loop:research` is gone with `loops/`. Saturday fills `loop.py`. Demo after class:
+
+```bash
+cd ../../solutions/sol3_research_deep_agents
+python3 loop.py --question "sqlalchemy nullable datetime column" --backend fixture
 ```
 
 The question is boring on purpose. It matches the fixture.
@@ -453,7 +487,7 @@ The question is boring on purpose. It matches the fixture.
 
 Four rows: `has_sources`, `grounded`, `cited`, `style`. No model call. A confident sentence nobody can trace is the failure that matters.
 
-House style forbids em dashes. A model will argue. Python will not. `strip_em_dashes` in `loops/brief.py`.
+House style forbids em dashes. A model will argue. Python will not. `strip_em_dashes` in the lab's `brief.py`.
 
 Fall-behind: watch Rick finish. See `labs/lab3_research/FALL-BEHIND.md`. Copy the answer. They continue Module 4 with a working artifact.
 
@@ -571,7 +605,13 @@ Stash Module 2 first, out loud, before anyone types. `git checkout broken-pr` re
 cd labs/lab4_fixer
 git -C ../../work/northwind-field-crm stash --include-untracked
 claude -p "$(cat prompts/claude-code.md)"
-task loop:fixer -- --branch broken-pr --doer reference
+```
+
+`task loop:fixer` is gone with `loops/`. Saturday fills `loop.py`. Demo the live fixer:
+
+```bash
+cd ../../solutions/sol4_fixer_agent_sdk
+python3 loop.py --repo ../../work/northwind-field-crm --branch broken-pr --doer reference
 ```
 
 `--branch broken-pr` is what makes this real. Point it at a green branch and it reports a pass and proves nothing. Same shape as the red gate.

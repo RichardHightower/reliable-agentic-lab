@@ -8,6 +8,8 @@ footer: Spillwave Solutions | spillwave.com
 
 Configuration port. It does **not** run the fixer.
 
+This is the role graph. The live harness is `sol4_fixer_agent_sdk`.
+
 No `fixer.py`, `gates.py`, `doers.py`, or tests. `task test` is `--table-only`.
 
 
@@ -117,7 +119,7 @@ If judge prints `yes`, stop.
 
 # Recap
 
-Same table, Deep Agents enforcement knob. Use the Agent SDK folder when you want a green branch or an honest comment.
+Same table, Deep Agents enforcement knob. This is graph without a loop. Use the Agent SDK folder when you want a green branch or an honest comment.
 
 ---
 

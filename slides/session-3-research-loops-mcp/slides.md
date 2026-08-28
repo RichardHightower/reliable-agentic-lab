@@ -297,7 +297,7 @@ id: s3-04
 layout: figure-bottom
 minutes: 1
 beat: talk
-notes: Point back at Module 1 three boxes. Nothing about them changes. The object is a question. The artifact is a cited brief. The judge still holds no write path.
+notes: Point back at Module 1 three boxes. Nothing about them changes. The object is a question. The artifact is a cited brief. The judge still holds no write path. Saturday is not a white paper.
 -->
 
 # Same graph. New object.
@@ -307,6 +307,8 @@ Orchestrator, doer, judge. The exact three parts from Module 1.
 The object is a question. The artifact is a cited brief.
 
 The judge still holds no write path.
+
+Saturday stays on the brief. Paper pipelines are take-home. Do not import those exits this hour. Pass, retry, escalate.
 
 The only new thing is a tool that reaches outside the machine.
 
@@ -607,8 +609,13 @@ notes: Read the command out loud. Work from labs/lab3_research. Pick one tool. T
 ```bash
 cd labs/lab3_research
 claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
+```
 
-task loop:research -- --question "sqlalchemy nullable datetime column" \
+`task loop:research` is gone with `loops/`. Saturday fills `loop.py`. Demo:
+
+```bash
+cd ../../solutions/sol3_research_deep_agents
+python3 loop.py --question "sqlalchemy nullable datetime column" \
   --backend fixture
 ```
 
@@ -669,7 +676,7 @@ Each sub-question is one you can tell was answered or not.
 
 Swapping in a model here is the lab's stretch goal. The checks downstream do not change when you do.
 
-<small>`loops/researcher.py`</small>
+<small>`solutions/sol3_research_deep_agents/researcher.py`</small>
 
 ---
 
@@ -721,12 +728,12 @@ id: s3-25
 layout: figure-bottom
 minutes: 1
 beat: lab
-notes: Point at loops/brief.py. ungrounded_citations and strip_em_dashes. Style is a rule, not a negotiation. Code spans are left alone.
+notes: Point at labs/lab3_research/brief.py. ungrounded_citations and strip_em_dashes. Style is a rule, not a negotiation. Code spans are left alone.
 -->
 
 <!-- _class: diagram -->
 
-# Two functions in `loops/brief.py`. Both refuse to argue.
+# Two functions in `brief.py`. Both refuse to argue.
 
 ![w:1000](images/diagram-s3-25.jpg)
 
@@ -766,9 +773,9 @@ notes: choose() order: Perplexity, then websearch inbox, then fixture. Nothing i
 
 ![w:1000](images/diagram-s3-27.jpg)
 
-Saturday path is `--backend fixture`. `loops/fixtures/research.json`.
+Saturday path is `--backend fixture`. `solutions/sol3_research_deep_agents` ships the fixture.
 
-<small>`loops/research.py`</small>
+<small>`solutions/sol3_research_deep_agents/loop.py`</small>
 
 ---
 
@@ -858,7 +865,7 @@ gate:    pass
 
 A confident sentence nobody can trace is the failure that matters.
 
-<small>`loops/brief.py` · `check()`</small>
+<small>`labs/lab3_research/brief.py` · `check()`</small>
 
 ---
 
@@ -874,7 +881,7 @@ notes: Walk the room. Do not reteach the architecture. Point at the brief and th
 
 Work from `labs/lab3_research`. Fill only `loop.py`.
 
-If you stall, read `loops/researcher.py`, `loops/research.py`, and `loops/brief.py`. That is the answer, not a hint.
+If you stall, read `labs/lab3_research/brief.py` and `solutions/sol3_research_deep_agents/researcher.py`. That is the answer, not a hint.
 
 Three exits. No fourth.
 
@@ -945,7 +952,7 @@ class Budget:
 
 A budget that only warns is a budget that gets ignored at three in the morning.
 
-<small>`loops/research.py` · `Budget`, `BudgetExceeded`</small>
+<small>`solutions/sol3_research_deep_agents` · `Budget`, `BudgetExceeded`</small>
 
 ---
 
@@ -1006,7 +1013,7 @@ The same gaps twice is not progress. Stopping is the feature.
 
 `signature` is what failed, not how it was worded.
 
-<small>`loops/gates.py` · `decide()`</small>
+<small>`labs/lab2_implementer/gates.py` · `decide()`</small>
 
 ---
 
@@ -1053,7 +1060,7 @@ id: s3-41
 layout: figure-bottom
 minutes: 1
 beat: bridge
-notes: Six lines. Read them. Do not add a seventh.
+notes: Six lines. Read them. Do not add a seventh. Saturday object is a cited brief. Paper pipelines are take-home. Saturday exits stay pass, retry, escalate.
 -->
 
 # Six lines to keep.
@@ -1080,7 +1087,6 @@ notes: Bibliography. Skip in the room unless asked.
 - Yang et al. ToolPrivBench. 2026. arXiv:2606.20023. OpenReview AXH6buTOVx
 - AgentDojo. Tool output is untrusted input that can carry instructions
 - MCP authorization spec. Validate token audience server side. Never pass a token through
-- `loops/research.py`, `loops/brief.py`, `loops/researcher.py`, `loops/gates.py`
 - `labs/lab3_research/ARCHITECTURE.md`, `MCP.md`
 - `solutions/sol3_research_deep_agents/` · Issue #119
 

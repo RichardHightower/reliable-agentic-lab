@@ -68,6 +68,9 @@ Point back at Module 1's three boxes. Nothing about them changes.
 The only new thing is a tool that reaches outside the machine. That is the whole
 delta, and it is why this module is only 40 minutes.
 
+Saturday object is a cited brief. Paper pipelines are take-home. Do not import
+those exits this hour. Pass, retry, escalate.
+
 ---
 
 ## s3-05. Section. Research is a subagent
