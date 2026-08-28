@@ -17,13 +17,25 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Paired by lab, both runtimes adjacent, because a missing twin is the
+      # failure this list is recovering from. Three Agent SDK ports were absent
+      # while their Deep Agents twins were covered, so nobody noticed that
+      # sol2's write separation had stopped holding or that sol4's money gate
+      # could not fire. A gap you can see is a gap that gets closed.
+      #
+      # `solutions/extra_credit` is deliberately not here. It needs fastapi and
+      # the rest of the root requirements, and this job installs pytest only.
+      # The root `task test` covers it.
       matrix:
         folder:
+          - solutions/sol1_enhancer_agent_sdk
           - solutions/sol1_enhancer_deep_agents
-          - solutions/sol3_research_deep_agents
-          - solutions/sol3_research_agent_sdk
-          - solutions/sol4_fixer_deep_agents
+          - solutions/sol2_implementer_agent_sdk
           - solutions/sol2_implementer_deep_agents
+          - solutions/sol3_research_agent_sdk
+          - solutions/sol3_research_deep_agents
+          - solutions/sol4_fixer_agent_sdk
+          - solutions/sol4_fixer_deep_agents
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
