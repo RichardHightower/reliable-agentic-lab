@@ -32,6 +32,8 @@ Each session folder:
 | `notes.md` | Narrative for that session. Same images, spoken order. |
 | `images/` | Editorial JPGs plus mermaid-cli SVGs. |
 
+Lab implementation walkthroughs (one deck per lab and per `sol*_` variant) live in `slides/labs/`. Same Spillwave theme. See `slides/labs/README.md`.
+
 `Speaker-Notes-Loop-Engineering.md` is the page, not the slide. Denser text. Smaller figures. Say, Why, and Lab boxes. Build it with the A4 theme:
 
 ```bash
@@ -100,7 +102,7 @@ notes: Ask the room who has a prompt that worked once and never again.
 ## Clock
 
 | Block | Minutes | Deck |
-|---|---|
+|---|---|---|
 | Open | 10 | session 1, slides 01 to 08 |
 | Module 1 talk | 15 | session 1, anatomy |
 | Module 1 lab | 25 | session 1, lab |
