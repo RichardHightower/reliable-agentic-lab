@@ -16,6 +16,7 @@ Do not survey seven production loops as labs. Name them in Module 4. Build one g
 | Action inside a scope | 1 | A doer edits the ticket body and nothing else |
 | Verify | 1 | A judge classifies the ticket and names what is missing |
 | Memory outside the chat | 1 | The ticket file and the trace. Point back to 20 August. |
+| Skills and memory as mounts | 4 | A role loads its instructions on demand, not always resident |
 | Human oversight | 1 | The loop proposes a contract. A human accepts it. |
 | Three exits, no fourth | 1 | `pass`, `retry`, `escalate`, printed on the trace |
 | Stable failure | 1 | The same gaps twice, and the loop stops rather than spend the budget |

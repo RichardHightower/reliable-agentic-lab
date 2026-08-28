@@ -142,11 +142,16 @@ A caller still names its loop at every site. The default agreeing with it is the
 SPEC.md  Taskfile.yml
 adapter.py  contract.py  loop.py
 roleplan.py  roles.py  write_scope.py
-tests/
+skills/  memory/  tests/
 ```
 
 Missing on purpose: `fixer.py`, `doers.py`, `gates.py`. This port is the graph
 without the loop. The tests pin the graph.
+
+`skills/` and `memory/` are mounts, not a fourth fence. A skill loads its
+instructions when the role is invoked, rather than sitting in every prompt from
+the start. `memory/` holds one file, so routing it does not hand the agent this
+folder's own source.
 
 ---
 

@@ -185,7 +185,7 @@ def test_build_agent_mounts_the_repo_as_a_virtual_filesystem(
     """
     roles.build_agent(contract, loop=LOOP)
 
-    backend = fake_deepagents["backend"]
+    backend = fake_deepagents["backend"].default
     assert backend.virtual_mode is True
     assert backend.root_dir == str(contract.repo.resolve())
 
@@ -227,3 +227,132 @@ def test_a_role_the_target_repo_never_scoped_gets_no_allow_rule():
     )
     rules = roles.permission_rules(role)
     assert [rule["mode"] for rule in rules] == ["deny", "deny"]
+
+
+# -- what the judge may say -------------------------------------------------
+
+
+def test_the_judge_carries_a_response_format(contract, fake_langchain):
+    """Without it the parent receives the subagent's last message text as-is.
+    With it the parent always gets valid JSON matching this schema."""
+    import roles  # noqa: PLC0415
+
+    judge = next(s for s in roles.subagents_for(contract, LOOP) if s["name"] == "judge")
+    assert judge["response_format"] is roles.JUDGE_RESPONSE
+
+
+def test_only_the_judge_carries_one(contract, fake_langchain):
+    import roles  # noqa: PLC0415
+
+    for spec in roles.subagents_for(contract, LOOP):
+        if spec["name"] != "judge":
+            assert "response_format" not in spec, spec["name"]
+
+
+def test_the_judge_cannot_name_a_gate():
+    """`done` is the verdict and belongs here. A gate is not a verdict, it is
+    the decision Python makes from one, and a stop condition a model can phrase
+    its way past is not a stop condition."""
+    import roles  # noqa: PLC0415
+
+    properties = roles.JUDGE_RESPONSE["properties"]
+    assert set(properties) == {"done", "why"}
+    for banned in ("gate", "pass", "retry", "escalate", "rubric", "score", "ready"):
+        assert banned not in properties
+
+
+def test_the_schema_refuses_extra_properties():
+    """`additionalProperties: False` is what stops the judge adding `gate`
+    anyway."""
+    import roles  # noqa: PLC0415
+
+    assert roles.JUDGE_RESPONSE["additionalProperties"] is False
+    assert roles.JUDGE_RESPONSE["required"] == ["done", "why"]
+
+
+def test_the_description_tells_the_judge_what_not_to_decide():
+    import roles  # noqa: PLC0415
+
+    text = roles.JUDGE_RESPONSE["description"].lower()
+    assert "do not name a gate" in text
+    assert "pass, retry, or escalate" in text
+
+
+# -- skills and memory ------------------------------------------------------
+
+
+def test_each_role_with_a_skill_directory_gets_the_mount(contract, fake_langchain):
+    specs = {s["name"]: s for s in roles.subagents_for(contract, LOOP)}
+    assert specs["code-implementer"]["skills"] == ["/skills/code_implementer/"]
+    assert specs["judge"]["skills"] == ["/skills/judge/"]
+
+
+def test_the_mount_path_follows_the_directory_not_the_subagent_name(contract, fake_langchain):
+    """The directory is `code_implementer`. The subagent is `code-implementer`.
+    Mounting the subagent's name would point at a directory that is not there."""
+    spec = next(s for s in roles.subagents_for(contract, LOOP) if s["name"] == "code-implementer")
+    assert "_" in spec["skills"][0]
+    assert (roles.SKILLS_DIR / "code_implementer").is_dir()
+
+
+def test_the_skill_body_is_not_also_pasted_into_the_prompt(contract, fake_langchain):
+    """Mount or inline, not both.
+
+    Deep Agents loads a skill in two levels: metadata in the system prompt at
+    startup, instructions only when the skill is invoked. Pasting the body into
+    `system_prompt` as well makes it always resident, which is the cost the
+    mount exists to avoid. sol1 does both. This folder does one.
+    """
+    body = (roles.SKILLS_DIR / "judge" / "SKILL.md").read_text(encoding="utf-8")
+    distinctive = "You read the broken pull request"
+    assert distinctive in body
+
+    spec = next(s for s in roles.subagents_for(contract, LOOP) if s["name"] == "judge")
+    assert distinctive not in spec["system_prompt"]
+    assert spec["skills"] == ["/skills/judge/"]
+
+
+def test_a_role_with_no_skill_directory_gets_no_key(contract, fake_langchain):
+    for spec in roles.subagents_for(contract, LOOP):
+        if not (roles.SKILLS_DIR / spec["name"].replace("-", "_")).is_dir():
+            assert "skills" not in spec, spec["name"]
+
+
+def test_build_agent_mounts_skills_and_memory(contract, fake_langchain, fake_deepagents):
+    roles.build_agent(contract, loop=LOOP)
+    assert fake_deepagents["skills"] == ["/skills/"]
+    assert fake_deepagents["memory"] == ["/memory/AGENTS.md"]
+
+    routes = fake_deepagents["backend"].routes
+    assert set(routes) == {"/skills/", "/memory/"}
+    assert all(route.virtual_mode for route in routes.values())
+
+
+def test_memory_routes_at_a_subdirectory_not_the_solution_folder(
+    contract, fake_langchain, fake_deepagents
+):
+    """Routing `/memory/` at the folder itself would put roles.py,
+    write_scope.py, and tests/ inside the agent's reach, in the one folder whose
+    lesson is that the coder may not write tests/**."""
+    roles.build_agent(contract, loop=LOOP)
+
+    from pathlib import Path  # noqa: PLC0415
+
+    root = Path(fake_deepagents["backend"].routes["/memory/"].root_dir)
+    assert root.name == "memory"
+    assert not (root / "roles.py").exists()
+    assert not (root / "tests").exists()
+    assert (root / "AGENTS.md").exists()
+
+
+def test_the_judge_skill_forbids_naming_a_gate():
+    """The skill and the schema have to agree. A skill that invites a verdict
+    the schema refuses is a retry loop waiting to happen."""
+    body = (roles.SKILLS_DIR / "judge" / "SKILL.md").read_text(encoding="utf-8").lower()
+    assert "do not name a gate" in body
+    assert "pass, retry, or escalate" in body
+
+
+def test_the_coder_skill_states_the_one_thing_it_cannot_do():
+    body = (roles.SKILLS_DIR / "code_implementer" / "SKILL.md").read_text(encoding="utf-8")
+    assert "tests/**" in body

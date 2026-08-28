@@ -29,6 +29,17 @@ Both the judge and doer use the `sonnet` model alias.
    task setup
    ```
 
+   Creates `.venv` in this folder and installs the package there. Homebrew
+   Python will not let `pip` write to the system interpreter (PEP 668).
+   `task run` uses this venv. You do not activate it.
+
+   Put the API key in the repo root `.env`, or export it in this shell.
+   Task loads `../../.env` first, then this folder's `.env`.
+
+   ```bash
+   echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
+   ```
+
 3. Clone your fork:
 
    ```bash
