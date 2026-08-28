@@ -101,3 +101,14 @@ Module 2.
 
 Stop typing and watch. Then copy the answer's scaffolding into this folder.
 See [FALL-BEHIND.md](FALL-BEHIND.md).
+
+## Deploy on GitHub Actions
+
+`task poll-forever` is a seminar stand-in. Production listens to ticket
+change events. Notes and a copy-me workflow:
+
+- [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md)
+- [workflows/enhance-on-issue.yml](workflows/enhance-on-issue.yml)
+
+Copy the YAML onto **your** CRM fork. The same notes are appended to every
+`solutions/sol1_*` SPEC. The trigger moves. The exits stay.

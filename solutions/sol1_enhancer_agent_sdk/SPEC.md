@@ -162,3 +162,23 @@ the harness. The skill is not invoked.
 never calls it. Leave it alone. Rewriting it to return an enhancer cast makes
 this copy drift from `loops/roles.py`, which is the exact failure the shared
 table exists to prevent.
+
+## Deploy on GitHub Actions (ticket change events)
+
+Saturday still polls. Production is an event: `issues` opened / edited /
+labeled, and `issue_comment` created.
+
+Copy-me workflow and the backend matrix (Claude, Codex, OpenCode, Agent
+SDK, Deep Agents) live in the Saturday lab notes, not here:
+
+- `labs/lab1_enhancer/GITHUB-ACTIONS.md`
+- `labs/lab1_enhancer/workflows/enhance-on-issue.yml`
+
+Copy the YAML onto **your CRM fork**. Do not enable it on the shared
+instructor repo. The trigger starts one poll. This folder still owns the
+exits. Skip comments that contain `<!-- enhancer-loop -->`. Set
+`ENHANCER_BACKEND` to the name of this port.
+
+Grok on hosted runners is a poor fit. Prefer Claude Code, Agent SDK, or
+Deep Agents in Actions. Keep Grok on a laptop or `ext_5_digitalocean`.
+

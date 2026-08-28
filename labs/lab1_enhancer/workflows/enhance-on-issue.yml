@@ -1,0 +1,169 @@
+# Copy this file onto YOUR CRM fork:
+#   .github/workflows/enhance-on-issue.yml
+# Do not enable it on the shared instructor repo.
+#
+# The trigger starts one poll. The enhancer exits. The workflow does not
+# grade the ticket, merge, or deploy.
+#
+# Set repository variable ENHANCER_BACKEND to one of:
+#   claude | codex | opencode | agent-sdk | deep-agents
+# Optional secret: ANTHROPIC_API_KEY (required for agent-sdk and deep-agents).
+
+name: Enhance tickets on issue events
+
+on:
+  issues:
+    types: [opened, edited, labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: Ticket id such as T900
+        required: true
+
+permissions:
+  issues: write
+  contents: read
+  actions: read
+
+concurrency:
+  group: enhancer-${{ github.event.issue.number || github.event.inputs.ticket }}
+  cancel-in-progress: false
+
+jobs:
+  enhance:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'issues' ||
+      (github.event_name == 'issue_comment' &&
+       !contains(github.event.comment.body, '<!-- enhancer-loop -->'))
+    runs-on: ubuntu-latest
+    env:
+      ENHANCER_BACKEND: ${{ vars.ENHANCER_BACKEND || 'claude' }}
+      AGENT_MAX_ATTEMPTS: ${{ vars.AGENT_MAX_ATTEMPTS || '3' }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Checkout the CRM fork
+        uses: actions/checkout@v4
+
+      - name: Checkout the enhancer lab
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.ENHANCER_REPO || github.repository }}
+          path: .enhancer
+          token: ${{ secrets.ENHANCER_REPO_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Parse ticket id from the issue title
+        id: ticket
+        env:
+          TITLE: ${{ github.event.issue.title || github.event.inputs.ticket }}
+          NUMBER: ${{ github.event.issue.number || '0' }}
+          INPUT: ${{ github.event.inputs.ticket }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT:-}" ]; then
+            echo "id=$INPUT" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          id="$(printf '%s\n' "$TITLE" | grep -oE '\[T[0-9]+\]' | head -1 | tr -d '[]' || true)"
+          if [ -z "$id" ]; then
+            id="T${NUMBER}"
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "Parsed ticket $id"
+
+      - name: Skip if the attempt budget is spent
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number || 0 }}
+          AGENT_MAX_ATTEMPTS: ${{ env.AGENT_MAX_ATTEMPTS }}
+        run: |
+          set -euo pipefail
+          n="$(gh issue view "$NUMBER" --json labels --jq '[.labels[].name] | map(select(startswith("agent-attempts-"))) | length' || echo 0)"
+          echo "prior attempts label count: $n"
+          if [ "$n" -ge "$AGENT_MAX_ATTEMPTS" ]; then
+            echo "AGENT_MAX_ATTEMPTS reached. Exiting without a poll."
+            exit 0
+          fi
+
+      - name: Mark in progress
+        if: github.event.issue.number
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue edit ${{ github.event.issue.number }} --add-label agent-in-progress || true
+
+      - name: Install the enhancer toolchain
+        working-directory: .enhancer
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          if [ -f requirements-takehome.txt ]; then
+            pip install -r requirements-takehome.txt
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          npm install -g @go-task/cli
+          case "$ENHANCER_BACKEND" in
+            claude) npm install -g @anthropic-ai/claude-code || true ;;
+            opencode) npm install -g opencode-ai || true ;;
+          esac
+
+      - name: Run one poll
+        working-directory: .enhancer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TICKET: ${{ steps.ticket.outputs.id }}
+          TARGET: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          case "$ENHANCER_BACKEND" in
+            claude)
+              cd solutions/sol1_enhancer
+              task run -- --ticket "$TICKET" --repo "$TARGET"
+              ;;
+            codex)
+              cd solutions/sol1_enhancer_codex
+              task run -- --ticket "$TICKET" --repo "$TARGET"
+              ;;
+            opencode)
+              cd solutions/sol1_enhancer_opencode
+              task run -- --ticket "$TICKET" --repo "$TARGET"
+              ;;
+            agent-sdk)
+              cd solutions/sol1_enhancer_agent_sdk
+              python3 loop.py --once --repo "$TARGET" --ticket "$TICKET"
+              ;;
+            deep-agents)
+              cd solutions/sol1_enhancer_deep_agents
+              python3 loop.py --once --repo "$TARGET" --ticket "$TICKET"
+              ;;
+            *)
+              echo "Unknown ENHANCER_BACKEND=$ENHANCER_BACKEND"
+              exit 1
+              ;;
+          esac
+
+      - name: Upload harness state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-enhancer-${{ steps.ticket.outputs.id }}
+          path: |
+            .harness/last-enhancer-*.json
+            work/**/.harness/last-enhancer-*.json
+          if-no-files-found: ignore
+
+      - name: Clear in-progress
+        if: always() && github.event.issue.number
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue edit ${{ github.event.issue.number }} --remove-label agent-in-progress || true
