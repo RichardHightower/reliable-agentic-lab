@@ -69,7 +69,7 @@ def test_the_judge_denies_every_write(contract, fake_langchain):
     judge = _by_name(roles.subagents_for(contract, loop="enhancer"))["judge"]
     rules = judge["permissions"]
     assert rules == [
-        {"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"},
+        {"operations": ["write"], "paths": ["/**"], "mode": "deny"},
     ]
 
 
@@ -77,9 +77,8 @@ def test_the_doer_allows_tickets_then_denies_the_rest(contract, fake_langchain):
     doer = _by_name(roles.subagents_for(contract, loop="enhancer"))["doer"]
     allow, deny = doer["permissions"]
     assert allow["mode"] == "allow"
-    assert "tickets/**" in allow["paths"]
     assert "/tickets/**" in allow["paths"]
-    assert deny == {"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"}
+    assert deny == {"operations": ["write"], "paths": ["/**"], "mode": "deny"}
 
 
 def test_the_judge_asks_for_structured_output(contract, fake_langchain):
@@ -195,5 +194,17 @@ def test_build_agent_mounts_the_crm_as_a_virtual_filesystem(contract, monkeypatc
     assert seen["memory"] == ["/memory/AGENTS.md"]
     assert seen["skills"] == ["/skills/"]
     assert seen["permissions"] == [
-        ("perm", {"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"})
+        ("perm", {"operations": ["write"], "paths": ["/**"], "mode": "deny"})
     ]
+
+
+def test_build_agent_passes_only_absolute_permission_paths(contract, monkeypatch, fake_langchain):
+    """Deep Agents 0.7 rejects a relative path such as ``tickets/**``."""
+    seen = {}
+    _install_fake_deepagents(monkeypatch, seen)
+
+    roles.build_agent(contract, loop="enhancer")
+
+    for subagent in seen["subagents"]:
+        for _, permission in subagent["permissions"]:
+            assert all(path.startswith("/") for path in permission["paths"])
