@@ -25,6 +25,12 @@ Do not guess a plausible-sounding value. Look for a real one:
   models, routes, existing forms and fields, similar tickets already marked
   `ready`. A due-date field, for instance, should match how other optional
   fields on the same model already behave.
+- For a broad read-only investigation, use the built-in `Explore` subagent
+  before drafting. It can map the relevant app surface without giving you any
+  write capability.
+- `tickets/T001-due-dates.ready.md` is the worked answer for the seminar's
+  due-date ticket. For another ticket, inspect a matching
+  `tickets/<id>-*.ready.md` file when one exists.
 - If a comment is present, treat it as the strongest source: it is a human
   telling you what they want. Use it to fill or correct fields directly.
 - Where the app and the comment do not settle a field, write the most
@@ -36,10 +42,10 @@ Do not guess a plausible-sounding value. Look for a real one:
 
 Rewrite the full ticket body (not just the gaps) so every required field
 for its kind has real content, in the same section style as an already-
-`ready` ticket in this repo if one exists (problem, proposal, value,
-acceptance criteria, and for a UI ticket, a wireframe). Keep the frontmatter
-exactly as given to you; you are not deciding `state`, `enhancer-loop` does
-that after judging your draft.
+`ready` ticket in this repo if one exists (problem, proposal, value, and
+acceptance criteria; include a wireframe only for a UI ticket). Keep the
+frontmatter exactly as given to you; you are not deciding `state`,
+`enhancer-loop` does that after judging your draft.
 
 ## Report
 

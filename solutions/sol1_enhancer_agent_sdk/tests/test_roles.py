@@ -142,7 +142,7 @@ def test_a_role_name_becomes_a_hyphenated_agent_name(contract, fake_sdk):
 
 def test_each_subagent_carries_its_own_tool_list(contract, fake_sdk):
     options = roles.options_for(contract, loop="enhancer")
-    assert options.agents["enhancer-doer"].tools == ["Read", "Grep", "Glob"]
+    assert options.agents["enhancer-doer"].tools == ["Read", "Grep", "Glob", "Agent"]
     assert "Write" not in options.agents["enhancer-judge"].tools, "the judge holds no write tool"
     assert "Write" not in options.agents["enhancer-doer"].tools, "the doer holds no write tool"
 

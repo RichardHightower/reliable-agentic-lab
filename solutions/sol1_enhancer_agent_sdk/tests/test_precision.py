@@ -19,6 +19,8 @@ def test_plugin_agents_are_the_claude_code_files():
     assert doer["tools"] == ["Read", "Grep", "Glob"]
     assert judge["tools"] == ["Read", "Grep", "Glob"]
     assert "You draft a better ticket" in doer["prompt"]
+    assert "Explore" in doer["prompt"]
+    assert "T001-due-dates.ready.md" in doer["prompt"]
     assert "You grade one ticket" in judge["prompt"]
     assert "Write" not in doer["tools"]
     assert "Bash" not in judge["tools"]
@@ -41,7 +43,7 @@ def test_options_load_plugin_agents_not_one_liners(contract, fake_sdk):
     judge = options.agents["enhancer-judge"]
     assert "You draft a better ticket" in doer.prompt
     assert "You grade one ticket" in judge.prompt
-    assert doer.tools == ["Read", "Grep", "Glob"]
+    assert doer.tools == ["Read", "Grep", "Glob", "Agent"]
     assert judge.tools == ["Read", "Grep", "Glob"]
     assert doer.maxTurns == 12
     assert judge.background is False
@@ -66,17 +68,17 @@ def test_the_parent_can_only_spawn_a_subagent(contract, fake_sdk):
 
 
 def test_the_plugin_is_loaded_from_this_folder_not_the_target_repo(contract, fake_sdk):
-    """cwd is the CRM. Skills live next to this runtime. plugins= is how they meet."""
+    """cwd is the CRM. The plugin supplies the two named subagents."""
     options = roles.options_for(contract, loop="enhancer")
     assert options.plugins == [{"type": "local", "path": str(PLUGIN)}]
-    assert options.skills == ["ticket-enhancer:enhancer-loop"]
+    assert options.skills is None
     assert options.cwd == str(contract.repo)
     assert options.cwd != str(PLUGIN)
 
 
-def test_builtin_general_purpose_is_disabled(contract, fake_sdk):
+def test_builtin_explore_is_available_to_the_doer(contract, fake_sdk):
     options = roles.options_for(contract, loop="enhancer")
-    assert options.env["CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS"] == "1"
+    assert "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS" not in options.env
 
 
 def test_parent_prompt_forbids_running_the_skill(contract, fake_sdk):
