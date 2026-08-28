@@ -80,7 +80,7 @@ neither writes nothing. Failing closed is the safe way to be wrong.
 |---|---|
 | `roleplan.py` | the cast per loop, and the scope per role |
 | `observability.py` | the trace writer all three runtimes share |
-| `extra_credit/` | the five event-driven assignments |
+| `extra_credit/` | ngrok and Droplet procedure answers |
 
 `roles.py` for each runtime lives inside the port folder, not up here. An
 attendee can copy one folder somewhere else and run it, with no path shim
