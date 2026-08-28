@@ -121,19 +121,15 @@ def permission_rules(role: RolePlan) -> list[dict]:
         return [
             {
                 "operations": ["write"],
-                "paths": ["/**", "**"],
+                "paths": ["/**"],
                 "mode": "deny",
             }
         ]
     allow = list(role.allow) or ["tickets/**"]
-    paths = []
-    for pattern in allow:
-        paths.append(pattern)
-        if not pattern.startswith("/"):
-            paths.append("/" + pattern)
+    paths = [pattern if pattern.startswith("/") else "/" + pattern for pattern in allow]
     return [
         {"operations": ["write"], "paths": paths, "mode": "allow"},
-        {"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"},
+        {"operations": ["write"], "paths": ["/**"], "mode": "deny"},
     ]
 
 
@@ -229,7 +225,7 @@ def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
         item["permissions"] = _as_permissions(spec["permissions"])
         subagents.append(item)
     orchestrator_permissions = [
-        FilesystemPermission(operations=["write"], paths=["/**", "**"], mode="deny"),
+        FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
     ]
     memory = ["/memory/AGENTS.md"] if MEMORY_FILE.exists() else None
     skills = ["/skills/"] if SKILLS_DIR.is_dir() else None
