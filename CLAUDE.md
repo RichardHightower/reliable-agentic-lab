@@ -20,8 +20,9 @@ abstraction.
 ## What this repo actually is
 
 - **Saturday:** Claude Code agents, as Claude Code actually works. Plugins,
-  skills, subagents, hooks. Fill-ins live in `labs/`. Answers live in
-  `solutions/solN_*` (and the Codex / Grok / OpenCode twins).
+  skills, subagents, hooks. Fill-ins live in `labs/`. Lab 1 answers live in
+  `solutions/sol1_*` (and the Codex / Grok / OpenCode twins). Labs 2 to 4
+  fill the stub; the shipped answers for those loops are the two runtime ports.
 - **Take-home:** Claude Agent SDK and LangChain Deep Agents, as those products
   actually work. Each port is a **standalone folder**. An attendee copies one
   folder somewhere else and it runs. Duplicate code is the point.

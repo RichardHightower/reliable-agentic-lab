@@ -48,5 +48,5 @@ The first command needs no API key. Run it first.
 ## Reading
 
 - `solutions/sol2_implementer_agent_sdk/`, the answer for this runtime
-- `solutions/sol2_implementer/implementer.py`, the Saturday Module 2 answer you are porting
+- `solutions/sol2_implementer_agent_sdk/`, the Saturday Module 2 loop on this runtime
 - `import claude_agent_sdk` is how you know the install worked

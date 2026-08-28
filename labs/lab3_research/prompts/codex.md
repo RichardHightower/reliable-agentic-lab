@@ -54,10 +54,9 @@ The boundary is the lesson. This loop can search and write into its own output f
 - Fill only `loop.py`. Do not edit anything under `solutions/`.
 - Do not edit the target repo's tests to make something pass.
 - Stop at the documented exit. Do not add a fourth one.
-- If you stall, read solutions/sol3_research/. It is the answer, not a hint.
+- If you stall, read `brief.py` in this folder, then watch Rick.
 
 ## Worth reading
 
-- `solutions/sol3_research/brief.py`
-- `solutions/sol3_research/research.py`
+- `brief.py`
 - `MCP.md`

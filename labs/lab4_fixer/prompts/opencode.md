@@ -57,9 +57,8 @@ Nobody is watching this one. Its exits matter more than its successes, and the s
 - Fill only `loop.py`. Do not edit anything under `solutions/`.
 - Do not edit the target repo's tests to make something pass.
 - Stop at the documented exit. Do not add a fourth one.
-- If you stall, read solutions/sol4_fixer/. It is the answer, not a hint.
+- If you stall, watch Rick. Fill the two functions in `loop.py`.
 
 ## Worth reading
 
-- `solutions/sol4_fixer/fixer.py`
-- `solutions/sol4_fixer/gates.py`
+- `contract.py`

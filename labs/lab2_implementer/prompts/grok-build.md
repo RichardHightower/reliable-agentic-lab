@@ -56,11 +56,9 @@ You will hit the push gate in this lab. Your agent will try to push and be refus
 - Fill only `harness.py`. Do not edit anything under `solutions/`.
 - Do not edit the target repo's tests to make something pass.
 - Stop at the documented exit. Do not add a fourth one.
-- If you stall, read solutions/sol2_implementer/. It is the answer, not a hint.
+- If you stall, read `rubric.py` and `gates.py` in this folder, then watch Rick.
 
 ## Worth reading
 
-- `solutions/sol2_implementer/rubric.py`
-- `solutions/sol2_implementer/gates.py`
-- `solutions/sol2_implementer/roles.py`
-- `solutions/sol2_implementer/steps.py`
+- `rubric.py`
+- `gates.py`

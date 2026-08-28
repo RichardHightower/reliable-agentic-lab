@@ -1,6 +1,6 @@
 name: unattended-fixer
 
-# Module 4. The fixer in solutions/sol4_fixer, triggered when nobody is watching.
+# Module 4. The fixer, triggered when nobody is watching.
 
 on:
   workflow_dispatch:
@@ -37,7 +37,7 @@ jobs:
           cd work/northwind-field-crm && task setup
 
       - name: Run the fixer with nobody watching
-        working-directory: solutions/sol4_fixer
+        working-directory: solutions/extra_credit/s_ext_4_fix_pr
         run: |
           git -C ../../work/northwind-field-crm checkout ${{ github.event.inputs.branch || 'broken-pr' }}
           python fixer.py \

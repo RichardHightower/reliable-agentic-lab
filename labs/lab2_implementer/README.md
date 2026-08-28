@@ -48,10 +48,5 @@ You will hit the push gate in this lab. Your agent will try to push and be refus
 
 ## If you fall behind
 
-Stop typing and watch. Then copy the answer into this folder:
-
-```bash
-cp ../../solutions/sol2_implementer/harness.py .
-```
-
-You continue the next module with a working artifact. See `FALL-BEHIND.md`.
+Stop typing and watch. Fill `harness.py` from what Rick types.
+See `FALL-BEHIND.md`.

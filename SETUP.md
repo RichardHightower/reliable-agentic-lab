@@ -62,11 +62,11 @@ task test
 That is extra credit plus a guard that the old shared `loops/` library stays
 gone. If it fails on a fresh clone, tell Rick.
 
-Then, if you want to see Module 2's answer run with no model key:
+Then, if you want to see the implementer run with no model key:
 
 ```bash
-cd solutions/sol2_implementer
-python implementer.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
+cd solutions/extra_credit/s_ext_1_webhook
+python implementer.py --repo ../../../work/northwind-field-crm --ticket T001 --doer reference
 ```
 
 You should see ten rubric rows, all passing, and `gate: pass`.

@@ -74,24 +74,6 @@ tasks:
     cmds:
       - claude -p "/enhancer-loop --repo {{.ROOT_DIR}}/{{.TARGET}} {{.CLI_ARGS}}"
 
-  lab2:
-    desc: Ticket implementer in solutions/sol2_implementer. Module 2.
-    dir: solutions/sol2_implementer
-    cmds:
-      - '{{.ROOT_DIR}}/{{.PY}} implementer.py --repo {{.ROOT_DIR}}/{{.TARGET}} {{.CLI_ARGS}}'
-
-  lab3:
-    desc: Research assistant in solutions/sol3_research. Module 3.
-    dir: solutions/sol3_research
-    cmds:
-      - '{{.ROOT_DIR}}/{{.PY}} researcher.py {{.CLI_ARGS}}'
-
-  lab4:
-    desc: Broken PR fixer in solutions/sol4_fixer. Module 4.
-    dir: solutions/sol4_fixer
-    cmds:
-      - '{{.ROOT_DIR}}/{{.PY}} fixer.py --repo {{.ROOT_DIR}}/{{.TARGET}} {{.CLI_ARGS}}'
-
   # --- the class ---------------------------------------------------------
   slides:
     desc: Draw the mermaid diagrams, then render every deck to PDF.

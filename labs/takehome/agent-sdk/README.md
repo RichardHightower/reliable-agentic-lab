@@ -34,7 +34,7 @@ model. Read that before you spend anything.
 
 ## The answer
 
-`solutions/agent_sdk/`.
+`solutions/sol2_implementer_agent_sdk/`.
 
 ## What you are actually building
 

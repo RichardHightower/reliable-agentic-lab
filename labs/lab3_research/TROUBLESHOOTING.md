@@ -40,13 +40,7 @@ That reading is the skill this workshop is about, not a sign something broke.
 
 ## You are out of time
 
-Stop and copy the answer in:
-
-```bash
-cp ../../solutions/sol3_research/loop.py .
-```
-
-See [FALL-BEHIND.md](FALL-BEHIND.md).
+Stop and watch Rick finish `loop.py`. See [FALL-BEHIND.md](FALL-BEHIND.md).
 
 ## Something is genuinely broken
 

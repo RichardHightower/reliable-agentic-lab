@@ -50,10 +50,5 @@ Nobody is watching this one. Its exits matter more than its successes, and the s
 
 ## If you fall behind
 
-Stop typing and watch. Then copy the answer into this folder:
-
-```bash
-cp ../../solutions/sol4_fixer/loop.py .
-```
-
-You continue the next module with a working artifact. See `FALL-BEHIND.md`.
+Stop typing and watch. Fill `loop.py` from what Rick types.
+See `FALL-BEHIND.md`.

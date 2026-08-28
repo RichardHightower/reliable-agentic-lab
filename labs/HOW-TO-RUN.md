@@ -27,19 +27,8 @@ below the line in the prompt file.
 
 ## No coding agent at all
 
-You can still do labs 2 through 4 by filling the stub by hand. Check your
-work against the solution folder:
-
-```bash
-cd solutions/sol2_implementer
-python implementer.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
-
-cd solutions/sol3_research
-python researcher.py --question "sqlalchemy nullable datetime column" --backend fixture
-
-cd solutions/sol4_fixer
-python fixer.py --repo ../../work/northwind-field-crm --doer reference
-```
+You can still do labs 2 through 4 by filling the stub by hand. Watch Rick
+if you stall. Labs 2 to 4 have no drop-in solution folder; Lab 1 still does.
 
 Lab 1 is a Claude Code plugin. It needs an LLM:
 

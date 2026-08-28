@@ -47,10 +47,5 @@ The boundary is the lesson. This loop can search and write into its own output f
 
 ## If you fall behind
 
-Stop typing and watch. Then copy the answer into this folder:
-
-```bash
-cp ../../solutions/sol3_research/loop.py .
-```
-
-You continue the next module with a working artifact. See `FALL-BEHIND.md`.
+Stop typing and watch. Fill `loop.py` from what Rick types.
+See `FALL-BEHIND.md`.
