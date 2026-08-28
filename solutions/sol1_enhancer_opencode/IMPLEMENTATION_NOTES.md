@@ -85,14 +85,18 @@ for any remaining asks.
 Steps 0–8 are the same protocol.
 
 - Step 0 skips `*.ready.md` and `*.enhancer-candidate.md`.
-- Step 2 writes `github_issue` into the state file on search and create
-  (#91). A found issue with no state file must not look like a first poll.
+- Step 2 writes `github_issue` into the state file and the ticket
+  frontmatter on search and create (#91, #114). A found issue with no state
+  file must not look like a first poll, and the frontmatter entry outlives
+  the state file the `LGTM` pass deletes.
 - Step 3: `sim:` plus exact text for `--simulate-comment`. Persist
   `last_comment_id` in step 8 and on the ready-but-not-LGTM branch.
 - Ready requires `check_fields.py` first. `LGTM` alone cannot set
   `state: ready`.
-- Every comment this loop posts ends with `<!-- enhancer -->`. Step 3
+- Every comment this loop posts ends with `<!-- enhancer-loop -->`. Step 3
   ignores comments that contain that marker (#62). Do not filter by author.
+  All four ports share this one marker on purpose, so two ports polling the
+  same issue skip each other's comments instead of answering them (#114).
 
 Script paths are `.opencode/skills/enhancer-loop/scripts/`, not
 `.claude/...`. The scripts themselves are copies, not imports.

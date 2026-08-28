@@ -44,7 +44,7 @@ Parse from the invocation text after `enhancer-loop`:
 Every comment this loop posts ends with this exact line:
 
 ```
-<!-- enhancer -->
+<!-- enhancer-loop -->
 ```
 
 GitHub renders an HTML comment as nothing, so a human never sees it.
@@ -154,7 +154,7 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      file): there is no comment yet, and none is needed. A fresh ticket
      always gets one round, so the human has something to react to; skip
      straight to step 5 with no comment and no comment id.
-   - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq '[.[] | select((.body // "") | contains("<!-- enhancer -->") | not)] | sort_by(.id) | .[-1] // empty | {id, body}'`.
+   - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq '[.[] | select((.body // "") | contains("<!-- enhancer-loop -->") | not)] | sort_by(.id) | .[-1] // empty | {id, body}'`.
      The id is that comment's numeric `id`. If it is not newer than
      `last_comment_id`, there is no new comment: stop here for this ticket
      (no-op, does not count as a round).
