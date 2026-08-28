@@ -133,23 +133,30 @@ itself past. The model drafts and grades. Everything else is computed.
    `{kind, present_fields}` into the authoritative `ready`.
 6. Ready plus a comment of exactly `LGTM` releases the ticket to
    `state: ready`, `loop: implementer`. A red rubric never consumes an `LGTM`.
-7. The doer writes `tickets/<id>.enhancer-candidate.md`. The judge grades that
-   file. The draft replaces the real ticket only when its missing set is a
-   proper subset of the current one. "Not worse" is not good enough.
-8. `check_stop.py` decides the other two exits: budget spent, or the same gaps
-   two rounds running. Either one adds `needs-human` and stops.
+7. The doer returns the rewritten ticket as its final message. Python writes
+   `tickets/<id>.enhancer-candidate.md`. The judge grades that file. The draft
+   replaces the real ticket only when its missing set is a proper subset of the
+   current one. "Not worse" is not good enough.
+8. `check_stop.py` decides the remaining exits: round budget spent, cost budget
+   spent, max turns, or the same gaps two rounds running. Completing a ticket
+   (rubric green and `LGTM`) is the other exit. Cost and max turns also stop
+   the SDK `query()` itself via `max_budget_usd` and `max_turns`. Either
+   computed stop adds `needs-human`.
 
-The doer is the only role holding `Write`, and the `PreToolUse` hook keeps it
-inside `tickets/**`. The candidate file lives there, so the hook allows the one
-write the loop wants and blocks every other path the doer might reach for.
+The doer holds no `Write`. Python writes the candidate, matching the Claude
+Code plugin. A `PreToolUse` hook is still registered so a leaked Write fails
+closed instead of writing `app/`. The parent session may only spawn a
+subagent (`allowed_tools=["Agent"]`).
 
 ## What this folder is not
 
 This folder is standalone. Copy it somewhere else and it runs. Do not import a shared engine.
 
-It is not a Claude Code plugin either. There is no `.claude/` here. The plugin
-port of this same lab lives in `solutions/sol1_enhancer/`, and the two are meant
-to be read side by side: same rubric, same exits, two different runtimes.
+It is not a Claude Code plugin either. The same agents and skill live under
+`plugin/`, loaded with `plugins=` because `cwd` is the CRM. The plugin port of
+this same lab lives in `solutions/sol1_enhancer/`, and the two are meant to be
+read side by side: same rubric, same agents, two different runtimes. Python is
+the harness. The skill is not invoked.
 
 `write_scope.build()` is a copy of the engine's role builder and the enhancer
 never calls it. Leave it alone. Rewriting it to return an enhancer cast makes
