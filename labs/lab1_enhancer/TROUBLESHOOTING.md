@@ -27,6 +27,16 @@ into `work/`.
 `task run` never opens issues. Run `task create-test-tickets` first. That
 task writes the draft files and opens a GitHub issue for each one.
 
+## `create-test-tickets` reopens the old issues
+
+It matches on a title that still starts with `[Txxx]`. Closing by hand is
+not enough. Retire them, then seed again:
+
+```bash
+task reset-test-tickets
+task create-test-tickets
+```
+
 ## Nothing happens on a second run
 
 If the ticket already meets the rubric, that is correct. The loop is waiting

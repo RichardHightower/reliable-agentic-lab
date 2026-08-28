@@ -57,6 +57,24 @@ You need `codex`, `gh`, `jq`, `task`, and `python3`.
    Writes `T900` (bug), `T901` (ui), `T902` (feature) if missing, then opens
    a GitHub issue for every draft enhancer ticket, including `T001`.
 
+
+## Retest from scratch
+
+`create-test-tickets` reopens an issue whose title still starts with `[Txxx]`.
+Closing by hand is not enough. This retires those issues so a new seed
+creates new ones.
+
+```bash
+task reset-test-tickets
+task create-test-tickets
+task run --
+```
+
+It rewrites each matching GitHub title to `[retired-Txxx-<timestamp>] ...`,
+closes it, drops `github_issue` from the ticket files, deletes enhancer
+state, restores tracked tickets from git, and removes T900/T901/T902 so
+they are rewritten as fresh drafts.
+
 ## Run one poll over every open ticket
 
 This is the demo. No ticket name. No simulated comment. The loop evaluates

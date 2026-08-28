@@ -31,6 +31,12 @@ tasks:
     cmds:
       - bin/setup_test_tickets.sh {{.TARGET}}
 
+  reset-test-tickets:
+    desc: Close and rename GitHub test issues so create-test-tickets makes new ones.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/reset_test_tickets.sh {{.TARGET}}
+
   run:
     desc: One poll-and-act step over every open ticket, using the plugin you built here.
     # Pinning dir here, not just TARGET, means the claude -p subprocess

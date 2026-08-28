@@ -58,6 +58,12 @@ tasks:
     cmds:
       - bin/setup_test_tickets.sh {{.TARGET}}
 
+  reset-test-tickets:
+    desc: Close and rename GitHub test issues so create-test-tickets makes new ones.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/reset_test_tickets.sh {{.TARGET}}
+
   # -- the loop. Needs deepagents, a key, and a clone ------------------------
 
   run:

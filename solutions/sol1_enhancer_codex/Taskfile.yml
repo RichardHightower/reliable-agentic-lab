@@ -36,6 +36,12 @@ tasks:
     cmds:
       - bin/setup_test_tickets.sh {{.TARGET}}
 
+  reset-test-tickets:
+    desc: Close and rename GitHub test issues so create-test-tickets makes new ones.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/reset_test_tickets.sh {{.TARGET}}
+
   fence-check:
     desc: Confirm the orchestrator sandbox is real. Run this once, before you trust a demo.
     dir: '{{.TASKFILE_DIR}}'
