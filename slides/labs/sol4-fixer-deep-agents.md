@@ -130,7 +130,9 @@ cd solutions/sol4_fixer_deep_agents
 python loop.py --table-only
 ```
 
-`DEFAULT_LOOP` in this copy is `"implementer"`. `loop.py` sets `LOOP = "fixer"`. Without that override you get five roles instead of three.
+`DEFAULT_LOOP` in this copy is `"implementer"`. So is sol1's. Both inherited it from the shared `roleplan.py` this repo deleted, and neither changed it. `loop.py` sets `LOOP = "fixer"` and passes it at every call site. Without that you get five roles instead of three.
+
+The rule is that a caller names its loop. A test in each folder pins it, because the default is one edit away from being wrong everywhere.
 
 ---
 

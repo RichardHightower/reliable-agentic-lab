@@ -19,6 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         folder:
+          - solutions/sol1_enhancer_deep_agents
           - solutions/sol3_research_deep_agents
           - solutions/sol3_research_agent_sdk
           - solutions/sol4_fixer_deep_agents

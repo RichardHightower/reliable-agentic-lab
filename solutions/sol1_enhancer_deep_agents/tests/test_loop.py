@@ -183,3 +183,20 @@ def test_an_enhancer_error_reports_and_exits_nonzero(target_repo, polling, capsy
     polling.setattr("enhancer.Enhancer.poll", boom)
     assert loop.main(["--once", "--repo", str(target_repo)]) == 1
     assert "enhancer stopped: no tickets/ directory" in capsys.readouterr().out
+
+
+def test_the_entry_point_names_its_own_loop():
+    """`DEFAULT_LOOP` in this copy is 'implementer', inherited from the original
+    shared `roleplan.py`. `sol1_enhancer_deep_agents` carries the same value.
+    Nothing misbehaves because every caller names its loop, and this test is
+    what keeps that true.
+
+    A caller that relied on the default would get the implementer cast instead of
+    the enhancer one, which is a different set of roles and a different set of
+    write scopes.
+    """
+    assert loop.LOOP == "enhancer"
+    assert set(loop.cast(None)) == set(roleplan.LOOPS["enhancer"])
+    assert set(roleplan.plan(None, "enhancer")) != set(
+        roleplan.plan(None, roleplan.DEFAULT_LOOP)
+    ), "this test only means something while the default differs from the loop"
