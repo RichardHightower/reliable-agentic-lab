@@ -3,69 +3,223 @@ marp: true
 paginate: true
 title: Session 4. Production Architecture
 description: Engineering Reliable Agentic AI Systems. Packt. 29 August 2026.
-footer: spillwave · session 4 · production architecture
+footer: Spillwave Solutions | spillwave.com
 style: |
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,550&family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600&display=swap');
+  /* @theme spillwave */
+  @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap");
 
   :root {
-    --bg: #07141f;
-    --ink: #eef4f6;
-    --muted: #8aa0ad;
-    --teal: #2dd4bf;
-    --gold: #d4a84b;
-    --line: rgba(45, 212, 191, 0.22);
+    --bg: #eef2f7;
+    --surface: #ffffff;
+    --ink: #1b2437;
+    --muted: #4a5b70;
+    --faint: #7a8b9c;
+    --navy: #1a365d;
+    --orange: #d9772a;
+    --teal: #2aa8bb;
+    --line: #c9d4e0;
+    --stripe: #1e3a6e;
   }
 
   section {
-    background: var(--bg);
+    background-color: var(--bg);
+    background-size: contain !important;
+    background-repeat: no-repeat !important;
+    background-position: center right !important;
     color: var(--ink);
-    font-family: Outfit, "Segoe UI", sans-serif;
-    padding: 48px 56px 64px;
-    font-size: 28px;
-    line-height: 1.35;
+    font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+    padding: 28px 48px 50px;
+    font-size: 20px;
+    line-height: 1.32;
+    justify-content: flex-start;
+    overflow: hidden;
+  }
+
+  section::before {
+    content: "SPILLWAVE SOLUTIONS  ·  LOOP ENGINEERING WORKSHOP";
+    display: block;
+    color: var(--navy);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 6px;
+    margin-bottom: 12px;
   }
 
   section::after {
-    color: var(--muted);
-    font-size: 12px;
-    letter-spacing: 0.14em;
+    color: var(--faint);
+    font-size: 11px;
+    font-weight: 500;
   }
 
   h1 {
-    font-family: Fraunces, Georgia, serif;
-    font-style: italic;
-    font-weight: 550;
-    color: var(--gold);
-    font-size: 44px;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-style: normal;
+    font-weight: 800;
+    color: var(--ink);
+    font-size: 28px;
     line-height: 1.12;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.028em;
+    margin: 0 0 12px 0;
   }
 
-  h2, h3 { color: var(--teal); font-weight: 600; }
+  h2,
+  h3 {
+    color: var(--navy);
+    font-weight: 700;
+  }
 
-  p, li { color: var(--ink); }
-  small, cite { color: var(--muted); font-size: 16px; }
+  p,
+  li {
+    color: var(--ink);
+  }
 
-  code, pre {
+  ul {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+  }
+
+  ul li {
+    position: relative;
+    padding: 8px 0 8px 20px;
+    border-bottom: 1px solid var(--line);
+    font-size: 20px;
+    line-height: 1.32;
+  }
+
+  ul li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.95em;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--navy);
+  }
+
+  ul li:last-child {
+    border-bottom: none;
+  }
+
+  ul li:last-child::before {
+    background: var(--orange);
+  }
+
+  small,
+  cite {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  code,
+  pre {
     font-family: "IBM Plex Mono", ui-monospace, monospace;
-    background: #061018;
-    color: #d7ece8;
+    background: #e4eaf2;
+    color: var(--ink);
+    font-size: 14px;
   }
 
-  table { font-size: 22px; }
-  th { color: var(--muted); font-weight: 500; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; }
-  td { border-color: var(--line); }
+  pre {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    max-height: 300px;
+    overflow: auto;
+  }
 
-  img { display: block; margin-left: auto; margin-right: auto; }
+  table {
+    font-size: 16px;
+    width: 100%;
+  }
+
+  th {
+    color: var(--muted);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  td {
+    border-color: var(--line);
+    padding: 6px 10px 6px 0;
+  }
+
+  img {
+    display: block;
+    margin: 8px auto 0;
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
+    object-position: center;
+  }
 
   footer {
     color: var(--muted);
-    font-size: 12px;
-    letter-spacing: 0.12em;
+    font-size: 11px;
   }
 
-  section.lead h1 { font-size: 56px; }
-  section.lead p { color: var(--muted); }
+  /* Title */
+  section.lead::before {
+    display: none;
+  }
+
+  section.lead {
+    border-left: 14px solid var(--stripe);
+    padding: 40px 48px 40px 40px;
+    justify-content: center;
+  }
+
+  section.lead h1 {
+    font-size: 44px;
+    font-weight: 800;
+    color: var(--ink);
+    font-style: normal;
+    line-height: 1.08;
+  }
+
+  section.lead p {
+    color: var(--navy);
+    font-weight: 500;
+    font-size: 20px;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 20px;
+    align-items: center;
+    width: 100%;
+  }
+
+  .hero img {
+    max-height: 420px;
+    width: 100%;
+    object-fit: contain;
+    margin: 0;
+  }
+
+  /* Diagram-first slides: the drawing is the slide */
+  section.diagram h1 {
+    font-size: 26px;
+    margin-bottom: 8px;
+  }
+
+  section.diagram img {
+    max-height: 340px;
+    width: auto;
+    max-width: 100%;
+    margin-top: 4px;
+  }
+
+  section.diagram p,
+  section.diagram small {
+    margin-top: 8px;
+  }
 ---
 
 <!--
@@ -77,13 +231,24 @@ _class: lead
 notes: Say the shape of the hour out loud. Build for 12 minutes. Type for 18. Land for 5. Then 10 to close. 13:45 Central. Energy is lowest here. Keep moving.
 -->
 
-# Engineering reliable agentic AI systems
+<!-- _class: lead -->
 
-Session 4. Production Architecture, the capstone.
+<div class="hero">
+<div>
+
+# Production Architecture
+
+Session 4. The capstone. Same graph. Nobody at the keyboard.
 
 Saturday 29 August 2026. 13:45 Central.
 
 Rick Hightower. Spillwave. Packt workshop.
+
+</div>
+
+![w:480](images/title-mark.jpg)
+
+</div>
 
 ---
 
@@ -128,8 +293,6 @@ notes: Four items. The graph is not one of them. The last line is the hook for t
 - The budget stops being advice. Nobody is there to hit Ctrl-C.
 - If you cannot read the last score, you cannot debug at 2 a.m.
 
-![bg right:42%](images/human-leaves.jpg)
-
 ---
 
 <!--
@@ -140,9 +303,11 @@ beat: talk
 notes: Point at Keep. That is Modules 1 to 3. Point at Swap. That is production. A webhook or a schedule fires only when the branch head actually moved. A timer that fires on no change burns budget for no work.
 -->
 
+<!-- _class: diagram -->
+
 # The graph does not change. The trigger does.
 
-![h:460](images/diagram-s4-04-742ae9ff.svg)
+![w:1000](images/diagram-s4-04.jpg)
 
 A keystroke is a trigger you cannot ship.
 
@@ -156,9 +321,11 @@ beat: talk
 notes: Read the four boxes. This is loops/unattended.py in one picture. Durable state, a hard budget, a written trace, an exit code. The loop itself is loops/fixer.py. Unattended wraps it.
 -->
 
+<!-- _class: diagram -->
+
 # Four things around the loop have to get real.
 
-![w:1060](images/diagram-s4-05-90b9d6b1.svg)
+![w:1000](images/diagram-s4-05.jpg)
 
 <small><code>loops/unattended.py</code>. The loop does not change. What changes is everything around it.</small>
 
@@ -172,9 +339,11 @@ beat: talk
 notes: Three exits, no fourth. Python holds the loop, so the model never counts its own retries. The forgotten exit is still stable failure. Same rows twice, stop.
 -->
 
+<!-- _class: diagram -->
+
 # Python still holds the loop. The model never counts retries.
 
-![h:460](images/diagram-s4-06-5e09d6c4.svg)
+![w:1000](images/diagram-s4-06.jpg)
 
 Pass. Retry. Escalate. No fourth exit.
 
@@ -188,9 +357,11 @@ beat: talk
 notes: Unattended means query(), not a chat client. ClaudeSDKClient is for a person typing. Nobody is chatting. Saturday lab stays two functions in loop.py. The Agent SDK port is the takehome.
 -->
 
+<!-- _class: diagram -->
+
 # Unattended means `query()`, not a chat client.
 
-![h:460](images/diagram-s4-07-8b9633ca.svg)
+![w:1000](images/diagram-s4-07.jpg)
 
 Claude Agent Software Development Kit. One process. A budget. Three exits.
 
@@ -207,9 +378,11 @@ beat: talk
 notes: Read the five lines. permission_mode acceptEdits because nobody is there to click Allow. PreToolUse deny tests/** because the fixer cannot weaken a test to reach green. max_turns is the SDK iteration budget. Tests after every turn are pytest. Merge is never a tool.
 -->
 
+<!-- _class: diagram -->
+
 # The Agent SDK contract for a loop with nobody watching.
 
-![w:1060](images/diagram-s4-08-473d983e.svg)
+![w:1000](images/diagram-s4-08.jpg)
 
 - `permission_mode`: `acceptEdits`
 - PreToolUse: deny `tests/**`
@@ -229,9 +402,11 @@ beat: talk
 notes: Callback to Module 1. Merge, money, and production deploy stay human. The fixer opens a branch. It never receives a merge tool. That is a missing tool, not a polite request.
 -->
 
+<!-- _class: diagram -->
+
 # Merge stays a human. The loop never gets that tool.
 
-![w:1060](images/diagram-s4-09-cabdb9d1.svg)
+![w:1000](images/diagram-s4-09.jpg)
 
 An agent can argue past an instruction. It cannot argue past a tool it was never given.
 
@@ -245,9 +420,11 @@ beat: talk
 notes: Untrusted is model output, including invented evidence. Trusted is Python: gates.decide, WriteScope, pytest, the receipt. Human owns merge. Same split as Module 1, now with nobody in the chair.
 -->
 
+<!-- _class: diagram -->
+
 # Trust boundaries do not move because the chair is empty.
 
-![h:460](images/diagram-s4-10-e90d031f.svg)
+![w:1000](images/diagram-s4-10.jpg)
 
 ---
 
@@ -280,8 +457,6 @@ MAST, the Multi-Agent System Failure Taxonomy. 1,642 traces. 7 frameworks.
 
 Every one of those three is something you build, not something you buy.
 
-![bg left:38%](images/mast-breakdown.jpg)
-
 ---
 
 <!--
@@ -292,9 +467,11 @@ beat: talk
 notes: Map MAST onto the day. System design is the graph, the scope, the budget. Inter-agent misalignment is the handoff: orchestrator sees summaries, not dumps. Task verification is the judge, the receipt, pytest. This hour is all three, with nobody watching.
 -->
 
+<!-- _class: diagram -->
+
 # Fourteen modes. Three categories. This hour is all three.
 
-![w:1060](images/diagram-s4-12-362c50c0.svg)
+![w:1000](images/diagram-s4-12.jpg)
 
 FC1 is poor specification and missing stops.
 FC2 is a breakdown in information flow between agents.
@@ -336,9 +513,11 @@ beat: talk
 notes: Walk load, run, save. runs increments. last_gate and last_reason come off the trace. last_run_at is UTC. loop is fixer, implementer, or enhancer. The next cron job reads this before it starts.
 -->
 
+<!-- _class: diagram -->
+
 # The next run has to know what the last one did.
 
-![w:1060](images/diagram-s4-14-9a65a524.svg)
+![w:1000](images/diagram-s4-14.jpg)
 
 A corrupt state file is not a fresh start. Say so, then start fresh.
 
@@ -369,8 +548,6 @@ Then three numbers per run: **steps**, **loop count**, **cost per task**.
 - Langfuse is that same record in a pane.
 - A dashboard nobody reads is decoration.
 
-![bg right:42%](images/observability-2am.jpg)
-
 ---
 
 <!--
@@ -381,9 +558,11 @@ beat: talk
 notes: solutions/observability.py. Always writes the local file, even on an exception. A trace that only appears when the run succeeds is the trace you cannot use. Langfuse is optional. A missing key must never change what the loop does.
 -->
 
+<!-- _class: diagram -->
+
 # Always write the file. A pane is optional.
 
-![w:1060](images/diagram-s4-16-3b303f6c.svg)
+![w:1000](images/diagram-s4-16.jpg)
 
 ```python
 with trace("fixer", ticket="broken-pr") as span:
@@ -405,9 +584,11 @@ beat: talk
 notes: Callback to the push gate they hit in Module 2. Same receipt rule in the hook and in the workflow. Same rule in both places, or the remote one is theater. You should be near 11 minutes here.
 -->
 
+<!-- _class: diagram -->
+
 # The local gate and the remote gate must agree.
 
-![h:460](images/diagram-s4-17-c1d28186.svg)
+![w:1000](images/diagram-s4-17.jpg)
 
 You met the push gate in Module 2. It reads `.harness/receipt.json` and refuses to push without a green one.
 
@@ -423,9 +604,11 @@ beat: talk
 notes: Read the exit codes. 0 pass, 2 escalate, 1 crash. Escalate is not a crash, it is a decision, so it gets its own code. CI needs a number, not a paragraph. Then flash the workflow. You should be at 12 minutes here. Then the lab.
 -->
 
+<!-- _class: diagram -->
+
 # Exit 0 is a pass. Exit 2 is an escalation. Exit 1 is a crash.
 
-![w:1060](images/diagram-s4-18-47759d84.svg)
+![w:1000](images/diagram-s4-18.jpg)
 
 ```yaml
 # .github/workflows/unattended.yml
@@ -464,9 +647,11 @@ beat: lab
 notes: Same three parts. Only the object changes. There is no plan to write, because the work is already defined by what is red. It runs unattended, so its exits matter more than its successes.
 -->
 
+<!-- _class: diagram -->
+
 # A failing branch in. A green one out. Or a reason.
 
-![h:460](images/diagram-s4-20-8d1ebdd9.svg)
+![w:1000](images/diagram-s4-20.jpg)
 
 It is the same graph as the implementer with two differences.
 
@@ -506,9 +691,11 @@ beat: lab
 notes: Fill loop.py. Nothing else. Two functions. The line to repeat while you walk the room: giving up is allowed, giving up silently is the bug.
 -->
 
+<!-- _class: diagram -->
+
 # Fill `loop.py`. Two functions. Nothing else.
 
-![w:1060](images/diagram-s4-22-de970f88.svg)
+![w:1000](images/diagram-s4-22.jpg)
 
 ```python
 def summarize_failure(run_result: RunResult) -> str:
@@ -556,9 +743,11 @@ beat: lab
 notes: Stopping is designed. Stopping without an explanation is a bug. The next person to look at this pull request has to know why the agent walked away. The returned trace carries the gate and the reason.
 -->
 
+<!-- _class: diagram -->
+
 # `repair_until_green`. Stop, and say why.
 
-![w:1060](images/diagram-s4-24-50faef6c.svg)
+![w:1000](images/diagram-s4-24.jpg)
 
 Giving up is allowed. Giving up **silently** is the bug.
 
@@ -572,9 +761,11 @@ beat: lab
 notes: checkout() in loops/fixer.py. If local changes would be overwritten, SystemExit names both ways out: stash, or discard. The work is still there. The loop did not decide for the human. Test: test_checkout_refuses_to_delete_an_earlier_lab_s_work.
 -->
 
+<!-- _class: diagram -->
+
 # The fixer refuses to clean the tree.
 
-![h:460](images/diagram-s4-25-022704bc.svg)
+![w:1000](images/diagram-s4-25.jpg)
 
 The refusal names both ways out, because an attendee reads it mid-lab with a clock running.
 
@@ -590,9 +781,11 @@ beat: lab
 notes: When the failure names an error it cannot place, it asks the research boundary once, inside the budget, and carries the answer into the next attempt. Budget is 2 calls, 0.05 dollars. Fixture in the room. Same boundary as Module 3.
 -->
 
+<!-- _class: diagram -->
+
 # Research once, inside the budget. Then repair.
 
-![w:1060](images/diagram-s4-26-45c30b95.svg)
+![w:1000](images/diagram-s4-26.jpg)
 
 ```python
 research.Budget(max_calls=2, max_usd=0.05)
@@ -702,8 +895,6 @@ That is not hallucination about the world. It is a wrong judgment about the stat
 
 A self-check cannot catch this by construction.
 
-![bg right:42%](images/self-verify-lie.jpg)
-
 ---
 
 <!--
@@ -714,9 +905,11 @@ beat: lab
 notes: The receipt is not a convenience. It is the reason you can trust the run. pytest ran. Against this tree. After the newest source edit. All three, or it proves nothing. scripts/receipt.py.
 -->
 
+<!-- _class: diagram -->
+
 # The receipt is the reason you can trust the run.
 
-![w:1060](images/diagram-s4-31-8d91e700.svg)
+![w:1000](images/diagram-s4-31.jpg)
 
 A receipt proves three things or it proves nothing.
 
@@ -774,9 +967,11 @@ beat: talk
 notes: Point at the two subgraphs. Keep the left one, replace the right one. Four modules, one graph, four objects, on purpose. Monday morning they point this at their backlog.
 -->
 
+<!-- _class: diagram -->
+
 # Swap the object. Keep the graph.
 
-![w:1060](images/diagram-s4-34-986feb7f.svg)
+![w:1000](images/diagram-s4-34.jpg)
 
 Four modules, one graph, four objects. That was on purpose.
 
@@ -790,9 +985,11 @@ beat: talk
 notes: Same graph, four objects. They already ran all four. Module 4 is the same graph with nobody at the keyboard. The object today is a failing pull request.
 -->
 
+<!-- _class: diagram -->
+
 # Same graph. Four objects. You already ran all four.
 
-![w:1060](images/diagram-s4-35-b9950fe3.svg)
+![w:1000](images/diagram-s4-35.jpg)
 
 | Module | Object | Lab |
 |---|---|---|
@@ -831,8 +1028,6 @@ Daily triage. Pull request babysitter. Continuous Integration sweeper. And four 
 | Research brief | a question queue | research |
 | Nightly eval | weekly cron | the harness |
 
-![bg left:36%](images/seven-loops-named.jpg)
-
 ---
 
 <!--
@@ -843,9 +1038,11 @@ beat: talk
 notes: Extra credit exists. Do not skip Module 2 to work on it. The trigger moves out of the loop. The exits stay in it. A workflow file starts the run. It never decides when to stop.
 -->
 
+<!-- _class: diagram -->
+
 # That list is a map home. It is not a second product.
 
-![w:1060](images/diagram-s4-37-faf0b4f0.svg)
+![w:1000](images/diagram-s4-37.jpg)
 
 The trigger moves out of the loop. The exits stay in it.
 
@@ -863,9 +1060,11 @@ beat: talk
 notes: The one nobody plans for. Passes every demo, earns trust, degrades over months with nothing visibly breaking. Causes are state, context, retrieval, latency, observability. Not model capability. Weekly evaluation, not quarterly. A 2% weekly drop is invisible in a week and catastrophic over a quarter. You should be at 35 minutes here.
 -->
 
+<!-- _class: diagram -->
+
 # The failure that gets you is slow.
 
-![w:1060](images/diagram-s4-38-d11123ed.svg)
+![w:1000](images/diagram-s4-38.jpg)
 
 A system passes every demo case, earns trust, then degrades over months with no single thing breaking.
 
@@ -904,9 +1103,11 @@ image_prompt: >
 notes: Four artifacts, one per module. Check them off out loud. Then the claim they will test on Monday: all four run from a clean clone with one task setup.
 -->
 
+<!-- _class: diagram -->
+
 # What you take home.
 
-![w:1060](images/diagram-s4-40-256325a0.svg)
+![w:1000](images/diagram-s4-40.jpg)
 
 1. A running autonomous loop. Module 1.
 2. A reusable evaluation harness. Module 2.
@@ -914,8 +1115,6 @@ notes: Four artifacts, one per module. Check them off out loud. Then the claim t
 4. A production architecture. Module 4.
 
 All four run on your machine, from a clean clone, with one `task setup`.
-
-![bg right:38%](images/four-artifacts.jpg)
 
 ---
 
@@ -961,8 +1160,6 @@ notes: Five steps, in order. The order is the advice. Step 5 is the one people s
 4. Split the doer before you add a single tool.
 5. Arm the push gate on day one, while the loop is still small.
 
-![bg right:42%](images/adapt-to-org.jpg)
-
 ---
 
 <!--
@@ -973,9 +1170,11 @@ beat: talk
 notes: Five steps as a flow so it sticks. One object. One ticket a test can fail. Taskfile plus junit. Split the doer. Arm the gate. That is the whole Monday plan.
 -->
 
+<!-- _class: diagram -->
+
 # The order is the advice.
 
-![w:1060](images/diagram-s4-43-e29d4d73.svg)
+![w:1000](images/diagram-s4-43.jpg)
 
 Do not add a tool until the doer is split.
 
