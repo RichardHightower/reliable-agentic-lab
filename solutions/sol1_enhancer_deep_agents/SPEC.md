@@ -19,9 +19,31 @@ restate a scope anywhere else.
 
 ## How this runtime enforces scope
 
-Deep Agents scopes by handing each subagent its own tool list. A subagent can
-only call what it was given. Path scope moves inside the write tool, which
-checks the scope before it touches the disk.
+Deep Agents scopes three ways. This port uses all three, because any one of
+them left off is a hole the other two cannot see.
+
+1. Each subagent gets its own tool list. The judge is never handed a write
+   tool. That is the same separation every other runtime uses.
+2. Path scope lives inside the doer's write tool. The tool checks
+   `tickets/**` before it touches the disk.
+3. The harness is fenced the way the product actually works in 0.7:
+
+   - `FilesystemBackend(root_dir=crm, virtual_mode=True)` so `..` cannot
+     walk off the target repo.
+   - `CompositeBackend` mounts this folder's `skills/` and `AGENTS.md`.
+   - `permissions=` deny writes on the orchestrator, allow `tickets/**` on
+     the doer, deny writes on the judge.
+   - A harness profile hides `write_file`, `edit_file`, `delete`, and
+     `execute` from the orchestrator, and turns off the default
+     `general-purpose` subagent. That subagent ships with the harness
+     filesystem tools. Leaving it on is how a scoped agent writes `app/`.
+   - The judge uses `response_format` so `{kind, present_fields}` is a
+     schema, not a regex over a graph-state repr.
+
+(1) and (2) are what `task test` pins down with no SDK installed. (3) is
+what `build_agent` does on a real run.
+
+Needs `deepagents>=0.7`.
 
 ## Build it step by step
 

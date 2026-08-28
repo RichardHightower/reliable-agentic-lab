@@ -41,6 +41,55 @@ def _changed_files(repo: Path) -> set[str]:
     return set(proc.stdout.splitlines())
 
 
+def last_ai_text(result) -> str:
+    """The last model reply, not `str(the whole graph state)`.
+
+    `create_deep_agent(...).invoke` returns a state dict whose `messages`
+    list holds Human/AI/Tool messages. `enhancer.parse_judge` has to see
+    the judge's JSON, not a repr of every message that produced it.
+
+    Content may be a string or a list of blocks. Either way this returns
+    the text the judge or the doer meant as its answer.
+    """
+    if isinstance(result, str):
+        return result
+    messages = None
+    if isinstance(result, dict):
+        messages = result.get("messages")
+    else:
+        messages = getattr(result, "messages", None)
+        if messages is None and hasattr(result, "get"):
+            messages = result.get("messages")
+    if not messages:
+        return str(result)
+    last = messages[-1]
+    content = last.get("content") if isinstance(last, dict) else getattr(last, "content", last)
+    return _content_text(content)
+
+
+def _content_text(content) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if block.get("type") in (None, "text") and "text" in block:
+                    parts.append(block["text"])
+                elif "text" in block:
+                    parts.append(block["text"])
+            else:
+                text = getattr(block, "text", None)
+                parts.append(text if text is not None else str(block))
+        return "".join(parts)
+    text = getattr(content, "text", None)
+    return text if text is not None else str(content)
+
+
 class DeepAgentsBackend(Backend):
     """Runs the doer role through a Deep Agents agent's `.invoke`.
 
@@ -59,7 +108,7 @@ class DeepAgentsBackend(Backend):
             before = _changed_files(repo)
             result = self.agent.invoke({"messages": [{"role": "user", "content": prompt}]})
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]
-            return DoerResult(wrote=wrote, output=str(result))
+            return DoerResult(wrote=wrote, output=last_ai_text(result))
         # Graceful failure, mirrors CliBackend.run. A backend that raises
         # takes the loop down with it.
         except Exception as exc:
