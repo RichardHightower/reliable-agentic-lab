@@ -22,12 +22,15 @@ style: |
   }
 
   section {
-    background: var(--bg);
+    background-color: var(--bg);
+    background-size: contain !important;
+    background-repeat: no-repeat !important;
+    background-position: center right !important;
     color: var(--ink);
     font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
-    padding: 28px 48px 52px;
+    padding: 28px 48px 50px;
     font-size: 20px;
-    line-height: 1.3;
+    line-height: 1.32;
     justify-content: flex-start;
     overflow: hidden;
   }
@@ -42,13 +45,12 @@ style: |
     text-transform: uppercase;
     border-bottom: 1px solid var(--line);
     padding-bottom: 6px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
 
   section::after {
     color: var(--faint);
     font-size: 11px;
-    letter-spacing: 0.04em;
     font-weight: 500;
   }
 
@@ -57,10 +59,10 @@ style: |
     font-style: normal;
     font-weight: 800;
     color: var(--ink);
-    font-size: 26px;
+    font-size: 28px;
     line-height: 1.12;
     letter-spacing: -0.028em;
-    margin: 0 0 10px 0;
+    margin: 0 0 12px 0;
   }
 
   h2,
@@ -82,17 +84,17 @@ style: |
 
   ul li {
     position: relative;
-    padding: 6px 0 6px 20px;
+    padding: 8px 0 8px 20px;
     border-bottom: 1px solid var(--line);
-    font-size: 18px;
-    line-height: 1.3;
+    font-size: 20px;
+    line-height: 1.32;
   }
 
   ul li::before {
     content: "";
     position: absolute;
     left: 0;
-    top: 0.85em;
+    top: 0.95em;
     width: 7px;
     height: 7px;
     border-radius: 50%;
@@ -125,7 +127,7 @@ style: |
     border: 1px solid var(--line);
     border-radius: 10px;
     padding: 12px 14px;
-    max-height: 280px;
+    max-height: 300px;
     overflow: auto;
   }
 
@@ -149,34 +151,31 @@ style: |
 
   img {
     display: block;
-    margin-left: auto;
-    margin-right: auto;
+    margin: 8px auto 0;
     max-width: 100%;
-    max-height: 210px;
-    width: auto;
     height: auto;
     object-fit: contain;
+    object-position: center;
   }
 
   footer {
     color: var(--muted);
     font-size: 11px;
-    letter-spacing: 0.02em;
   }
 
+  /* Title */
   section.lead::before {
     display: none;
   }
 
   section.lead {
-    border-left: 16px solid var(--stripe);
-    padding: 40px 52px 48px 44px;
+    border-left: 14px solid var(--stripe);
+    padding: 40px 48px 40px 40px;
     justify-content: center;
-    overflow: hidden;
   }
 
   section.lead h1 {
-    font-size: 46px;
+    font-size: 44px;
     font-weight: 800;
     color: var(--ink);
     font-style: normal;
@@ -189,8 +188,37 @@ style: |
     font-size: 20px;
   }
 
-  section.lead img {
-    max-height: none;
+  .hero {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 20px;
+    align-items: center;
+    width: 100%;
+  }
+
+  .hero img {
+    max-height: 420px;
+    width: 100%;
+    object-fit: contain;
+    margin: 0;
+  }
+
+  /* Diagram-first slides: the drawing is the slide */
+  section.diagram h1 {
+    font-size: 26px;
+    margin-bottom: 8px;
+  }
+
+  section.diagram img {
+    max-height: 340px;
+    width: auto;
+    max-width: 100%;
+    margin-top: 4px;
+  }
+
+  section.diagram p,
+  section.diagram small {
+    margin-top: 8px;
   }
 ---
 
@@ -205,7 +233,8 @@ notes: You are here to engineer a loop, not to collect prompts. Say the time out
 
 <!-- _class: lead -->
 
-![bg right:36%](images/title-mark.jpg)
+<div class="hero">
+<div>
 
 # Engineering reliable agentic AI systems
 
@@ -214,6 +243,12 @@ Session 1. System Architecture, the foundation.
 Saturday 29 August 2026. 10:00 Central.
 
 Rick Hightower. Spillwave. Packt workshop.
+
+</div>
+
+![w:480](images/title-mark.jpg)
+
+</div>
 
 ---
 
@@ -249,13 +284,11 @@ image_prompt: >
 notes: Promise exactly four things. All four run from a clean clone with one command.
 -->
 
+<!-- _class: diagram -->
+
 # Four artifacts. You leave with all four.
 
-![h:200](images/diagram-s1-03.jpg)
-
-| 01 | 02 | 03 | 04 |
-|---|---|---|---|
-| A running autonomous loop, in the first hour | A reusable evaluation harness | One live research assistant over MCP | A production architecture you can hand to your team |
+![w:1000](images/diagram-s1-03.jpg)
 
 ---
 
@@ -303,8 +336,6 @@ notes: Ask who has a prompt that worked brilliantly once and never again. Hands 
 - A hundred, and nobody remembers what good looked like.
 - The bottleneck is not the model. It is you, reading every diff.
 
-![bg right:34%](images/prompting-volume.jpg)
-
 ---
 
 <!--
@@ -331,11 +362,13 @@ beat: talk
 notes: Read the four items slowly. Say the last one twice. The model does not enforce its own transition, and that is the whole workshop.
 -->
 
+<!-- _class: diagram -->
+
 # A loop is not "call the model until it says done."
 
 A production loop is a state machine. Every iteration:
 
-![h:200](images/diagram-s1-07.jpg)
+![w:1000](images/diagram-s1-07.jpg)
 
 ---
 
@@ -347,9 +380,11 @@ beat: talk
 notes: ReAct is the inner cycle. The product you ship is the outer control system around it.
 -->
 
+<!-- _class: diagram -->
+
 # The primitive cycle is still ReAct. The product is the outer control system.
 
-![h:200](images/diagram-s1-08.jpg)
+![w:1000](images/diagram-s1-08.jpg)
 
 <small>Yao et al., ReAct, arXiv:2210.03629</small>
 
@@ -363,9 +398,11 @@ beat: talk
 notes: Give them one number they can quote to their manager. 19 to 44 on pass@5, same model, different flow. Do not oversell replication.
 -->
 
+<!-- _class: diagram -->
+
 # The jump is the flow, not the prompt.
 
-![h:200](images/diagram-s1-09.jpg)
+![w:1000](images/diagram-s1-09.jpg)
 
 AlphaCodium, CodeContests validation set. Same model. The flow did that.
 
@@ -410,8 +447,6 @@ notes: The engine never imports the CRM. That is what makes it point at their re
 - The engine never imports it. You point the loop at a path.
 - First ticket: add a due date. Vague on purpose.
 
-![bg left:34%](images/crm-target-repo.jpg)
-
 ---
 
 <!--
@@ -422,9 +457,11 @@ beat: talk
 notes: Monday morning they point this at their backlog. The interface is Taskfile.yml plus junit.xml.
 -->
 
+<!-- _class: diagram -->
+
 # Monday morning, you point this at your backlog.
 
-![h:200](images/diagram-s1-12.jpg)
+![w:1000](images/diagram-s1-12.jpg)
 
 The interface is `Taskfile.yml` plus `junit.xml`. That is the only contract the loops need.
 
@@ -472,9 +509,11 @@ beat: talk
 notes: Point at Verify. That is the one that separates a loop from a script that calls a model.
 -->
 
+<!-- _class: diagram -->
+
 # Five parts. Verify is the one that is not optional.
 
-![h:200](images/diagram-s1-15.jpg)
+![w:1000](images/diagram-s1-15.jpg)
 
 Five parts. **Verify** is the one that separates a loop from a script that calls a model.
 
@@ -500,8 +539,6 @@ notes: A trigger is not a chat. Ours today is a draft markdown ticket in the tar
 - Not a chat. Not "hey, add due dates."
 - In production it is a webhook or a schedule, and it fires only when the branch head actually moved.
 
-![bg right:34%](images/trigger-ticket.jpg)
-
 ---
 
 <!--
@@ -512,9 +549,11 @@ beat: talk
 notes: A trigger that fires on no change burns budget for no work. Module 4 comes back to it.
 -->
 
+<!-- _class: diagram -->
+
 # The shape of a trigger changes. The rule does not.
 
-![h:200](images/diagram-s1-17.jpg)
+![w:1000](images/diagram-s1-17.jpg)
 
 ---
 
@@ -539,8 +578,6 @@ notes: An agent can argue past an instruction, and cannot argue past a tool it w
 
 An agent can argue its way past an instruction. It cannot argue its way past a tool it was never given.
 
-![bg right:34%](images/scope-is-a-type.jpg)
-
 ---
 
 <!--
@@ -551,9 +588,11 @@ beat: talk
 notes: Deny always beats allow. In Python, Judge has no write method. In the Claude Code lab, neither agent carries a write tool.
 -->
 
+<!-- _class: diagram -->
+
 # Write scope is a type, not a polite request.
 
-![h:200](images/diagram-s1-19.jpg)
+![w:1000](images/diagram-s1-19.jpg)
 
 Deny always beats allow. In Python, `Judge` has no `write` method. In the Claude Code lab, `enhancer-judge` and `enhancer-doer` carry no write tool in their agent definitions.
 
@@ -580,8 +619,6 @@ notes: The judge reports. It does not fix. If verify is looks good to me, you ha
 
 If verify is "looks good to me," you do not have a loop. You have a generator.
 
-![bg left:34%](images/maker-checker.jpg)
-
 ---
 
 <!--
@@ -592,9 +629,11 @@ beat: talk
 notes: Same model plus same context plus same reasoning process is not a checker. The split is architectural.
 -->
 
+<!-- _class: diagram -->
+
 # Never let the AI verify its own done.
 
-![h:200](images/diagram-s1-21.jpg)
+![w:1000](images/diagram-s1-21.jpg)
 
 Same model plus same context plus same reasoning process is not a checker. The split is architectural.
 
@@ -635,9 +674,11 @@ beat: talk
 notes: pass, retry, escalate. The forgotten exit is stable failure. Python holds the loop.
 -->
 
+<!-- _class: diagram -->
+
 # Three exits, and no fourth. Python holds the loop.
 
-![h:200](images/diagram-s1-23.jpg)
+![w:1000](images/diagram-s1-23.jpg)
 
 `pass`, `retry`, `escalate`. The one people miss is stable failure.
 
@@ -651,9 +692,11 @@ beat: talk
 notes: signature is what failed, not how it was worded. Two equal signatures mean the last attempt changed nothing.
 -->
 
+<!-- _class: diagram -->
+
 # The same gaps twice is not progress. Stopping is the feature.
 
-![h:200](images/diagram-s1-24.jpg)
+![w:1000](images/diagram-s1-24.jpg)
 
 `signature` is what failed, not how it was worded. Two equal signatures mean the last attempt changed nothing.
 
@@ -683,8 +726,6 @@ Liu et al. 2024 measured it. Accuracy is highest when the fact sits at the **sta
 
 <small>Liu et al., TACL 2024. arXiv:2307.03172</small>
 
-![bg right:34%](images/context-middle.jpg)
-
 ---
 
 <!--
@@ -695,9 +736,11 @@ beat: talk
 notes: That rule is why the planner is its own subagent in Module 2.
 -->
 
+<!-- _class: diagram -->
+
 # Big output goes to a file. Only a short summary returns.
 
-![h:200](images/diagram-s1-26.jpg)
+![w:1000](images/diagram-s1-26.jpg)
 
 That rule is why the planner is its own subagent in Module 2.
 
@@ -725,8 +768,6 @@ notes: Today LGTM. In Module 2 a pull request. Never merge.
 
 Oversight is a designed step, not a hope.
 
-![bg right:34%](images/human-merges.jpg)
-
 ---
 
 <!--
@@ -737,9 +778,11 @@ beat: talk
 notes: Merge, money, and production deploy stay human. Say that twice.
 -->
 
+<!-- _class: diagram -->
+
 # Merge, money, and production deploy stay human.
 
-![h:200](images/diagram-s1-28.jpg)
+![w:1000](images/diagram-s1-28.jpg)
 
 ---
 
@@ -751,9 +794,11 @@ beat: talk
 notes: Three parts. Orchestrator owns the budget and writes nothing. Doer writes inside a scope. Judge scores and has no write path.
 -->
 
+<!-- _class: diagram -->
+
 # Three parts. The object is the only variable.
 
-![h:200](images/diagram-s1-29.jpg)
+![w:1000](images/diagram-s1-29.jpg)
 
 ---
 
@@ -765,9 +810,11 @@ beat: talk
 notes: This is the map for the whole day. Spend the full two minutes.
 -->
 
+<!-- _class: diagram -->
+
 # Same graph, four objects. Learn it once.
 
-![h:200](images/diagram-s1-30.jpg)
+![w:1000](images/diagram-s1-30.jpg)
 
 | Module | Object | Lab |
 |---|---|---|
@@ -786,9 +833,11 @@ beat: talk
 notes: Read .harness/last-enhancer.json in the lab. That is the trace.
 -->
 
+<!-- _class: diagram -->
+
 # Context windows reset. Ticket files do not.
 
-![h:200](images/diagram-s1-31.jpg)
+![w:1000](images/diagram-s1-31.jpg)
 
 Read `.harness/last-enhancer.json` in the lab. That is the trace.
 
@@ -802,9 +851,11 @@ beat: talk
 notes: Walk the sequence once. The orchestrator is the only writer. The agents return text.
 -->
 
+<!-- _class: diagram -->
+
 # Ticket enhancer. Vague in, contract out.
 
-![h:200](images/diagram-s1-32.jpg)
+![w:1000](images/diagram-s1-32.jpg)
 
 ---
 
@@ -816,9 +867,11 @@ beat: talk
 notes: Deterministic where it can be. A criterion that names a section is checkable without a model.
 -->
 
+<!-- _class: diagram -->
+
 # A feature ticket is a contract a test can fail.
 
-![h:200](images/diagram-s1-33.jpg)
+![w:1000](images/diagram-s1-33.jpg)
 
 Deterministic where it can be. A criterion that names a section is checkable without a model.
 
@@ -834,9 +887,11 @@ beat: talk
 notes: Four collapses. Each one is a missing harness piece, not a model failure.
 -->
 
+<!-- _class: diagram -->
+
 # If you take away verify, stop, scope, or disk, the loop collapses.
 
-![h:200](images/diagram-s1-34.jpg)
+![w:1000](images/diagram-s1-34.jpg)
 
 | Failure | Root cause | Symptom |
 |---|---|---|
@@ -870,9 +925,11 @@ beat: lab
 notes: The orchestrator is the only writer. That is a real limitation of the skill form: nothing enforces the round budget except the skill following its own instructions.
 -->
 
+<!-- _class: diagram -->
+
 # A skill that owns the loop. Two agents with no write tools.
 
-![h:200](images/diagram-s1-36.jpg)
+![w:1000](images/diagram-s1-36.jpg)
 
 The orchestrator is the only writer. That is a real limitation of the skill form: nothing enforces the round budget except the skill following its own instructions.
 
@@ -968,8 +1025,6 @@ notes: Each failure has a fix. All four fixes are Module 2.
 
 Each one has a fix. All four fixes are Module 2.
 
-![bg right:34%](images/oneshot-breaks.jpg)
-
 ---
 
 <!--
@@ -980,9 +1035,11 @@ beat: bridge
 notes: Preview only. Do not teach Module 2 here.
 -->
 
+<!-- _class: diagram -->
+
 # Module 2 is the one that does not get cut.
 
-![h:200](images/diagram-s1-41.jpg)
+![w:1000](images/diagram-s1-41.jpg)
 
 ---
 
