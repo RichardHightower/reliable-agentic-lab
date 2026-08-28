@@ -18,6 +18,7 @@ EM_DASH = re.compile(r"\s*—\s*")
 EN_DASH = re.compile(r"(?<=\w)\u2013(?=\w)")
 CODE_SPAN = re.compile(r"`[^`]*`|```.*?```", re.S)
 LIST_ITEM = re.compile(r"^\d+[.)]\s")
+IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 
 
 @dataclass
@@ -89,7 +90,10 @@ def uncited_claims(body: str) -> list[str]:
     """
     loose = []
     for block in body.split("\n\n"):
-        text = block.strip()
+        # A figure is not a claim. Its own alt text is what a reader gets, and
+        # the claim it illustrates is cited in the prose around it. Strip the
+        # image markup first so a paragraph that is only a figure drops out.
+        text = IMAGE.sub("", block).strip()
         if not text or text.startswith(("#", "-", "*", ">", "|", "```")):
             continue
         # A numbered list is the source list itself, or a set of steps. Neither

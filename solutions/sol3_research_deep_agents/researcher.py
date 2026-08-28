@@ -25,7 +25,9 @@ import json
 import time
 from pathlib import Path
 
-import brief, gates, research
+import brief
+import gates
+import research
 
 FIXTURE = Path(__file__).parent / "fixtures" / "research.json"
 

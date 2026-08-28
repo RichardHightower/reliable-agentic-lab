@@ -1,0 +1,4 @@
+# tab-separated: slug<TAB>gist_id. Secret gists, one per paper.
+# publish.py appends a row on the first push. Commit this file so the
+# URL stays stable forever.
+exit-conditions-in-production-agent-loops	932f35e14312b540da8a49c376c2dc1a

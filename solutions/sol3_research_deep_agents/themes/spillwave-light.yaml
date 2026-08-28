@@ -1,0 +1,47 @@
+id: spillwave-light
+name: Spillwave Light
+version: 2
+source:
+  kind: extracted
+  ref: Loop_Engineering_All_Source_Slides_Alternating_Spillwave.pdf
+aspect_default: "16:9"
+style:
+  summary: >
+    Light ice-gray technical slides. Navy sans-serif titles, orange accents,
+    teal diagram nodes. No italic, no dark backgrounds, no gold serif.
+  label_min_px: 24
+  arrow_px: [2, 3]
+  text_orientation: horizontal
+  contrast_min: 4.5
+palette:
+  background: "#eef2f7"
+  surface: "#ffffff"
+  primary: "#1a365d"
+  primary_fg: "#ffffff"
+  accent: "#d9772a"
+  accent_2: "#2aa8bb"
+  success: "#1f9d6a"
+  ink: "#1b2437"
+  muted: "#4a5b70"
+roles:
+  title: { bg: surface, fg: ink }
+  node_default: { bg: surface, fg: ink }
+  node_emphasis: { bg: accent_2, fg: ink }
+  node_success: { bg: success, fg: primary_fg }
+  node_decision: { bg: accent, fg: primary_fg }
+  subgraph: { bg: background, fg: ink }
+  arrow: { stroke: primary }
+negatives:
+  - mermaid or plantuml source syntax
+  - ASCII art
+  - tiny labels
+  - watermarks or logos
+  - node IDs as visible labels
+  - invented components
+  - italic serif titles
+  - dark navy backgrounds
+svg:
+  label_px: [18, 26]
+  max_kb: 40
+  max_kb_small: 20
+  small_node_threshold: 8

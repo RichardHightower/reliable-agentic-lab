@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import brief
 import loop
 import research
 import researcher
@@ -74,7 +73,7 @@ def test_run_fixture_writes_brief(tmp_path):
 
 
 def test_no_loops_import():
-    import subprocess
+    import subprocess  # noqa: PLC0415  (sys.path is set by conftest first)
 
     hit = subprocess.run(
         ["grep", "-rn", r"^from loops\|^import loops\|^from solutions import", str(ROOT)],

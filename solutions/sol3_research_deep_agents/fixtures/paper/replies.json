@@ -1,0 +1,267 @@
+{
+  "planner": {
+    "Write plan.json": {
+      "data": {
+        "title": "Exit conditions in production agent loops",
+        "audience": "engineers running agent loops against real budgets",
+        "questions": [
+          {
+            "id": "q1",
+            "subject": "exit-conditions",
+            "question": "What are the documented exit conditions in a production agent loop?",
+            "check": "a named limit in official vendor documentation, with a URL",
+            "important": true
+          },
+          {
+            "id": "q2",
+            "subject": "runaway-cost",
+            "question": "What failure follows from a loop with no exit condition?",
+            "check": "a reported failure mode, not a hypothetical one",
+            "important": true
+          },
+          {
+            "id": "q3",
+            "subject": "maker-checker",
+            "question": "How does a maker and checker split change reliability?",
+            "check": "a stated mechanism, and the condition under which it fails",
+            "important": false
+          }
+        ],
+        "sections": [
+          "Abstract",
+          "Introduction",
+          "Exit conditions",
+          "Independent verification",
+          "Limitations",
+          "References"
+        ],
+        "diagrams": [
+          {
+            "name": "three-exits",
+            "kind": "mermaid",
+            "shows": "the three exits a loop may take, checked in priority order"
+          },
+          {
+            "name": "maker-checker",
+            "kind": "plantuml",
+            "shows": "the maker and the checker holding different tool scopes"
+          }
+        ],
+        "notes": [
+          "the second brain already holds a loop-engineering area on this subject"
+        ]
+      }
+    }
+  },
+  "researcher": {
+    "documented exit conditions": {
+      "data": {
+        "answer": "Vendors document three stopping signals: a completion signal, a spend cap, and a turn cap.",
+        "sources": [
+          {
+            "title": "Claude Agent SDK overview",
+            "url": "https://docs.claude.com/en/api/agent-sdk/overview",
+            "vendor": "anthropic",
+            "quote": "max_turns limits how many turns the agent takes before it stops."
+          },
+          {
+            "title": "Deep Agents overview",
+            "url": "https://docs.langchain.com/labs/deep-agents/overview",
+            "vendor": "langchain",
+            "quote": "The graph stops when it reaches its recursion limit."
+          }
+        ],
+        "claims": [
+          {
+            "text": "A production agent loop stops on a completion signal, a spend cap, or a turn cap.",
+            "confidence": 0.9,
+            "source_urls": [
+              "https://docs.claude.com/en/api/agent-sdk/overview",
+              "https://docs.langchain.com/labs/deep-agents/overview"
+            ]
+          },
+          {
+            "text": "The Claude Agent SDK exposes a turn cap as max_turns.",
+            "confidence": 0.9,
+            "source_urls": [
+              "https://docs.claude.com/en/api/agent-sdk/overview"
+            ]
+          }
+        ]
+      }
+    },
+    "no exit condition": {
+      "data": {
+        "answer": "A loop without an exit spends until an external limit stops it, and repeated identical attempts never converge.",
+        "sources": [
+          {
+            "title": "Deep Agents overview",
+            "url": "https://docs.langchain.com/labs/deep-agents/overview",
+            "vendor": "langchain",
+            "quote": "Without a recursion limit the graph can loop indefinitely."
+          }
+        ],
+        "claims": [
+          {
+            "text": "A loop with no exit condition spends until an external limit stops it.",
+            "confidence": 0.8,
+            "source_urls": [
+              "https://docs.langchain.com/labs/deep-agents/overview"
+            ]
+          }
+        ]
+      }
+    },
+    "maker and checker split": {
+      "data": {
+        "answer": "A checker with a different tool scope catches errors the maker cannot see in its own output.",
+        "sources": [
+          {
+            "title": "Agent loops",
+            "url": "https://docs.claude.com/en/docs/agents-and-tools/agent-loops",
+            "vendor": "anthropic",
+            "quote": "Verification works best when the verifier does not share the actor's context."
+          },
+          {
+            "title": "CRITIC: self-correction with tool-interactive critiquing",
+            "url": "https://arxiv.org/abs/2305.11738",
+            "vendor": "arxiv",
+            "quote": "Intrinsic self-correction without external feedback rarely improves correctness."
+          }
+        ],
+        "claims": [
+          {
+            "text": "A checker holding a different tool scope catches errors the maker cannot see in its own output.",
+            "confidence": 0.8,
+            "source_urls": [
+              "https://docs.claude.com/en/docs/agents-and-tools/agent-loops",
+              "https://arxiv.org/abs/2305.11738"
+            ]
+          },
+          {
+            "text": "A checker that shares the maker's context and tools is another self-reflection turn, not independent validation.",
+            "confidence": 0.7,
+            "source_urls": [
+              "https://arxiv.org/abs/2305.11738"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "verifier": {
+    "Cross-check each claim": {
+      "data": {
+        "checked": [
+          {
+            "claim_id": "*exit-conditions*0",
+            "second_source_url": "https://docs.langchain.com/labs/deep-agents/overview",
+            "corroborate_status": "agreed",
+            "quote": "The graph stops when it reaches its recursion limit."
+          },
+          {
+            "claim_id": "*exit-conditions*1",
+            "second_source_url": "",
+            "corroborate_status": "not_found",
+            "quote": ""
+          },
+          {
+            "claim_id": "*runaway-cost*0",
+            "second_source_url": "https://docs.claude.com/en/api/agent-sdk/overview",
+            "corroborate_status": "agreed",
+            "quote": "max_turns limits how many turns the agent takes before it stops."
+          }
+        ]
+      }
+    }
+  },
+  "diagrammer": {
+    "named three-exits": {
+      "text": "flowchart LR\n  T[\"Turn ends\"] --> D{\"Done?\"}\n  D -->|yes| S1[\"Stop: done\"]\n  D -->|no| C{\"Budget spent?\"}\n  C -->|yes| S2[\"Stop: cost\"]\n  C -->|no| M{\"Turns spent?\"}\n  M -->|yes| S3[\"Stop: max turns\"]\n  M -->|no| N[\"Next turn\"]\n"
+    },
+    "named maker-checker": {
+      "text": "@startuml\nparticipant \"Maker\" as M\nparticipant \"Checker\" as C\nparticipant \"Gate\" as G\nM -> M: draft\nM -> C: hand over the draft\nC -> G: failing rows\nG -> M: retry, or stop\n@enduml\n"
+    }
+  },
+  "writer": {
+    "Bind each section": {
+      "data": {
+        "sections": [
+          {
+            "heading": "Abstract",
+            "purpose": "state the finding in four sentences",
+            "claim_ids": [],
+            "figures": []
+          },
+          {
+            "heading": "Introduction",
+            "purpose": "define the loop and the failure it produces",
+            "claim_ids": [
+              "*runaway-cost*0"
+            ],
+            "figures": []
+          },
+          {
+            "heading": "Exit conditions",
+            "purpose": "name the three exits and where each one is documented",
+            "claim_ids": [
+              "*exit-conditions*0",
+              "*exit-conditions*1"
+            ],
+            "figures": [
+              "three-exits"
+            ]
+          },
+          {
+            "heading": "Independent verification",
+            "purpose": "explain why a checker needs a different tool scope",
+            "claim_ids": [
+              "*maker-checker*0",
+              "*maker-checker*1"
+            ],
+            "figures": [
+              "maker-checker"
+            ]
+          },
+          {
+            "heading": "Limitations",
+            "purpose": "state what this paper's evidence does not cover",
+            "claim_ids": [
+              "*maker-checker*1"
+            ],
+            "figures": []
+          },
+          {
+            "heading": "References",
+            "purpose": "generated",
+            "claim_ids": [],
+            "figures": []
+          }
+        ]
+      }
+    },
+    "'Abstract' section": {
+      "text": "An agent loop without an explicit exit condition spends until an external limit stops it. [2]\n\nThis paper names the three exits that vendor documentation supports, and the verification split that decides when the first of them fires. [1][2]"
+    },
+    "'Introduction' section": {
+      "text": "An agent loop is a program that calls a model, acts on the reply, and repeats. The repetition is the value and the risk. [2]\n\nA loop with no exit condition spends until an external limit stops it. [2] The limit that arrives is a rate limit or an invoice, neither of which is a design decision."
+    },
+    "'Exit conditions' section": {
+      "text": "A production agent loop stops on a completion signal, a spend cap, or a turn cap. [1][2] Checking them in that order matters. A run that finished and then noticed it was over budget did finish, and reporting that as a cost failure discards completed work.\n\nThe Claude Agent SDK exposes the turn cap as `max_turns`. [1] That claim rests on a single source, and no second vendor states it in the same terms."
+    },
+    "'Independent verification' section": {
+      "text": "A checker holding a different tool scope catches errors the maker cannot see in its own output. [3][4] The mechanism is the tool list, not the instruction: a checker with no write tool has no path to edit what it grades.\n\nA checker that shares the maker's context and tools is another self-reflection turn, not independent validation. [4] The split is structural or it is decorative."
+    },
+    "'Limitations' section": {
+      "text": "This paper draws on two runtimes and one paper on self-correction. [4] It measures no loops in production, and it reports no cost figures of its own. [4]\n\nThe claim about turn caps rests on a single source. Treat it as documented behavior for one SDK, not as a general property of agent runtimes. [4]"
+    }
+  },
+  "reviewer": {
+    "Grade this draft": {
+      "data": {
+        "failed_rows": [],
+        "notes": []
+      }
+    }
+  }
+}

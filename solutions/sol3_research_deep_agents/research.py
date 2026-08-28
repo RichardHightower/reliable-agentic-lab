@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -66,6 +65,11 @@ class Finding:
     citations: list[str] = field(default_factory=list)
     backend: str = ""
     usd: float = 0.0
+    note: str = ""
+
+    @property
+    def empty(self) -> bool:
+        return not self.answer.strip()
 
     def to_dict(self) -> dict:
         return {
@@ -74,6 +78,7 @@ class Finding:
             "citations": self.citations,
             "backend": self.backend,
             "usd": self.usd,
+            "note": self.note,
         }
 
 
@@ -157,30 +162,89 @@ class WebSearchBackend(Backend):
 
 
 class PerplexityBackend(Backend):
-    """Perplexity, through the MCP server, when a key is present."""
+    """Perplexity, through whichever transport this laptop can reach.
+
+    The previous version piped a JSON blob into `npx -y server-perplexity-ask`
+    and read stdout. An MCP server does not work that way. It speaks JSON-RPC
+    over stdio and expects an `initialize` handshake before any `tools/call`, so
+    that version could only ever return an empty finding. `mcp_tools` does the
+    handshake, and falls back to the vendor's REST endpoint when it cannot.
+    """
 
     name = "perplexity"
     cost_per_call = 0.006
+
+    def __init__(self, config: dict | None = None):
+        self.config = config
+        self.transport = ""
 
     def available(self) -> bool:
         return bool(os.environ.get("PERPLEXITY_API_KEY"))
 
     def search(self, question: str) -> Finding:
-        proc = subprocess.run(
-            ["npx", "-y", "server-perplexity-ask"],
-            input=json.dumps({"messages": [{"role": "user", "content": question}]}),
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=120,
-        )
-        if proc.returncode != 0:
-            return Finding(question, "", backend=self.name)
+        from mcp_tools import TransportUnavailable, ask_perplexity  # noqa: PLC0415
+
+        try:
+            answer = ask_perplexity(question, self.config)
+        except TransportUnavailable as exc:
+            # An empty finding, not a raise. The loop counts empty answers and
+            # escalates on no source, which is the honest outcome here.
+            return Finding(question, "", backend=self.name, note=str(exc))
+        self.transport = answer.transport
         return Finding(
             question=question,
-            answer=proc.stdout.strip(),
+            answer=answer.text,
+            citations=answer.citations,
             backend=self.name,
-            usd=self.cost_per_call,
+            usd=answer.usd,
+        )
+
+
+class Context7Backend(Backend):
+    """Library, API, and version facts, from the vendor's own documentation.
+
+    Separate from Perplexity on purpose. Verification needs a source that is
+    independent of the one that produced the claim, and a second Perplexity
+    query is not independent: it is the same index, ranked slightly differently.
+    Context7 reads the library's published docs.
+
+    The question arrives as "library :: query". A question with no library is
+    not something this backend can answer, and it says so rather than guessing.
+    """
+
+    name = "context7"
+    cost_per_call = 0.0
+
+    def __init__(self, config: dict | None = None):
+        self.config = config
+        self.transport = ""
+
+    def available(self) -> bool:
+        from mcp_tools import ctx7_available  # noqa: PLC0415
+
+        return ctx7_available() or bool(self.config)
+
+    def search(self, question: str) -> Finding:
+        from mcp_tools import TransportUnavailable, ask_context7  # noqa: PLC0415
+
+        library, _, query = question.partition("::")
+        if not query.strip():
+            return Finding(
+                question,
+                "",
+                backend=self.name,
+                note="context7 needs 'library :: question'",
+            )
+        try:
+            answer = ask_context7(library.strip(), query.strip(), self.config)
+        except TransportUnavailable as exc:
+            return Finding(question, "", backend=self.name, note=str(exc))
+        self.transport = answer.transport
+        return Finding(
+            question=question,
+            answer=answer.text,
+            citations=answer.citations,
+            backend=self.name,
         )
 
 

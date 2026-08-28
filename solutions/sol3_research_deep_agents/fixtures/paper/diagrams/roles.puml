@@ -1,0 +1,9 @@
+@startuml
+participant "Orchestrator" as O
+participant "Researcher" as R
+participant "Verifier" as V
+O -> R: ask
+R -> O: findings
+O -> V: corroborate
+V -> O: truth states
+@enduml
