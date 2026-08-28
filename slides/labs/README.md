@@ -24,8 +24,8 @@ npx @marp-team/marp-cli slides/labs/lab1-enhancer.md \
 | `sol2-implementer-deep-agents.md` | Working eight-step loop | `solutions/sol2_implementer_deep_agents` |
 | `sol2-implementer-agent-sdk.md` | Role-table config port | `solutions/sol2_implementer_agent_sdk` |
 | `lab3-research.md` | Fill `plan_questions` and `check_brief` | `labs/lab3_research` |
-| `sol3-research-deep-agents.md` | Working research loop | `solutions/sol3_research_deep_agents` |
-| `sol3-research-agent-sdk.md` | Role-table config port | `solutions/sol3_research_agent_sdk` |
+| `sol3-research-deep-agents.md` | White paper pipeline, nine stages, three fences | `solutions/sol3_research_deep_agents` |
+| `sol3-research-agent-sdk.md` | White paper pipeline, ten phases, one PreToolUse hook | `solutions/sol3_research_agent_sdk` |
 | `lab4-fixer.md` | Fill `summarize_failure` and `repair_until_green` | `labs/lab4_fixer` |
 | `sol4-fixer-agent-sdk.md` | Working unattended fixer | `solutions/sol4_fixer_agent_sdk` |
 | `sol4-fixer-deep-agents.md` | Role-table config port | `solutions/sol4_fixer_deep_agents` |
@@ -42,6 +42,10 @@ Lab 1 deploy notes (GitHub Actions on ticket change events):
 `deploy-aws-fargate.md` is a production mapping of extra credit 1. The repo
 does not ship Terraform. HMAC, 202, marker skip, and the three exits stay
 exactly as `s_ext_1_webhook`.
+
+The two Lab 3 solution decks cover the grown report generators (PRs #156 and
+#158), not the old config-only ports. Saturday still fills two functions in
+`labs/lab3_research`.
 
 Do not project these during the four-hour clock unless a lab is running
 long and the room needs the code on screen. Module 2 still does not get

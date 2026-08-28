@@ -4,101 +4,263 @@ theme: spillwave
 paginate: true
 footer: Spillwave Solutions | spillwave.com
 ---
-# sol3_research_deep_agents
+# sol3_research_deep_agents. White paper
 
-The working filled Lab 3 loop.
+<!-- _class: lead -->
 
-LangChain's own Deep Agents quickstart is a research agent. This folder points that shape at the tool boundary.
+A question in, a cited brief out. A topic in, an evidence-backed white paper out.
+
+LangChain Deep Agents. Two entry points. One role table.
+
+PR #156 grew the Saturday brief into a nine-stage report pipeline. Saturday
+Lab 3 still fills two functions. This folder writes `whitepaper.md`.
 
 
 ---
 
-# Layout
+# Two entry points. Same folder.
 
+```bash
+python3 loop.py --question "sqlalchemy nullable datetime column"
+python3 loop.py --paper --topic "context management in multi-agent research loops"
 ```
-loop.py          wrappers around plan_questions / brief.check
-researcher.py    the iteration loop, gates.decide
-research.py      Backend.search. Fixture, WebSearch, Perplexity
-brief.py         four arithmetic rows
-gates.py         pass / retry / escalate
-fixtures/research.json
-tests/test_research.py
-```
+
+The brief is the small version of the paper. Both plan questions, search
+through one tool boundary, and refuse to ship anything uncited. The paper adds
+corroboration, figures, and a publish step.
+
+
+---
+
+# What you will walk through
+
+| File | Holds |
+|---|---|
+| `loop.py` | both entry points, and which cast to print |
+| `roleplan.py` | `research` (four roles) and `paper` (seven) |
+| `paper.py` | nine stages, three exits |
+| `stages.py` | each stage's gate |
+| `evidence.py` | SourceDocument, Claim, Finding |
+| `paper_check.py` | hard gates on a finished paper |
+| `publish.py` | secret gist, one id per paper forever |
+| `roles.py` | three fencing layers |
+
+
+---
+
+# Why this folder exists
+
+LangChain's own Deep Agents quickstart is a research agent. This folder is
+that shape, pointed at our tool boundary, then grown until it produces
+something you would hand to a colleague.
+
+A role cannot do a job it was not given a tool for. Nothing about grounding,
+cost, or stopping is left to a model's own judgment.
 
 
 ---
 
 # Learning objectives
 
-- Walk `researcher.run`
-- Plug three backends behind one `search(question)`
-- Enforce researcher has search, not write
-- Fail ungrounded `[9]`
-- Raise on the hard call cap
+- Print the paper cast: reviewer writes `no`
+- Name the three fences Deep Agents actually uses
+- Walk nine stages and say which two call no model
+- Prefer `done` over a spent budget
+- Keep the Saturday brief working (`--question`)
+- Refuse `task publish` when `gates.json` is red
 
 
 ---
 
 # Starting architecture
 
-```
-plan_questions → scholar.ask each sub-question
-              → write_brief with [n]
-              → strip_em_dashes
-              → brief.check
-              → gates.decide
-```
-
-`choose()` order: Perplexity if key, else WebSearch inbox, else fixture. Nothing is never an option.
+![w:880](images/da-paper-pipeline.jpg)
 
 
 ---
 
-# `plan_questions` and `write_brief`
+# The paper cast
+
+```
+role           writes  scope
+orchestrator   no      nothing
+planner        yes     plan.json
+researcher     no      nothing
+verifier       yes     evidence/**     denied: paper/**
+diagrammer     yes     diagrams/*.mmd, *.puml
+writer         yes     brief.md, paper/**, work/research/**
+reviewer       no      nothing
+```
+
+`task table` (adds `--paper`). If the reviewer prints `yes`, the translation
+is wrong and the tests say so.
+
+A role that would hold the same tools as its neighbour is not a role. It is a
+prompt, and it belongs in a skill.
+
+
+---
+
+# Three fences. People skip the third.
+
+1. **A tool list per subagent.** The reviewer is handed `read_file` and
+   nothing else. "Do not edit the paper" is not an instruction it can
+   reinterpret.
+2. **A path check inside the write tool.** Writer may write `paper/**`.
+   Verifier may write `evidence/**`. Neither can reach the other. Refusal is
+   a **sentence**, not a traceback: a raw traceback starts a retry loop.
+3. **A fence around the harness.** `permissions=`, hide built-in write tools
+   from the orchestrator, `FilesystemBackend(virtual_mode=True)` so `..`
+   cannot walk out, general-purpose subagent **off**.
+
+Layer 3 is the one people skip. The default general-purpose subagent ships
+with the harness filesystem tools. Leaving it enabled is how a carefully
+scoped agent writes anywhere it likes.
+
+
+---
+
+# Nine stages. Two of them are Python.
+
+| # | Stage | Model? | Gate |
+|---|---|---|---|
+| 1 | plan | yes | 3 to 8 questions, each with a check |
+| 2 | search | yes | every claim names a source that resolves |
+| 3 | verify | yes | every important claim has a decided truth state |
+| 4 | outline | yes | every body section names claim ids that exist |
+| 5 | diagram | yes | at most 12 nodes, every figure has alt text |
+| 6 | write | yes | a section cites only the numbers its claims support |
+| 7 | review | yes | every rubric row passes |
+| 8 | assemble | **no** | every hard gate in `paper_check` |
+| 9 | publish | **no** | the gates passed. Opt-in only |
+
+Assembling markdown and pushing a gist are things a program does correctly
+every time. Handing either to a model buys a new failure mode.
+
+
+---
+
+# Three exits. Done first.
+
+Checked before every stage:
+
+| Exit | When |
+|---|---|
+| `done` | stage 8 finished and every hard gate is green |
+| `cost` | the money budget is spent |
+| `max turns` | a stage exhausted its retries |
+
+Done beats a spent budget. A run that finished and then noticed it was over
+its cap did finish. Reporting that as a cost failure discards the paper.
+
+Inside a stage, `gates.decide` short-circuits the same rows failing twice.
+
+
+---
+
+# One boundary. Four backends.
+
+The loop never learns which one answered.
+
+| Backend | When |
+|---|---|
+| `perplexity` | `PERPLEXITY_API_KEY`. MCP first, then REST |
+| `context7` | `ctx7` on PATH, or the MCP server. Verification only |
+| `websearch` | coding agent through an inbox file |
+| `fixture` | always. A recording, for a room with no network |
+
+`task paper` is fixture. `task live` is `auto`.
+
+
+---
+
+# Saturday brief is still here
 
 ```python
 def plan_questions(question: str) -> list[str]:
     return [question, f"{question} common mistake", f"{question} how to verify"]
+
+def check_brief(body, sources):
+    return brief.check(body, sources)
 ```
 
-`write_brief` numbers unique citations, tags each finding paragraph `[n]`. Empty findings produce no body claims, so `has_sources` fails.
+Four arithmetic rows: `has_sources`, `grounded`, `cited`, `style`.
+
+```bash
+task brief -- --question "sqlalchemy nullable datetime column"
+```
+
+That is the Lab 3 answer. The paper is the take-home grown from it.
 
 
 ---
 
-# `brief.check` four rows
+# Evidence records outlive the paper
 
-```python
-checks.append(BriefCheck("has_sources", bool(sources), ...))
-checks.append(BriefCheck("grounded", not ungrounded, ...))
-checks.append(BriefCheck("cited", not loose, ...))
-checks.append(BriefCheck("style", dashes == 0, f"{dashes} em dashes"))
+```
+work/paper/<slug>/
+  whitepaper.md
+  plan.json
+  outline.json
+  evidence/            SourceDocument, Claim, Finding
+  diagrams/            mermaid and plantuml sources
+  figures/             SVG, polished PNG, sidecar
+  gates.json
+  .paper-state.json    resume reads this
 ```
 
-No model call. `signature()` is the sorted names of failed checks. That is the stable-failure key.
+Same record shape as `loop_eng_2nd_brain/knowledge/research/`. A run can be
+ingested later without a conversion step. The claims outlive the paper, which
+is the point of writing them down separately.
 
 
 ---
 
-# Roles
+# Hard gates on the finished paper
 
-Researcher: `read_file` + `search`. No write.
-Writer: scoped to `brief.md`, `work/research/**`. Refusal is a string.
-Judge: `read_file` only.
-Orchestrator is not a subagent. Python owns the loop.
+`paper_check.py`. No model. A failing hard gate blocks publish.
+
+Required sections: abstract, introduction, references. Recommended:
+limitations.
+
+Also: min 400 words, figures need alt text, diagram source must not survive
+into the body, citation arithmetic reused from `brief.py`.
+
+`signature()` is the sorted names of **hard** failures. A soft warning that
+keeps firing would look like a stall and escalate a run that is converging.
 
 
 ---
 
-# Budget
+# Publish. Four load-bearing rules.
 
-```python
-Budget(max_usd=0.20, max_calls=8, soft_usd=0.10)
+1. **One gist per paper, forever.** Id in `gist-ids.tsv`. Refresh, do not
+   mint a new gist per run.
+2. **Secret, never public.** Unlisted, not private. The URL is the credential.
+3. **Figures inline.** A gist is flat. Copy figures to the root, rewrite
+   image links to raw URLs.
+4. **The gate comes first.** `push` refuses when `gates.json` is red.
+
+`task paper` never publishes. `task publish` does.
+
+```bash
+task publish -- --slug ... --dry-run --out /tmp/staged
 ```
 
-Ninth call raises `BudgetExceeded`. Money over `max_usd` raises. Soft target only warns.
 
-Live Perplexity: `cost_per_call=0.006`, available only if `PERPLEXITY_API_KEY`.
+---
+
+# Resume and fixtures
+
+A resumed live run skips every finished stage and carries the cost forward.
+
+The fixture runner keys replies by a phrase in the prompt, not by position.
+A positional queue restarts at zero when the run resumes at stage six and
+hands the writer the outline reply.
+
+A list of replies repeats the last entry. That repeat is deliberate: a retry
+gets the same answer, which is the stable failure `gates.decide` exists to
+catch, so the offline run can demonstrate escalate without anybody faking it.
 
 
 ---
@@ -107,39 +269,32 @@ Live Perplexity: `cost_per_call=0.006`, available only if `PERPLEXITY_API_KEY`.
 
 ```bash
 cd solutions/sol3_research_deep_agents
-python3 -m pytest tests -q
-python3 loop.py --table-only
-python3 loop.py --question "sqlalchemy nullable datetime column" --backend fixture
+python3 -m venv .venv && source .venv/bin/activate && pip install pytest
+task table          # paper cast, no SDK
+task checks         # evidence, paper_check, diagrams, publish, mcp_tools
+task test           # 198 tests. No SDK, no key, no network
+task paper          # nine stages, fixture backend
+task setup          # only for a live run
+task live TOPIC="context management in multi-agent research loops"
+task publish -- --slug context-management-in-multi-agent-research-loops
 ```
 
 
 ---
 
-# Expected fixture output
+# Standalone. Tests pin it.
 
-```
-PASS  has_sources    3 sources retrieved
-PASS  grounded       every citation resolves
-PASS  cited          every paragraph cites a source
-PASS  style          0 em dashes
-gate:    pass
-reason:  the rubric is green
-```
+`tests/test_standalone.py` fails if this folder imports a shared engine.
 
-Exit: `0` if pass else `1`. Trace: `work/research/last-research.json` plus `brief.md`.
-
-
----
-
-# Tests that pin the lesson
+Other pins:
 
 | Test | Asserts |
 |---|---|
-| `test_plan_questions_are_checkable` | first q is the question; some q contains `verify` |
-| `test_ungrounded_citation_fails` | `[9]` fails |
-| `test_budget_hard_cap` | second charge raises |
-| `test_researcher_has_search_not_write` | judge tools `== ["read_file"]` |
-| `test_no_loops_import` | no `from loops` |
+| role table | reviewer holds no write |
+| stages | plan 3 to 8 questions; outline binds real claim ids |
+| paper_check | missing abstract fails; source syntax in body fails |
+| publish | red `gates.json` refuses |
+| research | `[9]` is ungrounded; budget hard cap raises |
 
 
 ---
@@ -148,13 +303,40 @@ Exit: `0` if pass else `1`. Trace: `work/research/last-research.json` plus `brie
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Shipped uncited brief | skipped empty-findings path | `has_sources` must fail |
-| Researcher has write | tool list leaked | researcher tools: read + search |
-| `task loop:research` missing | engine deleted | this `loop.py` |
+| Reviewer writes `yes` | tool list leaked | `read_file` only |
+| Agent writes anywhere | general-purpose subagent left on | turn it off |
+| Traceback retry storm | write tool raised | return a refusal sentence |
+| Resume hands wrong reply | positional fixture | key by prompt phrase |
+| New gist every run | ignored `gist-ids.tsv` | one id per slug |
+| Published a red paper | skipped `gates.json` | `push` must refuse |
+| Saturday brief missing | ran `--paper` by accident | `--question` is the lab |
+
+
+---
+
+# Validation checklist
+
+- [ ] `task table`: reviewer `no`
+- [ ] `task test` is 198, no SDK
+- [ ] `task paper` writes `whitepaper.md` plus `evidence/`
+- [ ] Stage 8 and 9 call no model
+- [ ] Done beats cost
+- [ ] `task publish -- --dry-run` restages figures
+- [ ] `tests/test_standalone.py` still passes
 
 
 ---
 
 # Recap
 
-Isolated researcher context. Orchestrator sees a summary. Citations are arithmetic. Same exits as Module 2, pointed at a brief.
+**What we built.** A brief for Saturday. A paper for take-home. Same exits.
+
+**Takeaways**
+
+1. Two entry points. One table.
+2. Three fences. The third is the one people skip.
+3. Assemble and publish are Python.
+4. Done beats cost.
+5. Claims outlive the paper.
+
+Closing line. A role that holds the same tools as its neighbour is a prompt.
