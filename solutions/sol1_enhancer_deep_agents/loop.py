@@ -109,9 +109,20 @@ def run(argv_repo: str, *, ticket: str | None, simulate: str | None) -> int:
 
     settings = config()
     contract = Contract(argv_repo)
+    try:
+        runtime_backend = backend(contract)
+    except ModuleNotFoundError as exc:
+        if exc.name != "deepagents":
+            raise
+        print(
+            "Deep Agents is not installed in this Python environment.\n"
+            "Create and activate the folder's virtual environment, then run:\n"
+            "  pip install -r ../../requirements-takehome.txt"
+        )
+        return 1
     engine = Enhancer(
         repo=Path(contract.repo),
-        backend=backend(contract),
+        backend=runtime_backend,
         gh=Gh(settings["fork_owner"], settings["repo_name"]),
         budget=int(contract.budget.get("iterations", 3)),
         max_usd=float(contract.budget.get("usd", 2.0)),
