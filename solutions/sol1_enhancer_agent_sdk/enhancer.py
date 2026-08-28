@@ -10,11 +10,10 @@ decides the exits, and this module decides whether a draft is an improvement.
 A stop condition trusted to a model's own judgment is a stop condition a model
 can talk itself past. That is the whole point of splitting it this way.
 
-The doer holds `Write` scoped to `tickets/**` by the PreToolUse hook in
-`roles.py`, so it writes its own candidate file. The judge holds no write tool,
-which is why it cannot grade its own draft. Both the backend and the GitHub
-wrapper are constructor arguments, so the entire loop runs against fakes with no
-SDK, no API key, and no network.
+The plugin doer holds no write tool. Python writes the candidate from the
+doer's reply. The loop ends on cost, max turns, or a completed ticket. Both
+the backend and the GitHub wrapper are constructor arguments, so the entire
+loop runs against fakes with no SDK, no API key, and no network.
 """
 
 from __future__ import annotations
@@ -34,10 +33,6 @@ import ticket as ticket_mod
 BUDGET = 3
 CANDIDATE_SUFFIX = ".enhancer-candidate.md"
 LGTM = "LGTM"
-
-# The doer writes here and nowhere else. It sits under `tickets/**`, which is
-# the doer's declared scope, so the hook lets it through and lets nothing else.
-DOER_ALLOW = ["tickets/**"]
 
 
 class EnhancerError(RuntimeError):
@@ -373,52 +368,44 @@ class Enhancer:
     backend: object
     gh: object
     budget: int = BUDGET
+    max_usd: float | None = None
+    max_turns: int | None = None
     prompts: dict = field(default_factory=dict)
+    spent_usd: float = 0.0
+    turns: int = 0
 
-    def _ask(self, prompt: str, allow: list[str] | None = None):
-        return self.backend.run(repo=Path(self.repo), prompt=prompt, allow=allow or [])
+    def _ask(self, prompt: str, allow: list[str] | None = None, **extra):
+        result = self.backend.run(
+            repo=Path(self.repo), prompt=prompt, allow=allow or [], **extra
+        )
+        self.turns += 1
+        self.spent_usd += float(getattr(result, "usd", 0.0) or 0.0)
+        reason = getattr(result, "stop_reason", None)
+        if reason:
+            raise TicketBlocked(reason)
+        return result
+
+    def _exhausted(self) -> str | None:
+        """Cost and max turns end the loop. Completing a ticket is the other exit."""
+        if self.max_usd is not None and self.spent_usd >= self.max_usd:
+            return "cost budget spent"
+        if self.max_turns is not None and self.turns >= self.max_turns:
+            return "max turns"
+        return None
 
     def judge(self, path: Path) -> dict:
-        """Grade one ticket file. The judge holds no write tool, so `allow` is empty."""
-        result = self._ask(
-            "Use the judge subagent. Read the ticket at "
-            f"{Path(path).relative_to(self.repo)} and reply with one JSON object "
-            'of the shape {"kind": ..., "present_fields": [...]} and nothing else.'
-        )
-        if not result.ok:
-            raise EnhancerError(f"the judge failed: {result.output}")
-        verdict = parse_judge(result.output)
-        return check_fields.check(verdict["kind"], verdict.get("present_fields", []))
+        """Grade one ticket file. The judge holds no write tool."""
+        import turns
+
+        return turns.judge(self, path)
 
     def draft(
         self, tkt: ticket_mod.Ticket, kind: str, missing: list[str], comment: str | None
     ) -> Path:
-        """Have the doer write a candidate. It writes the file, the hook scopes it.
+        """Ask the doer for a body. Python writes the candidate, matching the plugin."""
+        import turns
 
-        The doer is the only role here that holds `Write`, and the PreToolUse
-        hook in `roles.py` keeps it inside `tickets/**`. The candidate path is
-        inside that scope, so the hook allows this and still blocks everything
-        else, which is the whole reason this port exists.
-        """
-        candidate = Path(self.repo) / "tickets" / f"{tkt.id}{CANDIDATE_SUFFIX}"
-        relative = candidate.relative_to(self.repo)
-        told = (
-            f"The latest comment on the issue says: {comment}"
-            if comment
-            else "There is no comment yet. Rely on your own reading of the app under app/."
-        )
-        result = self._ask(
-            f"Use the doer subagent. Rewrite ticket {tkt.id}, a {kind} ticket that is "
-            f"missing {', '.join(missing) or 'nothing'}. {told} "
-            f"Keep the front matter exactly as it is. Write the full rewritten ticket "
-            f"to {relative} and write nothing else.",
-            allow=DOER_ALLOW,
-        )
-        if not result.ok:
-            raise EnhancerError(f"the doer failed: {result.output}")
-        if not candidate.exists():
-            raise EnhancerError(f"the doer wrote no candidate at {relative}")
-        return candidate
+        return turns.draft(self, tkt, kind, missing, comment)
 
     def ingest_github_issues(self) -> None:
         """GitHub is the ticket source. A UI-created issue becomes a local draft."""
@@ -521,7 +508,11 @@ class Enhancer:
             return Outcome(tkt.id, "escalated", "needs-human is already set")
 
         # 5. grade the real ticket. The rubric decides ready, never the comment.
-        verdict = self.judge(tkt.path)
+        try:
+            verdict = self.judge(tkt.path)
+        except TicketBlocked as blocked:
+            self.gh.add_label(issue, "needs-human")
+            return Outcome(tkt.id, "escalated", str(blocked))
 
         # 6. decide from `ready` and LGTM only. Label after a real write, not here.
         if verdict["ready"] and (comment or "").strip() == LGTM:
@@ -538,11 +529,29 @@ class Enhancer:
                 state.save(Path(self.repo), tkt.id)
             return Outcome(tkt.id, "waiting", "ready, waiting for LGTM")
 
+        exhausted = self._exhausted()
+        if exhausted:
+            self.gh.add_label(issue, "needs-human")
+            return Outcome(tkt.id, "escalated", exhausted)
+
         # 7. enhance because the ticket still needs work, not because someone commented.
-        signature = self._improve(tkt, verdict, None, issue)
+        try:
+            signature = self._improve(tkt, verdict, None, issue)
+        except TicketBlocked as blocked:
+            self.gh.add_label(issue, "needs-human")
+            return Outcome(tkt.id, "escalated", str(blocked))
 
         # 8. the exits, computed rather than judged.
-        stop = check_stop.check(state.round, self.budget, signature, state.previous_signature)
+        stop = check_stop.check(
+            state.round,
+            self.budget,
+            signature,
+            state.previous_signature,
+            usd=self.spent_usd,
+            max_usd=self.max_usd,
+            turns=self.turns,
+            max_turns=self.max_turns,
+        )
         if stop["stop"]:
             self.gh.add_label(issue, "needs-human")
             return Outcome(tkt.id, "escalated", stop["reason"])

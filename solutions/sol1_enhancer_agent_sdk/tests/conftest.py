@@ -105,7 +105,10 @@ class FakeAgentDefinition:
     description: str = ""
     prompt: str = ""
     tools: list = field(default_factory=list)
-    max_turns: int = 0
+    maxTurns: int = 0
+    disallowedTools: list | None = None
+    background: bool | None = None
+    model: str | None = None
 
 
 @dataclass
@@ -119,9 +122,17 @@ class FakeClaudeAgentOptions:
     cwd: str = ""
     agents: dict = field(default_factory=dict)
     allowed_tools: list = field(default_factory=list)
+    disallowed_tools: list = field(default_factory=list)
     permission_mode: str = ""
     hooks: dict = field(default_factory=dict)
     setting_sources: list = field(default_factory=list)
+    plugins: list = field(default_factory=list)
+    skills: list | str | None = None
+    system_prompt: str | None = None
+    max_turns: int | None = None
+    max_budget_usd: float | None = None
+    output_format: dict | None = None
+    env: dict = field(default_factory=dict)
 
 
 def make_sdk_module(messages: list | None = None) -> types.ModuleType:

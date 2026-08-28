@@ -1,0 +1,5 @@
+{
+  "name": "ticket-enhancer",
+  "description": "Same doer, judge, and loop skill as the Claude Code plugin, loaded by the Agent SDK.",
+  "version": "0.1.0"
+}

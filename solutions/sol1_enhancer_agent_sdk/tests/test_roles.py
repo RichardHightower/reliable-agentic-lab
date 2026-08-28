@@ -129,7 +129,7 @@ def test_options_for_needs_the_sdk(contract):
 def test_options_for_builds_one_subagent_per_role_that_is_not_the_orchestrator(contract, fake_sdk):
     """The orchestrator is the caller, not a subagent it can delegate to itself."""
     options = roles.options_for(contract, loop="enhancer")
-    assert set(options.agents) == {"doer", "judge"}
+    assert set(options.agents) == {"enhancer-doer", "enhancer-judge"}
 
 
 def test_a_role_name_becomes_a_hyphenated_agent_name(contract, fake_sdk):
@@ -140,14 +140,15 @@ def test_a_role_name_becomes_a_hyphenated_agent_name(contract, fake_sdk):
 
 def test_each_subagent_carries_its_own_tool_list(contract, fake_sdk):
     options = roles.options_for(contract, loop="enhancer")
-    assert "Write" in options.agents["doer"].tools
-    assert "Write" not in options.agents["judge"].tools, "the judge holds no write tool"
+    assert options.agents["enhancer-doer"].tools == ["Read", "Grep", "Glob"]
+    assert "Write" not in options.agents["enhancer-judge"].tools, "the judge holds no write tool"
+    assert "Write" not in options.agents["enhancer-doer"].tools, "the doer holds no write tool"
 
 
 def test_each_subagent_carries_its_purpose_as_its_prompt(contract, fake_sdk):
-    doer = roles.options_for(contract, loop="enhancer").agents["doer"]
-    assert doer.description == roleplan.PURPOSE["doer"]
-    assert doer.prompt.startswith("You are the doer.")
+    doer = roles.options_for(contract, loop="enhancer").agents["enhancer-doer"]
+    assert "You draft a better ticket" in doer.prompt
+    assert "holds no write tool" in doer.description.lower()
 
 
 def test_the_options_point_at_the_target_repo(contract, fake_sdk):
@@ -155,12 +156,10 @@ def test_the_options_point_at_the_target_repo(contract, fake_sdk):
 
 
 def test_allowed_tools_is_derived_from_the_cast_rather_than_restated(contract, fake_sdk):
-    """A loop whose cast writes nothing must not be handed Write."""
+    """The parent may only spawn a subagent. Write on the parent is how it skips the doer."""
     options = roles.options_for(contract, loop="enhancer")
-    expected = sorted(
-        {tool for role in roleplan.plan(contract, "enhancer").values() for tool in role.tools}
-    )
-    assert options.allowed_tools == expected
+    assert options.allowed_tools == ["Agent"]
+    assert "Write" in options.disallowed_tools
 
 
 def test_allowed_tools_is_sorted_and_deduplicated(contract, fake_sdk):

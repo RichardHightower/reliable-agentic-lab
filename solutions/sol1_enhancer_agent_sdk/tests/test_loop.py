@@ -99,7 +99,7 @@ def test_build_needs_the_sdk(contract):
 
 def test_build_returns_this_runtimes_options_for_the_enhancer_cast(contract, fake_sdk):
     options = loop.build(contract)
-    assert set(options.agents) == {"doer", "judge"}
+    assert set(options.agents) == {"enhancer-doer", "enhancer-judge"}
     assert options.cwd == str(contract.repo)
 
 

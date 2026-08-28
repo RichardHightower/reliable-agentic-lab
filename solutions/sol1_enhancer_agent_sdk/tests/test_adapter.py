@@ -60,15 +60,19 @@ def test_the_backend_is_named_for_its_runtime():
 
 def test_changed_files_reads_the_names_git_diff_prints(tmp_path, monkeypatch):
     class _Proc:
-        stdout = "app/models.py\ntickets/T001.md\n"
+        def __init__(self, stdout):
+            self.stdout = stdout
 
     def fake_run(argv, **kwargs):
-        assert argv == ["git", "diff", "--name-only"]
         assert kwargs["cwd"] == tmp_path
-        return _Proc()
+        if argv[:2] == ["git", "diff"]:
+            return _Proc("app/models.py\ntickets/T001.md\n")
+        if argv[:2] == ["git", "ls-files"]:
+            return _Proc("tickets/new.md\n")
+        raise AssertionError(argv)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    assert adapter._changed_files(tmp_path) == {"app/models.py", "tickets/T001.md"}
+    assert adapter._changed_files(tmp_path) == {"app/models.py", "tickets/T001.md", "tickets/new.md"}
 
 
 def test_changed_files_on_a_clean_tree_is_empty(tmp_path, monkeypatch):
@@ -203,3 +207,34 @@ def test_a_failed_run_never_claims_a_write(tmp_path, monkeypatch, changed):
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="do it", allow=["**"])
     assert result.wrote == []
+
+
+def test_run_reads_result_message_cost_and_structured_output(tmp_path, monkeypatch, changed):
+    class Msg:
+        result = '{"kind": "bug", "present_fields": ["title"]}'
+        total_cost_usd = 1.25
+        structured_output = {"kind": "bug", "present_fields": ["title"]}
+        is_error = False
+        subtype = "success"
+
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", make_sdk_module([Msg()]))
+    changed.extend([set(), set()])
+    result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="grade", allow=[])
+    assert result.usd == 1.25
+    assert result.structured["kind"] == "bug"
+    assert result.ok is True
+
+
+def test_run_maps_max_turns_subtype_to_a_stop_reason(tmp_path, monkeypatch, changed):
+    class Msg:
+        result = ""
+        total_cost_usd = 0.1
+        structured_output = None
+        is_error = True
+        subtype = "error_max_turns"
+
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", make_sdk_module([Msg()]))
+    changed.extend([set(), set()])
+    result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="grade", allow=[])
+    assert result.ok is False
+    assert result.stop_reason == "max turns"

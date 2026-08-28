@@ -105,10 +105,16 @@ def run(argv_repo: str, *, ticket: str | None, simulate: str | None) -> int:
 
     settings = config()
     contract = Contract(argv_repo)
+    from load_agents import DEFAULT_MAX_TURNS
+
+    budget = contract.budget
     engine = Enhancer(
         repo=Path(contract.repo),
         backend=backend(contract),
         gh=Gh(settings["fork_owner"], settings["repo_name"]),
+        budget=int(budget.get("iterations") or 3),
+        max_usd=float(budget["usd"]) if budget.get("usd") is not None else None,
+        max_turns=int(budget["turns"]) if budget.get("turns") is not None else DEFAULT_MAX_TURNS,
     )
     try:
         outcomes = engine.poll(ticket, simulate_comment=simulate)

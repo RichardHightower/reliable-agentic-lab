@@ -1,10 +1,12 @@
-"""Deterministic exit check for the ticket enhancer.
+"""Deterministic exit check for the ticket enhancer plugin.
 
 `check_fields.py` decides whether a ticket is ready, a fact computed from the
-Judge's report. This script decides the other exits: round budget spent, cost
-budget spent, max turns, and a stable failure (two rounds in a row find exactly
-the same gaps). A stop condition trusted to a model's own judgment is a stop
-condition a model can talk itself past.
+Judge's report. This script decides the other two exits SPEC.md names: budget
+spent, and a stable failure (two rounds in a row find exactly the same
+gaps). Given this round's {round, budget, signature, previous_signature}, it
+computes {stop, reason} itself. The skill must not decide these by prose, the
+same reason check_fields.py exists: a stop condition trusted to a model's own
+judgment is a stop condition a model can talk itself past.
 
 Usage:
     python3 check_stop.py '{"round": 2, "budget": 3, "signature": ["value"], "previous_signature": ["value"]}'
@@ -17,22 +19,9 @@ import json
 import sys
 
 
-def check(
-    round_: int,
-    budget: int,
-    signature: list[str],
-    previous_signature: list[str] | None,
-    usd: float = 0.0,
-    max_usd: float | None = None,
-    turns: int = 0,
-    max_turns: int | None = None,
-) -> dict:
+def check(round_: int, budget: int, signature: list[str], previous_signature: list[str] | None) -> dict:
     if previous_signature is not None and signature == previous_signature:
         return {"stop": True, "reason": "same signature two rounds running"}
-    if max_usd is not None and usd >= max_usd:
-        return {"stop": True, "reason": "cost budget spent"}
-    if max_turns is not None and turns >= max_turns:
-        return {"stop": True, "reason": "max turns"}
     if round_ + 1 >= budget:
         return {"stop": True, "reason": "budget spent"}
     return {"stop": False, "reason": None}
@@ -46,10 +35,6 @@ def main() -> None:
         payload["budget"],
         payload["signature"],
         payload.get("previous_signature"),
-        usd=float(payload.get("usd") or 0.0),
-        max_usd=payload.get("max_usd"),
-        turns=int(payload.get("turns") or 0),
-        max_turns=payload.get("max_turns"),
     )
     print(json.dumps(result))
 
@@ -64,14 +49,6 @@ def demo() -> None:
     # round 2 is the third round (0-indexed); round + 1 == budget spends it,
     # even when this round's signature differs from the last one
     assert check(2, 3, ["value"], ["other"]) == {"stop": True, "reason": "budget spent"}
-    assert check(0, 3, ["value"], None, usd=2.0, max_usd=2.0) == {
-        "stop": True,
-        "reason": "cost budget spent",
-    }
-    assert check(0, 3, ["value"], None, turns=12, max_turns=12) == {
-        "stop": True,
-        "reason": "max turns",
-    }
     print("check_stop: all demo assertions passed")
 
 
