@@ -12,7 +12,21 @@ A failing branch in. A green one out, or an honest explanation of why not.
 
 Work from `labs/lab4_fixer`.
 
-![w:560](../session-4-production-architecture/images/mast-breakdown.jpg)
+
+---
+
+# What you will build
+
+Two functions in `loop.py`:
+
+```python
+def summarize_failure(run_result: RunResult) -> str: ...
+def repair_until_green(contract: Contract, budget: int = 3) -> dict: ...
+```
+
+Already shipped: `contract.py` (the repo contract, 344 lines).
+
+**Final outcome.** A loop that can give up out loud.
 
 
 ---
@@ -24,8 +38,6 @@ Nobody is watching. Exits matter more than successes.
 Giving up is allowed. Giving up silently is the bug.
 
 A model that may both act and verify can invent its own evidence. That is why the receipt exists.
-
-**Artifact.** A production architecture you can hand to your team.
 
 
 ---
@@ -42,8 +54,6 @@ A model that may both act and verify can invent its own evidence. That is why th
 ---
 
 # Starting architecture
-
-Already here: `contract.py` (344 lines, the repo contract). You fill two functions in `loop.py`.
 
 ```
 Trigger  →  fixer.run
@@ -68,12 +78,26 @@ git -C ../../work/northwind-field-crm stash --include-untracked
 `checkout()` on a dirty tree refuses rather than deleting Lab 2 work:
 
 ```
-cannot switch to broken-pr: northwind-field-crm still holds the work from an earlier lab.
+cannot switch to broken-pr: northwind-field-crm still holds
+the work from an earlier lab.
   keep it:     git -C ... stash --include-untracked
   discard it:  git -C ... checkout -- . && git -C ... clean -fd
 ```
 
-That refusal is on brand. It costs 30 seconds if you let them find it.
+That refusal is on brand.
+
+
+---
+
+# CRM branches
+
+| Branch | State |
+|---|---|
+| `main` | no due dates, ~75% coverage, below floor |
+| `known-good` | due dates implemented, everything green |
+| `broken-pr` | dropped the null guard, one test red |
+
+`--branch broken-pr` is what makes this real. Point it at a green branch and it reports a pass and proves nothing. Same shape as the red gate.
 
 
 ---
@@ -88,7 +112,7 @@ def repair_until_green(contract: Contract, budget: int = 3) -> dict:
     raise NotImplementedError("fill me in")
 ```
 
-CRM branches: `main` ~75% coverage (below floor). `known-good` due dates green. `broken-pr` dropped the null guard, one test red.
+Fill only `loop.py`.
 
 
 ---
@@ -107,15 +131,13 @@ def summarize_failure(run_result) -> str:
     return "\n".join(lines)
 ```
 
-That is `fixer.failure_summary` in `solutions/sol4_fixer_agent_sdk/fixer.py`.
-
 
 ---
 
-# `repair_until_green`. Four stop paths
+# Four stop paths
 
 1. Suite green → pass
-2. Suite never ran → escalate on round 1. A suite that never ran is not a suite that failed.
+2. Suite never ran → escalate on round 1
 3. Same failing ids twice → escalate, leave a comment
 4. Budget spent → escalate, "A human should take this one"
 
@@ -138,8 +160,6 @@ python3 loop.py --repo ../../work/northwind-field-crm --branch broken-pr --doer 
 python3 loop.py --repo ../../work/northwind-field-crm --branch broken-pr --doer none
 ```
 
-`--branch broken-pr` is what makes this real. Point it at a green branch and it reports a pass and proves nothing. Same shape as the red gate.
-
 
 ---
 
@@ -151,8 +171,6 @@ attempt 1: 1 failing -> retry
 attempt 2: 1 failing -> escalate
 
 gate: escalate
-reason: the same rows failed twice
-
 The fixer gave up.
 A human should take this one.
 ```
@@ -179,12 +197,11 @@ Every one of those three is something you build, not something you buy.
 
 # Troubleshooting
 
-| Symptom | Likely cause | Resolution |
+| Symptom | Cause | Fix |
 |---|---|---|
-| `checkout broken-pr` refuses | Lab 2 files still dirty | stash, out loud, before anyone types |
-| `--doer none` is green | loop is lying | same ids twice must escalate |
-| Edited `tests/**` | scope not enforced | deny list on the code implementer |
-| `task loop:fixer` missing | engine deleted | `sol4_fixer_agent_sdk/loop.py` |
+| Checkout refuses | Lab 2 files dirty | stash, out loud |
+| `--doer none` is green | loop is lying | same ids twice escalate |
+| Edited `tests/**` | scope not enforced | deny list on the coder |
 | Silent give-up | missing comment | "A human should take this one." |
 
 
@@ -192,11 +209,9 @@ Every one of those three is something you build, not something you buy.
 
 # Recap
 
-**What we built.** Two functions that make an unattended fixer honest.
-
 **Takeaways**
 
-1. Stash first. A loop that deletes earlier work is the behaviour this workshop exists to prevent.
+1. Stash first.
 2. Giving up is allowed. Giving up silently is the bug.
 3. Merge is never a tool.
 4. If you cannot read the last score, you cannot debug at 2 a.m.
