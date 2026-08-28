@@ -21,6 +21,7 @@ jobs:
         folder:
           - solutions/sol3_research_deep_agents
           - solutions/sol4_fixer_deep_agents
+          - solutions/sol2_implementer_deep_agents
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

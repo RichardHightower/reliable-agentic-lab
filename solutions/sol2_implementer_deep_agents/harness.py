@@ -72,9 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     doer = args.doer
     if doer == "deep":
         doer = backend(contract)
-    trace = implementer.run(
-        repo=args.repo, ticket_id=args.ticket, doer=doer, budget=args.budget
-    )
+    trace = implementer.run(repo=args.repo, ticket_id=args.ticket, doer=doer, budget=args.budget)
     print(trace.get("rubric", ""))
     print()
     print(f"gate: {trace['gate']}")
