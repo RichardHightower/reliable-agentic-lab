@@ -3,69 +3,195 @@ marp: true
 paginate: true
 title: Session 1. System Architecture
 description: Engineering Reliable Agentic AI Systems. Packt. 29 August 2026.
-footer: spillwave · session 1 · system architecture
+footer: Spillwave Solutions | spillwave.com
 style: |
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,550&family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600&display=swap');
+  /* @theme spillwave */
+  @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap");
 
   :root {
-    --bg: #07141f;
-    --ink: #eef4f6;
-    --muted: #8aa0ad;
-    --teal: #2dd4bf;
-    --gold: #d4a84b;
-    --line: rgba(45, 212, 191, 0.22);
+    --bg: #eef2f7;
+    --surface: #ffffff;
+    --ink: #1b2437;
+    --muted: #4a5b70;
+    --faint: #7a8b9c;
+    --navy: #1a365d;
+    --orange: #d9772a;
+    --teal: #2aa8bb;
+    --line: #c9d4e0;
+    --stripe: #1e3a6e;
   }
 
   section {
     background: var(--bg);
     color: var(--ink);
-    font-family: Outfit, "Segoe UI", sans-serif;
-    padding: 48px 56px 64px;
-    font-size: 28px;
-    line-height: 1.35;
+    font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+    padding: 28px 48px 52px;
+    font-size: 20px;
+    line-height: 1.3;
+    justify-content: flex-start;
+    overflow: hidden;
+  }
+
+  section::before {
+    content: "SPILLWAVE SOLUTIONS  ·  LOOP ENGINEERING WORKSHOP";
+    display: block;
+    color: var(--navy);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 6px;
+    margin-bottom: 10px;
   }
 
   section::after {
-    color: var(--muted);
-    font-size: 12px;
-    letter-spacing: 0.14em;
+    color: var(--faint);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    font-weight: 500;
   }
 
   h1 {
-    font-family: Fraunces, Georgia, serif;
-    font-style: italic;
-    font-weight: 550;
-    color: var(--gold);
-    font-size: 44px;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-style: normal;
+    font-weight: 800;
+    color: var(--ink);
+    font-size: 26px;
     line-height: 1.12;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.028em;
+    margin: 0 0 10px 0;
   }
 
-  h2, h3 { color: var(--teal); font-weight: 600; }
+  h2,
+  h3 {
+    color: var(--navy);
+    font-weight: 700;
+  }
 
-  p, li { color: var(--ink); }
-  small, cite { color: var(--muted); font-size: 16px; }
+  p,
+  li {
+    color: var(--ink);
+  }
 
-  code, pre {
+  ul {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+  }
+
+  ul li {
+    position: relative;
+    padding: 6px 0 6px 20px;
+    border-bottom: 1px solid var(--line);
+    font-size: 18px;
+    line-height: 1.3;
+  }
+
+  ul li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.85em;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--navy);
+  }
+
+  ul li:last-child {
+    border-bottom: none;
+  }
+
+  ul li:last-child::before {
+    background: var(--orange);
+  }
+
+  small,
+  cite {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  code,
+  pre {
     font-family: "IBM Plex Mono", ui-monospace, monospace;
-    background: #061018;
-    color: #d7ece8;
+    background: #e4eaf2;
+    color: var(--ink);
+    font-size: 14px;
   }
 
-  table { font-size: 22px; }
-  th { color: var(--muted); font-weight: 500; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; }
-  td { border-color: var(--line); }
+  pre {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    max-height: 280px;
+    overflow: auto;
+  }
 
-  img { display: block; margin-left: auto; margin-right: auto; }
+  table {
+    font-size: 16px;
+    width: 100%;
+  }
+
+  th {
+    color: var(--muted);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  td {
+    border-color: var(--line);
+    padding: 6px 10px 6px 0;
+  }
+
+  img {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 100%;
+    max-height: 210px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
 
   footer {
     color: var(--muted);
-    font-size: 12px;
-    letter-spacing: 0.12em;
+    font-size: 11px;
+    letter-spacing: 0.02em;
   }
 
-  section.lead h1 { font-size: 56px; }
-  section.lead p { color: var(--muted); }
+  section.lead::before {
+    display: none;
+  }
+
+  section.lead {
+    border-left: 16px solid var(--stripe);
+    padding: 40px 52px 48px 44px;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  section.lead h1 {
+    font-size: 46px;
+    font-weight: 800;
+    color: var(--ink);
+    font-style: normal;
+    line-height: 1.08;
+  }
+
+  section.lead p {
+    color: var(--navy);
+    font-weight: 500;
+    font-size: 20px;
+  }
+
+  section.lead img {
+    max-height: none;
+  }
 ---
 
 <!--
@@ -77,7 +203,9 @@ _class: lead
 notes: You are here to engineer a loop, not to collect prompts. Say the time out loud. 10:00 Central, 11:00 Eastern.
 -->
 
-![w:64](images/wave-mark.svg)
+<!-- _class: lead -->
+
+![bg right:36%](images/title-mark.jpg)
 
 # Engineering reliable agentic AI systems
 
@@ -123,12 +251,7 @@ notes: Promise exactly four things. All four run from a clean clone with one com
 
 # Four artifacts. You leave with all four.
 
-```mermaid
-flowchart LR
-  A1["01 Running loop"] --> A2["02 Evaluation harness"]
-  A2 --> A3["03 Research over MCP"]
-  A3 --> A4["04 Production architecture"]
-```
+![h:200](images/diagram-s1-03.jpg)
 
 | 01 | 02 | 03 | 04 |
 |---|---|---|---|
@@ -180,7 +303,7 @@ notes: Ask who has a prompt that worked brilliantly once and never again. Hands 
 - A hundred, and nobody remembers what good looked like.
 - The bottleneck is not the model. It is you, reading every diff.
 
-![bg right:42%](images/prompting-volume.jpg)
+![bg right:34%](images/prompting-volume.jpg)
 
 ---
 
@@ -212,18 +335,7 @@ notes: Read the four items slowly. Say the last one twice. The model does not en
 
 A production loop is a state machine. Every iteration:
 
-```mermaid
-flowchart TB
-  subgraph Loop["Four properties. Take away any one and you have a generator."]
-    S["1 Explicit state\nStart from disk, not chat history"]
-    B["2 Bounded authority\nA declared write scope"]
-    E["3 Observable evidence\nA trace, a score, a file"]
-    T["4 External transition\nYou enforce pass / retry / escalate"]
-  end
-  S --- B
-  B --- E
-  E --- T
-```
+![h:200](images/diagram-s1-07.jpg)
 
 ---
 
@@ -237,14 +349,7 @@ notes: ReAct is the inner cycle. The product you ship is the outer control syste
 
 # The primitive cycle is still ReAct. The product is the outer control system.
 
-```mermaid
-flowchart LR
-  P["Perceive\nTrigger"] --> R["Reason\nPlan next action"]
-  R --> A["Act\nTool or write"]
-  A --> O["Observe\nTests, files, scores"]
-  O --> D["Decide\nPass, retry, escalate"]
-  D -->|retry| R
-```
+![h:200](images/diagram-s1-08.jpg)
 
 <small>Yao et al., ReAct, arXiv:2210.03629</small>
 
@@ -260,19 +365,7 @@ notes: Give them one number they can quote to their manager. 19 to 44 on pass@5,
 
 # The jump is the flow, not the prompt.
 
-```mermaid
-flowchart LR
-  subgraph One["Direct prompt"]
-    P["One well-designed prompt"] --> Out["19% pass@5"]
-  end
-  subgraph Flow["Flow engineering"]
-    Pl["Plan"] --> G["Generate"]
-    G --> Tests["Run tests"]
-    Tests -->|fail| G
-    Tests -->|pass| Win["44% pass@5"]
-  end
-  One -.->|"same GPT-4"| Flow
-```
+![h:200](images/diagram-s1-09.jpg)
 
 AlphaCodium, CodeContests validation set. Same model. The flow did that.
 
@@ -317,7 +410,7 @@ notes: The engine never imports the CRM. That is what makes it point at their re
 - The engine never imports it. You point the loop at a path.
 - First ticket: add a due date. Vague on purpose.
 
-![bg left:40%](images/crm-target-repo.jpg)
+![bg left:34%](images/crm-target-repo.jpg)
 
 ---
 
@@ -331,18 +424,7 @@ notes: Monday morning they point this at their backlog. The interface is Taskfil
 
 # Monday morning, you point this at your backlog.
 
-```mermaid
-flowchart LR
-  subgraph Engine["reliable-agentic-lab"]
-    Loops["orchestrator / doer / judge"]
-    Gates["gates.py"]
-  end
-  subgraph Target["northwind-field-crm"]
-    Tickets["tickets/*.md"]
-    App["CRM application"]
-  end
-  Loops -->|"path only\nTaskfile.yml"| Tickets
-```
+![h:200](images/diagram-s1-12.jpg)
 
 The interface is `Taskfile.yml` plus `junit.xml`. That is the only contract the loops need.
 
@@ -392,14 +474,7 @@ notes: Point at Verify. That is the one that separates a loop from a script that
 
 # Five parts. Verify is the one that is not optional.
 
-```mermaid
-flowchart LR
-  T["Trigger\nDraft ticket on disk"] --> A["Action\nDoer edits inside scope"]
-  A --> V["Verify\nJudge scores. Reports only."]
-  V -->|"not ready"| A
-  V -->|"ready"| M["Memory\nTicket file and trace"]
-  M --> H["Human\nAccepts, or does not"]
-```
+![h:200](images/diagram-s1-15.jpg)
 
 Five parts. **Verify** is the one that separates a loop from a script that calls a model.
 
@@ -425,7 +500,7 @@ notes: A trigger is not a chat. Ours today is a draft markdown ticket in the tar
 - Not a chat. Not "hey, add due dates."
 - In production it is a webhook or a schedule, and it fires only when the branch head actually moved.
 
-![bg right:42%](images/trigger-ticket.jpg)
+![bg right:34%](images/trigger-ticket.jpg)
 
 ---
 
@@ -439,14 +514,7 @@ notes: A trigger that fires on no change burns budget for no work. Module 4 come
 
 # The shape of a trigger changes. The rule does not.
 
-```mermaid
-flowchart TB
-  T["Trigger. Something outside the model starts the work."]
-  T --> F["File on disk\nA draft ticket exists"]
-  T --> W["Webhook\nIssue opened, PR failed, comment posted"]
-  T --> C["Schedule\nCron, and only if HEAD moved"]
-  T --> X["Anti-pattern\nA timer that fires on no change"]
-```
+![h:200](images/diagram-s1-17.jpg)
 
 ---
 
@@ -471,7 +539,7 @@ notes: An agent can argue past an instruction, and cannot argue past a tool it w
 
 An agent can argue its way past an instruction. It cannot argue its way past a tool it was never given.
 
-![bg right:42%](images/scope-is-a-type.jpg)
+![bg right:34%](images/scope-is-a-type.jpg)
 
 ---
 
@@ -485,13 +553,7 @@ notes: Deny always beats allow. In Python, Judge has no write method. In the Cla
 
 # Write scope is a type, not a polite request.
 
-```mermaid
-flowchart TB
-  W["Doer.write(path, text)"] --> C{"WriteScope.permits?"}
-  C -->|allow tickets/**| OK["Write"]
-  C -->|deny or unmatched| X["ScopeViolation"]
-  J["Judge"] --> N["No write method"]
-```
+![h:200](images/diagram-s1-19.jpg)
 
 Deny always beats allow. In Python, `Judge` has no `write` method. In the Claude Code lab, `enhancer-judge` and `enhancer-doer` carry no write tool in their agent definitions.
 
@@ -502,7 +564,7 @@ id: s1-20
 layout: split-left
 minutes: 2
 beat: talk
-image: images/judge-no-hands.jpg
+image: images/maker-checker.jpg
 image_prompt: >
   16:9. A figure at a lectern reading a scorecard aloud. The lectern has no
   keyboard, no pen, no drawer. Behind it, a locked cabinet labeled files.
@@ -518,7 +580,7 @@ notes: The judge reports. It does not fix. If verify is looks good to me, you ha
 
 If verify is "looks good to me," you do not have a loop. You have a generator.
 
-![bg left:40%](images/judge-no-hands.jpg)
+![bg left:34%](images/maker-checker.jpg)
 
 ---
 
@@ -532,14 +594,7 @@ notes: Same model plus same context plus same reasoning process is not a checker
 
 # Never let the AI verify its own done.
 
-```mermaid
-flowchart LR
-  Maker["Maker / Doer\nProduces the artifact"] --> Artifact["Ticket or patch"]
-  Artifact --> Checker["Checker / Judge\nIndependent score"]
-  Checker -->|"pass"| Done["Done"]
-  Checker -->|"retry"| Maker
-  Checker -->|"escalate"| Human["Human"]
-```
+![h:200](images/diagram-s1-21.jpg)
 
 Same model plus same context plus same reasoning process is not a checker. The split is architectural.
 
@@ -582,17 +637,7 @@ notes: pass, retry, escalate. The forgotten exit is stable failure. Python holds
 
 # Three exits, and no fourth. Python holds the loop.
 
-```mermaid
-stateDiagram-v2
-  [*] --> Running
-  Running --> Pass: rubric green
-  Running --> Retry: fixable gap and budget left
-  Running --> Escalate: budget spent
-  Running --> Escalate: same signature twice
-  Retry --> Running
-  Pass --> [*]
-  Escalate --> [*]
-```
+![h:200](images/diagram-s1-23.jpg)
 
 `pass`, `retry`, `escalate`. The one people miss is stable failure.
 
@@ -608,11 +653,7 @@ notes: signature is what failed, not how it was worded. Two equal signatures mea
 
 # The same gaps twice is not progress. Stopping is the feature.
 
-```mermaid
-flowchart TD
-  R1["Round 1\nmissing: value, criteria"] --> R2["Round 2\nsignature equal"]
-  R2 --> E["escalate\nThe loop is not converging"]
-```
+![h:200](images/diagram-s1-24.jpg)
 
 `signature` is what failed, not how it was worded. Two equal signatures mean the last attempt changed nothing.
 
@@ -642,7 +683,7 @@ Liu et al. 2024 measured it. Accuracy is highest when the fact sits at the **sta
 
 <small>Liu et al., TACL 2024. arXiv:2307.03172</small>
 
-![bg right:42%](images/context-middle.jpg)
+![bg right:34%](images/context-middle.jpg)
 
 ---
 
@@ -656,12 +697,7 @@ notes: That rule is why the planner is its own subagent in Module 2.
 
 # Big output goes to a file. Only a short summary returns.
 
-```mermaid
-flowchart TB
-  Big["Big output\nPatch, research dump, plan"] --> File["On disk"]
-  File --> Sum["Short summary + score"]
-  Sum --> Orch["Orchestrator window"]
-```
+![h:200](images/diagram-s1-26.jpg)
 
 That rule is why the planner is its own subagent in Module 2.
 
@@ -689,7 +725,7 @@ notes: Today LGTM. In Module 2 a pull request. Never merge.
 
 Oversight is a designed step, not a hope.
 
-![bg right:42%](images/human-merges.jpg)
+![bg right:34%](images/human-merges.jpg)
 
 ---
 
@@ -703,11 +739,7 @@ notes: Merge, money, and production deploy stay human. Say that twice.
 
 # Merge, money, and production deploy stay human.
 
-```mermaid
-flowchart LR
-  L["Loop proposes\nRewrites ticket\nLater opens a PR"] --> H["Human accepts\nLGTM comment"]
-  H --> M["Merge box\nHuman only"]
-```
+![h:200](images/diagram-s1-28.jpg)
 
 ---
 
@@ -721,12 +753,7 @@ notes: Three parts. Orchestrator owns the budget and writes nothing. Doer writes
 
 # Three parts. The object is the only variable.
 
-```mermaid
-flowchart TB
-  O["Orchestrator\nOwns the budget\nWrites nothing\nSees summaries"]
-  O --> D["Doer\nWrites inside a declared scope"]
-  O --> J["Judge\nScores\nNo write method"]
-```
+![h:200](images/diagram-s1-29.jpg)
 
 ---
 
@@ -740,14 +767,7 @@ notes: This is the map for the whole day. Spend the full two minutes.
 
 # Same graph, four objects. Learn it once.
 
-```mermaid
-flowchart TB
-  G["Same graph\nOrchestrator + Doer + Judge"]
-  G --> M1["M1 Draft ticket"]
-  G --> M2["M2 Ready ticket + code"]
-  G --> M3["M3 Question"]
-  G --> M4["M4 Failing pull request"]
-```
+![h:200](images/diagram-s1-30.jpg)
 
 | Module | Object | Lab |
 |---|---|---|
@@ -768,12 +788,7 @@ notes: Read .harness/last-enhancer.json in the lab. That is the trace.
 
 # Context windows reset. Ticket files do not.
 
-```mermaid
-flowchart LR
-  Disk["On disk\nticket, trace, plan"]
-  Proc["In process\nbudget, signature, iteration"]
-  Not["Not in the chat transcript"]
-```
+![h:200](images/diagram-s1-31.jpg)
 
 Read `.harness/last-enhancer.json` in the lab. That is the trace.
 
@@ -789,27 +804,7 @@ notes: Walk the sequence once. The orchestrator is the only writer. The agents r
 
 # Ticket enhancer. Vague in, contract out.
 
-```mermaid
-sequenceDiagram
-  participant Poll as Orchestrator skill
-  participant Judge as enhancer-judge
-  participant Doer as enhancer-doer
-  participant Disk as Ticket file
-  participant Human as Human
-  Poll->>Disk: load draft ticket
-  Poll->>Judge: score ticket
-  Judge-->>Poll: ready? missing[]
-  alt not ready and signature changed
-    Poll->>Doer: draft replacement
-    Doer-->>Poll: text only
-    Poll->>Disk: write candidate
-    Poll->>Poll: retry
-  else same gaps twice
-    Poll-->>Human: escalate
-  else ready
-    Poll-->>Human: wait for LGTM
-  end
-```
+![h:200](images/diagram-s1-32.jpg)
 
 ---
 
@@ -823,13 +818,7 @@ notes: Deterministic where it can be. A criterion that names a section is checka
 
 # A feature ticket is a contract a test can fail.
 
-```mermaid
-flowchart TB
-  K{"What kind of ticket?"}
-  K -->|bug| Bug["title, steps, expected,\nactual, environment"]
-  K -->|feature| Feat["problem, proposal,\nvalue, criteria"]
-  K -->|ui| Ui["feature fields\nplus a wireframe"]
-```
+![h:200](images/diagram-s1-33.jpg)
 
 Deterministic where it can be. A criterion that names a section is checkable without a model.
 
@@ -847,13 +836,7 @@ notes: Four collapses. Each one is a missing harness piece, not a model failure.
 
 # If you take away verify, stop, scope, or disk, the loop collapses.
 
-```mermaid
-flowchart TB
-  L["Loop without a harness"] --> F1["False completeness"]
-  L --> F2["Runaway iteration"]
-  L --> F3["Context rot"]
-  L --> F4["Stagnation"]
-```
+![h:200](images/diagram-s1-34.jpg)
 
 | Failure | Root cause | Symptom |
 |---|---|---|
@@ -889,12 +872,7 @@ notes: The orchestrator is the only writer. That is a real limitation of the ski
 
 # A skill that owns the loop. Two agents with no write tools.
 
-```mermaid
-flowchart TB
-  S["enhancer-loop skill\nPoll, budget, exits, writes ticket"]
-  S --> D["enhancer-doer\nDrafts text. No write tool."]
-  S --> J["enhancer-judge\nScores. No write tool."]
-```
+![h:200](images/diagram-s1-36.jpg)
 
 The orchestrator is the only writer. That is a real limitation of the skill form: nothing enforces the round budget except the skill following its own instructions.
 
@@ -990,7 +968,7 @@ notes: Each failure has a fix. All four fixes are Module 2.
 
 Each one has a fix. All four fixes are Module 2.
 
-![bg right:42%](images/oneshot-breaks.jpg)
+![bg right:34%](images/oneshot-breaks.jpg)
 
 ---
 
@@ -1004,15 +982,7 @@ notes: Preview only. Do not teach Module 2 here.
 
 # Module 2 is the one that does not get cut.
 
-```mermaid
-flowchart LR
-  M1["Module 1\nA loop that can run once"] --> M2["Module 2"]
-  M2 --> D["Two doers, disjoint scope"]
-  M2 --> C["Spec as a testable contract"]
-  M2 --> R["Red gate"]
-  M2 --> T["Ten-row rubric"]
-  M2 --> P["Push gate and receipt"]
-```
+![h:200](images/diagram-s1-41.jpg)
 
 ---
 
