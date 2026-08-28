@@ -92,6 +92,10 @@ def test_a_missing_repo_still_stops_anything_past_the_table(tmp_path):
         loop.main(["--repo", str(tmp_path / "nope")])
 
 
+@pytest.mark.skipif(
+    __import__("conftest", fromlist=["sdk_installed"]).sdk_installed(),
+    reason="SDK is installed; missing-package path is for a clean env",
+)
 def test_build_needs_the_sdk(contract):
     with pytest.raises(ImportError):
         loop.build(contract)
@@ -109,6 +113,10 @@ def test_backend_wraps_the_built_options(contract, fake_sdk):
     assert made.options.cwd == str(contract.repo)
 
 
+@pytest.mark.skipif(
+    __import__("conftest", fromlist=["sdk_installed"]).sdk_installed(),
+    reason="SDK is installed; missing-package path is for a clean env",
+)
 def test_backend_needs_the_sdk_only_through_build(contract):
     with pytest.raises(ImportError):
         loop.backend(contract)

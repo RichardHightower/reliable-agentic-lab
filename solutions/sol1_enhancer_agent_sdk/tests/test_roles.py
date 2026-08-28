@@ -120,6 +120,10 @@ def test_every_writing_role_denies_an_out_of_scope_write_in_every_loop(repo, con
 # -- options_for -----------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    __import__("conftest", fromlist=["sdk_installed"]).sdk_installed(),
+    reason="SDK is installed; missing-package path is for a clean env",
+)
 def test_options_for_needs_the_sdk(contract):
     """Without the package there is nothing to build, and that must be loud."""
     with pytest.raises(ImportError):

@@ -108,9 +108,20 @@ def run(argv_repo: str, *, ticket: str | None, simulate: str | None) -> int:
     from load_agents import DEFAULT_MAX_TURNS
 
     budget = contract.budget
+    try:
+        made = backend(contract)
+    except ImportError as exc:
+        name = getattr(exc, "name", "") or ""
+        if "claude_agent_sdk" in name or "claude_agent_sdk" in str(exc):
+            print(
+                "claude_agent_sdk is not installed. "
+                "From this folder run: task setup"
+            )
+            return 1
+        raise
     engine = Enhancer(
         repo=Path(contract.repo),
-        backend=backend(contract),
+        backend=made,
         gh=Gh(settings["fork_owner"], settings["repo_name"]),
         budget=int(budget.get("iterations") or 3),
         max_usd=float(budget["usd"]) if budget.get("usd") is not None else None,

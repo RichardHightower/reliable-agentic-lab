@@ -91,7 +91,8 @@ repo.
 
 1. Copy `config.json.example` to `config.json` and fill in your GitHub username.
 
-2. Install the runtime and clone your fork.
+2. Install the runtime and clone your fork. `task setup` creates `.venv`
+   in this folder so Homebrew Python is not in the way.
 
    ```bash
    task setup
