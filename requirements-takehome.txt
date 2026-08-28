@@ -1,6 +1,6 @@
 # The optional take-home labs only. Nothing in the five hours needs these,
 # and `task test` passes without them.
 claude-agent-sdk>=0.1.0
-deepagents>=0.2.0
+deepagents>=0.7.0
 langchain>=1.0.0
 langfuse>=3.0.0,<4.0.0
