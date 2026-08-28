@@ -36,11 +36,5 @@ the budget to watch it fail identically buys a surprise bill rather than a fix.
 
 ## Where the code lives
 
-The answer for this lab is `solutions/sol2_implementer/`.
-
-Worth reading:
-
-- `solutions/sol2_implementer/rubric.py`
-- `solutions/sol2_implementer/gates.py`
-- `solutions/sol2_implementer/roles.py`
-- `solutions/sol2_implementer/steps.py`
+Fill `harness.py` in this folder. `rubric.py` and `gates.py` here are the
+supporting files. There is no drop-in copy of the filled stub.

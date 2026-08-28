@@ -25,9 +25,9 @@ from fastapi.responses import JSONResponse
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-_IMPL = ROOT / "solutions" / "sol2_implementer"
-if str(_IMPL) not in sys.path:
-    sys.path.insert(0, str(_IMPL))
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
 
 import implementer
 

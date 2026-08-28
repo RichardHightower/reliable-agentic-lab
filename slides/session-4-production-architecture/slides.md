@@ -198,7 +198,7 @@ Fill `loop.py`. Two functions: `summarize_failure` and `repair_until_green`.
 
 Giving up is allowed. Giving up **silently** is the bug.
 
-Falling behind is fine: copy `loop.py` from `solutions/sol4_fixer/`.
+Falling behind is fine: watch Rick finish `loop.py` and keep going.
 
 ---
 
@@ -351,7 +351,7 @@ labs/takehome/        Agent SDK and Deep Agents. Not Saturday.
 work/                 the target repo, cloned by task setup.
 ```
 
-Every `solutions/sol<n>_*` folder is green. Copy from one any time.
+Lab 1 still has one folder per tool. Labs 2 to 4 keep the two runtime ports.
 
 ---
 

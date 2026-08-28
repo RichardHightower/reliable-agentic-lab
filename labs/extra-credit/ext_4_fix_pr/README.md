@@ -9,7 +9,7 @@ The Module 4 fixer, started by a failed check suite instead of by you.
 ## What it must do
 
 1. Read the pull request by number through the GitHub API.
-2. Repair it with `solutions/sol4_fixer`. The loop does not change, only the trigger.
+2. Repair it with `fixer.run` from the extra-credit answer folder. The loop does not change, only the trigger.
 3. Count attempts with an `agent-attempts-N` label. Stop at the budget.
 4. Skip the run when `agent-in-progress` is already set.
 5. Comment when it gives up. Silence is the worst outcome.

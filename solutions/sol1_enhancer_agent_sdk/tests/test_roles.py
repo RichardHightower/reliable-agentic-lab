@@ -180,8 +180,8 @@ def test_options_for_needs_a_contract_even_though_the_table_does_not(fake_sdk):
     `roleplan.plan(None, "research")` works, because research runs against a
     question and has no `.loop.yml`. `options_for` still reads `contract.repo`
     for `cwd`, so it needs one. This folder is the enhancer, `loop.py` always
-    passes a Contract, and this module is a copy of `solutions/agent_sdk/roles.py`.
-    Widening it here would make the copy drift from the original.
+    passes a Contract, and this module is this folder's local `roles.py`.
+    Widening it here would make the copy drift from the other ports.
     """
     with pytest.raises(AttributeError):
         roles.options_for(None, loop="research")

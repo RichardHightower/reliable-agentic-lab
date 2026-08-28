@@ -6,7 +6,7 @@ The order is fixed and it is the whole point:
 
     tests first  ->  prove them red  ->  code until green  ->  judge  ->  gate
 
-Read `solutions/sol2_implementer/implementer.py` only if you stall.
+Read `rubric.py` and `gates.py` in this folder if you stall.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 # Spec. Lab 2. Ticket Implementer on LangChain Deep Agents
 
-The same eight steps as `sol2_implementer/implementer.py`. A different runtime
+The same eight steps as the Module 2 implementer. A different runtime
 for the makers. Python still owns the red gate and the three exits.
 
 ## Cast

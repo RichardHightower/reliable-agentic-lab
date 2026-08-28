@@ -36,10 +36,5 @@ the budget to watch it fail identically buys a surprise bill rather than a fix.
 
 ## Where the code lives
 
-The answer for this lab is `solutions/sol3_research/`.
-
-Worth reading:
-
-- `solutions/sol3_research/brief.py`
-- `solutions/sol3_research/research.py`
-- `MCP.md`
+Fill `loop.py` in this folder. `brief.py` here is the supporting file.
+There is no drop-in copy of the filled stub. Also read `MCP.md`.

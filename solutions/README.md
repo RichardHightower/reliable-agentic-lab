@@ -3,23 +3,11 @@
 The answer to every lab. `sol<n>` matches `lab<n>`. The suffix names the tool or
 the runtime, so a folder is `sol<n>_<name>_<product>`.
 
-## Four tools, one answer each
+Labs 2 to 4 no longer ship four coding-tool copies of the same Python file.
+Saturday fills the stub in `labs/`. The solutions tree keeps Lab 1 (four real
+shapes) and the two runtime ports.
 
-For labs 2 to 4, the tool you drive does not change the answer, so the code in
-these four columns is the same file. What changes is `SPEC.md`, which tells you
-how to drive that tool.
-
-| Lab | Claude Code | Codex | Grok Build | OpenCode |
-|---|---|---|---|---|
-| `lab1_enhancer` | `sol1_enhancer` | `sol1_enhancer_codex` | `sol1_enhancer_grok_build` | `sol1_enhancer_opencode` |
-| `lab2_implementer` | `sol2_implementer` | `sol2_implementer_codex` | `sol2_implementer_grok_build` | `sol2_implementer_opencode` |
-| `lab3_research` | `sol3_research` | `sol3_research_codex` | `sol3_research_grok_build` | `sol3_research_opencode` |
-| `lab4_fixer` | `sol4_fixer` | `sol4_fixer_codex` | `sol4_fixer_grok_build` | `sol4_fixer_opencode` |
-
-For labs 2 to 4 each folder holds `SPEC.md`, the filled stub file, and a
-`Taskfile.yml` so `task test` works from the folder.
-
-### Lab 1 is the exception
+## Lab 1 is the exception
 
 Its answer is a plugin or a skill set, not a Python stub, and every product
 loads one its own way. The four columns are four different shapes, not four
@@ -91,15 +79,13 @@ neither writes nothing. Failing closed is the safe way to be wrong.
 | File | What it is |
 |---|---|
 | `roleplan.py` | the cast per loop, and the scope per role |
-| `agent_sdk/roles.py` | the Agent SDK translation, one loop at a time |
-| `deep_agents/roles.py` | the Deep Agents translation, one loop at a time |
 | `observability.py` | the trace writer all three runtimes share |
 | `extra_credit/` | the five event-driven assignments |
 
-These files live here as the reference copy, and each port folder carries its
-own flat copy of the ones it needs. An attendee can copy one folder somewhere
-else and run it, with no path shim reaching back up this tree. Standalone beats
-DRY here, because the folder is the teaching unit.
+`roles.py` for each runtime lives inside the port folder, not up here. An
+attendee can copy one folder somewhere else and run it, with no path shim
+reaching back up this tree. Standalone beats DRY here, because the folder is
+the teaching unit.
 
 The copies really are copies. Each port's own tests assert the cast by value,
 not by identity, precisely because each port defines its own `RolePlan` class.

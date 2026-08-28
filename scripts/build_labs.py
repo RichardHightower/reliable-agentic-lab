@@ -47,6 +47,10 @@ VARIANTS = {
 # the loop is the same, and the way the runtime keeps a role out of a path is
 # not. Both read the cast from `solutions/roleplan.py`, so neither can invent a
 # role or widen a scope.
+#
+# The shared `solutions.agent_sdk` / `solutions.deep_agents` packages were
+# removed. Each remaining port carries a local `roles.py`. These keys only
+# matter if a lab is added back to LABS_SPEC.
 RUNTIMES = {
     "agent_sdk": {
         "name": "Claude Agent SDK",

@@ -11,11 +11,7 @@ Nobody is graded here. Falling behind on one lab must not cost you the next one.
    cp loop.py loop.py.my-attempt
    ```
 
-3. Copy the answer in.
-
-   ```bash
-   cp ../../solutions/sol3_research/loop.py .
-   ```
+3. Watch Rick finish and type what he typed. There is no drop-in `loop.py`.
 
 4. You now have a working research assistant over mcp. Continue with the next module.
 
@@ -23,11 +19,12 @@ Nobody is graded here. Falling behind on one lab must not cost you the next one.
 
 A working research assistant that cites what it retrieved.
 
-## Read what you copied
+## Read if you stall
 
-`solutions/sol3_research/SPEC.md` is the step-by-step build for this lab. The same
-answer sits in `solutions/sol3_research_codex`, `_grok_build`, and `_opencode`, one
-per tool, each with the spec written for that tool.
+`brief.py` in this folder. The takehome ports
+`solutions/sol3_research_agent_sdk/` and
+`solutions/sol3_research_deep_agents/` are a different runtime, not a
+drop-in for this stub.
 
 ## Coming back later
 
@@ -38,4 +35,4 @@ git checkout -- loop.py
 ```
 
 That restores this one file. Everything you need is in `prompts/`, and
-`solutions/sol3_research/` is the reference the answer calls.
+`brief.py` in this folder is the reference.

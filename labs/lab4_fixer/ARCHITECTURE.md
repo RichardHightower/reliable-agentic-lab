@@ -36,9 +36,4 @@ the budget to watch it fail identically buys a surprise bill rather than a fix.
 
 ## Where the code lives
 
-The answer for this lab is `solutions/sol4_fixer/`.
-
-Worth reading:
-
-- `solutions/sol4_fixer/fixer.py`
-- `solutions/sol4_fixer/gates.py`
+Fill `loop.py` in this folder. There is no drop-in copy of the filled stub.

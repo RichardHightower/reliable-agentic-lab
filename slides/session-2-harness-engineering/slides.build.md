@@ -406,7 +406,7 @@ task loop:implementer -- --ticket T001 --doer none        # red gate refuses
 
 Fill `harness.py`. Three functions. Nothing else.
 
-Falling behind is fine: copy `harness.py` from `solutions/sol2_implementer/`
+Falling behind is fine: watch Rick finish `harness.py` and keep going.
 and keep going.
 
 ---

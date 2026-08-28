@@ -34,7 +34,7 @@ model. Read that before you spend anything.
 
 ## The answer
 
-`solutions/deep_agents/`.
+`solutions/sol2_implementer_deep_agents/`.
 
 ## What you are actually building
 

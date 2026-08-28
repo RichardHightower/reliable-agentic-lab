@@ -13,15 +13,12 @@ Then confirm the Saturday answers run from their own folders:
 # Module 1 needs an LLM. From the plugin folder:
 cd solutions/sol1_enhancer && task run -- --ticket T001 --simulate-comment "looks good"
 
-# Modules 2-4 still run with no model key, from their own folders:
-cd solutions/sol2_implementer
-python implementer.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
+# Modules 2 and 4 still run with no model key (extra-credit copies of the loops):
+cd solutions/extra_credit/s_ext_1_webhook
+python implementer.py --repo ../../../work/northwind-field-crm --ticket T001 --doer reference
 
-cd solutions/sol3_research
-python researcher.py --question "sqlalchemy nullable datetime column" --backend fixture
-
-cd solutions/sol4_fixer
-python fixer.py --repo ../../work/northwind-field-crm --doer reference
+cd solutions/extra_credit/s_ext_4_fix_pr
+python fixer.py --repo ../../../work/northwind-field-crm --doer reference
 ```
 
 The fixer needs the target on its broken branch:
@@ -64,8 +61,8 @@ anywhere else.
 
 1. **The push gate refusing.** Break a test in the target, ask an agent to push,
    read the refusal aloud.
-2. **The red gate refusing.** From `solutions/sol2_implementer`,
-   `python implementer.py --repo ../../work/northwind-field-crm --ticket T001 --doer none`.
+2. **The red gate refusing.** From `solutions/extra_credit/s_ext_1_webhook`,
+   `python implementer.py --repo ../../../work/northwind-field-crm --ticket T001 --doer none`.
    No test was ever red, so nothing has been proven.
 3. **Reading a trace.** `.harness/last-implementer.json` in the target. Ten rows,
    the gate, and the reason.

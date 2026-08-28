@@ -9,7 +9,7 @@ Answer: `fix_pr.py` in this folder.
 
 1. Read the pull request by number with `github_api.GitHub`.
 
-2. Call `fixer.run` from `solutions/sol4_fixer` with the target repo. It takes `repo`, `doer`, and
+2. Call `fixer.run` from this folder with the target repo. It takes `repo`, `doer`, and
    `budget`, and it returns a trace whose `green` key says whether the suite
    passed.
 
