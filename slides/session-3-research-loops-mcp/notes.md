@@ -13,8 +13,9 @@ Slide s3-43 at 40 minutes.
 Expanded from the original 11-slide outline to 43 slides. Same narrative.
 Same lab. More architecture, more evidence, more failure modes.
 
-Diagram coverage, Session 3: 25 mermaid figures on 38 substantive slides (66%).
-PlantUML source for the same architecture lives in `slides/diagrams/plantuml/`:
+Diagram coverage, Session 3: 20 Imagine diagrams on 38 substantive slides (53%).
+Mermaid source lives in `slides/diagrams/mermaid/` as `s3-*.mmd`.
+The audience sees the Imagine JPEG, never the diagram syntax.
 
 - `s3-mcp-trust-boundary.puml`
 - `s3-three-backend-adapter.puml`

@@ -22,32 +22,35 @@ style: |
   }
 
   section {
-    background: var(--bg);
+    background-color: var(--bg);
+    background-size: contain !important;
+    background-repeat: no-repeat !important;
+    background-position: center right !important;
     color: var(--ink);
     font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
-    padding: 34px 52px 68px;
-    font-size: 22px;
+    padding: 28px 48px 50px;
+    font-size: 20px;
     line-height: 1.32;
     justify-content: flex-start;
+    overflow: hidden;
   }
 
   section::before {
     content: "SPILLWAVE SOLUTIONS  ·  LOOP ENGINEERING WORKSHOP";
     display: block;
     color: var(--navy);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     border-bottom: 1px solid var(--line);
-    padding-bottom: 10px;
-    margin-bottom: 18px;
+    padding-bottom: 6px;
+    margin-bottom: 12px;
   }
 
   section::after {
     color: var(--faint);
-    font-size: 12px;
-    letter-spacing: 0.04em;
+    font-size: 11px;
     font-weight: 500;
   }
 
@@ -56,10 +59,10 @@ style: |
     font-style: normal;
     font-weight: 800;
     color: var(--ink);
-    font-size: 32px;
-    line-height: 1.14;
+    font-size: 28px;
+    line-height: 1.12;
     letter-spacing: -0.028em;
-    margin: 0 0 16px 0;
+    margin: 0 0 12px 0;
   }
 
   h2,
@@ -81,19 +84,19 @@ style: |
 
   ul li {
     position: relative;
-    padding: 10px 0 10px 22px;
+    padding: 8px 0 8px 20px;
     border-bottom: 1px solid var(--line);
-    font-size: 21px;
-    line-height: 1.35;
+    font-size: 20px;
+    line-height: 1.32;
   }
 
   ul li::before {
     content: "";
     position: absolute;
     left: 0;
-    top: 1.05em;
-    width: 8px;
-    height: 8px;
+    top: 0.95em;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--navy);
   }
@@ -109,7 +112,7 @@ style: |
   small,
   cite {
     color: var(--muted);
-    font-size: 14px;
+    font-size: 13px;
   }
 
   code,
@@ -117,62 +120,62 @@ style: |
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     background: #e4eaf2;
     color: var(--ink);
-    font-size: 15px;
+    font-size: 14px;
   }
 
   pre {
     border: 1px solid var(--line);
     border-radius: 10px;
-    padding: 14px 16px;
-    max-height: 360px;
+    padding: 12px 14px;
+    max-height: 300px;
     overflow: auto;
   }
 
   table {
-    font-size: 18px;
+    font-size: 16px;
     width: 100%;
   }
 
   th {
     color: var(--muted);
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
 
   td {
     border-color: var(--line);
-    padding: 8px 10px 8px 0;
+    padding: 6px 10px 6px 0;
   }
 
   img {
     display: block;
-    margin-left: auto;
-    margin-right: auto;
+    margin: 8px auto 0;
     max-width: 100%;
-    max-height: 390px;
+    height: auto;
     object-fit: contain;
+    object-position: center;
   }
 
   footer {
     color: var(--muted);
-    font-size: 12px;
-    letter-spacing: 0.02em;
+    font-size: 11px;
   }
 
+  /* Title */
   section.lead::before {
     display: none;
   }
 
   section.lead {
-    border-left: 16px solid var(--stripe);
-    padding: 48px 56px 56px 48px;
+    border-left: 14px solid var(--stripe);
+    padding: 40px 48px 40px 40px;
     justify-content: center;
   }
 
   section.lead h1 {
-    font-size: 52px;
+    font-size: 44px;
     font-weight: 800;
     color: var(--ink);
     font-style: normal;
@@ -182,7 +185,40 @@ style: |
   section.lead p {
     color: var(--navy);
     font-weight: 500;
-    font-size: 22px;
+    font-size: 20px;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 20px;
+    align-items: center;
+    width: 100%;
+  }
+
+  .hero img {
+    max-height: 420px;
+    width: 100%;
+    object-fit: contain;
+    margin: 0;
+  }
+
+  /* Diagram-first slides: the drawing is the slide */
+  section.diagram h1 {
+    font-size: 26px;
+    margin-bottom: 8px;
+  }
+
+  section.diagram img {
+    max-height: 340px;
+    width: auto;
+    max-width: 100%;
+    margin-top: 4px;
+  }
+
+  section.diagram p,
+  section.diagram small {
+    margin-top: 8px;
   }
 ---
 
@@ -195,13 +231,24 @@ _class: lead
 notes: You are here to build one research assistant, not to tour nine frameworks. Say the time out loud. 12:35 Central. Forty minutes. Artifact is a working cited brief, not a survey.
 -->
 
-# Engineering reliable agentic AI systems
+<!-- _class: lead -->
 
-Session 3. Research Loops and Model Context Protocol (MCP).
+<div class="hero">
+<div>
+
+# Research Loops and MCP
+
+Session 3. Same graph. A question in. A cited brief out.
 
 Saturday 29 August 2026. 12:35 Central. Forty minutes.
 
 Rick Hightower. Spillwave. Packt workshop.
+
+</div>
+
+![w:480](images/title-mark.jpg)
+
+</div>
 
 ---
 
@@ -235,16 +282,11 @@ beat: talk
 notes: Read the four rows. Promise only this hour's artifact. Do not tour servers.
 -->
 
+<!-- _class: diagram -->
+
 # Same graph. Four objects. This hour is the third.
 
-```mermaid
-flowchart TB
-  G["Same graph\nOrchestrator + Doer + Judge"]
-  G --> M1["M1 Draft ticket"]
-  G --> M2["M2 Ready ticket + code"]
-  G --> M3["M3 Question in, cited brief out"]
-  G --> M4["M4 Failing pull request"]
-```
+![w:1000](images/diagram-s3-03.jpg)
 
 <small>`slides/diagrams/mermaid/s3-same-graph.mmd`</small>
 
@@ -293,15 +335,11 @@ beat: talk
 notes: Read the four boxes. Researcher search only. Writer briefs only. Judge is Python. LangChain Deep Agents ships this as the default example. Saturday lab stays two functions.
 -->
 
+<!-- _class: diagram -->
+
 # Four roles. The orchestrator never sees the dump.
 
-```mermaid
-flowchart TB
-  O["Orchestrator\nOwns the budget\nWrites nothing\nSees summaries"]
-  O --> R["Researcher\nSearch tools only\nIsolated context"]
-  O --> W["Writer\nbriefs/ only"]
-  O --> J["Judge\ncheck_brief in Python\nNo write method"]
-```
+![w:1000](images/diagram-s3-06.jpg)
 
 <small>`solutions/sol3_research_deep_agents/roleplan.py` · loop `research`</small>
 
@@ -315,15 +353,11 @@ beat: talk
 notes: Lost in the middle, from Session 1. Raw search never returns to the orchestrator. A summary does. That is why researcher is a subagent.
 -->
 
+<!-- _class: diagram -->
+
 # Isolated context. A summary comes back. The dump does not.
 
-```mermaid
-flowchart LR
-  Search["Raw search dump"] --> Sub["Researcher subagent\nIsolated context"]
-  Sub --> File["Findings on disk"]
-  File --> Sum["Short summary + citations"]
-  Sum --> Orch["Orchestrator window"]
-```
+![w:1000](images/diagram-s3-07.jpg)
 
 Raw search never returns to the orchestrator. A summary does.
 
@@ -337,16 +371,11 @@ beat: talk
 notes: Writer writes brief.md and work/research. Researcher has no write method. Judge has no write method. Scope is a missing tool, not a sentence.
 -->
 
+<!-- _class: diagram -->
+
 # Writer writes the brief. Nobody else does.
 
-```mermaid
-flowchart TB
-  W["Writer.write(path, text)"] --> C{"WriteScope.permits?"}
-  C -->|allow briefs/**| OK["Write brief.md"]
-  C -->|deny or unmatched| X["ScopeViolation"]
-  R["Researcher"] --> S["search only. No write method"]
-  J["Judge"] --> N["check_brief. No write method"]
-```
+![w:1000](images/diagram-s3-08.jpg)
 
 Citations are arithmetic. The judge does not get a vote.
 
@@ -375,15 +404,11 @@ beat: talk
 notes: Expand MCP on this slide. context7 needs no key. Perplexity is optional. Fixture when the room has no wifi. Do not tour servers.
 -->
 
+<!-- _class: diagram -->
+
 # Model Context Protocol is how the agent reaches outside itself.
 
-```mermaid
-flowchart LR
-  Agent["Coding agent"] --> Bound["MCP tool boundary"]
-  Bound --> C7["context7\nlibrary docs. No key"]
-  Bound --> Px["perplexity-ask\noptional. Needs a key"]
-  Bound --> Fx["fixture\nrecorded. Offline"]
-```
+![w:1000](images/diagram-s3-10.jpg)
 
 `.mcp.json` ships with this repo. Approve `context7` at minimum.
 
@@ -409,8 +434,6 @@ notes: Two lists. Allowed and denied. Read both. A tool contract is a short list
 - A tool contract is a short list of what an agent may do.
 - The interesting list is what it may not.
 
-![bg right:42%](images/mcp-boundary.jpg)
-
 ---
 
 <!--
@@ -421,19 +444,11 @@ beat: talk
 notes: Land the schema point. add_review_comment is a tool. An HTTP client holding credentials is a liability. Narrow beats general.
 -->
 
+<!-- _class: diagram -->
+
 # A narrow schema beats a broad one.
 
-```mermaid
-flowchart LR
-  subgraph Safe["A tool"]
-    N["add_review_comment\nissue_id, body"]
-  end
-  subgraph Liability["A client"]
-    H["HTTP client\nholding credentials"]
-  end
-  Safe -->|"narrow schema"| Bound["Safe boundary"]
-  Liability -->|"can do anything the token can"| Risk["Confused deputy"]
-```
+![w:1000](images/diagram-s3-12.jpg)
 
 `add_review_comment(issue_id, body)` is a tool.
 
@@ -460,8 +475,6 @@ You do not fix this with a stronger sentence. You fix it by not shipping the sle
 
 <small>ToolPrivBench, 2026. Yang et al. arXiv:2606.20023</small>
 
-![bg right:42%](images/toolprivbench.jpg)
-
 ---
 
 <!--
@@ -472,15 +485,11 @@ beat: talk
 notes: AgentDojo. Content that comes back from a tool can carry instructions. Search results are a document the internet wrote, not a system prompt.
 -->
 
+<!-- _class: diagram -->
+
 # What comes back from a tool is untrusted input.
 
-```mermaid
-flowchart LR
-  Tool["Tool output\nA document the internet wrote"] --> Inj["Hidden instruction"]
-  Inj --> Agent["Agent treats it as trusted"]
-  Agent --> Redir["Redirected action"]
-  Bound["Boundary sanitizes output"] --> Safe["Treat as untrusted input"]
-```
+![w:1000](images/diagram-s3-14.jpg)
 
 AgentDojo showed that tool output can carry instructions, and that those instructions can redirect the agent.
 
@@ -496,16 +505,11 @@ beat: talk
 notes: Authorization lives at the tool boundary, not in the system prompt. Validate token audience server side. Never pass a token through. That is the confused-deputy fix.
 -->
 
+<!-- _class: diagram -->
+
 # Authorization is a property of the tool boundary.
 
-```mermaid
-flowchart TB
-  Client["Agent / client"] -->|"request + audience"| Server["MCP server"]
-  Server --> V{"Validate token audience\nserver side"}
-  V -->|match| Ok["Serve the tool"]
-  V -->|mismatch| No["Refuse"]
-  Client -.->|"never pass a token through"| X["Confused deputy"]
-```
+![w:1000](images/diagram-s3-15.jpg)
 
 The MCP authorization spec makes the same call.
 
@@ -521,21 +525,11 @@ beat: talk
 notes: Four threats, four controls. Do not turn this into a survey. Name them, then move. Pinned manifests, output sanitization, scoped credentials, transport-level policy.
 -->
 
+<!-- _class: diagram -->
+
 # MCP has a threat surface. Name it, then pin it.
 
-```mermaid
-flowchart TB
-  Threats["MCP threat surface"]
-  Threats --> P["Tool poisoning"]
-  Threats --> R["Rug pulls"]
-  Threats --> I["Prompt injection via tool output"]
-  Threats --> E["Capability escalation through composition"]
-  Controls["Controls"]
-  Controls --> M["Pinned manifests"]
-  Controls --> S["Output sanitization"]
-  Controls --> C["Scoped credentials"]
-  Controls --> T["Transport-level policy"]
-```
+![w:1000](images/diagram-s3-16.jpg)
 
 A prompt is not a control. A pinned manifest is.
 
@@ -553,8 +547,6 @@ notes: Read the table. The loop calls one function and never learns which backen
 -->
 
 # One boundary. Three backends. You pick.
-
-![bg left:40%](images/three-backends.jpg)
 
 | Backend | When |
 |---|---|
@@ -714,20 +706,11 @@ beat: lab
 notes: Put the four rows on the screen later. This is the shape. No model call. Grounded and cited are arithmetic.
 -->
 
+<!-- _class: diagram -->
+
 # The judge reads the brief. It does not read it thoughtfully.
 
-```mermaid
-flowchart TB
-  Body["brief.md + sources[]"] --> C["brief.check. No model call"]
-  C --> H["has_sources\nlen(sources) > 0"]
-  C --> G["grounded\nevery [n] resolves"]
-  C --> Ci["cited\nevery paragraph cites"]
-  C --> S["style\n0 em dashes"]
-  H --> Score["BriefScore.passed"]
-  G --> Score
-  Ci --> Score
-  S --> Score
-```
+![w:1000](images/diagram-s3-24.jpg)
 
 A confident sentence nobody can trace is the failure that matters.
 
@@ -741,18 +724,11 @@ beat: lab
 notes: Point at loops/brief.py. ungrounded_citations and strip_em_dashes. Style is a rule, not a negotiation. Code spans are left alone.
 -->
 
+<!-- _class: diagram -->
+
 # Two functions in `loops/brief.py`. Both refuse to argue.
 
-```mermaid
-flowchart LR
-  B["body"] --> U["ungrounded_citations"]
-  S["sources"] --> U
-  B --> L["uncited_claims"]
-  B --> D["strip_em_dashes"]
-  U --> Score["BriefScore"]
-  L --> Score
-  D --> Score
-```
+![w:1000](images/diagram-s3-25.jpg)
 
 `ungrounded_citations` returns markers that point at a source which was never retrieved.
 
@@ -768,32 +744,11 @@ beat: lab
 notes: Walk the sequence once. Orchestrator owns the budget. Researcher asks the boundary. Writer writes the brief. Judge is arithmetic. Python holds the loop.
 -->
 
+<!-- _class: diagram -->
+
 # One live loop. Question in. Cited brief out.
 
-```mermaid
-sequenceDiagram
-  participant O as Orchestrator
-  participant R as Researcher
-  participant B as search(question)
-  participant W as Writer
-  participant J as check_brief
-  participant D as Disk
-  O->>R: plan_questions(question)
-  R->>B: ask each sub-question
-  B-->>R: Finding + citations
-  R-->>O: summary, never the dump
-  O->>W: assemble brief
-  W->>D: write briefs/brief.md
-  O->>J: check_brief(body, sources)
-  J-->>O: BriefScore arithmetic
-  alt pass
-    O-->>O: stop
-  else same gaps twice
-    O-->>O: escalate
-  else budget left
-    O->>R: retry
-  end
-```
+![w:1000](images/diagram-s3-26.jpg)
 
 ---
 
@@ -805,18 +760,11 @@ beat: lab
 notes: choose() order: Perplexity, then websearch inbox, then fixture. Nothing is never an option. A research loop that silently returns no evidence is worse than one that refuses.
 -->
 
+<!-- _class: diagram -->
+
 # `research.choose` picks a backend. The loop stays ignorant.
 
-```mermaid
-flowchart TB
-  Choose["research.choose()"] --> P{"PERPLEXITY_API_KEY?"}
-  P -->|yes| Px["PerplexityBackend"]
-  P -->|no| W{"websearch inbox?"}
-  W -->|yes| Ws["WebSearchBackend"]
-  W -->|no| F{"fixture exists?"}
-  F -->|yes| Fx["FixtureBackend"]
-  F -->|no| X["RuntimeError. Refuse.\nNever return empty evidence"]
-```
+![w:1000](images/diagram-s3-27.jpg)
 
 Saturday path is `--backend fixture`. `loops/fixtures/research.json`.
 
@@ -832,14 +780,11 @@ beat: lab
 notes: langchain-mcp-adapters loads the servers. The loop still cannot merge. That sentence is the whole MCP lesson in this hour.
 -->
 
+<!-- _class: diagram -->
+
 # `langchain-mcp-adapters` loads the servers. The loop still cannot merge.
 
-```mermaid
-flowchart LR
-  Adapters["langchain-mcp-adapters"] --> Servers["Loads context7\nand optional Perplexity"]
-  Servers --> Tools["search tools in the researcher"]
-  Tools --> Loop["The loop still cannot merge"]
-```
+![w:1000](images/diagram-s3-28.jpg)
 
 Loading a server is not granting production. The wall is the tool list.
 
@@ -855,17 +800,11 @@ beat: lab
 notes: Saturday lab stays two functions in loop.py. The Deep Agents port is the takehome. Issue 119. LangChain's own quickstart is a research agent. Use that sentence.
 -->
 
+<!-- _class: diagram -->
+
 # Saturday is two functions. The takehome is Deep Agents.
 
-```mermaid
-flowchart TB
-  DA["create_deep_agent"]
-  DA --> O["Orchestrator. No write tool. Holds task"]
-  DA --> R["Researcher. search only. Isolated context"]
-  DA --> W["Writer. briefs/ only"]
-  DA --> J["Judge. read tools. check_brief in Python"]
-  Py["Python owns Budget and gates.decide"] --> DA
-```
+![w:1000](images/diagram-s3-29.jpg)
 
 Takehome: `solutions/sol3_research_deep_agents/`. Issue #119.
 
@@ -970,17 +909,11 @@ beat: talk
 notes: A code loop stops when the tests go green. A research loop has no equivalent, because the search space has no end. Keep searching until confident is not a stop condition.
 -->
 
+<!-- _class: diagram -->
+
 # Keep searching until confident is not a stop condition.
 
-```mermaid
-flowchart TB
-  Q["Keep searching until confident"] --> Inf["Search space has no end"]
-  Inf --> Burn["Token burn and a surprise bill"]
-  Cap["Harder stop"] --> C["Call budget 8"]
-  Cap --> D["Dollar budget"]
-  Cap --> S["Stable failure"]
-  Cap --> N["No source found escalates"]
-```
+![w:1000](images/diagram-s3-34.jpg)
 
 The search space has no end, so the loop has to be told where the end is.
 
@@ -1024,20 +957,11 @@ beat: talk
 notes: Walk the charge path. Ninth search raises. Dollar cap raises. Soft target warns without stopping. Live loop: max_usd 0.20, max_calls 8, soft_usd 0.10. Perplexity costs 0.006 per call.
 -->
 
+<!-- _class: diagram -->
+
 # Soft warns. Hard raises. The ninth search does not run.
 
-```mermaid
-flowchart TB
-  Ask["Researcher.ask(question)"] --> Ch["Budget.charge(usd)"]
-  Ch --> Calls{"calls + 1 > max_calls?"}
-  Calls -->|yes| E1["BudgetExceeded\ncall budget spent"]
-  Calls -->|no| Money{"spent + usd > max_usd?"}
-  Money -->|yes| E2["BudgetExceeded\nmoney budget spent"]
-  Money -->|no| Ok["calls += 1. spent += usd"]
-  Ok --> Soft{"over soft_usd?"}
-  Soft -->|yes| Warn["Warn. Do not stop"]
-  Soft -->|no| Go["search()"]
-```
+![w:1000](images/diagram-s3-36.jpg)
 
 Live loop: `Budget(max_usd=0.20, max_calls=8, soft_usd=0.10)`.
 
@@ -1051,16 +975,11 @@ beat: talk
 notes: Four stops. The last one is the honest one. No source found escalates, and it never ships an uncited brief. Same gaps twice is stable failure from gates.decide.
 -->
 
+<!-- _class: diagram -->
+
 # Four stops. The forgotten one is still stable failure.
 
-```mermaid
-flowchart TB
-  Run["Research loop"] --> P["Pass\nbrief grounded and clean"]
-  Run --> C["Call budget\nninth search raises"]
-  Run --> D["Dollar budget\nsoft warning then hard cap"]
-  Run --> S["Stable failure\nsame gaps twice"]
-  Run --> N["No source found\nescalate. Never ship uncited"]
-```
+![w:1000](images/diagram-s3-37.jpg)
 
 Call budget 8. Dollar budget. Stable failure. No-source escalates.
 
@@ -1099,14 +1018,11 @@ beat: talk
 notes: Retries are not linear. A retry usually replays the whole context, so a 20 percent per-step failure rate can roughly double the bill, not add a fifth to it. Isolated context is a cost control.
 -->
 
+<!-- _class: diagram -->
+
 # A twenty percent miss can roughly double the bill.
 
-```mermaid
-flowchart LR
-  Fail["20 percent per-step failure"] --> Replay["Retry replays the whole context"]
-  Replay --> Bill["Bill roughly doubles"]
-  Arch["Architecture\nbudget, signature, stop"] --> Cap["Hard cap raises"]
-```
+![w:1000](images/diagram-s3-39.jpg)
 
 Retries are not linear. A retry usually replays the whole context.
 
@@ -1122,17 +1038,11 @@ beat: talk
 notes: Closing architecture line. Cost is an architecture problem, not a pricing problem. Budget, isolated context, gates.decide, stable failure. Do not shop for a cheaper model first.
 -->
 
+<!-- _class: diagram -->
+
 # Cost is an architecture problem, not a pricing problem.
 
-```mermaid
-flowchart TB
-  Cost["Cost is an architecture problem"]
-  Cost --> B["Budget with a hard cap"]
-  Cost --> I["Isolated subagent context"]
-  Cost --> G["gates.decide outside the model"]
-  Cost --> F["Stable failure stops the spend"]
-  Not["Not a pricing problem"] --> Cost
-```
+![w:1000](images/diagram-s3-40.jpg)
 
 Cheaper tokens do not fix a loop that cannot stop.
 
