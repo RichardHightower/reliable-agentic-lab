@@ -141,7 +141,7 @@ grades. Everything else is computed.
 
 1. Find every `tickets/*.md` with `state: draft` and `loop: enhancer`. Skip
    `*.ready.md` and `*.enhancer-candidate.md`.
-2. Find the ticket's GitHub issue. Never create one. The lookup order is the state
+2. Find the ticket's GitHub issue. Never create one. Add the `enhanced` label on first touch, not at create time. The lookup order is the state
    file, then the ticket's `github_issue`, then a title search across every
    state. Never only the open ones: a closed issue is still that ticket's
    issue, and skipping it is what opens a duplicate.

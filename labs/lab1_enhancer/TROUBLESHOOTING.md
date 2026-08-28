@@ -29,10 +29,10 @@ task writes the draft files and opens a GitHub issue for each one.
 
 ## Nothing happens on a second run
 
-This is often correct, not a bug. Step 3 of the skill treats no new comment
-since the last poll as a no-op, on purpose: it does not spend a round until
-a human has said something. Comment on the ticket's GitHub issue, then run
-it again.
+If the ticket already meets the rubric, that is correct. The loop is waiting
+for an exact `LGTM` on the GitHub issue. Other comments do not trigger
+another edit. If the ticket is still missing fields, a second `task run --`
+should enhance it again without any comment.
 
 ## The loop escalates and you expected a pass
 

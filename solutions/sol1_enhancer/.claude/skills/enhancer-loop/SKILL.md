@@ -1,6 +1,6 @@
 ---
 name: enhancer-loop
-description: One poll-and-act step for the ticket enhancer. Checks every open draft ticket's GitHub issue for a new comment and acts on it. Use when invoked as /enhancer-loop, typically from `task run` or wrapped in /loop for repeated polling.
+description: One poll-and-act step for the ticket enhancer. Enhances every open draft ticket that still needs work. A human LGTM is the only comment that marks a ticket ready. Use when invoked as /enhancer-loop, typically from `task run` or wrapped in /loop for repeated polling.
 ---
 
 # The ticket enhancer, one poll-and-act step
@@ -144,26 +144,18 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    appears only on some later poll leaves every later poll looking like a
    first poll, and step 3 skips the comment fetch on a first poll.
 
-3. Get the newest comment, if there is one. Whichever branch below applies,
-   note that comment's id: step 6 and step 8 write it back into the state
-   file, and a poll that never records the id it acted on will act on the
-   same comment again on the next poll, and on every poll after that.
+3. Look at the newest human comment only to detect an exact `LGTM`.
+   Comments never start an enhance round. A missing comment never stops one.
 
-   - If the invocation named `--simulate-comment "<text>"`: there is no
-     GitHub comment and so no GitHub id. The id is the literal `sim:`
-     followed by the exact `<text>`, so the same simulated text always
-     produces the same id. If that id equals `last_comment_id`, this poll
-     has no new comment: stop here for this ticket (no-op, does not count as
-     a round). Otherwise treat `<text>` as the newest comment, and skip the
-     `gh` call below.
-   - Otherwise, if this is the ticket's first poll (step 1 found no state
-     file): there is no comment yet, and none is needed. A fresh ticket
-     always gets one round, so the human has something to react to; skip
-     straight to step 5 with no comment and no comment id.
+   Skip this loop's own replies using the marker. If every comment is one of
+   this loop's own, there is no human comment.
+
+   - `--simulate-comment`, if given, stands in for that human comment. Use it
+     to test `LGTM`, not to drive an edit.
    - Otherwise: `gh api repos/<owner>/<repo>/issues/<issue>/comments --jq '[.[] | select((.body // "") | contains("<!-- enhancer-loop -->") | not)] | sort_by(.id) | .[-1] // empty | {id, body}'`.
-     The id is that comment's numeric `id`. If it is not newer than
-     `last_comment_id`, there is no new comment: stop here for this ticket
-     (no-op, does not count as a round).
+   - If that comment is exactly `LGTM`, keep it for step 6.
+   - Otherwise there is no comment that matters. Continue. Do not stop.
+
 
 4. If the issue already carries `needs-human`, this ticket already reached a
    stable-failure or budget escalation on an earlier poll: stop here, wait
@@ -174,7 +166,12 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    `python3 .claude/skills/enhancer-loop/scripts/check_fields.py '<judge json>'`
    to get the authoritative `{kind, missing_fields, ready}`. Do this before
    looking at `LGTM`: a human's `LGTM` is not a substitute for the rubric,
-   it can only confirm a ticket the rubric already accepts.
+      it can only confirm a ticket the rubric already accepts.
+
+   If the issue does not already carry `enhanced`, add it now:
+   `gh issue edit <issue> --repo <owner>/<repo> --add-label enhanced`.
+   This is the first time the enhancer has touched the ticket.
+   `task create-test-tickets` must not add this label.
 
 6. Decide what happens next from step 5's `ready` and this round's comment
    (if any), trimmed:
@@ -186,25 +183,16 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      Run `gh issue edit <issue> --repo <owner>/<repo> --add-label ready`.
      Keep the `enhanced` label; do not remove it. Delete
      `<repo>/.harness/last-enhancer-<id>.json`. Done with this ticket.
-   - `ready` is true and the comment is anything else, or there is none (a
-     human commented something other than `LGTM` on an already-complete
-     ticket, or this is the first poll and the ticket somehow already meets
-     the rubric): post an issue comment saying it looks ready and is
-     waiting for `LGTM`, ending the body with the marker line. Write the
-     state file with `last_comment_id` set to step 3's comment id, keeping
-     `round` and `previous_signature` as step 1 loaded them, then stop here without calling the Doer. This branch never
-     reaches step 8, so it has to record the id itself, or the same comment
-     draws the same reply on every later poll.
-   - `ready` is false: nothing finalizes here, whatever the comment says,
-     `LGTM` included. `LGTM` is never treated as consumed by a red rubric.
-     Continue to step 7, the same as any other round, so the Doer gets a
-     turn and a later poll can still see this ticket through to ready once
-     it clears the rubric.
+   - `ready` is true and the comment is not `LGTM` (or there is none): do not
+     call the Doer. If you have not already asked for `LGTM` on this ticket,
+     post that it meets the rubric and is waiting for `LGTM`, with the marker.
+     Stop.
+   - `ready` is false: go to step 7. Do this whether or not anyone commented.
+     A human comment is not an instruction to the Doer. The Doer investigates
+     the app. `LGTM` on a red rubric does not mark the ticket ready.
 
 7. Call the `enhancer-doer` agent with the ticket's current body, its kind,
-   its `missing_fields`, and the newest comment's text if there is one (on
-   a first poll, tell it plainly there is no comment yet, and to rely on
-   its own investigation of the target app). Write its returned
+   its `missing_fields`, and tell it there is no comment to follow. It investigates the target app. Write its returned
    text to `<repo>/tickets/<id>.enhancer-candidate.md`. Call `enhancer-judge`
    again on that candidate file, and run it through `check_fields.py` the
    same way. Compare candidate `missing_fields` to the current ticket's
@@ -242,12 +230,9 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      Stop.
    - `stop` is `false`: write the updated state file with
      `round: round + 1`, `previous_signature` set to this round's
-     signature, and `last_comment_id` set to step 3's comment id, so the
-     next poll can tell that comment apart from a new one. If this poll used
-     no comment at all (the first-poll branch of step 3), leave
-     `last_comment_id` null or omit it. Never invent an id for a comment
-     that does not exist. This ticket's step ends here, waiting for the next
-     poll.
+     signature. If the ticket is now complete, set `last_comment_id` to
+     `asked-lgtm` so the next poll does not ask again. This ticket's step
+     ends here, waiting for `LGTM` or the next enhance round.
 
 ## Report, and whether to keep polling
 

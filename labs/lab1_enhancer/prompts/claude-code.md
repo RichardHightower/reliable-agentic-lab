@@ -149,15 +149,10 @@ The step, per ticket:
    task create-test-tickets. Do not call gh issue create. However you got
    the number, write it into both the state file and the ticket's
    frontmatter as github_issue before you go on.
-2. Get the newest comment on that issue newer than last_comment_id, and
-   note its id, a real comment's numeric id. --simulate-comment, if given,
-   stands in for that comment and wins over both cases below; it has no
-   GitHub id, so derive a stable one from its exact text, and the same text
-   twice is therefore not a new comment. Exception: on the ticket's first
-   poll (no state file yet, and no --simulate-comment), there is no comment
-   to wait for, so run one round anyway, the human needs something to react
-   to. Otherwise, no new comment means stop, this ticket is untouched this
-   poll.
+2. Look at the newest human comment only for exact LGTM. Comments never
+   start an enhance round. A missing comment never stops one. Add the
+   enhanced label the first time this loop touches the ticket. Create-test-tickets
+   must not add it.
 3. Issue already carries "needs-human": stop, wait for a person.
 4. Judge the current ticket (enhancer-judge, then check_fields.py) to get
    this round's kind, missing_fields, and ready. LGTM must never skip this:

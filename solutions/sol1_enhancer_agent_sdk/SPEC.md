@@ -124,8 +124,8 @@ itself past. The model drafts and grades. Everything else is computed.
 
 1. Find every `tickets/*.md` with `state: draft` and `loop: enhancer`. Skip
    `*.ready.md` and `*.enhancer-candidate.md`.
-2. Find the ticket's GitHub issue. Never create one.
-3. Read the newest comment. If it is one this loop already acted on, stop.
+2. Find the ticket's GitHub issue. Never create one. Add the `enhanced` label on first touch, not at create time.
+3. Read the newest human comment only to detect exact `LGTM`. Comments never start an enhance round.
 4. If the issue carries `needs-human`, stop and wait for a person.
 5. The judge grades the real ticket. `check_fields.py` turns its
    `{kind, present_fields}` into the authoritative `ready`.

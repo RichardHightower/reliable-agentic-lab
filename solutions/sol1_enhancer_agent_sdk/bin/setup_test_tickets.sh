@@ -124,7 +124,7 @@ open_issue_for() {
     return
   fi
 
-  url="$(gh issue create --repo "$REPO" --title "[$id] $title" --body "$body" --label enhanced)"
+  url="$(gh issue create --repo "$REPO" --title "[$id] $title" --body "$body")"
   num="${url##*/}"
   stamp_issue "$path" "$num"
   echo "$id -> created #$num $url"

@@ -216,8 +216,6 @@ class Gh:
             title,
             "--body",
             body,
-            "--label",
-            "enhanced",
         )
         return int(url.rstrip("/").rsplit("/", 1)[-1])
 
@@ -428,10 +426,9 @@ class Enhancer:
         set_front_matter(tkt.path, github_issue=str(issue))
         state.github_issue = issue
 
-        # 3. the newest comment, if there is one.
-        comment_id, comment = self._comment(state, issue, simulate_comment)
-        if comment_id is _NO_NEW_COMMENT:
-            return Outcome(tkt.id, "waiting", "no new comment")
+        # 3. Newest human comment is only inspected for exact LGTM.
+        # A comment never starts an enhance round. A missing comment never stops one.
+        _comment_id, comment = self._human_comment(issue, simulate_comment)
 
         # 4. an escalated ticket waits for a human, not for another poll.
         if "needs-human" in self.gh.labels(issue):
@@ -440,20 +437,25 @@ class Enhancer:
         # 5. grade the real ticket. The rubric decides ready, never the comment.
         verdict = self.judge(tkt.path)
 
-        # 6. decide from `ready` and the comment.
+        # First touch. Creation must not pre-stamp this label.
+        if "enhanced" not in self.gh.labels(issue):
+            self.gh.add_label(issue, "enhanced")
+
+        # 6. decide from `ready` and LGTM only.
         if verdict["ready"] and (comment or "").strip() == LGTM:
             set_front_matter(tkt.path, state="ready", loop="implementer")
             self.gh.add_label(issue, "ready")
             state.clear(Path(self.repo), tkt.id)
             return Outcome(tkt.id, "passed", "rubric green and a human said LGTM")
         if verdict["ready"]:
-            self.gh.comment(issue, "This ticket meets the rubric. Comment `LGTM` to release it.")
-            state.last_comment_id = comment_id
-            state.save(Path(self.repo), tkt.id)
+            if state.last_comment_id != "asked-lgtm":
+                self.gh.comment(issue, "This ticket meets the rubric. Comment `LGTM` to release it.")
+                state.last_comment_id = "asked-lgtm"
+                state.save(Path(self.repo), tkt.id)
             return Outcome(tkt.id, "waiting", "ready, waiting for LGTM")
 
-        # 7. the doer drafts, the judge grades the draft, and only then is it kept.
-        signature = self._improve(tkt, verdict, comment, issue)
+        # 7. enhance because the ticket still needs work, not because someone commented.
+        signature = self._improve(tkt, verdict, None, issue)
 
         # 8. the exits, computed rather than judged.
         stop = check_stop.check(state.round, self.budget, signature, state.previous_signature)
@@ -462,7 +464,8 @@ class Enhancer:
             return Outcome(tkt.id, "escalated", stop["reason"])
         state.round += 1
         state.previous_signature = signature
-        state.last_comment_id = comment_id
+        if not signature:
+            state.last_comment_id = "asked-lgtm"
         state.save(Path(self.repo), tkt.id)
         return Outcome(
             tkt.id, "waiting", f"round {state.round}, still missing {', '.join(signature)}"
@@ -486,6 +489,16 @@ class Enhancer:
         if state.last_comment_id is not None and comment_id <= state.last_comment_id:
             return _NO_NEW_COMMENT, None
         return comment_id, text
+
+
+    def _human_comment(self, issue: int, simulate: str | None):
+        """Newest human comment, used only to detect LGTM. Never aborts a poll."""
+        if simulate is not None:
+            return f"sim:{simulate}", simulate
+        newest = self.gh.latest_comment(issue)
+        if newest is None:
+            return None, None
+        return newest
 
     def _improve(self, tkt, verdict: dict, comment: str | None, issue: int) -> list[str]:
         """Step 7. Keep the draft only when it strictly closes gaps.

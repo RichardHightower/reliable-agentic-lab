@@ -298,6 +298,12 @@ def test_a_poll_without_an_issue_does_not_create_one(target):
     assert "create-test-tickets" in outcome.detail
 
 
+def test_the_first_touch_adds_the_enhanced_label(target):
+    gh = FakeGh()
+    engine(target, FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT), gh).poll()
+    assert gh.added[0] == "enhanced"
+
+
 def test_the_first_poll_runs_a_round_with_no_comment(target):
     """A fresh ticket always gets one round, so the human has something to react to."""
     backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
@@ -311,10 +317,10 @@ def test_the_first_poll_runs_a_round_with_no_comment(target):
 
 
 def test_the_first_poll_leaves_no_comment_id_behind(target):
-    """Never invent an id for a comment that does not exist."""
+    """A finished enhance round asks for LGTM. That is not a GitHub comment id."""
     backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
     engine(target, backend, FakeGh()).poll()
-    assert State.load(target, "T001").last_comment_id is None
+    assert State.load(target, "T001").last_comment_id == "asked-lgtm"
 
 
 # -- keeping or discarding a draft ------------------------------------------
@@ -412,14 +418,21 @@ def test_lgtm_on_a_red_rubric_is_never_consumed(target):
 
 
 def test_a_green_rubric_with_no_lgtm_asks_for_one(target):
-    State(github_issue=7, last_comment_id="1").save(target, "T001")
-    gh = FakeGh(comments=[("2", "looks good to me")])
+    gh = FakeGh()
     [outcome] = engine(target, FakeBackend([judged(present=FEATURE)]), gh).poll()
     assert outcome.status == "waiting"
     assert "LGTM" in gh.posted[0]
-    assert State.load(target, "T001").last_comment_id == "2", (
-        "without recording the id, the same comment draws the same reply forever"
-    )
+    assert "enhanced" in gh.added
+    assert State.load(target, "T001").last_comment_id == "asked-lgtm"
+
+
+def test_a_second_poll_on_a_green_ticket_does_not_ask_again(target):
+    State(github_issue=7, last_comment_id="asked-lgtm").save(target, "T001")
+    gh = FakeGh()
+    gh.added.append("enhanced")
+    [outcome] = engine(target, FakeBackend([judged(present=FEATURE)]), gh).poll()
+    assert outcome.status == "waiting"
+    assert gh.posted == []
 
 
 # -- which ticket, and which issue (#104, #105) -----------------------------
@@ -478,19 +491,25 @@ def test_a_closed_issue_stops_the_ticket_rather_than_creating_a_second_one(targe
 # -- no new comment ---------------------------------------------------------
 
 
-def test_a_comment_already_acted_on_is_not_acted_on_again(target):
-    State(github_issue=7, last_comment_id="5", round=1).save(target, "T001")
-    backend = FakeBackend([])
-    [outcome] = engine(target, backend, FakeGh(comments=[("5", "hi")])).poll()
-    assert outcome.status == "waiting"
-    assert outcome.detail == "no new comment"
-    assert backend.prompts == [], "no new comment means no model call at all"
-
-
-def test_an_issue_with_no_comments_yet_waits(target):
+def test_a_not_ready_ticket_is_enhanced_without_a_comment(target):
+    """Comments do not trigger edits. Missing work does."""
     State(github_issue=7, round=1).save(target, "T001")
-    [outcome] = engine(target, FakeBackend([]), FakeGh(comments=[])).poll()
-    assert outcome.detail == "no new comment"
+    backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
+    gh = FakeGh(comments=[])
+    [outcome] = engine(target, backend, gh).poll()
+    assert outcome.status == "waiting"
+    assert backend.prompts, "a red ticket must still be enhanced"
+    assert "There is no comment yet" in backend.prompts[1]
+
+
+def test_a_human_comment_does_not_trigger_an_edit(target):
+    State(github_issue=7, round=1).save(target, "T001")
+    backend = FakeBackend([judged(present=FEATURE)])
+    gh = FakeGh(comments=[("9", "please add more criteria")])
+    [outcome] = engine(target, backend, gh).poll()
+    assert outcome.status == "waiting"
+    assert outcome.detail == "ready, waiting for LGTM"
+    assert len(backend.prompts) == 1, "green ticket: judge only, no doer"
 
 
 def test_a_ticket_already_escalated_waits_for_a_human(target):
@@ -529,26 +548,25 @@ def test_a_spent_budget_escalates(target):
 
 
 def test_a_round_that_makes_progress_records_it_for_the_next_poll(target):
-    State(github_issue=7, last_comment_id="1", round=0, previous_signature=None).save(
-        target, "T001"
-    )
-    gh = FakeGh(comments=[("2", "add the value")])
+    State(github_issue=7, round=0, previous_signature=None).save(target, "T001")
+    gh = FakeGh()
     backend = FakeBackend([judged(), judged(present=["problem"])], draft=DRAFT)
     engine(target, backend, gh).poll()
     saved = State.load(target, "T001")
     assert saved.round == 1
-    assert saved.last_comment_id == "2"
     assert saved.previous_signature == ["criteria", "proposal", "value"]
+    assert "enhanced" in gh.added
 
 
-def test_the_newest_comment_reaches_the_doer(target):
-    """A comment is a human saying what they want. It is the strongest source."""
-    State(github_issue=7, last_comment_id="1", round=1).save(target, "T001")
+def test_the_doer_does_not_see_a_human_comment(target):
+    """A comment is not an instruction. The doer investigates the app."""
+    State(github_issue=7, round=1).save(target, "T001")
     backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
     engine(target, backend, FakeGh(comments=[("2", "due dates are optional")]))._one(
         enhancer.open_tickets(target)[0], None
     )
-    assert "due dates are optional" in backend.prompts[1]
+    assert "due dates are optional" not in backend.prompts[1]
+    assert "There is no comment yet" in backend.prompts[1]
 
 
 # -- selecting one ticket ---------------------------------------------------
@@ -572,19 +590,19 @@ def test_a_simulated_comment_needs_a_named_ticket(target):
         engine(target, FakeBackend([]), FakeGh()).poll(simulate_comment="hi")
 
 
-def test_a_simulated_comment_reaches_the_doer_without_touching_github(target):
-    State(github_issue=7, last_comment_id="1", round=1).save(target, "T001")
-    backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
+def test_a_simulated_lgtm_on_a_green_ticket_releases_it(target):
+    backend = FakeBackend([judged(present=FEATURE)])
     gh = FakeGh(comments=[("99", "a real comment nobody should read")])
+    [outcome] = engine(target, backend, gh).poll("T001", simulate_comment="LGTM")
+    assert outcome.status == "passed"
+    assert "ready" in gh.added
+
+
+def test_a_simulated_non_lgtm_does_not_drive_the_doer(target):
+    backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
+    gh = FakeGh()
     engine(target, backend, gh).poll("T001", simulate_comment="make it optional")
-    assert "make it optional" in backend.prompts[1]
-
-
-def test_the_same_simulated_text_is_the_same_comment_twice(target):
-    """A stable id, so a repeated simulation is a no-op rather than a second round."""
-    State(github_issue=7, last_comment_id="sim:hello", round=1).save(target, "T001")
-    [outcome] = engine(target, FakeBackend([]), FakeGh()).poll("T001", simulate_comment="hello")
-    assert outcome.detail == "no new comment"
+    assert "make it optional" not in "".join(backend.prompts)
 
 
 # -- which comment counts as new -------------------------------------------
@@ -604,7 +622,7 @@ def test_a_real_comment_after_a_simulated_one_is_still_new(target):
     [outcome] = engine(target, backend, gh).poll("T001")
 
     assert outcome.detail != "no new comment"
-    assert "make it optional" in backend.prompts[1]
+    assert "make it optional" not in backend.prompts[1]
 
 
 def test_comment_ids_compare_as_numbers_not_text():
@@ -705,7 +723,7 @@ def test_creating_an_issue_returns_the_number_from_its_url(gh_calls):
     replies.extend(["", "", "", "https://github.com/me/crm/issues/31"])
     assert Gh("me", "crm").create_issue("[T001] Title", "Body") == 31
     assert [call[1] for call in calls[:3]] == ["label", "label", "label"]
-    assert "--label" in calls[3] and "enhanced" in calls[3]
+    assert "--label" not in calls[3]
 
 
 def test_a_label_that_already_exists_does_not_stop_the_create(monkeypatch):

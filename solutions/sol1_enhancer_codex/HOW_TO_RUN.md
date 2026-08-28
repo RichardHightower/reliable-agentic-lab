@@ -59,8 +59,11 @@ You need `codex`, `gh`, `jq`, `task`, and `python3`.
 
 ## Run one poll over every open ticket
 
-No ticket name. No simulated comment. First poll on each draft runs one
-enhance round on its own.
+This is the demo. No ticket name. No simulated comment. The loop evaluates
+every open draft and enhances it if it still needs work. Comments do not
+trigger edits. The `enhanced` label is added on first touch, not at create
+time. A human reviews the issue and comments `LGTM`. Only then, and only if
+the rubric is already green, does the loop mark the ticket ready.
 
 ```bash
 task run --

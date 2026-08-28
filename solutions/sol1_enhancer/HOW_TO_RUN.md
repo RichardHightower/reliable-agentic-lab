@@ -48,9 +48,11 @@ this folder depends on the repo root or on any other folder outside it.
 
 ## Run one poll over every open ticket
 
-This is the demo. No ticket name. No simulated comment. First poll on each
-draft runs one enhance round on its own, so a human has something to react
-to.
+This is the demo. No ticket name. No simulated comment. The loop evaluates
+every open draft and enhances it if it still needs work. Comments do not
+trigger edits. The `enhanced` label is added on first touch, not at create
+time. A human reviews the issue and comments `LGTM`. Only then, and only if
+the rubric is already green, does the loop mark the ticket ready.
 
 ```bash
 task run --
