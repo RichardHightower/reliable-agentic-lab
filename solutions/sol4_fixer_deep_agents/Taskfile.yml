@@ -1,13 +1,20 @@
-# Standalone. No dependency on the root Taskfile. Needs no SDK installed:
-# --table-only prints the role table and stops.
 version: '3'
+
+# Standalone. No includes, no shared vars, nothing outside this folder.
+# `python3` here means the venv you activated. See SPEC.md.
 
 tasks:
   default:
     cmds: [task --list]
 
   test:
+    desc: Run this folder's tests. No SDK, no key, no network, no clone.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 -m pytest tests -q
+
+  table:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py --table-only
+      - python3 loop.py --table-only {{.CLI_ARGS}}
