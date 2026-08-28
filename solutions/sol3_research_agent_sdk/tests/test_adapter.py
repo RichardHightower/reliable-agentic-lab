@@ -1,0 +1,95 @@
+"""The backend. It must never claim a write it did not make."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import adapter
+from conftest import FakeResultMessage
+
+
+def test_it_reads_the_result_message_not_its_repr(fake_sdk, work):
+    """`str(message)` is how a verdict gets lost in a dump of tool events."""
+    fake_sdk(
+        [FakeResultMessage(result="the answer", total_cost_usd=0.25, structured_output={"a": 1})]
+    )
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    assert result.ok
+    assert result.output == "the answer"
+    assert result.usd == 0.25
+    assert result.structured == {"a": 1}
+
+
+def test_a_runtime_ceiling_comes_back_as_a_stop_reason(fake_sdk, work):
+    for subtype, expected in (
+        ("error_max_turns", "max turns"),
+        ("error_max_budget_usd", "cost budget spent"),
+    ):
+        fake_sdk([FakeResultMessage(result="", subtype=subtype)])
+        result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+        assert result.stop_reason == expected
+        assert not result.ok
+
+
+def test_an_error_result_is_not_ok(fake_sdk, work):
+    fake_sdk([FakeResultMessage(result="boom", is_error=True)])
+    assert not adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[]).ok
+
+
+def test_it_fails_gracefully_with_no_sdk(work, monkeypatch):
+    import sys  # noqa: PLC0415  (blocked below)
+
+    monkeypatch.delitem(sys.modules, "claude_agent_sdk", raising=False)
+    real = __import__
+
+    def blocked(name, *args, **kwargs):
+        if name == "claude_agent_sdk":
+            raise ImportError("no sdk")
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", blocked)
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    assert not result.ok
+    assert "agent sdk backend failed" in result.output
+    assert result.wrote == []
+
+
+def test_a_per_turn_override_does_not_mutate_the_shared_options(fake_sdk, work):
+    """One turn's `output_format` leaking into every later turn is the bug."""
+    module = fake_sdk([FakeResultMessage(result="x")])
+    options = module.ClaudeAgentOptions(cwd=str(work))
+    adapter.AgentSdkBackend(options).run(root=work, prompt="p", allow=[], output_format={"s": 1})
+    assert options.output_format is None
+    assert module.last_options.output_format == {"s": 1}
+
+
+def test_it_reports_only_writes_inside_scope(fake_sdk, work):
+    module = fake_sdk([FakeResultMessage(result="x")])
+
+    async def query(*, prompt, options):
+        (Path(work) / "paper.md").write_text("in scope")
+        (Path(work) / "secret.md").write_text("out of scope")
+        for message in [FakeResultMessage(result="x")]:
+            yield message
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=["paper.md"])
+    assert result.wrote == ["paper.md"]
+
+
+def test_the_snapshot_ignores_the_disposable_directories(work):
+    (Path(work) / ".cache").mkdir()
+    (Path(work) / ".cache" / "big.bin").write_text("x")
+    (Path(work) / "paper.md").write_text("x")
+    assert sorted(adapter._snapshot(work)) == ["paper.md"]
+
+
+def test_the_snapshot_notices_a_same_length_overwrite(work):
+    """A name-only listing misses an edit that keeps the file the same size."""
+    path = Path(work) / "paper.md"
+    path.write_text("aaa")
+    before = adapter._snapshot(work)
+    time.sleep(0.01)
+    path.write_text("bbb")
+    assert adapter._changed(before, adapter._snapshot(work)) == ["paper.md"]
