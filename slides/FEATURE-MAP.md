@@ -1,7 +1,12 @@
 # Feature map
 
-One graph, four objects. Same orchestrator, doer, and judge every hour. Only the
+One role graph, four objects. Same orchestrator, doer, and judge every hour. Only the
 object changes, and each hour adds one piece of machinery.
+
+Loop Engineering is the outer control around ReAct. Harness Engineering is the
+grader, scope, receipt, and stop. Graph Engineering is intent as `steps.jsonl`.
+"The graph" in Sessions 1, 3, and 4 means the role graph, not Graph Engineering,
+and not LangGraph.
 
 Do not survey seven production loops as labs. Name them in Module 4. Build one graph.
 
@@ -19,7 +24,7 @@ Do not survey seven production loops as labs. Name them in Module 4. Build one g
 | Write scope as a type | 2 | `Judge` has no `write` method. Not a rule. A missing method. |
 | Two doers, disjoint scope | 2 | The code implementer is denied `tests/**` |
 | Spec as a testable contract | 2 | Seven acceptance criteria, each one a test can be red about |
-| `steps.jsonl` | 2 | One step per line, each carrying a validation statement |
+| Graph Engineering (`steps.jsonl`) | 2 | Each criterion becomes a test step and a code step. Derived, not generated. |
 | The red gate | 2 | New tests must fail before the code implementer starts |
 | The ten-row rubric | 2 | "The tests passed" is one row of ten |
 | Deterministic judge | 2 | Arithmetic over `junit.xml`, `coverage.xml`, and the diff |

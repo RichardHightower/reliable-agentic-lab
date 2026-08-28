@@ -10,6 +10,8 @@ footer: Spillwave Solutions | spillwave.com
 
 Not Saturday. Run the Lab 1 enhancer on your laptop. GitHub still sends real events.
 
+New trigger. Same exits. Same harness. The graph does not change.
+
 Answer: `solutions/extra_credit/s_ext_2_ngrok/`
 
 No FastAPI. Stdlib `ThreadingHTTPServer`. Port 8765.

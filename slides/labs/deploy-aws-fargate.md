@@ -31,6 +31,8 @@ The new knob is a queue. GitHub's 10-second budget cannot wait for Claude.
 
 Same exits as Lab 1. The trigger moved again.
 
+New trigger. Same exits. Same harness. Fargate splits receive from work. That is still not a new loop.
+
 
 ---
 

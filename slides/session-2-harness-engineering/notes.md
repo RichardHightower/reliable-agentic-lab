@@ -6,7 +6,8 @@ Artifact they keep: a reusable evaluation harness.
 Vocabulary is fixed here. Unit test, end-to-end test, rubric, rubric judge, final
 judge, planner, doer, orchestrator, target repo. The outline says "Maker and
 Checker". Say once, on s2-08 and s2-09, that maker means doer and checker means
-judge, then never use the old words again.
+judge. Keep Maker and Checker as doctrine: never let the AI verify its own done.
+Those are planes, not job titles.
 
 **Clock checkpoints.** Slide s2-18 at 15 minutes. Slide s2-32 at 25 minutes.
 Slide s2-43 at 50 minutes.
@@ -69,7 +70,8 @@ about. Callback when you hit the receipt.
 ## s2-08. Section. Maker and Checker
 
 A breath. Zero minutes. Say the mapping once: maker means doer, checker means
-judge. Then drop the old words.
+judge. Keep both vocabularies. Maker and Checker are the doctrine. Doer and
+judge are the Saturday roles.
 
 ## s2-09. Two doers, disjoint scope
 
@@ -148,7 +150,8 @@ Then say what "should be intuitive" names. Nothing.
 
 Intent becomes a graph of steps. `plan_for()` writes one test step and one code
 step per criterion. Derived today, not generated. The schema is already enforced.
-Swapping in a planner subagent is the stretch.
+Swapping in a planner subagent is the stretch. This is Graph Engineering, not
+LangGraph. The live file is `solutions/sol2_implementer_deep_agents/implementer.py`.
 
 ## s2-21. steps.jsonl
 

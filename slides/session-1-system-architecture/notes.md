@@ -39,6 +39,11 @@ Hands go up. Move on.
 Read the four items slowly. Say the last one twice. The model does not
 enforce its own transition, and that is the whole workshop.
 
+## s1-08. ReAct and the outer control system
+
+ReAct is the inner cycle. The product you ship is the outer control system.
+Name it once: Loop Engineering.
+
 ## s1-09. AlphaCodium
 
 Give them one number they can quote to their manager: 19 to 44 on pass@5,
@@ -85,6 +90,9 @@ Today LGTM. In Module 2 a pull request. Never merge.
 ## s1-30. Four objects
 
 This is the map for the whole day. Spend the full two minutes.
+This picture is the role graph: orchestrator, doer, judge.
+Graph Engineering is the Module 2 plan file, not this picture, and not LangGraph.
+Say that once. Then drop it.
 
 ## s1-37. Lab
 

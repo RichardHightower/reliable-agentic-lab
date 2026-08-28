@@ -31,7 +31,7 @@ Python holds Pass / Retry / Escalate. Deep Agents is the maker. The red gate is 
 
 Saturday fills three stubs. There is no drop-in `harness.py`. This folder is the shipped eight-step answer.
 
-`task loop:implementer` is gone from the root Taskfile. Demo from here.
+`task loop:implementer` is gone from the root Taskfile. Demo from here. Each criterion becomes two nodes in `steps.jsonl`.
 
 
 ---
@@ -69,7 +69,7 @@ orchestrator  writes nothing, owns budget
 # Eight steps in `implementer.run`
 
 1. Read ticket. Refuse if not `ready`.
-2. `plan_for`: one test step and one code step per criterion. Derived, not generated.
+2. `plan_for`: one test step and one code step per criterion. Derived, not generated. This is Graph Engineering. Not LangGraph.
 3. `test_implementer` writes under `tests/**`.
 4. Red gate. Empty new-ids → escalate.
 5. `code_implementer` writes `app/**` until green.

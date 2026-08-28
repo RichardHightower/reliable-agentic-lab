@@ -318,7 +318,7 @@ id: s4-05
 layout: figure-bottom
 minutes: 1
 beat: talk
-notes: Read the four boxes. This is loops/unattended.py in one picture. Durable state, a hard budget, a written trace, an exit code. The loop itself is loops/fixer.py. Unattended wraps it.
+notes: Read the four boxes. Durable state, a hard budget, a written trace, an exit code. The loop itself is `solutions/sol4_fixer_agent_sdk`. Unattended wraps it.
 -->
 
 <!-- _class: diagram -->
@@ -327,7 +327,7 @@ notes: Read the four boxes. This is loops/unattended.py in one picture. Durable 
 
 ![w:1000](images/diagram-s4-05.jpg)
 
-<small><code>loops/unattended.py</code>. The loop does not change. What changes is everything around it.</small>
+<small><code>solutions/sol4_fixer_agent_sdk</code>. The loop does not change. What changes is everything around it.</small>
 
 ---
 
@@ -521,7 +521,7 @@ notes: Walk load, run, save. runs increments. last_gate and last_reason come off
 
 A corrupt state file is not a fresh start. Say so, then start fresh.
 
-<small><code>loops/unattended.py</code></small>
+<small><code>solutions/sol4_fixer_agent_sdk</code></small>
 
 ---
 
@@ -675,7 +675,7 @@ notes: Say the stash line out loud before anyone types. The target repo still ho
 git -C ../../work/northwind-field-crm stash --include-untracked
 ```
 
-`loops/fixer.py` refuses to clean the tree.
+`solutions/sol4_fixer_agent_sdk` refuses to clean the tree.
 
 After Module 2 the target repo holds work somebody did.
 
@@ -731,7 +731,7 @@ def failure_summary(run_result) -> str:
 
 The orchestrator reads this, not the whole log.
 
-<small><code>loops/fixer.py</code></small>
+<small><code>solutions/sol4_fixer_agent_sdk</code></small>
 
 ---
 
@@ -758,7 +758,7 @@ id: s4-25
 layout: figure-bottom
 minutes: 1
 beat: lab
-notes: checkout() in loops/fixer.py. If local changes would be overwritten, SystemExit names both ways out: stash, or discard. The work is still there. The loop did not decide for the human. Test: test_checkout_refuses_to_delete_an_earlier_lab_s_work.
+notes: checkout() in the Agent SDK fixer. If local changes would be overwritten, SystemExit names both ways out: stash, or discard. The work is still there. The loop did not decide for the human.
 -->
 
 <!-- _class: diagram -->
@@ -809,8 +809,13 @@ notes: Walk the room. Do not reteach. --branch broken-pr is what makes this real
 cd labs/lab4_fixer
 git -C ../../work/northwind-field-crm stash --include-untracked
 claude -p "$(cat prompts/claude-code.md)"     # or codex, grok, opencode
+```
 
-task loop:fixer -- --branch broken-pr --doer reference
+`task loop:fixer` is gone with `loops/`. Saturday fills `loop.py`. Demo:
+
+```bash
+cd ../../solutions/sol4_fixer_agent_sdk
+python3 loop.py --repo ../../work/northwind-field-crm --branch broken-pr --doer reference
 ```
 
 Fill `loop.py`. Two functions: `summarize_failure` and `repair_until_green`.
@@ -1226,7 +1231,6 @@ notes: Bibliography. Skip in the room unless asked. MAST numbers are from the pa
 
 - Cemri et al. Why Do Multi-Agent LLM Systems Fail? arXiv:2503.13657. NeurIPS 2025.
 - Yao et al. ReAct. arXiv:2210.03629
-- `loops/fixer.py`, `loops/unattended.py`, `loops/gates.py`
 - `scripts/receipt.py`, `solutions/observability.py`
 - `solutions/sol4_fixer_agent_sdk/`, Issue #120
 - `labs/lab4_fixer/ARCHITECTURE.md`

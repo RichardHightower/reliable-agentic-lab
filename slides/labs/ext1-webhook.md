@@ -10,6 +10,8 @@ footer: Spillwave Solutions | spillwave.com
 
 Not Saturday. Do not skip Module 2 for this.
 
+New trigger. Same exits. Same harness. The graph does not change.
+
 One FastAPI server GitHub can POST to. Extra credit 2 and 5 both need it.
 
 Filled answer: `solutions/extra_credit/s_ext_1_webhook/`

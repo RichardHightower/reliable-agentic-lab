@@ -8,6 +8,8 @@ footer: Spillwave Solutions | spillwave.com
 
 Take-home **configuration port**. It does not run the eight-step loop.
 
+This is the role graph. The live harness is `sol2_implementer_deep_agents`.
+
 It prints the role table and builds `ClaudeAgentOptions`. There is no `implementer.py`, no `gates.py`, no `rubric.py`, no `tests/`.
 
 

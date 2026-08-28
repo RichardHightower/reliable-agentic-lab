@@ -413,7 +413,7 @@ image_prompt: >
   holds a red pen and a stack of test cards. Right desk labeled CODE IMPLEMENTER
   holds a keyboard and source files, and has no reach over the wall. A third
   figure at a lectern labeled JUDGE has no keyboard at all. No logos.
-notes: Say the mapping once, here: maker means doer, checker means judge. Then drop the old words. The last sentence is the one they quote.
+notes: Say the mapping once, here: maker means doer and checker means judge. Keep Maker and Checker as doctrine. Never let the AI verify its own done. The last sentence is the one they quote.
 -->
 
 # Two doers. Disjoint scope.
@@ -440,7 +440,7 @@ notes: Five roles. Orchestrator writes nothing. Planner writes steps.jsonl. Two 
 
 ![w:1000](images/diagram-s2-10.jpg)
 
-<small>`loops/roles.py` · `build()`</small>
+<small>`solutions/sol2_implementer_deep_agents/roles.py` · `build()`</small>
 
 ---
 
@@ -469,7 +469,7 @@ class Judge(Role):
 
 A rule in a prompt is a suggestion an agent can reason its way around. A missing method is not.
 
-<small>`loops/roles.py` · `test_a_judge_has_no_write_method`</small>
+<small>`solutions/sol2_implementer_deep_agents` · `test_a_judge_has_no_write_method`</small>
 
 ---
 
@@ -493,7 +493,7 @@ code_implementer:
   write_deny:  ["tests/**"]
 ```
 
-<small>`loops/roles.py` · `WriteScope.permits` · `.loop.yml` in the target</small>
+<small>`solutions/sol2_implementer_deep_agents/write_scope.py` · `permits`</small>
 
 ---
 
@@ -655,7 +655,7 @@ id: s2-20
 layout: figure-bottom
 minutes: 1
 beat: talk
-notes: Graph engineering. Intent becomes a graph of steps. Each criterion maps to a test step and a code step. The planner is derived today, a subagent as stretch.
+notes: Graph engineering. Intent becomes a graph of steps. Each criterion maps to a test step and a code step. The planner is derived today, a subagent as stretch. Say this is Graph Engineering, not LangGraph.
 -->
 
 <!-- _class: diagram -->
@@ -664,7 +664,7 @@ notes: Graph engineering. Intent becomes a graph of steps. Each criterion maps t
 
 ![w:1000](images/diagram-s2-20.jpg)
 
-`loops/implementer.py` · `plan_for()`. Derived, not generated. Swapping this for a planner subagent is the stretch. The schema it must satisfy is already enforced.
+`solutions/sol2_implementer_deep_agents/implementer.py` · `plan_for()`. Derived, not generated. This is Graph Engineering, not LangGraph. Swapping this for a planner subagent is the stretch. The schema it must satisfy is already enforced.
 
 ---
 
@@ -689,7 +689,7 @@ notes: The plan is a file, so the plan is checkable. Read the JSON. Name validat
 
 The file is disposable. It belongs to one run against one ticket.
 
-<small>`loops/steps.py`</small>
+<small>`solutions/sol2_implementer_deep_agents` · `steps.jsonl`</small>
 
 ---
 
@@ -711,7 +711,7 @@ notes: Name the three rejections. Plus two more the code actually raises: no tes
 
 Marking a step done without naming the test that proves it is grading the loop on a claim.
 
-<small>`loops/steps.py` · `validate()` · `mark()`</small>
+<small>`solutions/sol2_implementer_deep_agents/implementer.py` · `plan_for()`</small>
 
 ---
 
@@ -758,7 +758,7 @@ def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
 
 ![w:1000](images/diagram-s2-24.jpg)
 
-<small>`loops/implementer.py` · `_new_test_ids` · `require_red` in `.loop.yml`</small>
+<small>`solutions/sol2_implementer_deep_agents/implementer.py` · `_new_test_ids`</small>
 
 ---
 
@@ -787,7 +787,7 @@ PASS  write_scope        every write was inside its role's scope
 
 Every row is computed from `junit.xml`, `coverage.xml`, exit codes, `steps.jsonl`, and the diff.
 
-<small>`loops/rubric.py` · `score()`</small>
+<small>`labs/lab2_implementer/rubric.py` · `score()`</small>
 
 ---
 
@@ -887,7 +887,7 @@ if verdict.done and verdict.blocking_issues:
 - Output that will not parse is a **FAIL**, never a pass.
 - Absent evidence is never clean.
 
-<small>`loops/final_judge.py` · `parse_verdict` · `synthetic_fail`</small>
+<small>`labs/lab2_implementer` · unparseable verdict is a fail</small>
 
 ---
 
@@ -953,9 +953,12 @@ claude -p "$(cat prompts/claude-code.md)"
 
 Fill three functions. Nothing else.
 
+`task loop:implementer` is gone with `loops/`. Saturday self-check is `task test`. Demo the eight-step loop from the Deep Agents port:
+
 ```bash
-task loop:implementer -- --ticket T001 --doer reference   # ten rows
-task loop:implementer -- --ticket T001 --doer none        # red gate refuses
+cd ../../solutions/sol2_implementer_deep_agents
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer none
 ```
 
 Falling behind is fine: watch Rick finish `harness.py` and keep going.
@@ -1035,7 +1038,7 @@ def score_attempt(contract: Contract, **evidence) -> rubric.Score:
 
 ![w:1000](images/diagram-s2-35.jpg)
 
-Do not compute the rows yourself. `loops/rubric.py` already does.
+Do not compute the rows yourself. `labs/lab2_implementer/rubric.py` already does.
 
 ---
 
@@ -1067,7 +1070,7 @@ def run_loop(contract: Contract, budget: int = 3, ticket_id: str = "T001") -> di
 
 ![w:1000](images/diagram-s2-36.jpg)
 
-<small>`loops/gates.py` · `decide()`</small>
+<small>`solutions/sol2_implementer_deep_agents/gates.py` · `decide()`</small>
 
 ---
 
@@ -1081,12 +1084,14 @@ notes: Two commands. Reference copies known-good under write scope. None writes 
 
 # Two commands. Honesty is the second one.
 
+`task loop:implementer` is gone. Run these from `solutions/sol2_implementer_deep_agents`:
+
 ```bash
-task loop:implementer -- --ticket T001 --doer reference
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
 # copies known-good into tests/** then app/**
 # expect ten PASS rows and gate: pass
 
-task loop:implementer -- --ticket T001 --doer none
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer none
 # writes nothing on purpose
 # expect gate: escalate
 # reason: red gate: no new test was observed failing
@@ -1158,7 +1163,7 @@ notes: The common stall is score_attempt. People try to compute rows. Tell them 
 
 ![w:1000](images/diagram-s2-40.jpg)
 
-If you stall, read `loops/implementer.py`, `loops/rubric.py`, and `loops/gates.py`. They are the answer, not a hint.
+If you stall, read `solutions/sol2_implementer_deep_agents/implementer.py`, `rubric.py`, and `gates.py` in that folder. They are the answer, not a hint.
 
 Do not edit the target repo's tests to make something pass.
 
@@ -1325,7 +1330,7 @@ notes: signature is what failed, not how it was worded. Two equal signatures mea
 
 Green rubric plus `judge_done=False` is escalate. The deterministic rows can all pass on work that misses the point.
 
-<small>`loops/gates.py` · `decide()`</small>
+<small>`solutions/sol2_implementer_deep_agents/gates.py` · `decide()`</small>
 
 ---
 
@@ -1350,7 +1355,7 @@ Do not refactor. Do not address anything else.
 
 A doer that spends its last turn on a naming nit leaves the blocking row unfixed.
 
-<small>`loops/gates.py` · `retry_instruction()`</small>
+<small>`solutions/sol2_implementer_deep_agents/gates.py` · `retry_instruction()`</small>
 
 ---
 
@@ -1370,7 +1375,7 @@ A harness that fails, iterates, and passes on its own, and refuses to ship when 
 
 ![w:1000](images/diagram-s2-49.jpg)
 
-The reusable evaluation harness is `harness.py` plus `loops/rubric.py`, `loops/gates.py`, and `scripts/receipt.py`.
+The reusable evaluation harness is `harness.py` plus `rubric.py`, `gates.py`, and `scripts/receipt.py`.
 
 ---
 
@@ -1421,7 +1426,7 @@ notes: Bibliography. Skip in the room unless asked.
 - Liu et al. Lost in the Middle. TACL 2024. arXiv:2307.03172
 - Yao et al. ReAct. arXiv:2210.03629
 - Ridnik, Kredo, Friedman. AlphaCodium. arXiv:2401.08500
-- `loops/implementer.py`, `loops/rubric.py`, `loops/gates.py`, `loops/roles.py`, `loops/steps.py`, `loops/final_judge.py`
+- `solutions/sol2_implementer_deep_agents/` (`implementer.py`, `rubric.py`, `gates.py`, `roles.py`)
 - `scripts/receipt.py`
 - `labs/lab2_implementer/ARCHITECTURE.md`
 - `solutions/sol2_implementer_deep_agents/SPEC.md`

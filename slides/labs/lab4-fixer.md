@@ -146,9 +146,9 @@ Scope violations escalate even if the suite is green. Reaching green by editing 
 
 ---
 
-# Commands. README drift
+# Commands. Live first. The README still prints a dead task.
 
-README still prints `task loop:fixer`. Gone with `loops/`.
+`task loop:fixer` is gone with `loops/`.
 
 Saturday: `task test` imports `loop`.
 
