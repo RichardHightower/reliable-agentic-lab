@@ -22,32 +22,35 @@ style: |
   }
 
   section {
-    background: var(--bg);
+    background-color: var(--bg);
+    background-size: contain !important;
+    background-repeat: no-repeat !important;
+    background-position: center right !important;
     color: var(--ink);
     font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
-    padding: 34px 52px 68px;
-    font-size: 22px;
+    padding: 28px 48px 50px;
+    font-size: 20px;
     line-height: 1.32;
     justify-content: flex-start;
+    overflow: hidden;
   }
 
   section::before {
     content: "SPILLWAVE SOLUTIONS  ·  LOOP ENGINEERING WORKSHOP";
     display: block;
     color: var(--navy);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     border-bottom: 1px solid var(--line);
-    padding-bottom: 10px;
-    margin-bottom: 18px;
+    padding-bottom: 6px;
+    margin-bottom: 12px;
   }
 
   section::after {
     color: var(--faint);
-    font-size: 12px;
-    letter-spacing: 0.04em;
+    font-size: 11px;
     font-weight: 500;
   }
 
@@ -56,10 +59,10 @@ style: |
     font-style: normal;
     font-weight: 800;
     color: var(--ink);
-    font-size: 32px;
-    line-height: 1.14;
+    font-size: 28px;
+    line-height: 1.12;
     letter-spacing: -0.028em;
-    margin: 0 0 16px 0;
+    margin: 0 0 12px 0;
   }
 
   h2,
@@ -81,19 +84,19 @@ style: |
 
   ul li {
     position: relative;
-    padding: 10px 0 10px 22px;
+    padding: 8px 0 8px 20px;
     border-bottom: 1px solid var(--line);
-    font-size: 21px;
-    line-height: 1.35;
+    font-size: 20px;
+    line-height: 1.32;
   }
 
   ul li::before {
     content: "";
     position: absolute;
     left: 0;
-    top: 1.05em;
-    width: 8px;
-    height: 8px;
+    top: 0.95em;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--navy);
   }
@@ -109,7 +112,7 @@ style: |
   small,
   cite {
     color: var(--muted);
-    font-size: 14px;
+    font-size: 13px;
   }
 
   code,
@@ -117,62 +120,62 @@ style: |
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     background: #e4eaf2;
     color: var(--ink);
-    font-size: 15px;
+    font-size: 14px;
   }
 
   pre {
     border: 1px solid var(--line);
     border-radius: 10px;
-    padding: 14px 16px;
-    max-height: 360px;
+    padding: 12px 14px;
+    max-height: 300px;
     overflow: auto;
   }
 
   table {
-    font-size: 18px;
+    font-size: 16px;
     width: 100%;
   }
 
   th {
     color: var(--muted);
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
 
   td {
     border-color: var(--line);
-    padding: 8px 10px 8px 0;
+    padding: 6px 10px 6px 0;
   }
 
   img {
     display: block;
-    margin-left: auto;
-    margin-right: auto;
+    margin: 8px auto 0;
     max-width: 100%;
-    max-height: 390px;
+    height: auto;
     object-fit: contain;
+    object-position: center;
   }
 
   footer {
     color: var(--muted);
-    font-size: 12px;
-    letter-spacing: 0.02em;
+    font-size: 11px;
   }
 
+  /* Title */
   section.lead::before {
     display: none;
   }
 
   section.lead {
-    border-left: 16px solid var(--stripe);
-    padding: 48px 56px 56px 48px;
+    border-left: 14px solid var(--stripe);
+    padding: 40px 48px 40px 40px;
     justify-content: center;
   }
 
   section.lead h1 {
-    font-size: 52px;
+    font-size: 44px;
     font-weight: 800;
     color: var(--ink);
     font-style: normal;
@@ -182,7 +185,40 @@ style: |
   section.lead p {
     color: var(--navy);
     font-weight: 500;
-    font-size: 22px;
+    font-size: 20px;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 20px;
+    align-items: center;
+    width: 100%;
+  }
+
+  .hero img {
+    max-height: 420px;
+    width: 100%;
+    object-fit: contain;
+    margin: 0;
+  }
+
+  /* Diagram-first slides: the drawing is the slide */
+  section.diagram h1 {
+    font-size: 26px;
+    margin-bottom: 8px;
+  }
+
+  section.diagram img {
+    max-height: 340px;
+    width: auto;
+    max-width: 100%;
+    margin-top: 4px;
+  }
+
+  section.diagram p,
+  section.diagram small {
+    margin-top: 8px;
   }
 ---
 
@@ -195,13 +231,24 @@ _class: lead
 notes: Say the shape of the hour out loud. Build for 12 minutes. Type for 18. Land for 5. Then 10 to close. 13:45 Central. Energy is lowest here. Keep moving.
 -->
 
-# Engineering reliable agentic AI systems
+<!-- _class: lead -->
 
-Session 4. Production Architecture, the capstone.
+<div class="hero">
+<div>
+
+# Production Architecture
+
+Session 4. The capstone. Same graph. Nobody at the keyboard.
 
 Saturday 29 August 2026. 13:45 Central.
 
 Rick Hightower. Spillwave. Packt workshop.
+
+</div>
+
+![w:480](images/title-mark.jpg)
+
+</div>
 
 ---
 
@@ -246,8 +293,6 @@ notes: Four items. The graph is not one of them. The last line is the hook for t
 - The budget stops being advice. Nobody is there to hit Ctrl-C.
 - If you cannot read the last score, you cannot debug at 2 a.m.
 
-![bg right:42%](images/human-leaves.jpg)
-
 ---
 
 <!--
@@ -258,23 +303,11 @@ beat: talk
 notes: Point at Keep. That is Modules 1 to 3. Point at Swap. That is production. A webhook or a schedule fires only when the branch head actually moved. A timer that fires on no change burns budget for no work.
 -->
 
+<!-- _class: diagram -->
+
 # The graph does not change. The trigger does.
 
-```mermaid
-flowchart LR
-  subgraph keep ["Keep. Orchestrator, doer, judge."]
-    O["Orchestrator"] --> D["Doer"]
-    O --> J["Judge"]
-  end
-  subgraph swap ["Swap. How work starts."]
-    F["File on disk"]
-    W["Webhook"]
-    C["Cron, and only if HEAD moved"]
-  end
-  F --> O
-  W --> O
-  C --> O
-```
+![w:1000](images/diagram-s4-04.jpg)
 
 A keystroke is a trigger you cannot ship.
 
@@ -288,16 +321,11 @@ beat: talk
 notes: Read the four boxes. This is loops/unattended.py in one picture. Durable state, a hard budget, a written trace, an exit code. The loop itself is loops/fixer.py. Unattended wraps it.
 -->
 
+<!-- _class: diagram -->
+
 # Four things around the loop have to get real.
 
-```mermaid
-flowchart TB
-  L["The loop. Same graph as Module 2."]
-  L --> S["Durable state\n.harness/state.json"]
-  L --> B["Hard budget\nNobody is there to stop it"]
-  L --> T["Written trace\nIf you cannot read the last score"]
-  L --> X["Exit code\nContinuous Integration needs a number"]
-```
+![w:1000](images/diagram-s4-05.jpg)
 
 <small><code>loops/unattended.py</code>. The loop does not change. What changes is everything around it.</small>
 
@@ -311,20 +339,11 @@ beat: talk
 notes: Three exits, no fourth. Python holds the loop, so the model never counts its own retries. The forgotten exit is still stable failure. Same rows twice, stop.
 -->
 
+<!-- _class: diagram -->
+
 # Python still holds the loop. The model never counts retries.
 
-```mermaid
-stateDiagram-v2
-  [*] --> Running
-  Running --> Pass: suite green
-  Running --> Retry: fixable gap and budget left
-  Running --> Escalate: budget spent
-  Running --> Escalate: same failing ids twice
-  Running --> Escalate: the suite never ran
-  Retry --> Running
-  Pass --> [*]
-  Escalate --> [*]
-```
+![w:1000](images/diagram-s4-06.jpg)
 
 Pass. Retry. Escalate. No fourth exit.
 
@@ -338,18 +357,11 @@ beat: talk
 notes: Unattended means query(), not a chat client. ClaudeSDKClient is for a person typing. Nobody is chatting. Saturday lab stays two functions in loop.py. The Agent SDK port is the takehome.
 -->
 
+<!-- _class: diagram -->
+
 # Unattended means `query()`, not a chat client.
 
-```mermaid
-flowchart LR
-  subgraph chat ["Chat client. A person is here."]
-    H["Human types"] --> C["ClaudeSDKClient"]
-  end
-  subgraph night ["Unattended. Nobody is here."]
-    T["Trigger"] --> Q["query()"]
-    Q --> P["Python owns exits"]
-  end
-```
+![w:1000](images/diagram-s4-07.jpg)
 
 Claude Agent Software Development Kit. One process. A budget. Three exits.
 
@@ -366,17 +378,11 @@ beat: talk
 notes: Read the five lines. permission_mode acceptEdits because nobody is there to click Allow. PreToolUse deny tests/** because the fixer cannot weaken a test to reach green. max_turns is the SDK iteration budget. Tests after every turn are pytest. Merge is never a tool.
 -->
 
+<!-- _class: diagram -->
+
 # The Agent SDK contract for a loop with nobody watching.
 
-```mermaid
-flowchart TB
-  Q["query(). Not a chat client."]
-  Q --> M["permission_mode: acceptEdits"]
-  Q --> H["PreToolUse hook. Deny tests/**"]
-  Q --> N["max_turns is the iteration budget"]
-  Q --> T["Tests after every turn are pytest"]
-  Q --> X["Merge is not a tool"]
-```
+![w:1000](images/diagram-s4-08.jpg)
 
 - `permission_mode`: `acceptEdits`
 - PreToolUse: deny `tests/**`
@@ -396,13 +402,11 @@ beat: talk
 notes: Callback to Module 1. Merge, money, and production deploy stay human. The fixer opens a branch. It never receives a merge tool. That is a missing tool, not a polite request.
 -->
 
+<!-- _class: diagram -->
+
 # Merge stays a human. The loop never gets that tool.
 
-```mermaid
-flowchart LR
-  F["Fixer proposes\nA green branch, or a comment"] --> H["Human reads\nThe receipt, the trace, the diff"]
-  H --> M["Merge box\nHuman only"]
-```
+![w:1000](images/diagram-s4-09.jpg)
 
 An agent can argue past an instruction. It cannot argue past a tool it was never given.
 
@@ -416,30 +420,11 @@ beat: talk
 notes: Untrusted is model output, including invented evidence. Trusted is Python: gates.decide, WriteScope, pytest, the receipt. Human owns merge. Same split as Module 1, now with nobody in the chair.
 -->
 
+<!-- _class: diagram -->
+
 # Trust boundaries do not move because the chair is empty.
 
-```mermaid
-flowchart TB
-  subgraph untrusted ["Untrusted. Model output."]
-    Draft["Doer patch"]
-    Claim["Judge prose"]
-    Story["Invented test passes"]
-  end
-  subgraph trusted ["Trusted process. Python."]
-    Scope["WriteScope.check()"]
-    Gate["gates.decide()"]
-    Py["pytest, junit.xml"]
-    Rec["receipt.json"]
-  end
-  subgraph human ["Human."]
-    Merge["LGTM and merge"]
-  end
-  Draft --> Scope
-  Claim --> Gate
-  Story --> Py
-  Py --> Rec
-  Rec --> Merge
-```
+![w:1000](images/diagram-s4-10.jpg)
 
 ---
 
@@ -472,8 +457,6 @@ MAST, the Multi-Agent System Failure Taxonomy. 1,642 traces. 7 frameworks.
 
 Every one of those three is something you build, not something you buy.
 
-![bg left:38%](images/mast-breakdown.jpg)
-
 ---
 
 <!--
@@ -484,15 +467,11 @@ beat: talk
 notes: Map MAST onto the day. System design is the graph, the scope, the budget. Inter-agent misalignment is the handoff: orchestrator sees summaries, not dumps. Task verification is the judge, the receipt, pytest. This hour is all three, with nobody watching.
 -->
 
+<!-- _class: diagram -->
+
 # Fourteen modes. Three categories. This hour is all three.
 
-```mermaid
-flowchart TB
-  M["MAST. 14 modes."]
-  M --> D["System design issues 41.8%\nScope, budget, trigger, state"]
-  M --> H["Inter-agent misalignment 36.9%\nHandoff. Summaries, not dumps."]
-  M --> V["Task verification 21.3%\nJudge, pytest, receipt"]
-```
+![w:1000](images/diagram-s4-12.jpg)
 
 FC1 is poor specification and missing stops.
 FC2 is a breakdown in information flow between agents.
@@ -534,15 +513,11 @@ beat: talk
 notes: Walk load, run, save. runs increments. last_gate and last_reason come off the trace. last_run_at is UTC. loop is fixer, implementer, or enhancer. The next cron job reads this before it starts.
 -->
 
+<!-- _class: diagram -->
+
 # The next run has to know what the last one did.
 
-```mermaid
-flowchart LR
-  Load["load_state()"] --> Run["run the loop"]
-  Run --> Save["save_state()"]
-  Save --> Disk[".harness/state.json"]
-  Disk --> Next["Next cron. Next debug."]
-```
+![w:1000](images/diagram-s4-14.jpg)
 
 A corrupt state file is not a fresh start. Say so, then start fresh.
 
@@ -573,8 +548,6 @@ Then three numbers per run: **steps**, **loop count**, **cost per task**.
 - Langfuse is that same record in a pane.
 - A dashboard nobody reads is decoration.
 
-![bg right:42%](images/observability-2am.jpg)
-
 ---
 
 <!--
@@ -585,14 +558,11 @@ beat: talk
 notes: solutions/observability.py. Always writes the local file, even on an exception. A trace that only appears when the run succeeds is the trace you cannot use. Langfuse is optional. A missing key must never change what the loop does.
 -->
 
+<!-- _class: diagram -->
+
 # Always write the file. A pane is optional.
 
-```mermaid
-flowchart LR
-  Loop["The loop"] --> Span["Span. Events, then outcome."]
-  Span --> File["work/traces/*.json\nAlways."]
-  Span --> Pane["Langfuse\nIf the keys exist."]
-```
+![w:1000](images/diagram-s4-16.jpg)
 
 ```python
 with trace("fixer", ticket="broken-pr") as span:
@@ -614,16 +584,11 @@ beat: talk
 notes: Callback to the push gate they hit in Module 2. Same receipt rule in the hook and in the workflow. Same rule in both places, or the remote one is theater. You should be near 11 minutes here.
 -->
 
+<!-- _class: diagram -->
+
 # The local gate and the remote gate must agree.
 
-```mermaid
-flowchart TB
-  Local["PreToolUse hook\nRefuses git push without a green receipt"]
-  Remote["GitHub Actions\nReads the same .harness/receipt.json"]
-  Rec["receipt.json\nGreen. This tree. Newer than the last edit."]
-  Rec --> Local
-  Rec --> Remote
-```
+![w:1000](images/diagram-s4-17.jpg)
 
 You met the push gate in Module 2. It reads `.harness/receipt.json` and refuses to push without a green one.
 
@@ -639,15 +604,11 @@ beat: talk
 notes: Read the exit codes. 0 pass, 2 escalate, 1 crash. Escalate is not a crash, it is a decision, so it gets its own code. CI needs a number, not a paragraph. Then flash the workflow. You should be at 12 minutes here. Then the lab.
 -->
 
+<!-- _class: diagram -->
+
 # Exit 0 is a pass. Exit 2 is an escalation. Exit 1 is a crash.
 
-```mermaid
-flowchart LR
-  G{"last_gate"}
-  G -->|pass| E0["exit 0"]
-  G -->|escalate| E2["exit 2"]
-  G -->|anything else| E1["exit 1"]
-```
+![w:1000](images/diagram-s4-18.jpg)
 
 ```yaml
 # .github/workflows/unattended.yml
@@ -686,14 +647,11 @@ beat: lab
 notes: Same three parts. Only the object changes. There is no plan to write, because the work is already defined by what is red. It runs unattended, so its exits matter more than its successes.
 -->
 
+<!-- _class: diagram -->
+
 # A failing branch in. A green one out. Or a reason.
 
-```mermaid
-flowchart TB
-  O["Orchestrator\nOwns the budget. Writes nothing."]
-  O --> C["code_implementer\nRepairs inside its scope"]
-  O --> J["Judge\nReads the suite. No write method."]
-```
+![w:1000](images/diagram-s4-20.jpg)
 
 It is the same graph as the implementer with two differences.
 
@@ -733,13 +691,11 @@ beat: lab
 notes: Fill loop.py. Nothing else. Two functions. The line to repeat while you walk the room: giving up is allowed, giving up silently is the bug.
 -->
 
+<!-- _class: diagram -->
+
 # Fill `loop.py`. Two functions. Nothing else.
 
-```mermaid
-flowchart LR
-  S["summarize_failure(run_result)"] --> R["repair_until_green(contract, budget)"]
-  R --> G["pass, or escalate with a comment"]
-```
+![w:1000](images/diagram-s4-22.jpg)
 
 ```python
 def summarize_failure(run_result: RunResult) -> str:
@@ -787,18 +743,11 @@ beat: lab
 notes: Stopping is designed. Stopping without an explanation is a bug. The next person to look at this pull request has to know why the agent walked away. The returned trace carries the gate and the reason.
 -->
 
+<!-- _class: diagram -->
+
 # `repair_until_green`. Stop, and say why.
 
-```mermaid
-flowchart TB
-  Start["contract.run('test')"] --> Green{"junit.green?"}
-  Green -->|yes| Pass["PASS. the suite is green"]
-  Green -->|never ran| Esc1["ESCALATE. the suite never ran"]
-  Green -->|same ids twice| Esc2["ESCALATE. not converging"]
-  Green -->|budget spent| Esc3["ESCALATE. plus a comment"]
-  Green -->|else| Doer["Doer repairs inside scope"]
-  Doer --> Start
-```
+![w:1000](images/diagram-s4-24.jpg)
 
 Giving up is allowed. Giving up **silently** is the bug.
 
@@ -812,14 +761,11 @@ beat: lab
 notes: checkout() in loops/fixer.py. If local changes would be overwritten, SystemExit names both ways out: stash, or discard. The work is still there. The loop did not decide for the human. Test: test_checkout_refuses_to_delete_an_earlier_lab_s_work.
 -->
 
+<!-- _class: diagram -->
+
 # The fixer refuses to clean the tree.
 
-```mermaid
-flowchart TB
-  C["git checkout broken-pr"] --> Ok{"returncode 0?"}
-  Ok -->|yes| Go["Run the loop"]
-  Ok -->|local changes| Stop["SystemExit\nstash, or discard. You choose."]
-```
+![w:1000](images/diagram-s4-25.jpg)
 
 The refusal names both ways out, because an attendee reads it mid-lab with a clock running.
 
@@ -835,14 +781,11 @@ beat: lab
 notes: When the failure names an error it cannot place, it asks the research boundary once, inside the budget, and carries the answer into the next attempt. Budget is 2 calls, 0.05 dollars. Fixture in the room. Same boundary as Module 3.
 -->
 
+<!-- _class: diagram -->
+
 # Research once, inside the budget. Then repair.
 
-```mermaid
-flowchart LR
-  Err["Named error in the log"] --> Ask["scholar.ask, once"]
-  Ask --> Next["Carry the answer into the next attempt"]
-  Ask -->|BudgetExceeded| Stop["Record it. Do not search forever."]
-```
+![w:1000](images/diagram-s4-26.jpg)
 
 ```python
 research.Budget(max_calls=2, max_usd=0.05)
@@ -952,8 +895,6 @@ That is not hallucination about the world. It is a wrong judgment about the stat
 
 A self-check cannot catch this by construction.
 
-![bg right:42%](images/self-verify-lie.jpg)
-
 ---
 
 <!--
@@ -964,14 +905,11 @@ beat: lab
 notes: The receipt is not a convenience. It is the reason you can trust the run. pytest ran. Against this tree. After the newest source edit. All three, or it proves nothing. scripts/receipt.py.
 -->
 
+<!-- _class: diagram -->
+
 # The receipt is the reason you can trust the run.
 
-```mermaid
-flowchart TB
-  R[".harness/receipt.json"] --> A["The suite passed"]
-  R --> B["It ran against this tree, not an older one"]
-  R --> C["It ran after the newest source edit"]
-```
+![w:1000](images/diagram-s4-31.jpg)
 
 A receipt proves three things or it proves nothing.
 
@@ -1029,23 +967,11 @@ beat: talk
 notes: Point at the two subgraphs. Keep the left one, replace the right one. Four modules, one graph, four objects, on purpose. Monday morning they point this at their backlog.
 -->
 
+<!-- _class: diagram -->
+
 # Swap the object. Keep the graph.
 
-```mermaid
-flowchart LR
-  subgraph keep ["Keep. You built this today."]
-    O["Orchestrator"] --> D["Doer"]
-    D --> J["Judge"]
-    J --> G["Gate"]
-  end
-  subgraph swap ["Swap. This is yours."]
-    Obj["Your tickets, PRs, or docs"]
-    Trig["Your trigger"]
-    Rub["Your rubric rows"]
-  end
-  Trig --> O
-  Rub --> J
-```
+![w:1000](images/diagram-s4-34.jpg)
 
 Four modules, one graph, four objects. That was on purpose.
 
@@ -1059,16 +985,11 @@ beat: talk
 notes: Same graph, four objects. They already ran all four. Module 4 is the same graph with nobody at the keyboard. The object today is a failing pull request.
 -->
 
+<!-- _class: diagram -->
+
 # Same graph. Four objects. You already ran all four.
 
-```mermaid
-flowchart TB
-  G["Same graph\nOrchestrator + Doer + Judge"]
-  G --> M1["M1 Draft ticket"]
-  G --> M2["M2 Ready ticket + code"]
-  G --> M3["M3 Question"]
-  G --> M4["M4 Failing pull request"]
-```
+![w:1000](images/diagram-s4-35.jpg)
 
 | Module | Object | Lab |
 |---|---|---|
@@ -1107,8 +1028,6 @@ Daily triage. Pull request babysitter. Continuous Integration sweeper. And four 
 | Research brief | a question queue | research |
 | Nightly eval | weekly cron | the harness |
 
-![bg left:36%](images/seven-loops-named.jpg)
-
 ---
 
 <!--
@@ -1119,14 +1038,11 @@ beat: talk
 notes: Extra credit exists. Do not skip Module 2 to work on it. The trigger moves out of the loop. The exits stay in it. A workflow file starts the run. It never decides when to stop.
 -->
 
+<!-- _class: diagram -->
+
 # That list is a map home. It is not a second product.
 
-```mermaid
-flowchart LR
-  Today["Today. One fixer, on a branch."]
-  Today --> Mon["Monday. One object, one trigger."]
-  Mon --> Later["Later. Name the other six. Do not start them."]
-```
+![w:1000](images/diagram-s4-37.jpg)
 
 The trigger moves out of the loop. The exits stay in it.
 
@@ -1144,14 +1060,11 @@ beat: talk
 notes: The one nobody plans for. Passes every demo, earns trust, degrades over months with nothing visibly breaking. Causes are state, context, retrieval, latency, observability. Not model capability. Weekly evaluation, not quarterly. A 2% weekly drop is invisible in a week and catastrophic over a quarter. You should be at 35 minutes here.
 -->
 
+<!-- _class: diagram -->
+
 # The failure that gets you is slow.
 
-```mermaid
-flowchart LR
-  W1["Week 1\n98 of 100"] --> W4["Week 4\n92"]
-  W4 --> W12["Week 12\n79"]
-  W12 --> Q["A quarter later\nThe demo cases still pass"]
-```
+![w:1000](images/diagram-s4-38.jpg)
 
 A system passes every demo case, earns trust, then degrades over months with no single thing breaking.
 
@@ -1190,14 +1103,11 @@ image_prompt: >
 notes: Four artifacts, one per module. Check them off out loud. Then the claim they will test on Monday: all four run from a clean clone with one task setup.
 -->
 
+<!-- _class: diagram -->
+
 # What you take home.
 
-```mermaid
-flowchart LR
-  A1["01 Running loop"] --> A2["02 Evaluation harness"]
-  A2 --> A3["03 Research over MCP"]
-  A3 --> A4["04 Production architecture"]
-```
+![w:1000](images/diagram-s4-40.jpg)
 
 1. A running autonomous loop. Module 1.
 2. A reusable evaluation harness. Module 2.
@@ -1205,8 +1115,6 @@ flowchart LR
 4. A production architecture. Module 4.
 
 All four run on your machine, from a clean clone, with one `task setup`.
-
-![bg right:38%](images/four-artifacts.jpg)
 
 ---
 
@@ -1252,8 +1160,6 @@ notes: Five steps, in order. The order is the advice. Step 5 is the one people s
 4. Split the doer before you add a single tool.
 5. Arm the push gate on day one, while the loop is still small.
 
-![bg right:42%](images/adapt-to-org.jpg)
-
 ---
 
 <!--
@@ -1264,15 +1170,11 @@ beat: talk
 notes: Five steps as a flow so it sticks. One object. One ticket a test can fail. Taskfile plus junit. Split the doer. Arm the gate. That is the whole Monday plan.
 -->
 
+<!-- _class: diagram -->
+
 # The order is the advice.
 
-```mermaid
-flowchart LR
-  O["One object"] --> T["One ticket a test can fail"]
-  T --> F["Taskfile.yml emits junit.xml"]
-  F --> D["Split the doer"]
-  D --> G["Arm the push gate"]
-```
+![w:1000](images/diagram-s4-43.jpg)
 
 Do not add a tool until the doer is split.
 

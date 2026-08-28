@@ -8,14 +8,12 @@ Energy is lowest here. Keep it moving. The lab is 18 minutes, not 25.
 Expanded from the original 16-slide outline to 48 slides. Same narrative.
 Same lab. More architecture, more evidence, more failure modes.
 
-Diagram coverage, Session 4: 24 mermaid figures on 40 substantive slides (60%).
-PlantUML source for the same architecture lives in `slides/diagrams/plantuml/s4-*.puml`.
+Diagram coverage, Session 4: 24 Imagine diagrams on 40 substantive slides (60%).
+Mermaid source lives in `slides/diagrams/mermaid/` as `s4-*.mmd`.
+The audience sees the Imagine JPEG, never the diagram syntax.
 
 **Clock checkpoints.** Slide s4-18 at 12 minutes. Slide s4-27 at 16 minutes.
 Slide s4-32 at 30 minutes. Slide s4-39 at 35 minutes.
-
-Images match `slides.md`. If a PNG or JPG is missing, the mermaid block is the figure.
-Run `python scripts/build_slides.py` before Marp so mermaid becomes SVG.
 
 Do not survey seven production loops as labs. Name them. Build one graph.
 
