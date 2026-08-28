@@ -28,9 +28,59 @@ from write_scope import ScopeViolation, WriteScope
 
 DEFAULT_MODEL = "anthropic:claude-sonnet-5"
 
+HERE = Path(__file__).resolve().parent
+SKILLS_DIR = HERE / "skills"
+MEMORY_DIR = HERE / "memory"
+MEMORY_FILE = MEMORY_DIR / "AGENTS.md"
+
 # Built-in harness tools that write or execute. The orchestrator must not hold
 # these. Deep Agents adds them by default unless a harness profile hides them.
 ORCHESTRATOR_EXCLUDED_TOOLS = frozenset({"write_file", "edit_file", "delete", "execute"})
+
+
+# The judge answers one question and names no gate.
+#
+# The consumer is the framework, not this folder's Python. From the Deep Agents
+# docs: without `response_format` the parent receives the subagent's last
+# message text as-is; with it the parent always gets valid JSON matching the
+# schema, JSON-serialized into the ToolMessage the parent reads.
+#
+# `gates.decide` takes a `judge_done` argument and this folder ships no loop driver, so nothing
+# calls it yet. Naming a gate is
+# still the one thing the judge may not do, the same reason sol1's schema
+# forbids `ready`: a stop condition a model can phrase its way past is not a
+# stop condition.
+JUDGE_RESPONSE = {
+    "type": "object",
+    "title": "JudgeVerdict",
+    "description": (
+        "Whether the diff does what the broken pull request needed. One question, one answer, one sentence "
+        "of reason. Do not name a gate. Do not say pass, retry, or escalate. "
+        "Do not score the rubric. Python does that."
+    ),
+    "properties": {
+        "done": {"type": "boolean"},
+        "why": {"type": "string"},
+    },
+    "required": ["done", "why"],
+    "additionalProperties": False,
+}
+
+RESPONSE_FORMATS = {"judge": JUDGE_RESPONSE}
+
+
+def _skill_path(name: str) -> str | None:
+    """The mount path for one role's skill, or None when it has no directory.
+
+    Mount, do not inline. Deep Agents loads a skill in two levels: its metadata
+    sits in the system prompt at startup, and its instructions join the context
+    only when the skill is invoked. Pasting the whole SKILL.md into
+    `system_prompt` as well defeats that, because the body is then always
+    resident and the mount saves nothing.
+
+    sol1 does both. This folder does one.
+    """
+    return f"/skills/{name}/" if (SKILLS_DIR / name).is_dir() else None
 
 
 def _inside(repo: Path, path: str):
@@ -146,15 +196,22 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
         tools = [reader]
         if role.can_write:
             tools.append(scoped_write_tool(repo, role))
-        out.append(
-            {
-                "name": role.name.replace("_", "-"),
-                "description": role.purpose,
-                "system_prompt": f"You are the {role.name}. {role.purpose}",
-                "tools": tools,
-                "permissions": permission_rules(role),
-            }
-        )
+        spec = {
+            "name": role.name.replace("_", "-"),
+            "description": role.purpose,
+            "system_prompt": f"You are the {role.name}. {role.purpose}",
+            "tools": tools,
+            "permissions": permission_rules(role),
+        }
+        if role.name in RESPONSE_FORMATS:
+            spec["response_format"] = RESPONSE_FORMATS[role.name]
+        skill = _skill_path(role.name)
+        if skill:
+            # The directory is named for the role, `code_implementer`, while the
+            # subagent is named `code-implementer`. The mount path follows the
+            # directory.
+            spec["skills"] = [skill]
+        out.append(spec)
     return out
 
 
@@ -178,7 +235,7 @@ def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
         create_deep_agent,
         register_harness_profile,
     )
-    from deepagents.backends import FilesystemBackend  # noqa: PLC0415
+    from deepagents.backends import CompositeBackend, FilesystemBackend  # noqa: PLC0415
 
     repo = Path(contract.repo).resolve()
     register_harness_profile(
@@ -202,6 +259,18 @@ def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
             "test to make the suite green."
         ),
         subagents=subagents,
-        backend=FilesystemBackend(root_dir=str(repo), virtual_mode=True),
+        backend=CompositeBackend(
+            default=FilesystemBackend(root_dir=str(repo), virtual_mode=True),
+            routes={
+                "/skills/": FilesystemBackend(root_dir=str(SKILLS_DIR), virtual_mode=True),
+                # `memory/`, not the solution folder. Routing at HERE would put
+                # roles.py, write_scope.py, and tests/ inside the agent's reach,
+                # in the folder whose lesson is that the coder may not write
+                # tests/**.
+                "/memory/": FilesystemBackend(root_dir=str(MEMORY_DIR), virtual_mode=True),
+            },
+        ),
+        memory=["/memory/AGENTS.md"] if MEMORY_FILE.exists() else None,
+        skills=["/skills/"] if SKILLS_DIR.is_dir() else None,
         permissions=[FilesystemPermission(operations=["write"], paths=["/**", "**"], mode="deny")],
     )
