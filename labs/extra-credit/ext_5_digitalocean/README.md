@@ -8,7 +8,7 @@ A Droplet that:
 
 - Exposes HTTPS `/github-webhook`
 - Receives `issues`, `check_suite`, and `pull_request` events
-- Routes to Ticket Groomer, Ticket Fulfiller, or PR Fixer
+- Routes to the Saturday loops (enhancer, implementer, or fixer)
 - Works with the Python loops, Claude Code headless, OpenCode, Codex, Grok Build, Agent SDK, or LangGraph
 
 `AGENT_BACKEND=python` is the working default. Change it only after the Python path is green.
@@ -56,12 +56,13 @@ XAI_API_KEY=
 
 ## 4. Run the server
 
+Run your FastAPI receiver on `127.0.0.1:8000` so Nginx can proxy to it.
+
 ```bash
 cd /opt/agents
 source /opt/agent-env/bin/activate
 export PYTHONPATH=/opt/agents
 set -a && source /opt/agents/.env && set +a
-python -m uvicorn solutions.extra_credit.s_ext_1_webhook.webhook:app --host 127.0.0.1 --port 8000
 ```
 
 Copy `agent-webhook.service` into systemd so it survives reboot.
@@ -83,13 +84,13 @@ Repo, Settings, Webhooks:
 - Secret: same as `GITHUB_WEBHOOK_SECRET`
 - Events: Issues, Check suites, Pull requests
 
-## 7. How the three approaches plug in
+## 7. How the backends plug in
 
 Set `AGENT_BACKEND` on the Droplet.
 
 | Value | What the webhook runs |
 |---|---|
-| `python` | `solutions/extra_credit` loops. Working default. |
+| `python` | Saturday lab loops. Working default. |
 | `claude` | `claude -p` headless |
 | `opencode` | `opencode run` |
 | `codex` | `codex exec` |
@@ -104,4 +105,3 @@ Same entry point. Only the agent implementation changes.
 - Always verify the GitHub signature.
 - File lock plus `agent-in-progress` so two runs cannot overlap.
 - Same max-iteration budget as polling.
-- Log `solutions/extra_credit/s_ext_1_webhook/work/last-webhook.json`.
