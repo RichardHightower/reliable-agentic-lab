@@ -23,7 +23,11 @@ import subprocess
 import time
 from pathlib import Path
 
-import doers, gates, research, loop_roles as roles, rubric
+import doers
+import gates
+import research
+import rubric
+import write_scope as roles
 from contract import Contract
 
 ERROR_IN_OUTPUT = re.compile(r"\b([A-Z][A-Za-z]*(?:Error|Exception))\b[^\n]*")
@@ -228,11 +232,20 @@ def main(argv: list[str] | None = None) -> int:
         help="check this branch out first. Use broken-pr to start from a real failure.",
     )
     parser.add_argument("--budget", type=int, default=None)
-    parser.add_argument("--research", default="fixture", choices=["off", "fixture", "auto"])
+    # `off` by default. This used to default to `fixture` and point at
+    # `fixtures/research.json`, a file this folder has never had, so the
+    # documented default could not run. `loop.py` passes `research_backend=None`
+    # either way, so research is opt-in from here and nowhere else.
+    parser.add_argument("--research", default="off", choices=["off", "fixture", "auto"])
     args = parser.parse_args(argv)
 
     backend = None
     fixture = Path(__file__).parent / "fixtures" / "research.json"
+    if args.research in ("fixture", "auto") and not fixture.exists():
+        parser.error(
+            f"--research {args.research} needs {fixture}, which does not exist. "
+            "Record one, or run with --research off."
+        )
     if args.research == "fixture":
         backend = research.FixtureBackend(fixture)
     elif args.research == "auto":

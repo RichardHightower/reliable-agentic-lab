@@ -13,11 +13,19 @@ tasks:
       - python3 -m pytest tests -q
 
   table:
+    desc: Print the role table and stop, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - python3 loop.py --table-only
 
+  setup:
+    desc: Install the Agent SDK and pytest into the venv you activated.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 -m pip install --quiet claude-agent-sdk pytest
+
   run:
+    desc: Repair a branch. Needs the SDK, a key, and a clone.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - python3 loop.py {{.CLI_ARGS}}

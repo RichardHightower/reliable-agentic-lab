@@ -8,7 +8,7 @@ footer: Spillwave Solutions | spillwave.com
 
 The working Module 4 loop. Issue 120.
 
-`query()`, not `ClaudeSDKClient`. `permission_mode: acceptEdits`. Merge is never a tool.
+`query()`, not `ClaudeSDKClient`. `permission_mode: dontAsk`. Merge is never a tool.
 
 
 ---
@@ -21,7 +21,7 @@ fixer.py      the while loop
 doers.py      none / reference / cli / SDK backend
 gates.py      identical copy to sol3
 contract.py   Taskfile + junit + coverage
-roles.py      acceptEdits, PreToolUse deny tests/**
+roles.py      dontAsk, one PreToolUse hook, deny tests/**
 tests/        hook deny/allow, same-signature escalate
 ```
 
@@ -33,7 +33,7 @@ No `unattended.py`. Durable `.harness/state.json` and exit 0/2/1 lived there and
 # Learning objectives
 
 - Walk `fixer.run`
-- Set `permission_mode: acceptEdits` because nobody is in the chair
+- Set `permission_mode: dontAsk` because nobody is in the chair
 - Deny `tests/**` on the code implementer
 - Stash before `--branch broken-pr`
 - Leave a comment when the loop gives up
@@ -60,14 +60,19 @@ Trigger → fixer.run
 # Five unattended lines
 
 ```
-permission_mode: acceptEdits     # nobody to click Allow
+permission_mode: dontAsk         # never prompts, and fails closed
 PreToolUse deny tests/**         # cannot weaken a test
-max_turns=12                     # SDK inner budget; Python owns outer
+maxTurns=12                      # camelCase. max_turns= is a TypeError
 tests after every turn = pytest  # not a claim
 Merge is never a tool
 ```
 
-Research port uses `dontAsk`. This one uses `acceptEdits`.
+This port used `acceptEdits` and that was the bug. Both modes never prompt.
+`acceptEdits` auto-accepts every edit **before** the allow list is read, so the
+hook is the only fence, and the hook fails open on a typo. `dontAsk` denies
+anything not pre-approved, which makes `allowed_tools` a real second gate.
+
+"Nobody is in the chair" is the argument for `dontAsk`, not against it.
 
 
 ---
@@ -134,7 +139,7 @@ A human should take this one.
 |---|---|
 | `test_hook_denies_test_write` | Write `tests/test_x.py` → deny |
 | `test_hook_allows_app_write` | Write `app/main.py` → `{}` |
-| `test_options_use_accept_edits` | `permission_mode == "acceptEdits"` |
+| `test_the_permission_mode_denies_rather_than_prompts` | `permission_mode == "dontAsk"` |
 | `test_same_failing_ids_escalate` | same signature → ESCALATE |
 | `test_no_loops_import` | no `from loops` |
 
@@ -190,6 +195,6 @@ Saturday types a body. This folder delegates to `fixer.run`.
 
 - [ ] pytest green without a key
 - [ ] table: judge `no`, coder denied `tests/**`
-- [ ] `permission_mode == "acceptEdits"`
+- [ ] `permission_mode == "dontAsk"`
 - [ ] `--doer none` on `broken-pr` escalates with a comment
 - [ ] merge is not in any tool list
