@@ -1,13 +1,23 @@
-# Standalone. No dependency on the root Taskfile. Needs no SDK installed:
-# --table-only prints the role table and stops.
 version: '3'
+
+dotenv: ['../../.env', '.env']
 
 tasks:
   default:
     cmds: [task --list]
 
   test:
-    desc: Print the role table and exit, with no SDK installed.
+    desc: Unit tests. No Agent SDK and no CRM clone.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 -m pytest tests -q
+
+  table:
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - python3 loop.py --table-only
+
+  run:
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 loop.py {{.CLI_ARGS}}

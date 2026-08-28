@@ -1,65 +1,54 @@
 #!/usr/bin/env python3
-"""Lab 3. Research Assistant over MCP, on LangChain Deep Agents.
+"""Lab 3. Research assistant on LangChain Deep Agents.
 
-The loop does not change. The rubric, the gates, and the exits are the same
-objects lab 3 uses. What changes is how the runtime says "this role
-may not write that file".
-
-Deep Agents scopes by handing each subagent its own tool list. A subagent can
-only call what it was given. Path scope moves inside the write tool, which
-checks the scope before it touches the disk.
-
-    python loop.py --table-only
-
-Nothing here calls a model. This module returns configuration, and your driver
-is what runs it.
+Python owns the budget and the brief check. Deep Agents isolates the researcher.
 """
 
 from __future__ import annotations
 
 import argparse
 
+import brief
+import researcher
 import roleplan
 import roles as deep
 
 LOOP = "research"
 
 
-def cast(contract) -> dict[str, roleplan.RolePlan]:
-    """The roles this loop runs.
-
-    Read from `solutions/roleplan.py`, never restated here. A port that writes
-    its own scopes is a port that drifts from the loop it claims to be, and it
-    drifts silently.
-    """
+def cast(contract):
     return roleplan.plan(contract, LOOP)
 
 
-def build(contract):
-    """This runtime's configuration for the cast.
+def build(contract, backend=None):
+    return deep.subagents_for(contract, loop=LOOP, backend=backend)
 
-    Needs `deepagents` installed. `cast()` and the role table do not, which
-    is why the tests can check the separation without either SDK present.
-    """
-    return deep.subagents_for(contract, loop=LOOP)
+
+def plan_questions(question: str) -> list[str]:
+    return researcher.plan_questions(question)
+
+
+def check_brief(body: str, sources: list[str]) -> brief.BriefScore:
+    return brief.check(body, sources)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--table-only",
-        action="store_true",
-        help="print the role table and stop, so no SDK is needed",
-    )
+    parser.add_argument("--question", default="sqlalchemy nullable datetime column")
+    parser.add_argument("--backend", default="fixture", choices=["auto", "fixture", "websearch"])
+    parser.add_argument("--out", default=None)
+    parser.add_argument("--budget", type=int, default=3)
+    parser.add_argument("--table-only", action="store_true")
     args = parser.parse_args(argv)
 
-    contract = None
-    print(roleplan.table(cast(contract)))
+    print(roleplan.table(cast(None)))
     if args.table_only:
         return 0
-    print()
-    print(build(contract))
-    return 0
+
+    argv_run = ["--question", args.question, "--backend", args.backend, "--budget", str(args.budget)]
+    if args.out:
+        argv_run += ["--out", args.out]
+    return researcher.main(argv_run)
 
 
 if __name__ == "__main__":

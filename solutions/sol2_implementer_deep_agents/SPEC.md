@@ -1,69 +1,38 @@
-# Spec. Lab 2. Ticket Implementer and the harness, on LangChain Deep Agents
+# Spec. Lab 2. Ticket Implementer on LangChain Deep Agents
 
-The same loop, in a different runtime. The point is not that it runs. The point
-is that the rubric, the red gate, the write scope, and the exits did not have to
-change to make it run.
+The same eight steps as `sol2_implementer/implementer.py`. A different runtime
+for the makers. Python still owns the red gate and the three exits.
 
-## The cast for this loop
+## Cast
 
-- `orchestrator`
-- `planner`
-- `test_implementer`
-- `code_implementer`
-- `judge`
+orchestrator, planner, test_implementer, code_implementer, judge.
 
-`solutions/roleplan.py` is where that list lives. Read it there. Do not restate
-a scope in this folder.
+`create_deep_agent` is the harness. The orchestrator holds `run_tests` and
+`task`. It holds no write tool. Each subagent gets its own `tools` list, which
+**replaces** the parent. The judge's list is `read_file` only.
 
-## How this runtime enforces scope
+## What Python still owns
 
-Deep Agents scopes by handing each subagent its own tool list. A subagent can
-only call what it was given. Path scope moves inside the write tool, which
-checks the scope before it touches the disk.
+1. Ready ticket in.
+2. Plan schema in `steps.jsonl`.
+3. Red gate over `reports/junit.xml`.
+4. Ten-row rubric. No model.
+5. `gates.decide`. Pass, retry, escalate. Same signature twice means stop.
 
-## Build it step by step
-
-1. Install the runtime.
-
-   ```bash
-   pip install -r requirements-takehome.txt
-   ```
-
-2. Read the cast before you configure anything.
-
-   ```bash
-   cd solutions/sol2_implementer_deep_agents
-   python harness.py --table-only --repo ../../work/northwind-field-crm
-   ```
-
-   The judge must print `no` in the writes column. If it prints `yes`, stop.
-   Nothing downstream is worth building on that.
-
-3. Translate the cast into this runtime, one role at a time. `cast(contract)`
-   returns a `RolePlan` per role, carrying the tools, the allow list, and the
-   deny list. `build(contract)` turns those into the runtime's own objects.
-
-4. Give the writing roles their path check. A role holding `Edit` or `Write`
-   without a path check can reach any file in the repo, and the first thing an
-   agent under pressure reaches for is the failing test.
-
-5. Print the configuration and read it.
-
-   ```bash
-   python harness.py --repo ../../work/northwind-field-crm
-   ```
-
-## Verify
+## Run
 
 ```bash
-task test -- loops/tests/test_runtime_ports.py
+cd solutions/sol2_implementer_deep_agents
+python3 -m pytest tests -q
+python3 harness.py --table-only
+# live, after task setup:
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer deep
 ```
 
-Those checks need no SDK and no key. They assert that this port and the
-in-process roles read the same table, and that the judge holds no write tool in
-either.
+`--doer deep` needs `deepagents` installed. The tests do not.
 
 ## What this folder is not
 
-It is not a second loop engine. `loops/` holds the loop, and porting it must not
-require changing `loops/`. If it does, the design leaked.
+Not a second loop engine. Not Saturday's lab. Saturday fills `harness.py` under
+`labs/lab2_implementer` with Claude Code.
