@@ -35,14 +35,12 @@ and it does not run `/enhancer-loop`.
 3. Install the runtime.
 
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install pytest
-   pip install -r ../../requirements-takehome.txt
+   task setup
    ```
 
-   `task test` and `task table` only need pytest. Install the take-home
-   extras when you are ready to poll.
+   This creates `.venv` in this folder and installs `deepagents` plus pytest.
+   `task run` uses that virtual environment automatically; you do not need to
+   activate it manually.
 
 4. Clone your fork:
 

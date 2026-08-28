@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -51,6 +52,8 @@ def test_a_full_run_still_needs_the_target_repo(tmp_path):
 
 def test_build_needs_the_sdk(contract):
     """`build()` is the line that pulls in LangChain. It is not on the table path."""
+    if importlib.util.find_spec("deepagents") is not None:
+        pytest.skip("task setup installs the optional runtime")
     with pytest.raises(ModuleNotFoundError):
         loop.build(contract)
 
@@ -201,7 +204,7 @@ def test_a_missing_deepagents_install_has_a_setup_command(target_repo, monkeypat
 
     out = capsys.readouterr().out
     assert "Deep Agents is not installed" in out
-    assert "pip install -r ../../requirements-takehome.txt" in out
+    assert "task setup" in out
 
 
 def test_the_entry_point_names_its_own_loop():

@@ -116,8 +116,8 @@ def run(argv_repo: str, *, ticket: str | None, simulate: str | None) -> int:
             raise
         print(
             "Deep Agents is not installed in this Python environment.\n"
-            "Create and activate the folder's virtual environment, then run:\n"
-            "  pip install -r ../../requirements-takehome.txt"
+            "From this folder, run:\n"
+            "  task setup"
         )
         return 1
     engine = Enhancer(
