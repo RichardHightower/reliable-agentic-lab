@@ -14,8 +14,9 @@ Set `PERPLEXITY_API_KEY` in `.env` if you have one. If you do not, you have two
 other ways to run the research loop, and you pick:
 
 ```bash
-task loop:research -- --question "..." --backend websearch   # your agent's own search
-task loop:research -- --question "..." --backend fixture     # recorded, works offline
+cd solutions/sol3_research_deep_agents
+python3 loop.py --question "..." --backend websearch   # your agent's own search
+python3 loop.py --question "..." --backend fixture     # recorded, works offline
 ```
 
 The loop does not know which one it is holding. That is the Module 3 lesson:

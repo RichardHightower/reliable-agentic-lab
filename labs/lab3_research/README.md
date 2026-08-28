@@ -31,8 +31,17 @@ Pick one tool and paste its prompt.
 
 ## Verify
 
+Saturday self-check, from this folder:
+
 ```bash
-task loop:research -- --question "sqlalchemy nullable datetime column" --backend fixture
+task test
+```
+
+Instructor demo of a cited brief, from the Deep Agents port:
+
+```bash
+cd ../../solutions/sol3_research_deep_agents
+python3 loop.py --question "sqlalchemy nullable datetime column" --backend fixture
 ```
 
 ## When it stops

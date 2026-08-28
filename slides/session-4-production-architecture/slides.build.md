@@ -228,7 +228,7 @@ layout: title
 minutes: 1
 beat: talk
 _class: lead
-notes: Say the shape of the hour out loud. Build for 12 minutes. Type for 18. Land for 5. Then 10 to close. 13:45 Central. Energy is lowest here. Keep moving.
+notes: Say the shape of the hour out loud. Build for 12 minutes. Type for 18. Land for 5. Then 10 to close. 13:15 Central. Energy is lowest here. Keep moving.
 -->
 
 <!-- _class: lead -->
@@ -240,7 +240,7 @@ notes: Say the shape of the hour out loud. Build for 12 minutes. Type for 18. La
 
 Session 4. The capstone. Same graph. Nobody at the keyboard.
 
-Saturday 29 August 2026. 13:45 Central.
+Saturday 29 August 2026. 13:15 Central.
 
 Rick Hightower. Spillwave. Packt workshop.
 
@@ -264,10 +264,10 @@ notes: Read the four rows. Artifact they keep is a production architecture they 
 
 | Block | Start | Minutes |
 |---|---|---|
-| State, observability, unattended | 13:45 | 12 |
-| Lab 4. Broken pull request fixer | 13:57 | 18 |
-| Patterns, adapt to their team | 14:15 | 5 |
-| Close. Four artifacts, Monday, questions | 14:20 | 10 |
+| State, observability, unattended | 13:15 | 12 |
+| Lab 4. Broken pull request fixer | 13:27 | 18 |
+| Patterns, adapt to their team | 13:45 | 5 |
+| Close. Four artifacts, Monday, questions | 13:50 | 10 |
 
 The graph does not change. Nobody is at the keyboard.
 
@@ -375,7 +375,7 @@ id: s4-08
 layout: figure-bottom
 minutes: 1
 beat: talk
-notes: Read the five lines. permission_mode acceptEdits because nobody is there to click Allow. PreToolUse deny tests/** because the fixer cannot weaken a test to reach green. max_turns is the SDK iteration budget. Tests after every turn are pytest. Merge is never a tool.
+notes: Read the five lines. permission_mode dontAsk because nobody is there to click Allow, and dontAsk fails closed. acceptEdits was the bug: it auto-accepts edits before the allow list. PreToolUse deny tests/** because the fixer cannot weaken a test to reach green. max_turns is the SDK iteration budget. Tests after every turn are pytest. Merge is never a tool.
 -->
 
 <!-- _class: diagram -->
@@ -384,7 +384,7 @@ notes: Read the five lines. permission_mode acceptEdits because nobody is there 
 
 ![w:1000](images/diagram-s4-08.jpg)
 
-- `permission_mode`: `acceptEdits`
+- `permission_mode`: `dontAsk`
 - PreToolUse: deny `tests/**`
 - `max_turns` is the iteration budget
 - Tests after every turn are pytest, not a claim
@@ -765,7 +765,7 @@ notes: checkout() in the Agent SDK fixer. If local changes would be overwritten,
 
 # The fixer refuses to clean the tree.
 
-![w:1000](images/diagram-s4-25.jpg)
+![h:220](images/diagram-s4-25.jpg)
 
 The refusal names both ways out, because an attendee reads it mid-lab with a clock running.
 
@@ -1194,7 +1194,7 @@ id: s4-44
 layout: figure-bottom
 minutes: 0
 beat: talk
-notes: Takehome. Issue 120. query(), not ClaudeSDKClient. permission_mode acceptEdits. PreToolUse is write scope. Merge is never a tool. Nobody is expected to finish this inside the five hours.
+notes: Takehome. Issue 120. query(), not ClaudeSDKClient. permission_mode dontAsk. PreToolUse is write scope. Merge is never a tool. Nobody is expected to finish this inside the five hours.
 -->
 
 # Takehome. Agent SDK unattended fixer. Issue #120.
@@ -1204,7 +1204,7 @@ solutions/sol4_fixer_agent_sdk/
 ```
 
 - `query()`, not `ClaudeSDKClient`. Nobody is chatting.
-- `permission_mode` is `acceptEdits`.
+- `permission_mode` is `dontAsk`.
 - PreToolUse is write scope. `tests/**` is denied.
 - Merge is never a tool.
 - Python still owns `summarize_failure` and the three exits.

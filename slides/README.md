@@ -34,6 +34,16 @@ Each session folder:
 
 Lab implementation walkthroughs (one deck per lab and per `sol*_` variant) live in `slides/labs/`. Same Spillwave theme. See `slides/labs/README.md`.
 
+Saturday handout PDFs live in `slides/handout/`:
+
+| File | What it is |
+|---|---|
+| `SLIDE_DECK.pdf` | Sessions 1 to 4 |
+| `LABS.pdf` | Saturday labs, then every `sol*_` walkthrough |
+| `SPEAKER_NOTES.pdf` | A4 facilitator packet |
+| `EXTRA_CREDIT.pdf` | Webhook, ngrok, DigitalOcean, GitHub Actions, Fargate |
+| `COMPLETE-HANDOUT.pdf` | Those four, in that order. One file to print. |
+
 `Speaker-Notes-Loop-Engineering.md` is the page, not the slide. Denser text. Smaller figures. Say, Why, and Lab boxes. Build it with the A4 theme:
 
 ```bash

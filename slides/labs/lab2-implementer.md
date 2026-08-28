@@ -211,7 +211,7 @@ The code implementer cannot weaken a test, not because it was told not to, but b
 
 ---
 
-# Commands. Live first. The README still prints a dead task.
+# Commands. Live first.
 
 `task loop:implementer` is gone from the root Taskfile. `loops/` was deleted on purpose.
 
@@ -229,7 +229,7 @@ python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer re
 python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer none
 ```
 
-The lab README still prints `task loop:implementer`. Ignore that line.
+The lab README verify is `task test`. Demo from the Deep Agents port.
 
 
 ---

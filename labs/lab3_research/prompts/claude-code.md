@@ -42,7 +42,7 @@ There are three exits and no fourth: pass, retry, escalate.
 ## Verify
 
 ```bash
-task loop:research -- --question "sqlalchemy nullable datetime column" --backend fixture
+task test
 ```
 
 ## The gate

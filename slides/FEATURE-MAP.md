@@ -50,14 +50,13 @@ Do not survey seven production loops as labs. Name them in Module 4. Build one g
 | Why the receipt exists | 4 | A model that acts and verifies can invent its own evidence |
 | PR Fixer pattern | 4 | A failing branch to a mergeable one, or an honest explanation |
 | Swap the object | 4 | Keep the graph. Replace the CRM ticket with their backlog. |
-
-
 | Deep Agents tool lists | 2 | Judge subagent has no write tool. List replaces parent |
 | Python owns the gate | 2 | `create_deep_agent` does not count retries |
 | Isolated research context | 3 | Researcher subagent. Orchestrator gets a summary |
 | MCP adapters plus fixture | 3 | context7, optional Perplexity, fixture offline |
 | Agent SDK `query()` | 4 | Unattended fixer. PreToolUse is write scope |
 | Merge stays human | 4 | Fixer never receives a merge tool |
+
 
 Module 1 is a loop that can run once.
 Module 2 is that loop made repeatable, and made honest.

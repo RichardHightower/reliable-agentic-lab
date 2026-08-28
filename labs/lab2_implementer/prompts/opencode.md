@@ -43,8 +43,7 @@ There are three exits and no fourth: pass, retry, escalate.
 ## Verify
 
 ```bash
-task loop:implementer -- --ticket T001 --doer reference
-task loop:implementer -- --ticket T001 --doer none
+task test
 ```
 
 ## The gate

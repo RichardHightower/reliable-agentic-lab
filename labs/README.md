@@ -37,6 +37,5 @@ Some will try.
 
 ## If you fall behind
 
-Stop typing and watch. Then copy the answer out of `solutions/sol<n>_<name>/`
-into the lab folder and carry on with a working artifact. Every lab has a
-`FALL-BEHIND.md` with the exact command.
+Stop typing and watch Rick. Save your attempt. Labs 2 to 4 have no drop-in
+answer. Copy only Lab 1's `.claude/` tree. See each lab's `FALL-BEHIND.md`.

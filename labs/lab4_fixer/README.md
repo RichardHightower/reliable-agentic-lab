@@ -31,11 +31,19 @@ Pick one tool and paste its prompt.
 
 ## Verify
 
-```bash
-# Module 2 left its work in the target repo. Put it away first.
-git -C ../../work/northwind-field-crm stash --include-untracked
+Saturday self-check, from this folder. Module 2 left its work in the target
+repo. Put it away first.
 
-task loop:fixer -- --branch broken-pr --doer reference
+```bash
+git -C ../../work/northwind-field-crm stash --include-untracked
+task test
+```
+
+Instructor demo of the unattended fixer, from the Agent SDK port:
+
+```bash
+cd ../../solutions/sol4_fixer_agent_sdk
+python3 loop.py --repo ../../work/northwind-field-crm --branch broken-pr --doer reference
 ```
 
 ## When it stops

@@ -31,9 +31,18 @@ Pick one tool and paste its prompt.
 
 ## Verify
 
+Saturday self-check, from this folder:
+
 ```bash
-task loop:implementer -- --ticket T001 --doer reference
-task loop:implementer -- --ticket T001 --doer none
+task test
+```
+
+Instructor demo of the eight-step loop, from the Deep Agents port:
+
+```bash
+cd ../../solutions/sol2_implementer_deep_agents
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
+python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer none
 ```
 
 ## When it stops

@@ -228,7 +228,7 @@ layout: title
 minutes: 1
 beat: talk
 _class: lead
-notes: You are here to engineer a loop, not to collect prompts. Say the time out loud. 10:00 Central, 11:00 Eastern.
+notes: You are here to engineer a loop, not to collect prompts. Say Loop Engineering as the first spoken line. Say the time out loud. 10:00 Central, 11:00 Eastern.
 -->
 
 <!-- _class: lead -->
@@ -239,6 +239,8 @@ notes: You are here to engineer a loop, not to collect prompts. Say the time out
 # Engineering reliable agentic AI systems
 
 Session 1. System Architecture, the foundation.
+
+Loop Engineering. The outer control around ReAct.
 
 Saturday 29 August 2026. 10:00 Central.
 
@@ -308,11 +310,11 @@ notes: If a lab runs long, cut talk. Do not cut Module 2. Do not reteach 20 Augu
 | Module 1 anatomy + lab | 10:10 | 45 |
 | Break | 10:55 | 15 |
 | Module 2 harness | 11:10 | 55 |
-| Break | 12:20 | 15 |
-| Module 3 research + MCP | 12:35 | 40 |
-| Break | 13:30 | 15 |
-| Module 4 production | 13:45 | 35 |
-| Close | 14:20 | 10 |
+| Break | 12:05 | 15 |
+| Module 3 research + MCP | 12:20 | 40 |
+| Break | 13:00 | 15 |
+| Module 4 production | 13:15 | 35 |
+| Close | 13:50 | 10 |
 
 ---
 
@@ -386,7 +388,7 @@ notes: ReAct is the inner cycle. The product you ship is the outer control syste
 
 That outer control system is Loop Engineering.
 
-![w:1000](images/diagram-s1-08.jpg)
+![h:290](images/diagram-s1-08.jpg)
 
 <small>Yao et al., ReAct, arXiv:2210.03629</small>
 
