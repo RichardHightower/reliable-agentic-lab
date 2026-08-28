@@ -13,6 +13,13 @@ Keep them the same.
 
 This is takehome. It is not on the Saturday clock.
 
+Finish extra credit 1 first. Fill
+`labs/extra-credit/ext_1_webhook/webhook_server.py` so it serves
+`GET /health` and `POST /github-webhook`.
+The Droplet runs that file. It does not import
+`solutions.extra_credit.s_ext_1_webhook`. That package is gone.
+Groom, fulfill, and fix answers live in the Saturday lab folders.
+
 ## Build it step by step
 
 1. Create the smallest Ubuntu Droplet. Point a subdomain at its IP.
@@ -40,12 +47,11 @@ This is takehome. It is not on the Saturday clock.
    ```
 
 4. Install the unit file from `deploy/agent-webhook.service`.
-   It runs uvicorn against
-   `solutions.extra_credit.s_ext_1_webhook.webhook:app` on `127.0.0.1:8000`, so
+   It runs the filled assignment 1 script on `127.0.0.1:8000`, so
    nothing but nginx can reach it.
 
    ```bash
-   cp deploy/agent-webhook.service /etc/systemd/system/agent-webhook.service
+   cp solutions/extra_credit/s_ext_5_digitalocean/deploy/agent-webhook.service /etc/systemd/system/agent-webhook.service
    systemctl daemon-reload
    systemctl enable --now agent-webhook
    ```
@@ -54,7 +60,7 @@ This is takehome. It is not on the Saturday clock.
    `deploy/nginx.conf` is the server block.
 
    ```bash
-   cp deploy/nginx.conf /etc/nginx/sites-available/agent-webhook
+   cp solutions/extra_credit/s_ext_5_digitalocean/deploy/nginx.conf /etc/nginx/sites-available/agent-webhook
    ln -s /etc/nginx/sites-available/agent-webhook /etc/nginx/sites-enabled/
    nginx -t && systemctl reload nginx
    certbot --nginx -d your-domain.com
@@ -74,7 +80,7 @@ This is takehome. It is not on the Saturday clock.
 ## Verify
 
 A 200 in the GitHub webhook log, and a record in
-`solutions/extra_credit/s_ext_1_webhook/work/last-webhook.json` on the Droplet.
+`labs/extra-credit/ext_1_webhook/work/last-webhook.json` on the Droplet.
 
 ## Why bind to localhost
 

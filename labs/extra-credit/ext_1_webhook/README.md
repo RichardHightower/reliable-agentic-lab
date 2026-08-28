@@ -16,16 +16,17 @@ One FastAPI server that GitHub can post to. Every later assignment needs it.
 4. Set `agent-in-progress` before the work and clear it after, so two deliveries
    for one issue do not run at once.
 5. Stop at `AGENT_MAX_ATTEMPTS`. Comment when you give up.
-6. Write one JSON record per delivery.
+6. Write one JSON record per delivery to `work/last-webhook.json`.
+
+Groom, fulfill, and fix answers live in the Saturday lab folders.
+There is no `solutions/extra_credit/s_ext_1_webhook` package anymore.
 
 ## Verify
 
 ```bash
-python solutions/extra_credit/s_ext_1_webhook/webhook.py --port 8765
+python labs/extra-credit/ext_1_webhook/webhook_server.py --port 8765
 curl -s localhost:8765/health
 ```
 
-## Answer
-
-`solutions/extra_credit/s_ext_1_webhook/`. Read it when you stall. It is the
-answer, not a hint.
+Then extra credit 2 tunnels this port with ngrok.
+Extra credit 5 runs the same file on a DigitalOcean Droplet.

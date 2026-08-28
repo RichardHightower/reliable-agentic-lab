@@ -1,5 +1,8 @@
 # Extra credit. Copy onto the Droplet as /etc/systemd/system/agent-webhook.service
 # systemctl daemon-reload && systemctl enable --now agent-webhook
+#
+# Runs the filled extra credit 1 stub. The s_ext_1_webhook package is gone.
+# labs/extra-credit is not a Python package name, so call the file directly.
 
 [Unit]
 Description=reliable-agentic-lab extra-credit GitHub webhook
@@ -9,8 +12,9 @@ After=network.target
 Type=simple
 User=www-data
 WorkingDirectory=/opt/agents
+Environment=PYTHONPATH=/opt/agents
 EnvironmentFile=/opt/agents/.env
-ExecStart=/opt/agent-env/bin/python -m uvicorn solutions.extra_credit.s_ext_1_webhook.webhook:app --host 127.0.0.1 --port 8000
+ExecStart=/opt/agent-env/bin/python /opt/agents/labs/extra-credit/ext_1_webhook/webhook_server.py --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
 

@@ -2,6 +2,14 @@
 
 Not Saturday. A cheap permanent public endpoint. Same FastAPI receiver as ngrok.
 
+The virtual private server (VPS) is a DigitalOcean Droplet.
+Cheapest Basic plan. Ubuntu 24.04 LTS. One virtual CPU. One gigabyte of RAM.
+About six dollars a month.
+
+Finish extra credit 1 first. Fill `webhook_server.py` in that folder.
+This assignment deploys that file. It does not import
+`solutions.extra_credit.s_ext_1_webhook`. That package is gone.
+
 ## Goal
 
 A Droplet that:
@@ -61,14 +69,14 @@ cd /opt/agents
 source /opt/agent-env/bin/activate
 export PYTHONPATH=/opt/agents
 set -a && source /opt/agents/.env && set +a
-python -m uvicorn solutions.extra_credit.s_ext_1_webhook.webhook:app --host 127.0.0.1 --port 8000
+python labs/extra-credit/ext_1_webhook/webhook_server.py --host 127.0.0.1 --port 8000
 ```
 
-Copy `agent-webhook.service` into systemd so it survives reboot.
+Copy `deploy/agent-webhook.service` into systemd so it survives reboot.
 
 ## 5. HTTPS with Nginx and Let's Encrypt
 
-Point a domain at the Droplet. Copy `nginx.conf`. Then:
+Point a domain at the Droplet. Copy `deploy/nginx.conf`. Then:
 
 ```bash
 certbot --nginx -d your-domain.com
@@ -89,7 +97,7 @@ Set `AGENT_BACKEND` on the Droplet.
 
 | Value | What the webhook runs |
 |---|---|
-| `python` | `solutions/extra_credit` loops. Working default. |
+| `python` | Saturday lab loops. Working default. |
 | `claude` | `claude -p` headless |
 | `opencode` | `opencode run` |
 | `codex` | `codex exec` |
@@ -104,4 +112,4 @@ Same entry point. Only the agent implementation changes.
 - Always verify the GitHub signature.
 - File lock plus `agent-in-progress` so two runs cannot overlap.
 - Same max-iteration budget as polling.
-- Log `solutions/extra_credit/s_ext_1_webhook/work/last-webhook.json`.
+- Log `labs/extra-credit/ext_1_webhook/work/last-webhook.json`.
