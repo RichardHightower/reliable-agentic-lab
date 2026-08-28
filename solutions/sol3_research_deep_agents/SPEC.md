@@ -79,7 +79,7 @@ agent writes anywhere it likes.
 | 2 | search | yes | Every claim names a source that resolves |
 | 3 | verify | yes | Every important claim has a decided truth state, and anything past the cap says it was skipped |
 | 4 | outline | yes | Every body section names claim ids that exist and may be used |
-| 5 | diagram | yes | At most twelve nodes per figure, and every figure has alt text |
+| 5 | diagram | yes | At most twelve nodes per figure, and every figure has alt text. No renderer on the machine skips the stage rather than retrying |
 | 6 | write | yes | A section cites only the numbers its claims support |
 | 7 | review | yes | Every rubric row passes |
 | 8 | assemble | no | Every hard gate in `paper_check`, including that the paper has a body |
@@ -115,6 +115,19 @@ Inside a stage, `gates.decide` returns pass, retry, or escalate. It short
 circuits the one case worth catching early: the same rows failing twice, which
 means the loop is not converging. Spending the rest of the budget to watch it
 fail identically buys a bill, not a fix.
+
+## A missing renderer is not a retry
+
+`mmdc is not installed` is not something the diagrammer can fix. Asking it to
+redraw is asking it to solve a problem it cannot see or reach, and three
+attempts buy three times the bill and the same result.
+
+The stage tells the two apart. A figure with too many nodes comes back as a
+retry instruction, because a better attempt can fix it. A renderer that is not
+on the machine raises `RendererMissing`, the stage records `renderer: missing`,
+and the run continues. The paper ships without figures rather than not at all,
+because nothing in `paper_check` requires one and blocking every attendee
+without Java is a worse answer than saying so out loud.
 
 ## Verification is bounded
 
@@ -181,7 +194,7 @@ The loop never learns which one answered.
 ## Verify
 
 ```bash
-task test      # 220 tests, no SDK, no key, no network
+task test      # 226 tests, no SDK, no key, no network, no renderer
 task table     # the reviewer prints no in the writes column
 task checks    # every module's own assertions
 task brief -- --question "sqlalchemy nullable datetime column"
@@ -230,6 +243,14 @@ It is not a shared library. Nothing here is imported by another solution folder,
 and nothing here imports one. It is not a generic research engine. Copy this
 folder somewhere else and it runs.
 
-The check that runs without any of it is `task test`. No SDK required, no key
-required. If your reviewer ends up holding a write tool, the translation is
-wrong, and that test says so.
+The check that runs without any of it is `task test`. No SDK, no key, no
+network, and no diagram renderer. That last one is load bearing: the suite used
+to shell out to mermaid-cli and plantuml, so it could not run in continuous
+integration, and a cost-cap test passed only because the developer's machine
+happened to have plantuml. With no renderer the run died at the diagram stage
+and still returned the exit code the test asserted. A test that cannot fail is
+not a test, so the suite is hermetic and `.github/workflows/tests.yml` runs it
+on a bare runner with nothing but `pytest`.
+
+If your reviewer ends up holding a write tool, the translation is wrong, and
+`task test` says so.

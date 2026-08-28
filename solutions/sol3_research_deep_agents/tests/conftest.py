@@ -1,8 +1,13 @@
 """Shared fixtures. Nothing here imports deepagents or langchain for real.
 
-The whole suite must run with no SDK, no API key, no network, and no clone.
-That is the contract every solution folder in this repo meets, and it is what
-lets an attendee check their translation before installing anything.
+The whole suite must run with no SDK, no API key, no network, no clone, and no
+diagram renderer. That last one was missing, and it cost a real bug: thirteen
+tests shelled out to mermaid-cli and plantuml, so the suite could not run on a
+clean runner, and one cost-cap test was a false green. With no renderer the run
+died at the diagram stage and still returned the exit code the test asserted.
+
+`test_diagrams.py` is the one place that exercises the renderers, and it stubs
+the calls that shell out.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 FIXTURES = ROOT / "fixtures" / "paper"
+DIAGRAM_SUFFIXES = (".mmd", ".mermaid", ".puml", ".plantuml")
 
 
 @pytest.fixture
@@ -99,48 +105,102 @@ def fake_deepagents(monkeypatch: pytest.MonkeyPatch):
     return seen
 
 
+# -- the diagram renderers -------------------------------------------------
+
+
+def stub_figure(name: str, out_dir: Path):
+    """A rendered figure, without mermaid-cli, plantuml, java, or a network."""
+    import diagrams  # noqa: PLC0415  (sys.path is set above)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    svg = out_dir / f"{name}.svg"
+    svg.write_text("<svg/>", encoding="utf-8")
+    return diagrams.Figure(
+        name=name,
+        source=Path(f"{name}.mmd"),
+        svg=svg,
+        alt=f"A diagram of {name}",
+        hash="stub",
+    )
+
+
+def _render_stub(src_dir, out_dir, topic, **kwargs):
+    src_dir = Path(src_dir)
+    names = (
+        [path.stem for path in sorted(src_dir.iterdir()) if path.suffix.lower() in DIAGRAM_SUFFIXES]
+        if src_dir.is_dir()
+        else []
+    )
+    return [stub_figure(name, Path(out_dir)) for name in names], []
+
+
+@pytest.fixture
+def stub_renderer(monkeypatch: pytest.MonkeyPatch):
+    """Render every diagram source to a placeholder SVG, in process."""
+    import stages  # noqa: PLC0415  (sys.path is set above)
+
+    monkeypatch.setattr(stages, "render_figures", _render_stub)
+    return _render_stub
+
+
+@pytest.fixture
+def no_renderer(monkeypatch: pytest.MonkeyPatch):
+    """No mermaid-cli, no plantuml, no java. What a clean CI runner looks like."""
+    import stages  # noqa: PLC0415  (sys.path is set above)
+
+    def missing(src_dir, out_dir, topic, **kwargs):
+        raise stages.RendererMissing("no diagram source could be rendered on this machine.")
+
+    monkeypatch.setattr(stages, "render_figures", missing)
+    return missing
+
+
+# -- whole runs ------------------------------------------------------------
+
+
 @pytest.fixture
 def run_dir(tmp_path: Path) -> Path:
     return tmp_path / "run"
 
 
-@pytest.fixture
-def offline(run_dir: Path):
-    """A whole pipeline, wired to recorded replies. No network, no key, no SDK."""
-    import paper  # noqa: PLC0415  (sys.path is set by conftest first)
-    import research  # noqa: PLC0415  (sys.path is set by conftest first)
+def build_run(work_dir: Path, **kwargs):
+    import paper  # noqa: PLC0415  (sys.path is set above)
+    import research  # noqa: PLC0415
 
     return paper.Paper(
         topic="Exit conditions in production agent loops",
-        runner=paper.FixtureRunner(FIXTURES / "replies.json"),
+        runner=kwargs.pop("runner", None) or paper.FixtureRunner(FIXTURES / "replies.json"),
         backend=research.FixtureBackend(FIXTURES / "research.json"),
-        work_dir=run_dir,
+        work_dir=work_dir,
         polish=False,
         quiet=True,
+        **kwargs,
     )
+
+
+@pytest.fixture
+def offline(run_dir: Path, stub_renderer):
+    """A whole pipeline, wired to recorded replies and a stubbed renderer."""
+    return build_run(run_dir)
 
 
 @pytest.fixture(scope="session")
 def finished_paper(tmp_path_factory) -> Path:
     """One completed run, shared by every read-only check.
 
-    Session scoped because the diagram stage shells out to mmdc and plantuml,
-    which take seconds. Tests that mutate a run take the per-test `offline`
-    fixture instead.
+    Session scoped so the pipeline runs once rather than once per test. The
+    renderer is stubbed here as everywhere else, so this passes on a runner with
+    nothing installed.
     """
-    import paper  # noqa: PLC0415  (sys.path is set by conftest first)
-    import research  # noqa: PLC0415  (sys.path is set by conftest first)
+    import stages  # noqa: PLC0415  (sys.path is set above)
 
     work = tmp_path_factory.mktemp("finished")
-    run = paper.Paper(
-        topic="Exit conditions in production agent loops",
-        runner=paper.FixtureRunner(FIXTURES / "replies.json"),
-        backend=research.FixtureBackend(FIXTURES / "research.json"),
-        work_dir=work,
-        polish=False,
-        quiet=True,
-    )
-    assert run.run() == 0
+    real, stages.render_figures = stages.render_figures, _render_stub
+    try:
+        run = build_run(work)
+        assert run.run() == 0
+    finally:
+        stages.render_figures = real
     return work
 
 

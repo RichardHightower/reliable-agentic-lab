@@ -1,0 +1,41 @@
+name: tests
+
+on: [push, pull_request]
+
+# The worklog invariants ran on every push and nothing else did, so no test in
+# this repo had ever run in continuous integration. A cost-cap test that only
+# passed because the runner happened to have plantuml installed is what that
+# gap looks like from the inside.
+#
+# The runner is bare on purpose: no mermaid-cli, no plantuml, no Java, no
+# imagen, no API key, no SDK. A solution folder that needs any of those to make
+# its tests pass is not standalone, which is the one property every folder here
+# is supposed to have.
+
+jobs:
+  folders:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        folder:
+          - solutions/sol3_research_deep_agents
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: install pytest only
+        run: python -m pip install --quiet pytest
+      - name: the folder's own tests
+        working-directory: ${{ matrix.folder }}
+        run: python -m pytest tests -q
+      - name: the deterministic check scripts
+        working-directory: ${{ matrix.folder }}
+        run: |
+          for module in evidence paper_check diagrams publish mcp_tools; do
+            python "$module.py" --demo
+          done
+      - name: the role table, with no SDK installed
+        working-directory: ${{ matrix.folder }}
+        run: python loop.py --table-only --paper

@@ -69,6 +69,15 @@ def test_the_paper_passes_its_own_gates(finished_paper):
     assert report["failures"] == []
 
 
+def test_a_warning_is_not_filed_as_a_failure(finished_paper):
+    """`publish` reads this file to decide whether the paper may ship, so a soft
+    word count must not look like a blocked gate."""
+    report = json.loads((finished_paper / "gates.json").read_text())
+    assert "warnings" in report
+    assert set(report["warnings"]) & {"length", "limitations"} or report["warnings"] == []
+    assert not set(report["failures"]) & {"length", "limitations"}
+
+
 def test_every_citation_in_the_paper_resolves(finished_paper):
     import re  # noqa: PLC0415  (sys.path is set by conftest first)
 
@@ -235,30 +244,51 @@ class Priced(paper.FixtureRunner):
 
 
 def priced_run(work_dir, cap):
-    import research  # noqa: PLC0415  (sys.path is set by conftest first)
-    from conftest import FIXTURES  # noqa: PLC0415
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
 
-    return paper.Paper(
-        topic="Exit conditions in production agent loops",
-        runner=Priced(FIXTURES / "replies.json"),
-        backend=research.FixtureBackend(FIXTURES / "research.json"),
-        work_dir=work_dir,
-        polish=False,
-        quiet=True,
-        max_usd=cap,
-    )
+    return build_run(work_dir, runner=Priced(FIXTURES / "replies.json"), max_usd=cap)
 
 
-def test_the_cap_holds_inside_a_stage(run_dir):
+def stopped_at(run):
+    """Which stage failed and why. An exit code alone proves nothing.
+
+    `run() == 2` means the run escalated. It does not say whether the money ran
+    out or a renderer was missing, and a test that checks only the code passes
+    for either. That is exactly how the first version of this file was a false
+    green: on a machine with no plantuml the run died at `diagram` and still
+    returned 2.
+    """
+    for name, entry in run.state.stages.items():
+        if entry.status == pstate.FAILED:
+            return name, entry.error or ""
+    return None, ""
+
+
+def test_the_cap_holds_inside_a_stage(run_dir, stub_renderer):
     """Checking only between stages is not a cap. A stage that loops over six
     sections makes six calls with nothing between them, so the run learns it is
     over budget once the money is gone. This case used to spend $4.45 of $3.00."""
     run = priced_run(run_dir, 3.00)
     assert run.run() == 2
+
+    stage, why = stopped_at(run)
+    assert stage == "write", (
+        f"the run must reach the writer to prove anything, it stopped at {stage}"
+    )
+    assert "writer call needs" in why, why
     assert run.state.total_cost_usd <= 3.00, f"spent ${run.state.total_cost_usd:.2f} of $3.00"
 
 
-def test_the_run_says_which_call_it_could_not_afford(run_dir, capsys):
+def test_the_writer_was_actually_reached(run_dir, stub_renderer):
+    """A guard on the guard. Every earlier stage must have completed, or the cap
+    test above is measuring a different failure."""
+    run = priced_run(run_dir, 3.00)
+    run.run()
+    done = [n for n, s in run.state.stages.items() if s.status == pstate.COMPLETE]
+    assert done == ["plan", "search", "verify", "outline", "diagram"], done
+
+
+def test_the_run_says_which_call_it_could_not_afford(run_dir, stub_renderer, capsys):
     run = priced_run(run_dir, 3.00)
     run.quiet = False
     run.run()
@@ -267,7 +297,7 @@ def test_the_run_says_which_call_it_could_not_afford(run_dir, capsys):
     assert "cost" in out
 
 
-def test_a_spent_budget_is_never_retried(run_dir):
+def test_a_spent_budget_is_never_retried(run_dir, stub_renderer):
     """A gate failure might be fixed by another attempt. A spent budget will not
     be, and retrying on it turns a cost cap into a cost multiplier."""
     run = priced_run(run_dir, 3.00)
@@ -275,13 +305,13 @@ def test_a_spent_budget_is_never_retried(run_dir):
     assert run.state.attempts("write") == 1
 
 
-def test_a_cheap_run_still_finishes(run_dir):
+def test_a_cheap_run_still_finishes(run_dir, stub_renderer):
     run = priced_run(run_dir, 100.0)
     assert run.run() == 0
     assert run.state.total_cost_usd <= 100.0
 
 
-def test_the_total_counts_each_call_once(run_dir):
+def test_the_total_counts_each_call_once(run_dir, stub_renderer):
     """`spend` and `mark_complete` both used to add."""
     run = priced_run(run_dir, 100.0)
     run.run()
@@ -289,6 +319,41 @@ def test_the_total_counts_each_call_once(run_dir):
     assert run.state.total_cost_usd == pytest.approx(by_stage), (
         "the total and the per-stage costs describe the same calls"
     )
+
+
+# -- a machine with no diagram renderer ------------------------------------
+
+
+def test_a_missing_renderer_does_not_block_the_paper(run_dir, no_renderer):
+    """An attendee without Java still gets a paper. Nothing in `paper_check`
+    requires a figure, so blocking the run would be a worse answer than saying
+    so out loud."""
+    run = priced_run(run_dir, 100.0)
+    assert run.run() == 0
+    assert (run_dir / "whitepaper.md").exists()
+
+
+def test_a_missing_renderer_is_never_retried(run_dir, no_renderer):
+    """Nothing the diagrammer writes installs plantuml. Three attempts buy three
+    times the bill and the same result."""
+    run = priced_run(run_dir, 100.0)
+    run.run()
+    assert run.state.attempts("diagram") == 1
+
+
+def test_a_missing_renderer_is_recorded(run_dir, no_renderer, capsys):
+    run = priced_run(run_dir, 100.0)
+    run.quiet = False
+    run.run()
+    assert run.state.stages["diagram"].metadata.get("renderer") == "missing"
+    assert "no renderer on this machine" in capsys.readouterr().out
+
+
+def test_a_paper_without_figures_still_passes_its_gates(run_dir, no_renderer):
+    run = priced_run(run_dir, 100.0)
+    run.run()
+    report = json.loads((run_dir / "gates.json").read_text())
+    assert report["passed"] is True, report
 
 
 def test_sections_written_before_a_stop_survive(run_dir):
