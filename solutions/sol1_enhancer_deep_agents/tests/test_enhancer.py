@@ -92,10 +92,11 @@ class FakeBackend:
 
     name = "fake"
 
-    def __init__(self, judgments: list, draft: str | None = None, ok: bool = True):
+    def __init__(self, judgments: list, draft: str | None = None, ok: bool = True, usd: float = 0.0):
         self.judgments = list(judgments)
         self.draft = draft
         self.ok = ok
+        self.usd = usd
         self.prompts: list[str] = []
         self.allows: list[list[str]] = []
 
@@ -106,14 +107,17 @@ class FakeBackend:
             return DoerResult(ok=False, output="backend exploded")
         if "judge subagent" in prompt:
             verdict = self.judgments.pop(0)
-            return DoerResult(output=verdict if isinstance(verdict, str) else json.dumps(verdict))
+            return DoerResult(
+                output=verdict if isinstance(verdict, str) else json.dumps(verdict),
+                usd=self.usd,
+            )
         target = prompt.split("Write the full rewritten ticket to ")[1].split(" and ", maxsplit=1)[
             0
         ]
         path = Path(repo) / target
         if self.draft is not None:
             path.write_text(self.draft, encoding="utf-8")
-        return DoerResult(wrote=[target], output="wrote the candidate")
+        return DoerResult(wrote=[target], output="wrote the candidate", usd=self.usd)
 
 
 def judged(kind: str = "feature", present: list[str] | None = None) -> dict:
@@ -127,8 +131,8 @@ def target(tmp_path) -> Path:
     return tmp_path
 
 
-def engine(target, backend, gh, budget: int = 3) -> Enhancer:
-    return Enhancer(repo=target, backend=backend, gh=gh, budget=budget)
+def engine(target, backend, gh, budget: int = 3, max_usd: float = 2.0) -> Enhancer:
+    return Enhancer(repo=target, backend=backend, gh=gh, budget=budget, max_usd=max_usd)
 
 
 # -- parse_judge ------------------------------------------------------------
@@ -527,20 +531,19 @@ def test_a_ticket_already_escalated_waits_for_a_human(target):
 # -- the exits --------------------------------------------------------------
 
 
-def test_the_same_gaps_two_rounds_running_escalates(target):
-    """A loop that keeps finding the same gap is not converging, it is stuck."""
+def test_the_same_gaps_two_rounds_running_does_not_stop(target):
+    """Stuck work burns turns or dollars. A repeated signature is not an exit."""
     State(github_issue=7, last_comment_id="1", round=1, previous_signature=sorted(FEATURE)).save(
         target, "T001"
     )
     gh = FakeGh(comments=[("2", "still here")])
     backend = FakeBackend([judged(), judged()], draft=DRAFT)
     [outcome] = engine(target, backend, gh).poll()
-    assert outcome.status == "escalated"
-    assert outcome.detail == "same signature two rounds running"
-    assert "needs-human" in gh.added
+    assert outcome.status == "waiting"
+    assert "needs-human" not in gh.added
 
 
-def test_a_spent_budget_escalates(target):
+def test_max_turns_escalates(target):
     State(github_issue=7, last_comment_id="1", round=2, previous_signature=["problem"]).save(
         target, "T001"
     )
@@ -548,7 +551,17 @@ def test_a_spent_budget_escalates(target):
     backend = FakeBackend([judged(), judged()], draft=DRAFT)
     [outcome] = engine(target, backend, gh, budget=3).poll()
     assert outcome.status == "escalated"
-    assert outcome.detail == "budget spent"
+    assert outcome.detail == "max turns"
+
+
+def test_cost_escalates(target):
+    State(github_issue=7, last_comment_id="1", round=0).save(target, "T001")
+    gh = FakeGh(comments=[("2", "still here")])
+    backend = FakeBackend([judged(), judged()], draft=DRAFT, usd=1.0)
+    [outcome] = engine(target, backend, gh, max_usd=0.5).poll()
+    assert outcome.status == "escalated"
+    assert outcome.detail == "cost"
+    assert "needs-human" in gh.added
 
 
 def test_a_round_that_makes_progress_records_it_for_the_next_poll(target):

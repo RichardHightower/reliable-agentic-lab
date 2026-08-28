@@ -113,6 +113,8 @@ def run(argv_repo: str, *, ticket: str | None, simulate: str | None) -> int:
         repo=Path(contract.repo),
         backend=backend(contract),
         gh=Gh(settings["fork_owner"], settings["repo_name"]),
+        budget=int(contract.budget.get("iterations", 3)),
+        max_usd=float(contract.budget.get("usd", 2.0)),
     )
     try:
         outcomes = engine.poll(ticket, simulate_comment=simulate)

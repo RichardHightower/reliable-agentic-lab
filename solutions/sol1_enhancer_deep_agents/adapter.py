@@ -67,6 +67,42 @@ def last_ai_text(result) -> str:
     return _content_text(content)
 
 
+def last_usd(result) -> float:
+    """Sum any cost the invoke result carried. Zero when the runtime is silent.
+
+    Deep Agents does not always put a dollar figure on graph state. When a
+    message has `usage_metadata` with `total_cost` / `total_cost_usd` / `cost`,
+    that is the number `check_stop` charges. Missing metadata is zero, not a
+    guess.
+    """
+    if isinstance(result, dict) and result.get("usd") is not None:
+        try:
+            return float(result["usd"])
+        except (TypeError, ValueError):
+            pass
+    messages = None
+    if isinstance(result, dict):
+        messages = result.get("messages")
+    else:
+        messages = getattr(result, "messages", None)
+        if messages is None and hasattr(result, "get"):
+            messages = result.get("messages")
+    total = 0.0
+    for msg in messages or []:
+        usage = msg.get("usage_metadata") if isinstance(msg, dict) else getattr(msg, "usage_metadata", None)
+        if not isinstance(usage, dict):
+            continue
+        for key in ("total_cost", "total_cost_usd", "cost"):
+            if usage.get(key) is None:
+                continue
+            try:
+                total += float(usage[key])
+            except (TypeError, ValueError):
+                continue
+            break
+    return total
+
+
 def _content_text(content) -> str:
     if content is None:
         return ""
@@ -108,7 +144,7 @@ class DeepAgentsBackend(Backend):
             before = _changed_files(repo)
             result = self.agent.invoke({"messages": [{"role": "user", "content": prompt}]})
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]
-            return DoerResult(wrote=wrote, output=last_ai_text(result))
+            return DoerResult(wrote=wrote, output=last_ai_text(result), usd=last_usd(result))
         # Graceful failure, mirrors CliBackend.run. A backend that raises
         # takes the loop down with it.
         except Exception as exc:

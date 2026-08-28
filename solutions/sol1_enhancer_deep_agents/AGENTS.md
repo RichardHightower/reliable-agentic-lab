@@ -14,5 +14,6 @@ The judge holds no write tool. Never ask it to write.
 Never spawn a general-purpose subagent.
 Never edit `app/` or `tests/`.
 
-`check_fields.py` computes ready. `check_stop.py` computes the exits.
+`check_fields.py` computes ready. `check_stop.py` computes the three exits:
+cost, max turns, or done. A repeated signature is not an exit.
 A human `LGTM` is the only comment that releases a green ticket.
