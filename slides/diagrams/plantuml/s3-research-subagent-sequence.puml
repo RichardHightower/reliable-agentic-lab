@@ -1,0 +1,39 @@
+@startuml s3-research-subagent-sequence
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam shadowing false
+skinparam sequence {
+  LifeLineBorderColor #2dd4bf
+  ActorBorderColor #d4a84b
+  ActorBackgroundColor #0d1e2c
+  ParticipantBackgroundColor #0d1e2c
+  ParticipantBorderColor #2dd4bf
+  ParticipantFontColor #eef4f6
+}
+title Research subagent sequence
+participant "Orchestrator" as O
+participant "Researcher" as R
+participant "search()" as S
+participant "Writer" as W
+participant "check_brief" as J
+database "briefs/" as D
+O -> R : plan_questions(question)
+R -> S : ask each sub-question
+S --> R : Finding + citations
+R --> O : summary, never the dump
+O -> W : assemble brief
+W -> D : write brief.md
+O -> J : check_brief(body, sources)
+J --> O : BriefScore
+alt pass
+  O --> O : stop
+else same gaps twice
+  O --> O : escalate
+else BudgetExceeded or no source
+  O --> O : escalate
+else budget left
+  O -> R : retry
+end
+@enduml

@@ -1,0 +1,10 @@
+flowchart LR
+  subgraph Engine["reliable-agentic-lab"]
+    Loops["orchestrator / doer / judge"]
+    Gates["gates.py"]
+  end
+  subgraph Target["northwind-field-crm"]
+    Tickets["tickets/*.md"]
+    App["CRM application"]
+  end
+  Loops -->|"path only\nTaskfile.yml"| Tickets

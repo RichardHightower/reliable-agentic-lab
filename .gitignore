@@ -39,3 +39,6 @@ solutions/**/debug.log
 # checkouts that live-in-repo sessions create.
 .claude/settings.local.json
 .claude/worktrees/
+
+# Generated Marp HTML (PDF remains tracked).
+slides/**/slides.html

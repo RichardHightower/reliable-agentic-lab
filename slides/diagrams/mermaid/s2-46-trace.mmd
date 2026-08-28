@@ -1,0 +1,4 @@
+flowchart LR
+  Trace[".harness/last-implementer.json"] --> Rows["rows per iteration"]
+  Trace --> Gate["gate: pass or escalate"]
+  Trace --> Why["reason: the row that blocked"]

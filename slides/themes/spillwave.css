@@ -1,0 +1,59 @@
+/* @theme spillwave */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,550&family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #07141f;
+  --ink: #eef4f6;
+  --muted: #8aa0ad;
+  --teal: #2dd4bf;
+  --gold: #d4a84b;
+  --line: rgba(45, 212, 191, 0.22);
+}
+
+section {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Outfit, "Segoe UI", sans-serif;
+  padding: 48px 56px 64px;
+  font-size: 28px;
+  line-height: 1.35;
+}
+
+section::after {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+
+h1 {
+  font-family: Fraunces, Georgia, serif;
+  font-style: italic;
+  font-weight: 550;
+  color: var(--gold);
+  font-size: 44px;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+}
+
+h2, h3 { color: var(--teal); font-weight: 600; }
+
+p, li { color: var(--ink); }
+small, cite { color: var(--muted); font-size: 16px; }
+
+code, pre {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  background: #061018;
+  color: #d7ece8;
+}
+
+table { font-size: 22px; }
+th { color: var(--muted); font-weight: 500; font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; }
+td { border-color: var(--line); }
+
+img { display: block; margin-left: auto; margin-right: auto; }
+
+footer {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+}

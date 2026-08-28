@@ -8,25 +8,30 @@ writes `slides.build.md` next to the source, with the block replaced by an image
     python scripts/build_slides.py
 
 Edit `slides.md`. Never edit `slides.build.md`. It is generated.
+
+Optional: set MERMAID_PUPPETEER_CONFIG to a puppeteer JSON if Chromium is not
+where mermaid-cli expects it. In CI-like sandboxes this script will also look
+for Playwright's chrome-headless-shell under /opt/pw-browsers.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SLIDES = ROOT / "slides"
 BLOCK = re.compile(r"^```mermaid\n(.*?)^```\n", re.M | re.S)
 MMDC = ["npx", "-y", "@mermaid-js/mermaid-cli"]
-# Mermaid's default type is too small once a wide diagram is scaled to fit.
 CONFIG = SLIDES / "mermaid.json"
 VIEWBOX = re.compile(r'viewBox="0 0 ([\d.]+) ([\d.]+)"')
 
-# A 1280x720 slide, less the heading and the caption that share it.
 MAX_W = 1060
 MAX_H = 460
 SLIDE_RATIO = MAX_W / MAX_H
@@ -55,6 +60,43 @@ def viewbox(svg: Path) -> tuple[float, float]:
     return float(match.group(1)), float(match.group(2))
 
 
+def find_chrome() -> Path | None:
+    env = os.environ.get("PUPPETEER_EXECUTABLE_PATH")
+    if env and Path(env).is_file():
+        return Path(env)
+    bundled = Path(
+        "/opt/pw-browsers/chromium_headless_shell-1234/"
+        "chrome-headless-shell-linux64/chrome-headless-shell"
+    )
+    if bundled.is_file():
+        return bundled
+    matches = sorted(Path("/opt/pw-browsers").glob("**/chrome-headless-shell"))
+    return matches[0] if matches else None
+
+
+def puppeteer_config() -> Path | None:
+    env = os.environ.get("MERMAID_PUPPETEER_CONFIG")
+    if env and Path(env).is_file():
+        return Path(env)
+    bundled = SLIDES / "puppeteer.json"
+    if bundled.is_file():
+        return bundled
+    chrome = find_chrome()
+    if chrome is None:
+        return None
+    path = Path(tempfile.gettempdir()) / "mermaid-puppeteer.json"
+    path.write_text(
+        json.dumps(
+            {
+                "executablePath": str(chrome),
+                "args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def render(source: str, out: Path) -> None:
     """Draw one block. The hash in the file name means an unchanged block is a
     cache hit, which keeps a rebuild from costing 30 seconds of node startup."""
@@ -62,12 +104,19 @@ def render(source: str, out: Path) -> None:
         return
     mmd = out.with_suffix(".mmd")
     mmd.write_text(source, encoding="utf-8")
-    subprocess.run(
-        [*MMDC, "-i", str(mmd), "-o", str(out), "-b", "transparent", "-c", str(CONFIG)],
-        check=True,
-        capture_output=True,
-    )
-    mmd.unlink()
+    cmd = [*MMDC, "-i", str(mmd), "-o", str(out), "-b", "transparent", "-c", str(CONFIG)]
+    puppeteer = puppeteer_config()
+    if puppeteer is not None:
+        cmd.extend(["-p", str(puppeteer)])
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        sys.stderr.write(f"mermaid-cli failed for {out.name}\n")
+        sys.stderr.write(exc.stderr or exc.stdout or "")
+        raise
+    finally:
+        if mmd.exists():
+            mmd.unlink()
 
 
 def build(deck: Path) -> int:
@@ -83,9 +132,6 @@ def build(deck: Path) -> int:
         digest = hashlib.sha256(body.encode()).hexdigest()[:8]
         name = f"diagram-{id_before(match.start(), ids)}-{digest}.svg"
         render(body, images / name)
-        # mermaid-cli writes width="100%", so the SVG fills whatever box it
-        # lands in and a tall flowchart runs off the slide. Pick the dimension
-        # that actually binds, and let Marp keep the aspect ratio.
         width, height = viewbox(images / name)
         fit = f"h:{MAX_H}" if width / height < SLIDE_RATIO else f"w:{MAX_W}"
         count += 1

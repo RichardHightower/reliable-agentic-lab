@@ -1,0 +1,4 @@
+flowchart LR
+  Err["Named error in the log"] --> Ask["scholar.ask, once"]
+  Ask --> Next["Carry the answer into the next attempt"]
+  Ask -->|BudgetExceeded| Stop["Record it. Do not search forever."]

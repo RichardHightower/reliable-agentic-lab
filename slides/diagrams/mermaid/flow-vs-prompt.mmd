@@ -1,0 +1,11 @@
+flowchart LR
+  subgraph One["Direct prompt"]
+    P["One well-designed prompt"] --> Out["19% pass@5"]
+  end
+  subgraph Flow["Flow engineering"]
+    Pl["Plan"] --> G["Generate"]
+    G --> Tests["Run tests"]
+    Tests -->|fail| G
+    Tests -->|pass| Win["44% pass@5"]
+  end
+  One -.->|"same GPT-4"| Flow

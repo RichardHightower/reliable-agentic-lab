@@ -1,0 +1,5 @@
+flowchart TB
+  O["Orchestrator\nOwns the budget\nWrites nothing\nSees summaries"]
+  O --> R["Researcher\nSearch tools only\nIsolated context"]
+  O --> W["Writer\nbriefs/ only"]
+  O --> J["Judge\ncheck_brief in Python\nNo write method"]

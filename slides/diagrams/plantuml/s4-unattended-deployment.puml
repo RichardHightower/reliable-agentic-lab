@@ -1,0 +1,60 @@
+@startuml s4-unattended-deployment
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam node {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+skinparam package {
+  BackgroundColor #07141f
+  BorderColor #d4a84b
+  FontColor #d4a84b
+}
+skinparam component {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+skinparam actor {
+  BackgroundColor #0d1e2c
+  BorderColor #d4a84b
+  FontColor #eef4f6
+}
+title C4 container view. Unattended fixer.
+
+actor "Human\nmerge, escalate" as Human
+
+node "GitHub" as GH {
+  component "unattended.yml\ndispatch, PR, cron 0 15 * * 1-5" as WF
+}
+
+node "Engine repo\nreliable-agentic-lab" as Engine {
+  component "loops/unattended.py\nexit 0, 2, 1" as U
+  component "loops/fixer.py\nfailure_summary, checkout, research once" as F
+  component "loops/gates.py\npass, retry, escalate" as G
+}
+
+node "Target repo\nnorthwind-field-crm" as Target {
+  component "Taskfile.yml plus junit.xml" as TF
+  component ".harness/state.json" as ST
+  component ".harness/receipt.json" as RC
+  component "app, not tests/**" as APP
+}
+
+component "pytest" as PY
+component "Langfuse, optional" as LF
+
+Human --> WF : workflow_dispatch
+WF --> U : start one loop
+U --> F : run fixer
+F --> G : decide
+F --> TF : path only
+F --> APP : write inside scope
+F --> PY : tests after every turn
+U --> ST : save last_gate, last_reason
+PY --> RC : write receipt
+U --> LF : same record, if keys exist
+RC --> Human : merge stays human
+@enduml

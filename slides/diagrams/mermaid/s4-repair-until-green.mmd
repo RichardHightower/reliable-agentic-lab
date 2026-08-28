@@ -1,0 +1,8 @@
+flowchart TB
+  Start["contract.run('test')"] --> Green{"junit.green?"}
+  Green -->|yes| Pass["PASS. the suite is green"]
+  Green -->|never ran| Esc1["ESCALATE. the suite never ran"]
+  Green -->|same ids twice| Esc2["ESCALATE. not converging"]
+  Green -->|budget spent| Esc3["ESCALATE. plus a comment"]
+  Green -->|else| Doer["Doer repairs inside scope"]
+  Doer --> Start

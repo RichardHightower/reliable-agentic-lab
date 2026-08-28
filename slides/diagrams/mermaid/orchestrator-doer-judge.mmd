@@ -1,0 +1,4 @@
+flowchart TB
+  O["Orchestrator\nOwns the budget\nWrites nothing\nSees summaries"]
+  O --> D["Doer\nWrites inside a declared scope"]
+  O --> J["Judge\nScores\nNo write method"]

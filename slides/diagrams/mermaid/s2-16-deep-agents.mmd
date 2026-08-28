@@ -1,0 +1,6 @@
+flowchart TB
+  O["Orchestrator\ncreate_deep_agent\ntools: run_tests. No write."]
+  O --> P["planner\nwrite tool, steps.jsonl"]
+  O --> T["test-implementer\nwrite tool, tests/**"]
+  O --> C["code-implementer\nwrite tool, app/**"]
+  O --> J["judge\ntools: read_file only"]

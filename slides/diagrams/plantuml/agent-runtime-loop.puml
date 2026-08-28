@@ -1,0 +1,26 @@
+@startuml agent-runtime-loop
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam component {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+skinparam rectangle {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+title Agent runtime loop
+rectangle "Trigger\nDraft ticket" as T
+rectangle "Doer\nScoped write" as D
+rectangle "Judge\nNo write path" as J
+rectangle "Memory\nFile + trace" as M
+rectangle "Human\nLGTM" as H
+T --> D
+D --> J
+J --> D : not ready
+J --> M : ready
+M --> H
+@enduml

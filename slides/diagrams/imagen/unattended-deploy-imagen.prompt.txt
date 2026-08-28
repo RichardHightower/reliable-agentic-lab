@@ -1,0 +1,7 @@
+This is a slide diagram for a technical presentation about unattended production loops.
+Clean minimalist technical illustration. Boxes, arrows, labels. Landscape 16:9.
+Palette: background #07141f, surface #0d1e2c, primary #2dd4bf, accent #d4a84b, ink #eef4f6.
+No source syntax, no ASCII, no tiny labels, no watermarks, no logos, no em dash characters.
+Diagram type: c4.
+GitHub Actions trigger workflow_dispatch, pull_request, cron into a fixer loop with orchestrator, doer, judge, then .harness/state.json and receipt.json, then three exit codes 0 pass, 2 escalate, 1 crash. Human merge box locked at the end.
+Convert the visual boxes, arrows, and labels. The image must show a finished diagram, not Mermaid or PlantUML code.

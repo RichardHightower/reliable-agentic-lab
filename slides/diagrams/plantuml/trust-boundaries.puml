@@ -1,0 +1,22 @@
+@startuml trust-boundaries
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+title Trust boundaries in Module 1
+package "Untrusted model output" {
+  rectangle "Doer draft"
+  rectangle "Judge prose"
+}
+package "Trusted process" {
+  rectangle "gates.decide()"
+  rectangle "WriteScope.check()"
+  rectangle "criteria.judge() structural rows"
+}
+package "Human" {
+  rectangle "LGTM"
+}
+"Doer draft" --> "WriteScope.check()"
+"Judge prose" --> "gates.decide()"
+"criteria.judge() structural rows" --> "gates.decide()"
+"gates.decide()" --> LGTM : pass
+@enduml

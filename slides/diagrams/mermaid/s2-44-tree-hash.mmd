@@ -1,0 +1,10 @@
+flowchart TB
+  C["receipt.check(repo)"] --> N{"receipt exists?"}
+  N -->|no| X1["No receipt"]
+  N -->|yes| G{"green and report_usable?"}
+  G -->|no| X2["Last run FAILED"]
+  G -->|yes| H{"tree_hash matches?"}
+  H -->|no| X3["The tree changed. Receipt is stale."]
+  H -->|yes| T{"newest mtime <= written_at?"}
+  T -->|no| X4["A source file is newer. Re-run."]
+  T -->|yes| OK["Allow the push"]

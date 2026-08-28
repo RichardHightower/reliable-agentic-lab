@@ -1,0 +1,66 @@
+@startuml s4-observability-pipeline
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam package {
+  BackgroundColor #07141f
+  BorderColor #d4a84b
+  FontColor #d4a84b
+}
+skinparam rectangle {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+title Observability pipeline
+
+package "The loop" {
+  rectangle "tool name" as TN
+  rectangle "arguments" as AR
+  rectangle "output" as OUT
+  rectangle "duration" as DUR
+  rectangle "retries" as RET
+  rectangle "error" as ERR
+}
+
+package "Span" {
+  rectangle "events[]" as EV
+  rectangle "outcome" as OC
+  rectangle "seconds" as SEC
+}
+
+package "Always" {
+  rectangle "work/traces/*.json" as JSON
+}
+
+package "Optional" {
+  rectangle "Langfuse pane" as LF
+}
+
+package "Three numbers per run" {
+  rectangle "steps" as ST
+  rectangle "loop count" as LC
+  rectangle "cost per task" as COST
+}
+
+TN --> EV
+AR --> EV
+OUT --> EV
+DUR --> EV
+RET --> EV
+ERR --> EV
+EV --> JSON
+OC --> JSON
+SEC --> JSON
+JSON --> LF
+JSON --> ST
+JSON --> LC
+JSON --> COST
+
+note as N1
+  Local JSON is production
+  if you actually open it.
+  A missing key must never
+  change what the loop does.
+end note
+@enduml

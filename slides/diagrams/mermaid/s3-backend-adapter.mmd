@@ -1,0 +1,8 @@
+flowchart TB
+  Choose["research.choose()"] --> P{"PERPLEXITY_API_KEY?"}
+  P -->|yes| Px["PerplexityBackend"]
+  P -->|no| W{"websearch inbox?"}
+  W -->|yes| Ws["WebSearchBackend"]
+  W -->|no| F{"fixture exists?"}
+  F -->|yes| Fx["FixtureBackend"]
+  F -->|no| X["RuntimeError. Refuse.\nNever return empty evidence"]

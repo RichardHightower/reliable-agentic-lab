@@ -1,0 +1,6 @@
+flowchart LR
+  P["Perceive\nTrigger"] --> R["Reason\nPlan next action"]
+  R --> A["Act\nTool or write"]
+  A --> O["Observe\nTests, files, scores"]
+  O --> D["Decide\nPass, retry, escalate"]
+  D -->|retry| R

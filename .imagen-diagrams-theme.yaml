@@ -1,0 +1,45 @@
+id: spillwave-navy
+name: Spillwave Navy
+version: 1
+source:
+  kind: extracted
+  ref: Loop_Engineering_Workshop_Alternating_Spillwave.pdf
+aspect_default: "16:9"
+style:
+  summary: >
+    Dark navy technical slides. Teal boxes, gold titles, white labels.
+    Soft rounded rectangles, thin teal arrows, no decoration.
+  label_min_px: 24
+  arrow_px: [2, 3]
+  text_orientation: horizontal
+  contrast_min: 4.5
+palette:
+  background: "#07141f"
+  surface: "#0d1e2c"
+  primary: "#2dd4bf"
+  primary_fg: "#07141f"
+  accent: "#d4a84b"
+  accent_2: "#122536"
+  success: "#4ade80"
+  ink: "#eef4f6"
+  muted: "#8aa0ad"
+roles:
+  title: { bg: surface, fg: accent }
+  node_default: { bg: surface, fg: ink }
+  node_emphasis: { bg: primary, fg: primary_fg }
+  node_success: { bg: success, fg: primary_fg }
+  node_decision: { bg: accent, fg: primary_fg }
+  subgraph: { bg: accent_2, fg: ink }
+  arrow: { stroke: primary }
+negatives:
+  - mermaid or plantuml source syntax
+  - ASCII art
+  - tiny labels
+  - watermarks or logos
+  - node IDs as visible labels
+  - invented components
+svg:
+  label_px: [18, 26]
+  max_kb: 40
+  max_kb_small: 20
+  small_node_threshold: 8

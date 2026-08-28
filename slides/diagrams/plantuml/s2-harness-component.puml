@@ -1,0 +1,50 @@
+@startuml s2-harness-component
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam component {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+skinparam package {
+  BackgroundColor #0d1e2c
+  BorderColor #d4a84b
+  FontColor #eef4f6
+}
+skinparam database {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+title Component view of the implementer harness
+package "Control plane. Python." {
+  component "Orchestrator\nbudget, order, no write" as O
+  component "gates.decide()\npass / retry / escalate" as G
+  component "red_gate()\n_new_test_ids" as R
+}
+package "Execution plane. Scoped writers." {
+  component "Planner\nsteps.jsonl only" as P
+  component "test_implementer\ntests/** only" as T
+  component "code_implementer\napp/**, deny tests/**" as C
+}
+package "Verification plane. No write path." {
+  component "rubric.score()\nten rows, no model" as RUB
+  component "Judge\nread only" as J
+  component "final_judge\nis the ticket done?" as F
+}
+database "Target repo\njunit.xml, coverage.xml,\nsteps.jsonl, .harness/" as D
+O --> P
+O --> T
+T --> R
+R --> C
+C --> RUB
+RUB --> J
+J --> F
+F --> G
+G --> O
+T --> D
+C --> D
+RUB --> D
+@enduml

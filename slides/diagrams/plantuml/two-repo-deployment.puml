@@ -1,0 +1,22 @@
+@startuml two-repo-deployment
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam node {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+}
+title Two-repo contract
+node "Engine repo\nreliable-agentic-lab" as E {
+  component loops
+  component labs
+}
+node "Target repo\nnorthwind-field-crm" as C {
+  component "Taskfile.yml" as TF
+  component "tickets/" as TK
+  component "app" as APP
+}
+loops ..> TF : path only
+loops ..> TK : scoped write
+@enduml

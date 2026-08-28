@@ -1,0 +1,6 @@
+flowchart TB
+  W["Writer.write(path, text)"] --> C{"WriteScope.permits?"}
+  C -->|allow briefs/**| OK["Write brief.md"]
+  C -->|deny or unmatched| X["ScopeViolation"]
+  R["Researcher"] --> S["search only. No write method"]
+  J["Judge"] --> N["check_brief. No write method"]

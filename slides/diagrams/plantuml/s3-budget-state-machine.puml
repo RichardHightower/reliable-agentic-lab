@@ -1,0 +1,30 @@
+@startuml s3-budget-state-machine
+skinparam backgroundColor #07141f
+skinparam defaultFontColor #eef4f6
+skinparam ArrowColor #2dd4bf
+skinparam titleFontColor #d4a84b
+skinparam shadowing false
+skinparam state {
+  BackgroundColor #0d1e2c
+  BorderColor #2dd4bf
+  FontColor #eef4f6
+  StartColor #d4a84b
+  EndColor #d4a84b
+}
+title Budget state machine
+[*] --> Idle
+Idle --> Charging : ask(question)
+Charging --> Searching : under hard cap
+Charging --> Exceeded : call budget 8 or dollar cap
+Searching --> SoftWarn : spent over soft_usd
+Searching --> Idle : Finding recorded
+SoftWarn --> Idle : Finding recorded. Warn only
+Exceeded --> Escalate : BudgetExceeded
+Idle --> Pass : BriefScore green
+Idle --> Retry : fixable gap and budget left
+Idle --> Escalate : same signature twice
+Idle --> Escalate : no source found
+Retry --> Charging
+Pass --> [*]
+Escalate --> [*]
+@enduml

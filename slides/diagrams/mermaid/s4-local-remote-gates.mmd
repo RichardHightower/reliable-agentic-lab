@@ -1,0 +1,6 @@
+flowchart TB
+  Local["PreToolUse hook\nRefuses git push without a green receipt"]
+  Remote["GitHub Actions\nReads the same .harness/receipt.json"]
+  Rec["receipt.json\nGreen. This tree. Newer than the last edit."]
+  Rec --> Local
+  Rec --> Remote
