@@ -102,6 +102,10 @@ class FakeResultMessage:
     subtype: str = "success"
 
 
+class FakeResultError(Exception):
+    pass
+
+
 def make_sdk_module(messages=None):
     import types  # noqa: PLC0415  (only the fake needs it)
 
@@ -110,6 +114,7 @@ def make_sdk_module(messages=None):
     module.HookMatcher = FakeHookMatcher
     module.ClaudeAgentOptions = FakeClaudeAgentOptions
     module.ResultMessage = FakeResultMessage
+    module.ResultError = FakeResultError
 
     async def query(*, prompt: str, options):
         module.last_prompt = prompt

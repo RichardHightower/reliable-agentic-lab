@@ -11,9 +11,11 @@ import e2e_t001
 class FakeAgentSdkBackend:
     def __init__(self):
         self.prompt = ""
+        self.calls = 0
 
     def run(self, *, repo: Path, prompt: str, allow: list[str]):
         self.prompt = prompt
+        self.calls += 1
         return SimpleNamespace(
             wrote=["tests/test_due_date.py"],
             output="test created",
@@ -40,6 +42,36 @@ def test_the_e2e_wrapper_is_a_doers_backend(tmp_path):
     assert result.usd == 0.12
     assert delegate.prompt.startswith("Delegate only to implementer-test-implementer.")
     assert wrapper.calls[0].phase == "test"
+
+
+def test_the_e2e_wrapper_selects_the_backend_for_each_phase(tmp_path):
+    tester = FakeAgentSdkBackend()
+    coder = FakeAgentSdkBackend()
+    wrapper = e2e_t001.AgentSdkE2EBackend({"test": tester, "code": coder})
+
+    wrapper.run(repo=tmp_path, prompt="test", allow=["tests/**"])
+    wrapper.run(repo=tmp_path, prompt="code", allow=["app/**"])
+
+    assert tester.calls == 1
+    assert coder.calls == 1
+
+
+def test_a_controlled_sdk_turn_ceiling_is_not_a_failed_query(tmp_path):
+    delegate = FakeAgentSdkBackend()
+    original_run = delegate.run
+
+    def stopped(**kwargs):
+        result = original_run(**kwargs)
+        result.ok = False
+        result.stop_reason = "max turns"
+        return result
+
+    delegate.run = stopped
+    wrapper = e2e_t001.AgentSdkE2EBackend(delegate)
+
+    wrapper.run(repo=tmp_path, prompt="test", allow=["tests/**"])
+
+    assert not wrapper.query_failed
 
 
 def test_the_e2e_command_refuses_before_querying_without_a_credential(tmp_path, monkeypatch, capsys):

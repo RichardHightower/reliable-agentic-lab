@@ -26,6 +26,8 @@ from typing import Any, Iterator
 FOLDER = Path(__file__).resolve().parent
 DEEP_FOLDER = FOLDER.parent / "sol2_implementer_deep_agents"
 MAX_TOTAL_USD = 2.0
+E2E_MAX_TURNS = 2
+CONTROLLED_STOPS = frozenset({"max turns", "cost budget spent"})
 
 _CONFLICTING_MODULES = (
     "adapter",
@@ -143,7 +145,7 @@ class AgentSdkE2EBackend(doers.Backend):
 
     @property
     def query_failed(self) -> bool:
-        return any(not call.ok for call in self.calls)
+        return any(not call.ok and call.stop_reason not in CONTROLLED_STOPS for call in self.calls)
 
     def run(self, *, repo: Path, prompt: str, allow: list[str]):
         phase, agent = _phase(allow)
@@ -156,7 +158,8 @@ class AgentSdkE2EBackend(doers.Backend):
             return result
 
         instruction = f"Delegate only to {agent}. {prompt}" if agent else prompt
-        result = self.backend.run(repo=repo, prompt=instruction, allow=allow)
+        delegate = self.backend[phase] if isinstance(self.backend, dict) else self.backend
+        result = delegate.run(repo=repo, prompt=instruction, allow=allow)
         usd = float(getattr(result, "usd", 0.0) or 0.0)
         self.spent_usd += max(usd, 0.0)
         self.calls.append(
@@ -226,9 +229,17 @@ def _build_backend(repo: Path, budget: int | None) -> tuple[AgentSdkE2EBackend, 
     per_query_usd = MAX_TOTAL_USD / (iterations + 1)
     sdk_adapter, sdk_roles = _load_sdk_modules()
     audit: list[dict] = []
-    options = sdk_roles.options_for(target, max_usd=per_query_usd)
-    _instrument_hooks(options, audit)
-    return AgentSdkE2EBackend(sdk_adapter.AgentSdkBackend(options)), audit
+    backends = {}
+    for phase, role_name in (("test", "test_implementer"), ("code", "code_implementer")):
+        options = sdk_roles.options_for(
+            target,
+            max_usd=per_query_usd,
+            max_turns=E2E_MAX_TURNS,
+            role_names=frozenset({role_name}),
+        )
+        _instrument_hooks(options, audit)
+        backends[phase] = sdk_adapter.AgentSdkBackend(options)
+    return AgentSdkE2EBackend(backends), audit
 
 
 def _write_extras(repo: Path, trace: dict, backend: AgentSdkE2EBackend, audit: list[dict]) -> None:

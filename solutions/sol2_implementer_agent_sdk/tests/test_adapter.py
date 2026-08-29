@@ -61,6 +61,21 @@ def test_a_runtime_ceiling_comes_back_as_a_stop_reason(fake_sdk, target):
         assert not result.ok
 
 
+def test_the_sdk_exception_after_a_terminal_result_keeps_the_stop_reason(fake_sdk, target):
+    module = fake_sdk()
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result="", is_error=True, subtype="error_max_turns")
+        raise module.ResultError("CLI exits non-zero after the terminal result")
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+
+    assert not result.ok
+    assert result.stop_reason == "max turns"
+    assert "backend failed" not in result.output
+
+
 def test_an_error_result_is_not_ok(fake_sdk, target):
     repo = target
     fake_sdk([FakeResultMessage(result="boom", is_error=True)])
@@ -151,8 +166,9 @@ def test_a_hung_query_times_out(fake_sdk, target, monkeypatch):
         yield FakeResultMessage(result="never reached")
 
     module.query = query
-    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 0.05)
-    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=0.05).run(
+        repo=target, prompt="p", allow=[]
+    )
     assert not result.ok
     assert result.stop_reason == "query timeout"
     assert "timed out" in result.output
