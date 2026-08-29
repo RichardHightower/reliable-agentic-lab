@@ -1,20 +1,87 @@
 version: '3'
 
+# Task loads these for every task below. The repo root `.env` is the normal
+# place for a key. The folder file is optional and fills in only what the
+# root does not set, because Task lets the FIRST file that defines a
+# variable win. A missing file is fine, and nothing under `task test` needs one.
+dotenv: ['../../.env', '.env']
+
 # Standalone. No includes, no shared vars, nothing outside this folder.
-# `python3` here means the venv you activated. See SPEC.md.
+
+vars:
+  # TASKFILE_DIR is Task's own absolute path to this file's directory. Every
+  # path below is built from it on purpose. A relative path depends on the
+  # invoking process's cwd being exactly right, and when it is not, this port
+  # writes into a different checkout that also has a work/ directory.
+  TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
+  VENV: '{{.TASKFILE_DIR}}/.venv'
+  PY: '{{.PY | default "python3"}}'
+  RUN_PY: '{{.RUN_PY | default (printf "%s/bin/python" .VENV)}}'
 
 tasks:
   default:
     cmds: [task --list]
 
+  # -- no runtime, no key, no clone -----------------------------------------
+
   test:
     desc: Run this folder's tests. No SDK, no key, no network, no clone.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 -m pytest tests -q
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" -m pytest tests -q
+        else
+          {{.PY}} -m pytest tests -q
+        fi
 
   table:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py --table-only {{.CLI_ARGS}}
+      - '{{.PY}} loop.py --table-only {{.CLI_ARGS}}'
+
+  # -- setup ----------------------------------------------------------------
+
+  setup:
+    desc: Create .venv in this folder and install Deep Agents into it.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - test -x {{.RUN_PY}} || {{.PY}} -m venv {{.VENV}}
+      - '{{.RUN_PY}} -m pip install --quiet "deepagents>=0.7.0" pytest'
+
+  clone:
+    desc: Clone your CRM (from config.json) into work/. Skips if it is already there.
+    status:
+      - test -d {{.TARGET}}/.git
+    cmds:
+      - test -f {{.TASKFILE_DIR}}/config.json || (echo "copy config.json.example to config.json first, and fill in fork_owner" && exit 1)
+      - mkdir -p {{.TASKFILE_DIR}}/../../work
+      - git clone --quiet https://github.com/$(python3 -c "import json;print(json.load(open('{{.TASKFILE_DIR}}/config.json'))['fork_owner'])")/$(python3 -c "import json;print(json.load(open('{{.TASKFILE_DIR}}/config.json'))['repo_name'])").git {{.TARGET}}
+
+  reset:
+    desc: Check out broken-pr in the CRM clone. Refuses if the tree is dirty.
+    cmds:
+      - |
+        if [ ! -d "{{.TARGET}}/.git" ]; then
+          echo "run task clone first."
+          exit 1
+        fi
+        if [ -n "$(git -C {{.TARGET}} status --porcelain)" ]; then
+          echo "the clone is dirty. commit, stash, or reset it before checking out broken-pr."
+          exit 1
+        fi
+        git -C {{.TARGET}} checkout broken-pr
+
+  # -- live. Needs deepagents, a key, and a clone ---------------------------
+
+  run:
+    desc: Build the fixer agent against TARGET. Needs Deep Agents. Check out broken-pr first.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates .venv in this folder and installs Deep Agents."
+          exit 1
+        fi
+        "{{.RUN_PY}}" loop.py --repo {{.TARGET}} {{.CLI_ARGS}}

@@ -90,7 +90,7 @@ def test_build_agent_fences_the_harness(contract, fake_langchain, fake_deepagent
     assert "write_file" in profile.excluded_tools
     assert "execute" in profile.excluded_tools
 
-    assert fake_deepagents["backend"].virtual_mode is True
+    assert fake_deepagents["backend"].default.virtual_mode is True
 
     orchestrator = fake_deepagents["permissions"]
     assert [rule.mode for rule in orchestrator] == ["deny"]
@@ -150,3 +150,66 @@ def test_the_description_tells_the_judge_what_not_to_decide():
     text = roles.JUDGE_RESPONSE["description"].lower()
     assert "do not name a gate" in text
     assert "pass, retry, or escalate" in text
+
+
+# -- skills and memory ------------------------------------------------------
+
+
+def test_each_role_with_a_skill_directory_gets_the_mount(contract, fake_langchain):
+    specs = {s["name"]: s for s in roles.subagents_for(contract)}
+    assert specs["planner"]["skills"] == ["/skills/planner/"]
+    assert specs["test-implementer"]["skills"] == ["/skills/test_implementer/"]
+    assert specs["code-implementer"]["skills"] == ["/skills/code_implementer/"]
+    assert specs["judge"]["skills"] == ["/skills/judge/"]
+
+
+def test_the_mount_path_follows_the_directory_not_the_subagent_name(contract, fake_langchain):
+    """The directory is `code_implementer`. The subagent is `code-implementer`.
+    Mounting the subagent's name would point at a directory that is not there."""
+    spec = next(s for s in roles.subagents_for(contract) if s["name"] == "code-implementer")
+    assert "_" in spec["skills"][0]
+    assert (roles.SKILLS_DIR / "code_implementer").is_dir()
+
+
+def test_the_skill_body_is_not_also_pasted_into_the_prompt(contract, fake_langchain):
+    """Mount or inline, not both.
+
+    Deep Agents loads a skill in two levels: metadata in the system prompt at
+    startup, instructions only when the skill is invoked. Pasting the body into
+    `system_prompt` as well makes it always resident, which is the cost the
+    mount exists to avoid.
+    """
+    body = (roles.SKILLS_DIR / "judge" / "SKILL.md").read_text(encoding="utf-8")
+    distinctive = "You read the ticket, the plan, the diff"
+    assert distinctive in body
+
+    spec = next(s for s in roles.subagents_for(contract) if s["name"] == "judge")
+    assert distinctive not in spec["system_prompt"]
+    assert spec["skills"] == ["/skills/judge/"]
+
+
+def test_build_agent_mounts_skills_and_memory(contract, fake_langchain, fake_deepagents):
+    roles.build_agent(contract)
+    assert fake_deepagents["skills"] == ["/skills/"]
+    assert fake_deepagents["memory"] == ["/memory/AGENTS.md"]
+
+    routes = fake_deepagents["backend"].routes
+    assert set(routes) == {"/skills/", "/memory/"}
+    assert all(route.virtual_mode for route in routes.values())
+
+
+def test_memory_routes_at_a_subdirectory_not_the_solution_folder(
+    contract, fake_langchain, fake_deepagents
+):
+    """Routing `/memory/` at the folder itself would put roles.py,
+    write_scope.py, and tests/ inside the agent's reach, in the one folder whose
+    lesson is that the coder may not write tests/**."""
+    roles.build_agent(contract)
+
+    from pathlib import Path  # noqa: PLC0415
+
+    root = Path(fake_deepagents["backend"].routes["/memory/"].root_dir)
+    assert root.name == "memory"
+    assert not (root / "roles.py").exists()
+    assert not (root / "tests").exists()
+    assert (root / "AGENTS.md").exists()

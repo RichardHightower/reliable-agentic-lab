@@ -54,35 +54,20 @@ Needs `deepagents>=0.7`.
 
 ## Build it step by step
 
-1. Install the runtime.
+See `HOW_TO_RUN.md`. The short path:
 
-   ```bash
-   pip install -r requirements-takehome.txt
-   ```
+```bash
+cd solutions/sol4_fixer_deep_agents
+cp config.json.example config.json
+task setup
+task table
+task clone
+task reset
+task run --
+```
 
-2. Read the cast before you configure anything.
-
-   ```bash
-   cd solutions/sol4_fixer_deep_agents
-   python loop.py --table-only --repo ../../work/northwind-field-crm
-   ```
-
-   The judge must print `no` in the writes column. If it prints `yes`, stop.
-   Nothing downstream is worth building on that.
-
-3. Translate the cast into this runtime, one role at a time. `cast(contract)`
-   returns a `RolePlan` per role, carrying the tools, the allow list, and the
-   deny list. `build(contract)` turns those into the runtime's own objects.
-
-4. Give the writing roles their path check. A role holding `Edit` or `Write`
-   without a path check can reach any file in the repo, and the first thing an
-   agent under pressure reaches for is the failing test.
-
-5. Print the configuration and read it.
-
-   ```bash
-   python loop.py --repo ../../work/northwind-field-crm
-   ```
+`task test` and `task table` need no SDK. `task reset` checks out `broken-pr`
+and refuses if the clone is dirty. `task run` needs the folder venv.
 
 ## Verify
 

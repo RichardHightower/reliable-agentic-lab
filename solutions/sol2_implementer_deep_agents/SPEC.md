@@ -21,16 +21,24 @@ orchestrator, planner, test_implementer, code_implementer, judge.
 
 ## Run
 
+See `HOW_TO_RUN.md`. The short path:
+
 ```bash
 cd solutions/sol2_implementer_deep_agents
-python3 -m pytest tests -q
-python3 harness.py --table-only
-# live, after task setup:
-python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
-python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer deep
+cp config.json.example config.json
+task test
+task table
+task setup
+task clone
+task run -- --ticket T001 --doer reference
+task run -- --ticket T001 --doer deep
 ```
 
-`--doer deep` needs `deepagents` installed. The tests do not.
+`task test` and `task table` need no SDK. `--doer deep` needs `task setup`.
+
+Each writing role with a skill directory mounts `/skills/<role>/`. The body
+is not pasted into the system prompt. `/memory/` routes at `memory/`, not
+this folder.
 
 ## What this folder is not
 
