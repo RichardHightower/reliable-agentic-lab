@@ -115,6 +115,11 @@ def fake_deepagents(monkeypatch: pytest.MonkeyPatch):
             self.root_dir = root_dir
             self.virtual_mode = virtual_mode
 
+    class CompositeBackend:
+        def __init__(self, default=None, routes=None):
+            self.default = default
+            self.routes = routes or {}
+
     package = types.ModuleType("deepagents")
     package.create_deep_agent = create_deep_agent
     package.register_harness_profile = register_harness_profile
@@ -123,6 +128,7 @@ def fake_deepagents(monkeypatch: pytest.MonkeyPatch):
     package.HarnessProfile = HarnessProfile
     backends = types.ModuleType("deepagents.backends")
     backends.FilesystemBackend = FilesystemBackend
+    backends.CompositeBackend = CompositeBackend
     package.backends = backends
     monkeypatch.setitem(sys.modules, "deepagents", package)
     monkeypatch.setitem(sys.modules, "deepagents.backends", backends)

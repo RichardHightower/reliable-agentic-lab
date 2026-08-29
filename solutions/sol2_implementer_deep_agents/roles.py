@@ -29,6 +29,10 @@ from pathlib import Path
 from roleplan import DEFAULT_LOOP, RolePlan, plan
 from write_scope import ScopeViolation, WriteScope
 
+HERE = Path(__file__).resolve().parent
+SKILLS_DIR = HERE / "skills"
+MEMORY_DIR = HERE / "memory"
+MEMORY_FILE = MEMORY_DIR / "AGENTS.md"
 DEFAULT_MODEL = "anthropic:claude-sonnet-5"
 
 # Built-in harness tools that write or execute. The orchestrator must not hold
@@ -71,6 +75,18 @@ JUDGE_RESPONSE = {
 }
 
 RESPONSE_FORMATS = {"judge": JUDGE_RESPONSE}
+
+
+def _skill_path(name: str) -> str | None:
+    """The mount path for one role's skill, or None when it has no directory.
+
+    Mount, do not inline. Deep Agents loads a skill in two levels: its metadata
+    sits in the system prompt at startup, and its instructions join the context
+    only when the skill is invoked. Pasting the whole SKILL.md into
+    `system_prompt` as well defeats that, because the body is then always
+    resident and the mount saves nothing.
+    """
+    return f"/skills/{name}/" if (SKILLS_DIR / name).is_dir() else None
 
 
 def _inside(repo: Path, path: str):
@@ -200,6 +216,12 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
         }
         if role.name in RESPONSE_FORMATS:
             spec["response_format"] = RESPONSE_FORMATS[role.name]
+        skill = _skill_path(role.name)
+        if skill:
+            # The directory is named for the role, `code_implementer`, while the
+            # subagent is named `code-implementer`. The mount path follows the
+            # directory.
+            spec["skills"] = [skill]
         out.append(spec)
     return out
 
@@ -224,7 +246,7 @@ def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
         create_deep_agent,
         register_harness_profile,
     )
-    from deepagents.backends import FilesystemBackend  # noqa: PLC0415
+    from deepagents.backends import CompositeBackend, FilesystemBackend  # noqa: PLC0415
 
     repo = Path(contract.repo).resolve()
     register_harness_profile(
@@ -241,8 +263,26 @@ def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
         subagents.append(item)
     return create_deep_agent(
         model=model,
+        system_prompt=(
+            "You are the orchestrator. You own the budget and the order. "
+            "You write nothing. Delegate planning, tests, and code to the "
+            "named subagents. Delegate grading to the judge subagent. "
+            "Never edit a test to make the suite green."
+        ),
         tools=[run_tests_tool(repo)],
         subagents=subagents,
-        backend=FilesystemBackend(root_dir=str(repo), virtual_mode=True),
+        backend=CompositeBackend(
+            default=FilesystemBackend(root_dir=str(repo), virtual_mode=True),
+            routes={
+                "/skills/": FilesystemBackend(root_dir=str(SKILLS_DIR), virtual_mode=True),
+                # `memory/`, not the solution folder. Routing at HERE would put
+                # roles.py, write_scope.py, and tests/ inside the agent's reach,
+                # in the folder whose lesson is that the coder may not write
+                # tests/**.
+                "/memory/": FilesystemBackend(root_dir=str(MEMORY_DIR), virtual_mode=True),
+            },
+        ),
+        memory=["/memory/AGENTS.md"] if MEMORY_FILE.exists() else None,
+        skills=["/skills/"] if SKILLS_DIR.is_dir() else None,
         permissions=[FilesystemPermission(**DENY_EVERY_WRITE)],
     )
