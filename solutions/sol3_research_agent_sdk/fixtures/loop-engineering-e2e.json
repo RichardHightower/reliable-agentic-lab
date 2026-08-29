@@ -1,0 +1,27 @@
+{
+  "_note": "Recorded primary-source summaries for the illustrated loop-engineering E2E scenario. The fixture keeps research deterministic; renderer fidelity remains a real acceptance condition.",
+  "loop engineering best practices": {
+    "question": "loop engineering best practices",
+    "answer": "A bounded agent loop needs runtime limits that the model cannot override. Claude Agent SDK configuration exposes max_turns and a task budget, so the host can set an execution ceiling independently of the model's own assessment.",
+    "citations": ["https://github.com/anthropics/claude-agent-sdk-python"],
+    "sources": [
+      {"url": "https://github.com/anthropics/claude-agent-sdk-python", "title": "Claude Agent SDK for Python"}
+    ]
+  },
+  "loop engineering best practices common mistake": {
+    "question": "loop engineering best practices common mistake",
+    "answer": "A reliable loop needs observable checks rather than an untested declaration of success. Google SRE notes that a failing test demonstrates a reliability problem, and that a system-level test can block a push before the bug reaches production.",
+    "citations": ["https://sre.google/sre-book/testing-reliability/"],
+    "sources": [
+      {"url": "https://sre.google/sre-book/testing-reliability/", "title": "Google SRE: Testing for Reliability"}
+    ]
+  },
+  "loop engineering best practices how to verify": {
+    "question": "loop engineering best practices how to verify",
+    "answer": "The Model Context Protocol separates resources, prompts, and tools in the host-server boundary. Its specification also assigns the host responsibility for user consent and control over data access and operations.",
+    "citations": ["https://modelcontextprotocol.io/specification/2025-06-18/index"],
+    "sources": [
+      {"url": "https://modelcontextprotocol.io/specification/2025-06-18/index", "title": "Model Context Protocol specification"}
+    ]
+  }
+}

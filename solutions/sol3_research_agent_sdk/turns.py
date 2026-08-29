@@ -88,7 +88,9 @@ def extract_json(text: str) -> dict | None:
 class Turns:
     """What a runtime must be able to do. Six calls, and no seventh."""
 
-    def plan(self, topic: str, prior_art: str, budget: dict | None = None, note: str = "") -> dict:
+    def plan(
+        self, topic: str, prior_art: str, budget: dict | None = None, note: str = "", brief: str = ""
+    ) -> dict:
         raise NotImplementedError
 
     def research(self, question: str, note: str = "") -> dict:
@@ -143,7 +145,9 @@ class SdkTurns(Turns):
             raise TurnFailed(f"{agent} returned no JSON object: {(result.output or '')[:400]}")
         return parsed
 
-    def plan(self, topic: str, prior_art: str, budget: dict | None = None, note: str = "") -> dict:
+    def plan(
+        self, topic: str, prior_art: str, budget: dict | None = None, note: str = "", brief: str = ""
+    ) -> dict:
         known = (
             f"Prior art on this topic is in prior-art.md. Read it first.\n{prior_art[:2000]}"
             if prior_art
@@ -161,9 +165,16 @@ class SdkTurns(Turns):
             "discarded is dropped with them. Plan a paper that fits: fewer sections, each "
             "one answered, beats more sections half-researched."
         )
+        commissioning = (
+            "\n\nThe commissioning brief below is binding. Satisfy its required sections, "
+            "questions, sources, and figures without exceeding the stated budget.\n"
+            f"{brief.strip()}"
+            if brief.strip()
+            else ""
+        )
         return self._json(
             "research-planner",
-            f"Plan a technical white paper on: {topic}\n\n{limits}\n\n{known}\n"
+            f"Plan a technical white paper on: {topic}\n\n{limits}{commissioning}\n\n{known}\n"
             f"{note}\n\n{GROUNDING}",
             PLAN_SCHEMA,
         )
@@ -243,7 +254,9 @@ class OfflineTurns(Turns):
 
     backend: research.Backend
 
-    def plan(self, topic: str, prior_art: str, budget: dict | None = None, note: str = "") -> dict:
+    def plan(
+        self, topic: str, prior_art: str, budget: dict | None = None, note: str = "", brief: str = ""
+    ) -> dict:
         sections = [
             {"id": "problem", "heading": "The problem", "goal": f"State what {topic} must solve."},
             {
@@ -268,7 +281,16 @@ class OfflineTurns(Turns):
             "sections": sections,
             "questions": questions,
             "diagrams": [
-                {"name": "pipeline", "concept": f"the phases of {topic}", "section": "approach"}
+                {
+                    "name": "control-loop",
+                    "concept": f"the phases and exits of {topic}",
+                    "section": "approach",
+                },
+                {
+                    "name": "trust-boundary",
+                    "concept": "the independent researcher, verifier, writer, and gate boundaries",
+                    "section": "approach",
+                },
             ],
         }
 
@@ -312,15 +334,27 @@ class OfflineTurns(Turns):
         return {"verdict": "unclear", "source_url": "", "excerpt": ""}
 
     def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
-        return {
-            "language": "mermaid",
-            "source": (
+        if name == "trust-boundary":
+            source = (
+                "flowchart LR\n"
+                "  Sources[Primary sources] --> Researcher[Researcher]\n"
+                "  Researcher --> Claims[Atomic claims]\n"
+                "  Claims --> Verifier[Independent verifier]\n"
+                "  Verifier --> Writer[Scoped writer]\n"
+                "  Writer --> Gate[Deterministic gate]\n"
+            )
+        else:
+            source = (
                 "flowchart LR\n"
                 "  Plan[Plan] --> Research[Research]\n"
                 "  Research --> Verify[Verify]\n"
                 "  Verify --> Write[Write]\n"
                 "  Write --> Check[Check]\n"
-            ),
+                "  Check --> Exit[Pass retry or escalate]\n"
+            )
+        return {
+            "language": "mermaid",
+            "source": source,
             "caption": f"The figure shows {concept}.",
         }
 

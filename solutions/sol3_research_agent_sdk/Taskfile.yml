@@ -7,11 +7,10 @@
 # creates `.venv` in this folder so Homebrew Python (PEP 668) is not in the way.
 version: '3'
 
-# Task loads these for every task below. The repo root `.env` is the normal
-# place for a key. The folder file is optional and fills in only what the root
-# does not set, because Task lets the FIRST file that defines a variable win.
-# A missing file is fine, and nothing in the first section needs one.
-dotenv: ['../../.env', '.env']
+# Task loads these for every task below. The closest dotenv file wins, so an
+# attendee may put a key in this folder, `solutions/`, the repo root, or the
+# directory above the checkout. Missing files are fine.
+dotenv: ['.env', '../.env', '../../.env', '../../../.env']
 
 vars:
   # TASKFILE_DIR is Task's own absolute path to this file's directory. Every
@@ -88,6 +87,28 @@ tasks:
         else
           {{.PY}} loop.py --topic "{{.TOPIC}}" --backend fixture --fresh
         fi
+
+  e2e-fixture:
+    desc: Build and validate the illustrated loop-engineering paper from recorded research.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates .venv and installs the renderer."
+          exit 1
+        fi
+        "{{.RUN_PY}}" e2e.py --mode fixture
+
+  e2e-live:
+    desc: Run the bounded live Agent SDK acceptance test. Needs ANTHROPIC_API_KEY and PERPLEXITY_API_KEY.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates .venv and installs the renderer."
+          exit 1
+        fi
+        "{{.RUN_PY}}" e2e.py --mode live --max-usd "{{.LIVE_E2E_MAX_USD | default "10"}}"
 
   run:
     desc: Research a topic and write the paper. Needs a key. TOPIC=... to set it.

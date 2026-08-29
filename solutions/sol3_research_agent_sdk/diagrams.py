@@ -10,16 +10,16 @@ Three attempts, then stop. A render loop with no ceiling is a render loop that
 spends a budget redrawing the same overcrowded graph, because the fix is always
 "simplify" and a model asked to simplify its own work tends to rename things.
 
-The renderer is a clone, not a dependency. `task setup` puts it in `.cache/`.
-When it is not there, or when no image backend is on PATH, `draw` records the
-miss and the run continues without that figure. A missing figure is a weaker
-paper. A failed run over a missing figure is no paper.
+The renderer is the installed `imagen-diagrams` plugin, cloned by `task setup`
+into `.cache/`. Its auto policy is authoritative: `imagen`, then `grok`, then
+`codex`. When none is on PATH, it writes the themed prompt beside the intended
+PNG and exits 2. A paper cannot claim a publication-quality figure it did not
+render.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,8 +37,21 @@ TIMEOUT = 300
 
 # render.py's exit code for a Salt wireframe, which it refuses on purpose.
 SALT = 3
+# imagen-diagrams's documented fail-closed status. Its render script leaves
+# <stem>_imagen.prompt.txt and a JSON sidecar before returning this status.
+NO_BACKEND = 2
 
 SUFFIX = {"mermaid": ".mmd", "plantuml": ".puml"}
+
+
+class ImageBackendUnavailable(RuntimeError):
+    """No approved image backend is available; the caller must exit 2."""
+
+    exit_code = 2
+
+    def __init__(self, prompt_file: Path):
+        self.prompt_file = Path(prompt_file)
+        super().__init__(f"no image backend is on PATH; saved prompt at {self.prompt_file}")
 
 
 @dataclass
@@ -100,34 +113,8 @@ def _run(script: str, args: list[str]) -> subprocess.CompletedProcess:
     )
 
 
-def _generate(prompt_file: Path, png: Path) -> bool:
-    """Draw the image with the `imagen` CLI, using the flags it actually has.
-
-    imagen-diagrams builds the themed prompt, and that is the part worth having.
-    Its own backend then calls `imagen generate --prompt-file X --aspect Y
-    --output Z`, and the published gemini-imagen CLI has none of those three
-    options: the prompt is an argument or stdin, output is `-o`, and aspect is
-    `--aspect-ratio`. Both v0.1.0 and main have this mismatch.
-
-    So the renderer builds the prompt and judges the result, and this function
-    is the one call in between. Fix it upstream and this collapses back into
-    `render.py` doing the whole job.
-    """
-    if not shutil.which("imagen"):
-        return False
-    proc = subprocess.run(
-        ["imagen", "generate", "-o", str(png), "--aspect-ratio", ASPECT],
-        input=prompt_file.read_text(encoding="utf-8"),
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=TIMEOUT,
-    )
-    return proc.returncode == 0 and png.exists() and png.stat().st_size >= 32
-
-
 def render(source: Path, topic: str, out_dir: Path, theme: str = DEFAULT_THEME) -> Path | None:
-    """Render one source file. Returns the PNG, or None when nothing was drawn."""
+    """Render with imagen-diagrams. The plugin owns backend selection and prompts."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     ensure_theme()
@@ -147,22 +134,26 @@ def render(source: Path, topic: str, out_dir: Path, theme: str = DEFAULT_THEME) 
         ],
     )
     png = out_dir / f"{Path(source).stem}_imagen.png"
+    prompt_file = png.with_suffix(".prompt.txt")
     if png.exists() and png.stat().st_size >= 32:
         return png
+    if proc.returncode == NO_BACKEND and prompt_file.is_file():
+        raise ImageBackendUnavailable(prompt_file)
     if proc.returncode == SALT:
         # A Salt wireframe needs the PlantUML JAR, not an image model. Handing
         # the prompt to `imagen` anyway produces a picture of a form, which is
         # worse than no figure because it looks like a rendering.
         return None
-    prompt_file = png.with_suffix(".prompt.txt")
-    if prompt_file.exists() and _generate(prompt_file, png):
-        return png
     return None
 
 
 def judge(source: Path, png: Path) -> dict:
     """Ask the renderer's own fidelity judge what the image lost."""
-    proc = _run("judge.py", ["--source", str(source), "--png", str(png)])
+    sidecar = png.with_suffix(".judge.json")
+    proc = _run(
+        "judge.py",
+        ["--source", str(source), "--png", str(png), "--sidecar", str(sidecar)],
+    )
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError:

@@ -32,6 +32,17 @@ from roleplan import RolePlan, plan
 from write_scope import WriteScope
 
 LOOP = "research"
+FOLDER = Path(__file__).resolve().parent
+
+# Task resolves these same paths. Keep this local to the standalone port: an
+# attendee can copy the folder and put a key beside it, beside `solutions/`, at
+# the repo root, or one directory above that checkout. The nearest file wins.
+DOTENV_PATHS = (
+    FOLDER / ".env",
+    FOLDER.parent / ".env",
+    FOLDER.parents[1] / ".env",
+    FOLDER.parents[2] / ".env",
+)
 
 # Tool inputs that name a path. A hook has to know where to look.
 PATH_KEYS = ("file_path", "path", "notebook_path")
@@ -53,6 +64,35 @@ GLOBAL_DENY = ["Bash"]
 NO_WRITE = ["Edit", "Write", "NotebookEdit", "Bash"]
 
 
+def environment_value(name: str) -> str | None:
+    """Find one unquoted dotenv value without executing dotenv syntax.
+
+    An exported process variable wins. Otherwise inspect the four documented
+    locations in nearest-first order. Only the selected value is passed to the
+    MCP child; loading an entire dotenv file into this process would make a
+    research run inherit unrelated settings and could evaluate shell syntax.
+    """
+    if name in os.environ:
+        return os.environ[name] or None
+    for path in DOTENV_PATHS:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for raw in lines:
+            line = raw.strip()
+            if line.startswith("export "):
+                line = line[7:].lstrip()
+            key, separator, value = line.partition("=")
+            if separator != "=" or key.strip() != name:
+                continue
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            return value or None
+    return None
+
+
 def mcp_servers() -> dict:
     """The research boundary, declared here rather than inherited.
 
@@ -72,7 +112,7 @@ def mcp_servers() -> dict:
     topic nobody has written about.
     """
     servers: dict = {"context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}}
-    key = os.environ.get("PERPLEXITY_API_KEY")
+    key = environment_value("PERPLEXITY_API_KEY")
     if key:
         servers["perplexity-ask"] = {
             "type": "stdio",

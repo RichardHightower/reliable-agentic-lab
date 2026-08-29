@@ -88,6 +88,83 @@ def test_a_missing_renderer_never_calls_the_model(monkeypatch, tmp_path):
     assert "task setup" in figure.misses[0]
 
 
+def test_render_invokes_the_plugin_with_article_density(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text("flowchart LR\n  A[{Decision?}]")
+    out = tmp_path / "out"
+    calls = []
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+
+    def run(script, args):
+        calls.append((script, args))
+        (out / "figure_imagen.png").parent.mkdir(parents=True, exist_ok=True)
+        (out / "figure_imagen.png").write_bytes(b"x" * 64)
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(diagrams, "_run", run)
+
+    assert diagrams.render(source, "loop safety", out) == out / "figure_imagen.png"
+    assert calls == [
+        (
+            "render.py",
+            [
+                "--source",
+                str(source),
+                "--topic",
+                "loop safety",
+                "--theme",
+                diagrams.DEFAULT_THEME,
+                "--density",
+                "article",
+                "--output-dir",
+                str(out),
+            ],
+        )
+    ]
+
+
+def test_plugin_no_backend_keeps_its_prompt_and_fails_closed(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text("flowchart LR\n  A[{Decision?}]")
+    out = tmp_path / "out"
+    prompt = out / "figure_imagen.prompt.txt"
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+
+    def run(script, args):
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("the plugin-built themed prompt")
+        return type("Result", (), {"returncode": diagrams.NO_BACKEND})()
+
+    monkeypatch.setattr(diagrams, "_run", run)
+
+    with pytest.raises(diagrams.ImageBackendUnavailable) as exc:
+        diagrams.render(source, "loop safety", out)
+
+    assert prompt.name == "figure_imagen.prompt.txt"
+    assert exc.value.exit_code == 2
+    assert exc.value.prompt_file == prompt
+    assert prompt.read_text() == "the plugin-built themed prompt"
+
+
+def test_judge_persists_the_plugin_fidelity_sidecar(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    png = tmp_path / "figure_imagen.png"
+    calls = []
+
+    def run(script, args):
+        calls.append((script, args))
+        return type("Result", (), {"stdout": '{"pass": true, "misses": []}'})()
+
+    monkeypatch.setattr(diagrams, "_run", run)
+    assert diagrams.judge(source, png) == {"pass": True, "misses": []}
+    assert calls == [
+        (
+            "judge.py",
+            ["--source", str(source), "--png", str(png), "--sidecar", str(tmp_path / "figure_imagen.judge.json")],
+        )
+    ]
+
+
 def test_the_source_is_written_next_to_the_image(renderer, tmp_path):
     """The source is an intermediate form, kept for a reader, not for the paper."""
     renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
