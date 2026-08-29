@@ -62,6 +62,29 @@ def test_the_fixture_backend_is_chosen_when_nothing_else_is_there(monkeypatch, w
     assert chosen.backend.name == "fixture"
 
 
+def test_a_brief_is_forwarded_only_when_the_run_has_one(work, turns):
+    import paper  # noqa: PLC0415
+
+    class Briefed(turns):
+        def plan(self, topic, prior_art, budget=None, note="", brief=""):
+            self.received_brief = brief
+            return super().plan(topic, prior_art, budget, note)
+
+    run = paper.Run(
+        topic="topic",
+        work_dir=work,
+        turns=Briefed(),
+        state=paper.State.load_or_new(work, "topic"),
+        brain=None,
+        brief="require a figure",
+        log=lambda *_: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+
+    assert run.turns.received_brief == "require a figure"
+
+
 def test_asking_for_the_agent_with_no_sdk_installed_raises(monkeypatch, work):
     """`auto` degrades. `agent` is a request, and a silent downgrade hides it."""
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)

@@ -171,6 +171,8 @@ task demo                                   # offline, over the fixture
 task run TOPIC="..."                        # needs PERPLEXITY_API_KEY
 task run TOPIC="..." -- --backend perplexity  # real search, templated prose
 task publish TOPIC="..."                    # also pushes to a private gist
+task e2e-fixture                             # illustrated offline acceptance test
+LIVE_E2E_MAX_USD=10 task e2e-live            # bounded live Agent SDK acceptance test
 ```
 
 Output lands in `work/<slug>/`:
@@ -338,12 +340,17 @@ not pass `skills=`, so the parent cannot invoke it. An earlier draft loaded it
 and asked the model not to run it in the system prompt. A parent that can
 invoke the loop is a second orchestrator, and a sentence is not a fence.
 
-### Known upstream mismatch
+### Publication figures
 
-`imagen-diagrams` builds the themed prompt and judges the result, and both of
-those are worth having. Its own image backend then calls
-`imagen generate --prompt-file X --aspect Y --output Z`, and the published
-gemini-imagen CLI has none of those three options: the prompt is an argument or
-stdin, output is `-o`, and aspect is `--aspect-ratio`. Both `v0.1.0` and `main`
-have this mismatch, so `diagrams._generate` makes that one call itself. Fix it
-upstream and that function collapses back into `render.py` doing the whole job.
+`task setup` pins and clones
+[`SpillwaveSolutions/imagen-diagrams`](https://github.com/SpillwaveSolutions/imagen-diagrams).
+`diagrams.py` invokes the plugin's `render.py` and `judge.py` directly. The
+plugin owns its `imagen`, `grok`, then `codex` backend selection and the brace
+policy for each backend. It writes a themed prompt sidecar before it fails
+closed with exit 2 when no image backend is installed.
+
+An accepted E2E figure must retain the plugin render sidecar and judge sidecar,
+be rendered at article density, and pass the plugin's source-inventory check.
+The harness then keeps the retry cap and validates document embedding and
+resolution. A future vision pass can strengthen label readability without
+replacing this source-of-truth renderer.

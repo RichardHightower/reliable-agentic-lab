@@ -146,6 +146,7 @@ class Run:
     max_claims: int = MAX_CLAIMS
     theme: str = diagrams.DEFAULT_THEME
     brain: Path | None = BRAIN
+    brief: str = ""
     should_publish: bool = False
     log: object = print
 
@@ -294,12 +295,17 @@ def plan(run: Run) -> dict:
     prior_text = prior.read_text(encoding="utf-8") if prior.exists() else ""
 
     def once(note: str) -> dict:
-        drafted = run.turns.plan(
+        args = (
             run.topic,
             prior_text,
             {"questions": run.max_questions, "diagrams": run.max_diagrams},
             note,
         )
+        # A commissioning brief is optional. Keep the normal turn call exactly
+        # as it was so an attendee's minimal runtime only needs the six base
+        # methods; the Agent SDK path receives the extra context when an E2E
+        # scenario needs a specific deliverable.
+        drafted = run.turns.plan(*args, brief=run.brief) if run.brief else run.turns.plan(*args)
         if not drafted.get("sections") or not drafted.get("questions"):
             raise RunFailed("the planner returned no sections or no questions")
         return drafted

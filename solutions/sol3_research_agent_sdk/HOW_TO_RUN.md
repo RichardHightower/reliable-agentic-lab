@@ -25,8 +25,9 @@ Creates `.venv` in this folder. Homebrew Python will not let `pip` write to
 the system interpreter (PEP 668). `task run` uses this venv. You do not
 activate it.
 
-Put the API key in the repo root `.env`, or export it in this shell.
-Task loads `../../.env` first, then this folder's `.env`.
+Put the API key in `.env`, `../.env`, `../../.env`, or `../../../.env`, or
+export it in this shell. The closest dotenv file wins. Direct `python loop.py`
+runs use the same nearest-first lookup for `PERPLEXITY_API_KEY`.
 
 ```bash
 echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
@@ -48,6 +49,35 @@ task demo
 `task demo` runs the recorded fixture. No key, no network. `task table`
 prints the role table. The writer is the only role that prints `yes` in the
 writes column.
+
+## White-paper acceptance runs
+
+The two E2E lanes both build an illustrated paper on loop-engineering best
+practices and leave `paper.md` plus `e2e-report.json` under `work/`.
+
+```bash
+task e2e-fixture
+```
+
+This uses a recorded primary-source corpus but the installed
+[`imagen-diagrams`](https://github.com/SpillwaveSolutions/imagen-diagrams)
+renderer and fidelity judge. It therefore needs `task setup` plus one approved
+image backend, in this order: `imagen`, `grok`, then `codex`. The plugin uses
+the `imagen-cli-vars` brace policy for Imagen and `grok-imagine` for Grok and
+Codex. If none is on PATH, it writes `<stem>_imagen.prompt.txt` and exits 2.
+Each accepted figure retains the plugin's render and judge sidecars. No model
+key or research network access is needed for the recorded research corpus
+itself.
+
+```bash
+LIVE_E2E_MAX_USD=10 task e2e-live
+```
+
+This is a manual or nightly acceptance test. It uses the Agent SDK and MCP
+research tools, so it requires `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, the
+renderer, and an approved image backend. It never publishes a gist. The resulting figures must
+have no fidelity misses, be embedded in the paper, and meet the resolution
+floor recorded in `e2e-report.json`.
 
 ## Live paper
 

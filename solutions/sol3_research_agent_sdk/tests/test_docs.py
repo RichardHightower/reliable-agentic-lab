@@ -138,5 +138,5 @@ def test_the_docs_name_only_tasks_that_exist():
     declared = set(re.findall(r"^  (\w[\w-]*):$", taskfile, re.M))
     for name in ("SPEC.md", "HOW_TO_RUN.md"):
         prose = (FOLDER / name).read_text(encoding="utf-8")
-        for named in re.findall(r"task ([a-z][a-z-]*)", prose):
+        for named in re.findall(r"task ([a-z][a-z0-9-]*)", prose):
             assert named in declared, f"{name} names `task {named}`, the Taskfile does not"

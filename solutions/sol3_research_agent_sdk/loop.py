@@ -59,7 +59,13 @@ def build(work_dir, max_usd=None):
     return sdk.options_for(work_dir, max_usd=max_usd, loop=LOOP)
 
 
-def pick_turns(name: str, work_dir: Path, max_usd: float | None, on_cost):
+def pick_turns(
+    name: str,
+    work_dir: Path,
+    max_usd: float | None,
+    on_cost,
+    fixture: Path = FIXTURE,
+):
     """Choose a runtime for the six model turns.
 
     `agent` is the real one: every turn is a named subagent holding the MCP
@@ -85,7 +91,7 @@ def pick_turns(name: str, work_dir: Path, max_usd: float | None, on_cost):
                 raise
     if name == "perplexity" or (name == "auto" and research.PerplexityBackend().available()):
         return t.OfflineTurns(backend=research.PerplexityBackend())
-    return t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
+    return t.OfflineTurns(backend=research.FixtureBackend(fixture))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,6 +109,16 @@ def main(argv: list[str] | None = None) -> int:
         help="which runtime answers the six model turns",
     )
     parser.add_argument("--out", help="work directory (default: work/<slug>)")
+    parser.add_argument(
+        "--fixture",
+        type=Path,
+        help="recorded research fixture for --backend fixture (default: fixtures/research.json)",
+    )
+    parser.add_argument(
+        "--brief-file",
+        type=Path,
+        help="a commissioning brief the planner must follow",
+    )
     parser.add_argument("--area", default=None, help="RKC research area for the knowledge bundle")
     parser.add_argument("--max-usd", type=float, default=5.0, help="hard cost ceiling")
     parser.add_argument("--max-iterations", type=int, default=3, help="write and check attempts")
@@ -133,6 +149,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.fresh:
         shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
+    brief = ""
+    if args.brief_file:
+        try:
+            brief = args.brief_file.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            parser.error(f"could not read --brief-file {args.brief_file}: {exc}")
 
     state = paper.State.load_or_new(work, args.topic)
     run = paper.Run(
@@ -140,7 +162,13 @@ def main(argv: list[str] | None = None) -> int:
         work_dir=work,
         # The lambda is not redundant. `run` does not exist yet, so the cost
         # callback has to close over the name and resolve it when it fires.
-        turns=pick_turns(args.backend, work, args.max_usd, lambda usd: run.spend(usd)),  # noqa: PLW0108
+        turns=pick_turns(
+            args.backend,
+            work,
+            args.max_usd,
+            lambda usd: run.spend(usd),
+            args.fixture or FIXTURE,
+        ),  # noqa: PLW0108
         state=state,
         area=args.area or paper.DEFAULT_AREA,
         max_usd=args.max_usd,
@@ -148,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         max_questions=args.max_questions,
         max_diagrams=args.max_diagrams,
         max_claims=args.max_claims,
+        brief=brief,
         should_publish=args.publish,
     )
 
@@ -158,6 +187,10 @@ def main(argv: list[str] | None = None) -> int:
     print()
     try:
         result = paper.run_paper(run)
+    except paper.diagrams.ImageBackendUnavailable as exc:
+        print()
+        print(f"image backend unavailable: {exc}")
+        return exc.exit_code
     except paper.RunFailed as exc:
         print()
         print(f"escalated: {exc}")

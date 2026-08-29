@@ -184,8 +184,32 @@ def test_the_folder_declares_its_own_search_boundary(fake_sdk, work, monkeypatch
 def test_perplexity_is_left_out_when_its_key_is_not_set(fake_sdk, work, monkeypatch):
     """A server with an empty key answers every question with an auth error."""
     monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    monkeypatch.setattr(roles, "DOTENV_PATHS", ())
     fake_sdk()
     assert set(roles.options_for(work).mcp_servers) == {"context7"}
+
+
+def test_a_nearby_dotenv_supplies_the_perplexity_key(fake_sdk, work, monkeypatch, tmp_path):
+    near = tmp_path / "near.env"
+    far = tmp_path / "far.env"
+    near.write_text("PERPLEXITY_API_KEY=near-key\n")
+    far.write_text("PERPLEXITY_API_KEY=far-key\n")
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    monkeypatch.setattr(roles, "DOTENV_PATHS", (near, far))
+    fake_sdk()
+
+    options = roles.options_for(work)
+
+    assert options.mcp_servers["perplexity-ask"]["env"]["PERPLEXITY_API_KEY"] == "near-key"
+
+
+def test_the_exported_perplexity_key_beats_every_dotenv(monkeypatch, tmp_path):
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("PERPLEXITY_API_KEY=dotenv-key\n")
+    monkeypatch.setattr(roles, "DOTENV_PATHS", (dotenv,))
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "exported-key")
+
+    assert roles.environment_value("PERPLEXITY_API_KEY") == "exported-key"
 
 
 def test_the_search_tools_the_roles_hold_match_the_servers_declared(fake_sdk, work, monkeypatch):
