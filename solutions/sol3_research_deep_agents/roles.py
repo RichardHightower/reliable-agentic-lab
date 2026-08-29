@@ -388,7 +388,14 @@ def subagents_for(  # noqa: PLR0913  (one keyword per wiring point)
 
         prompt = f"You are the {role.name}. {role.purpose}"
         skill_dir = SKILLS_DIR / role.name
-        if skill_dir.is_dir():
+        if answer_only_writer:
+            prompt += (
+                "\n\n" + _skill_text(role.name) + "\n\n"
+                "The delegation message contains the complete evidence and output contract. "
+                "Return the requested section body directly. Do not read, list, search, "
+                "glob, grep, or write any file."
+            )
+        elif skill_dir.is_dir():
             prompt += (
                 f" Before you work, use the built-in read_file tool to read "
                 f"/skills/{role.name}/SKILL.md and follow it."
@@ -403,22 +410,15 @@ def subagents_for(  # noqa: PLR0913  (one keyword per wiring point)
             "description": role.purpose,
             "system_prompt": prompt,
             "tools": tools,
-            # The live paper writer is answer-only, but it still needs its
-            # mounted instruction file. Allow exactly that read route. The
-            # catch-all deny prevents it from browsing paper/** or writing a
-            # second, ungated paper beside Python's sections.json checkpoint.
             "permissions": (
-                [
-                    {"operations": ["read"], "paths": [f"/skills/{role.name}/**"], "mode": "allow"},
-                    {"operations": ["read", "write"], "paths": ["/**"], "mode": "deny"},
-                ]
+                [{"operations": ["read", "write"], "paths": ["/**"], "mode": "deny"}]
                 if answer_only_writer
                 else permission_rules(role)
             ),
         }
         if role.name in RESPONSE_FORMATS:
             spec["response_format"] = RESPONSE_FORMATS[role.name]
-        if skill_dir.is_dir():
+        if skill_dir.is_dir() and not answer_only_writer:
             spec["skills"] = [f"/skills/{role.name}/"]
         out.append(spec)
     return out

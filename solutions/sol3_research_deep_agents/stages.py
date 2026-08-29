@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import diagrams
+import brief
 import evidence
 import paper_check
 
@@ -524,7 +525,7 @@ def claim_brief(ledger: evidence.Ledger, claim_id: str, index: dict[str, int]) -
 
 
 def write_gate(section: str, body: str, allowed: list[int]) -> None:
-    """The section cites only the numbers its claims gave it."""
+    """Every factual paragraph cites only the numbers its claims gave it."""
     if not body.strip():
         raise GateFailed(f"section {section!r} came back empty.", ("empty_section",))
     used = {int(marker) for marker in CITATION.findall(body)}
@@ -540,6 +541,13 @@ def write_gate(section: str, body: str, allowed: list[int]) -> None:
             f"section {section!r} cites nothing. Every paragraph that asserts a "
             "fact carries a marker.",
             ("no_citation",),
+        )
+    uncited = brief.uncited_claims(body)
+    if uncited:
+        raise GateFailed(
+            f"section {section!r} has uncited prose paragraphs: {uncited[:2]}. "
+            "Put an allowed marker in every paragraph that makes a factual claim.",
+            ("uncited_paragraph",),
         )
 
 

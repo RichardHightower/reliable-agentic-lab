@@ -164,17 +164,16 @@ def test_reviewer_response_cannot_state_a_verdict():
     assert "ship" not in props and "verdict" not in props
 
 
-def test_paper_writer_mounts_its_skill_and_cannot_browse_the_run(fake_langchain):
+def test_paper_writer_gets_its_skill_inline_and_cannot_browse_the_run(fake_langchain):
     spec = by_name(roles.subagents_for(None, "paper", repo=Path(".")))["writer"]
     body = (roles.SKILLS_DIR / "writer" / "SKILL.md").read_text(encoding="utf-8")
     assert "technical white paper" in body.lower()
-    assert "technical white paper" not in spec["system_prompt"].lower()
-    assert "/skills/writer/SKILL.md" in spec["system_prompt"]
-    assert spec["skills"] == ["/skills/writer/"]
+    assert "technical white paper" in spec["system_prompt"].lower()
+    assert "do not read, list, search" in spec["system_prompt"].lower()
+    assert "skills" not in spec
     assert names(spec) == []
     assert spec["permissions"] == [
-        {"operations": ["read"], "paths": ["/skills/writer/**"], "mode": "allow"},
-        {"operations": ["read", "write"], "paths": ["/**"], "mode": "deny"},
+        {"operations": ["read", "write"], "paths": ["/**"], "mode": "deny"}
     ]
 
 

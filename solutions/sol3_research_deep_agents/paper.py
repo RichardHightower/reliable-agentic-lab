@@ -48,6 +48,19 @@ DEFAULT_SEARCH_CALLS = 24
 DONE, COST, MAX_TURNS = "done", "cost", "max turns"
 
 
+def section_body(text: str, heading: str) -> str:
+    """Remove a repeated section heading from a role's body-only reply.
+
+    The writer contract says that the assembler owns headings.  Models
+    occasionally repeat one anyway, and treating that one-word line as prose
+    makes the deterministic citation gate reject an otherwise grounded paper.
+    This is a boundary normalization, not an attempt to edit the writer's
+    argument.
+    """
+    pattern = rf"\A\s*(?:#{{1,6}}\s*)?{re.escape(heading)}\s*(?:\n+|\Z)"
+    return re.sub(pattern, "", text, count=1, flags=re.IGNORECASE).strip()
+
+
 class BudgetSpent(RuntimeError):
     """The money ran out mid-stage. Not a gate failure, so never a retry.
 
@@ -438,6 +451,14 @@ class Paper:
                 if name == "review":
                     revised = self.stage_revise(extra)
                     self.say(f"  revise     {revised.summary}")
+                elif name == "assemble" and "cited" in signature:
+                    # This gate names a mechanical, local defect.  Send only
+                    # the offending sections back to the maker; a full rewrite
+                    # would risk the reviewer-approved prose just to add a
+                    # traceable source marker.
+                    targets = self._uncited_section_headings()
+                    revised = self.stage_revise(extra, targets=targets or None)
+                    self.say(f"  revise     {revised.summary}")
                 continue
 
             self.state.mark_complete(name, cost_usd=result.usd, **result.artifacts)
@@ -694,10 +715,11 @@ class Paper:
                 "Return 180 to 300 words of section body as markdown. No heading "
                 "line, the assembler adds it. No references section. The word "
                 "limit is part of the contract: prefer concise, cited mechanisms "
-                "over an exhaustive survey.",
+                "over an exhaustive survey. Every prose paragraph that makes a "
+                "factual claim must include one or more of its allowed citation markers.",
             )
             usd += reply.usd
-            body = reply.text.strip()
+            body = section_body(reply.text, heading)
             # A live subagent can return a parent tool receipt, an empty
             # completion, or malformed prose. Preserve the exact pre-gate body
             # locally so a failed citation gate is diagnosable without another
@@ -734,8 +756,8 @@ class Paper:
         path.write_text(json.dumps(self.written, indent=2), encoding="utf-8")
         return path
 
-    def stage_revise(self, feedback: str) -> StageResult:
-        """Rewrite only the sections named by a failed reviewer row.
+    def stage_revise(self, feedback: str, *, targets: list[str] | None = None) -> StageResult:
+        """Rewrite only the sections named by a failed quality gate.
 
         Re-running a reviewer after it finds prose defects cannot change the
         draft. Keep that maker-checker separation intact: the reviewer names
@@ -744,19 +766,17 @@ class Paper:
         """
         self._need_written()
         index, _ = stages.numbering(self.ledger)
-        lowered = feedback.lower()
-        targets: list[str] = []
-        hints = {
-            "introduction": ("introduction", "no_filler"),
-            "exit conditions and budgets": ("exit-condition", "exit condition"),
-            "idempotent tool design": ("idempotency", "idempotent"),
-            "verification: maker-checker splits": ("maker-checker", "maker checker"),
-        }
-        for heading in self.written:
-            if any(token in lowered for token in hints.get(heading.lower(), ())):
-                targets.append(heading)
-        if not targets:
-            targets = [heading for heading in self.written if heading.lower() not in stages.UNBOUND_SECTIONS]
+        # These two rubric rows apply across a draft. A reviewer may name a
+        # different example on the second pass, so revising only the first
+        # named section creates an oscillating review loop. Rewrite every
+        # substantive body once, rather than guessing which mechanism it will
+        # mention next.
+        # The abstract appears first, so it cannot introduce a term that its
+        # body section defines later. Limitations is already a caveat-only
+        # section, but every other section, including the abstract, needs the
+        # same global terminology and citation repair.
+        if targets is None:
+            targets = [heading for heading in self.written if heading.lower() != "limitations"]
 
         usd = 0.0
         for heading in targets:
@@ -782,10 +802,15 @@ class Paper:
                 f"Use only these claims and their citation markers:\n{briefs}\n\n"
                 "Return 180 to 300 words of replacement markdown body. No heading or references. "
                 "Preserve factual grounding and citation markers. Where the reviewer asks for a "
-                "tradeoff, name a credible alternative and its cost without inventing evidence.",
+                "tradeoff, name a credible alternative and its cost without inventing evidence. "
+                "Do not repeat the paper's section list or its abstract in this section. Define every "
+                "specialized term before its first use; the abstract must avoid or define terms that "
+                "body sections introduce later. Do not reuse a citation for a distinct claim unless the "
+                "provided claim brief explicitly supports both claims. Every prose paragraph that makes "
+                "a factual claim must include one or more of its allowed citation markers.",
             )
             usd += reply.usd
-            body = reply.text.strip()
+            body = section_body(reply.text, heading)
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body
             self._save_sections()
@@ -809,6 +834,15 @@ class Paper:
 
     def stage_assemble(self, extra: str = "") -> StageResult:
         self._need_written()
+        # Recover old checkpoints as well as fresh writer replies.  A process
+        # can be stopped between the writer and assembler, so normalizing only
+        # in stage_write would leave a persisted duplicate heading untreated.
+        normalized = {
+            heading: section_body(body, heading) for heading, body in self.written.items()
+        }
+        if normalized != self.written:
+            self.written = normalized
+            self._save_sections()
         body = stages.assemble(self.plan, self.outline, self.written, self.figures, self.ledger)
         # The em dash sweep is mechanical and runs before the gate that checks
         # for em dashes. Arguing with a model about punctuation costs a turn.
@@ -837,6 +871,16 @@ class Paper:
             artifacts={"words": len(body.split())},
             summary=f"{len(body.split())} words, every hard gate green",
         )
+
+    def _uncited_section_headings(self) -> list[str]:
+        """Return exactly the writer bodies that the citation gate rejects."""
+        import brief  # noqa: PLC0415
+
+        return [
+            heading
+            for heading, body in self.written.items()
+            if heading.lower() != "references" and brief.uncited_claims(section_body(body, heading))
+        ]
 
     # -- 9. publish --------------------------------------------------------
 

@@ -360,6 +360,12 @@ def test_write_gate_rejects_a_section_that_cites_nothing():
         stages.write_gate("Introduction", "A confident sentence with no source.", [1])
 
 
+def test_write_gate_rejects_an_uncited_paragraph_in_an_otherwise_cited_section():
+    with pytest.raises(GateFailed) as exc:
+        stages.write_gate("Introduction", "One fact. [1]\n\nAnother fact.", [1])
+    assert exc.value.signature == ("uncited_paragraph",)
+
+
 def test_write_gate_rejects_an_empty_section():
     with pytest.raises(GateFailed):
         stages.write_gate("Introduction", "   ", [1])
