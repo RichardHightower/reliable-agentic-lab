@@ -123,6 +123,20 @@ def test_render_invokes_the_plugin_with_article_density(monkeypatch, tmp_path):
     ]
 
 
+def test_renderer_child_receives_the_imagen_06_key_alias(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("GEMINI_API_KEY", "secret-value")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    def run(*_args, **kwargs):
+        seen.update(kwargs["env"])
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(diagrams.subprocess, "run", run)
+    diagrams._run("render.py", [])
+    assert seen["GOOGLE_API_KEY"] == "secret-value"
+
+
 def test_plugin_no_backend_keeps_its_prompt_and_fails_closed(monkeypatch, tmp_path):
     source = tmp_path / "figure.mmd"
     source.write_text("flowchart LR\n  A[{Decision?}]")
@@ -144,6 +158,25 @@ def test_plugin_no_backend_keeps_its_prompt_and_fails_closed(monkeypatch, tmp_pa
     assert exc.value.exit_code == 2
     assert exc.value.prompt_file == prompt
     assert prompt.read_text() == "the plugin-built themed prompt"
+
+
+def test_backend_auth_failure_also_fails_closed_with_the_prompt(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text("flowchart LR\n  A[Plan]")
+    out = tmp_path / "out"
+    prompt = out / "figure_imagen.prompt.txt"
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+
+    def run(_script, _args):
+        out.mkdir(exist_ok=True)
+        prompt.write_text("the plugin-built themed prompt")
+        return type("Result", (), {"returncode": 1})()
+
+    monkeypatch.setattr(diagrams, "_run", run)
+    with pytest.raises(diagrams.ImageBackendUnavailable) as exc:
+        diagrams.render(source, "loop safety", out)
+    assert exc.value.exit_code == 2
+    assert exc.value.prompt_file == prompt
 
 
 def test_runtime_failure_falls_through_in_order_and_keeps_attempts(monkeypatch, tmp_path):
@@ -172,21 +205,6 @@ def test_runtime_failure_falls_through_in_order_and_keeps_attempts(monkeypatch, 
     assert calls == ["imagen", "grok"]
     assert (out / "figure_imagen.imagen.prompt.txt").read_text() == "prompt for imagen"
     assert (out / "figure_imagen.imagen.json").is_file()
-
-
-def test_gemini_key_is_mapped_for_the_imagen_child(monkeypatch, tmp_path):
-    seen = {}
-    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-
-    def run(*args, **kwargs):
-        seen.update(kwargs["env"])
-        return type("Result", (), {"returncode": 0, "stdout": ""})()
-
-    monkeypatch.setattr(diagrams.subprocess, "run", run)
-    diagrams._run("judge.py", [])
-
-    assert seen["GOOGLE_API_KEY"] == "gemini-test-key"
 
 
 def test_judge_persists_the_plugin_fidelity_sidecar(monkeypatch, tmp_path):

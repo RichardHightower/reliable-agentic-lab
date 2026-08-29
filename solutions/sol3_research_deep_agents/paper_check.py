@@ -125,6 +125,11 @@ def figures_without_alt(body: str) -> list[str]:
     return [target for alt, target in figures(body) if not alt.strip()]
 
 
+def non_publication_figures(body: str) -> list[str]:
+    """Only plugin-produced ``*_imagen.png`` assets may enter the paper."""
+    return [target for _alt, target in figures(body) if not target.endswith("_imagen.png")]
+
+
 def visible_source_syntax(body: str) -> list[str]:
     """Diagram source left in the paper. The figure is the artifact, not the code."""
     found = []
@@ -360,6 +365,17 @@ def check(
         )
     )
 
+    wrong_assets = non_publication_figures(body)
+    checks.append(
+        Check(
+            "figure_assets",
+            not wrong_assets,
+            "every figure is a judged *_imagen.png publication asset"
+            if not wrong_assets
+            else f"non-publication figures: {wrong_assets}",
+        )
+    )
+
     raw = visible_source_syntax(body)
     checks.append(
         Check(
@@ -460,7 +476,7 @@ def demo() -> None:
         "A loop without an exit spends until someone notices. [1]\n\n"
         "## Introduction\n\n"
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
-        "![A flowchart of the three exits](figures/exits.svg)\n\n"
+        "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
         "## Limitations\n\n"
         "This paper measures two runtimes only. [2]\n\n"
         "## References\n\n"
@@ -492,7 +508,7 @@ def demo() -> None:
     # A Figures appendix is images and alt text, and owes no prose.
     appendix = good.replace(
         "## References",
-        "## Figures\n\n![A flowchart of the three exits](figures/exits.svg)\n\n## References",
+        "## Figures\n\n![A flowchart of the three exits](figures/exits_imagen.png)\n\n## References",
     )
     assert "has_body" not in check(appendix, urls).signature(), check(appendix, urls).report()
 

@@ -112,6 +112,11 @@ def parsed_sections(markdown: str) -> list[tuple[str, list[str | tuple[str, str]
     return sections
 
 
+def publication_figure_target(target: str) -> bool:
+    """PDF diagram assets come only from the imagen-diagrams output contract."""
+    return Path(target).name.endswith("_imagen.png")
+
+
 def styles() -> dict[str, ParagraphStyle]:
     base = getSampleStyleSheet()
     return {
@@ -301,6 +306,11 @@ def build(markdown: Path, output: Path) -> None:
         for block in blocks:
             if isinstance(block, tuple):
                 caption, target = block
+                if not publication_figure_target(target):
+                    raise RuntimeError(
+                        f"PDF rejected non-publication figure {target!r}; "
+                        "diagram assets must be judged *_imagen.png files"
+                    )
                 figure = markdown.parent / target
                 if figure.exists():
                     story.append(image_flowable(figure, caption, style["caption"]))

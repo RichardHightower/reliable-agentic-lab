@@ -40,13 +40,13 @@ def test_a_running_loop_does_not_stop():
 # -- the offline run -------------------------------------------------------
 
 
-def test_the_whole_pipeline_runs_offline(offline, run_dir):
-    """No network, no key, no SDK. This is the contract for this folder."""
+def test_the_whole_pipeline_runs_from_recorded_research(offline, run_dir):
+    """Research is offline; the accepted image boundary is stubbed in process."""
     assert offline.run() == 0
     assert (run_dir / "whitepaper.md").exists()
     assert (run_dir / "plan.json").exists()
     assert list((run_dir / "evidence").glob("claim.*.md"))
-    assert list((run_dir / "figures").glob("*.svg"))
+    assert list((run_dir / "figures").glob("*_imagen.png"))
 
 
 def test_the_stages_run_in_order(offline, run_dir):
@@ -157,7 +157,6 @@ def _rebuild(run_dir):
         runner=paper.FixtureRunner(FIXTURES / "replies.json"),
         backend=research.FixtureBackend(FIXTURES / "research.json"),
         work_dir=run_dir,
-        polish=False,
         quiet=True,
     )
 
@@ -480,42 +479,26 @@ def test_the_total_counts_each_call_once(run_dir, stub_renderer):
     )
 
 
-# -- a machine with no diagram renderer ------------------------------------
+# -- a machine with no image backend ---------------------------------------
 
 
-def test_a_missing_renderer_does_not_block_the_paper(run_dir, no_renderer):
-    """An attendee without Java still gets a paper. Nothing in `paper_check`
-    requires a figure, so blocking the run would be a worse answer than saying
-    so out loud."""
+def test_a_missing_image_backend_blocks_the_paper(run_dir, no_renderer):
     run = priced_run(run_dir, 100.0)
-    assert run.run() == 0
-    assert (run_dir / "whitepaper.md").exists()
+    with pytest.raises(stages.diagrams.ImageBackendUnavailable) as exc:
+        run.run()
+    assert exc.value.exit_code == 2
+    assert exc.value.prompt_file.read_text() == "plugin-built prompt"
+    assert not (run_dir / "whitepaper.md").exists()
 
 
-def test_a_missing_renderer_is_never_retried(run_dir, no_renderer):
-    """Nothing the diagrammer writes installs plantuml. Three attempts buy three
-    times the bill and the same result."""
+def test_a_missing_image_backend_is_never_retried(run_dir, no_renderer):
     run = priced_run(run_dir, 100.0)
-    run.run()
+    with pytest.raises(stages.diagrams.ImageBackendUnavailable):
+        run.run()
     assert run.state.attempts("diagram") == 1
 
 
-def test_a_missing_renderer_is_recorded(run_dir, no_renderer, capsys):
-    run = priced_run(run_dir, 100.0)
-    run.quiet = False
-    run.run()
-    assert run.state.stages["diagram"].metadata.get("renderer") == "missing"
-    assert "no renderer on this machine" in capsys.readouterr().out
-
-
-def test_a_paper_without_figures_still_passes_its_gates(run_dir, no_renderer):
-    run = priced_run(run_dir, 100.0)
-    run.run()
-    report = json.loads((run_dir / "gates.json").read_text())
-    assert report["passed"] is True, report
-
-
-def test_sections_written_before_a_stop_survive(run_dir):
+def test_sections_written_before_a_stop_survive(run_dir, stub_renderer):
     """A stage that persists only on success makes a mid-stage stop cost the
     whole stage again, which is the opposite of what a cost cap is for."""
     run = priced_run(run_dir, 5.10)

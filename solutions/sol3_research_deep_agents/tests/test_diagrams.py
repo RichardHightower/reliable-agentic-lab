@@ -1,4 +1,4 @@
-"""The figure pipeline. Every step fails closed to the step before it."""
+"""The publication figure boundary: source in, judged *_imagen.png out."""
 
 from __future__ import annotations
 
@@ -12,6 +12,10 @@ SIMPLE = 'flowchart LR\n  A["Plan"] --> B["Search"]\n  B --> C{"Grounded?"}\n'
 PUML = '@startuml\nparticipant "Maker" as M\nparticipant "Checker" as C\nM -> C: draft\n@enduml\n'
 
 
+def result(code=0, *, stdout="", stderr=""):
+    return type("Result", (), {"returncode": code, "stdout": stdout, "stderr": stderr})()
+
+
 def big(nodes: int) -> str:
     rows = [f'  N{i}["Node {i}"] --> N{i + 1}["Node {i + 1}"]' for i in range(nodes)]
     return "flowchart TB\n" + "\n".join(rows)
@@ -21,230 +25,316 @@ def test_demo_assertions_hold():
     diagrams.demo()
 
 
-def test_inventory_reads_labels_not_ids():
+def test_setup_pins_both_image_plugins_and_keeps_their_jobs_separate():
+    taskfile = (diagrams.HERE / "Taskfile.yml").read_text(encoding="utf-8")
+    assert "RENDERER_TAG: 'v0.2.0'" in taskfile
+    assert "IMAGE_GEN_TAG: 'v2.1.0'" in taskfile
+    assert ".cache/imagen-diagrams" in taskfile
+    assert ".cache/image-gen" in taskfile
+
+    module = (diagrams.HERE / "diagrams.py").read_text(encoding="utf-8")
+    assert "run_image_gen" not in module
+    assert "mmdc" not in module
+    assert "-tsvg" not in module and "-tpng" not in module
+
+
+def test_inventory_reads_labels_and_edges_without_rendering():
     inv = diagrams.inventory(SIMPLE, "mermaid")
     assert inv.labels == ["Plan", "Search", "Grounded?"]
     assert inv.edges == 2
 
 
-def test_inventory_falls_back_to_the_id_when_a_node_has_no_label():
-    """A bare id is what a reader would see, so the judge must check for it."""
+def test_inventory_falls_back_to_a_bare_node_id():
     inv = diagrams.inventory('flowchart LR\n  A[] --> B["Search"]\n', "mermaid")
-    assert "A" in inv.labels
+    assert inv.labels == ["A", "Search"]
 
 
-def test_plantuml_inventory():
+def test_plantuml_inventory_is_local_too():
     inv = diagrams.inventory(PUML, "plantuml")
     assert inv.labels == ["Maker", "Checker"]
     assert inv.edges == 1
 
 
-def test_complexity_gate_fires_over_the_limit():
-    inv = diagrams.inventory(big(diagrams.MAX_NODES + 2), "mermaid")
-    assert inv.too_complex
-    assert not diagrams.inventory(SIMPLE, "mermaid").too_complex
+def test_complexity_gate_fires_before_the_plugin(monkeypatch, tmp_path):
+    source = tmp_path / "wide.mmd"
+    source.write_text(big(diagrams.MAX_NODES + 2))
+    called = []
+    monkeypatch.setattr(diagrams, "render_png", lambda *_args: called.append(True))
+    with pytest.raises(diagrams.DiagramTooComplex) as exc:
+        diagrams.render(source, tmp_path / "out")
+    assert "Combine related nodes" in str(exc.value)
+    assert not called
 
 
-def test_the_simplify_instruction_names_the_surplus_nodes():
-    """ "Simplify this" produces shorter labels. Naming them produces a combine."""
-    instruction = diagrams.simplify_instruction(diagrams.inventory(big(20), "mermaid"))
-    assert "Combine related nodes" in instruction
-    assert "Node 12" in instruction
-
-
-def test_render_refuses_a_too_complex_source(tmp_path):
-    src = tmp_path / "wide.mmd"
-    src.write_text(big(30))
-    with pytest.raises(diagrams.DiagramTooComplex):
-        diagrams.render(src, tmp_path / "out", polish=False)
-
-
-def test_braces_are_doubled_for_the_imagen_cli():
-    """The CLI reads {x} as a template variable. A {Decision?} node crashes it."""
-    assert diagrams.escape_braces("a {x} b") == "a {{x}} b"
-    prompt = diagrams.build_prompt(
-        SIMPLE, diagrams.inventory(SIMPLE, "mermaid"), diagrams.load_theme(), "loops"
-    )
-    assert "{{" in prompt and "}}" in prompt
-    assert "{Decision?}" not in prompt
-
-
-def test_the_closer_is_the_last_thing_in_the_prompt():
-    """Final tokens weigh most, and the failure this guards is a picture of code."""
-    prompt = diagrams.build_prompt(
-        SIMPLE, diagrams.inventory(SIMPLE, "mermaid"), diagrams.load_theme(), "loops"
-    )
-    assert prompt.rstrip().endswith("not Mermaid or PlantUML code.")
-
-
-def test_the_prompt_carries_the_theme_palette():
-    theme = diagrams.load_theme("spillwave-light")
-    assert theme["palette"]["background"].startswith("#")
-    prompt = diagrams.build_prompt(SIMPLE, diagrams.inventory(SIMPLE, "mermaid"), theme, "loops")
-    assert theme["palette"]["background"] in prompt
-    assert "mermaid or plantuml source syntax" in prompt
-
-
-def test_mermaid_theme_keeps_html_labels_for_the_browser_rendered_print_png():
-    config = json.loads(diagrams.MERMAID_CONFIG.read_text())
-    assert config["flowchart"]["htmlLabels"] is True
-
-
-def test_mermaid_keeps_chromium_sandboxed_unless_the_environment_opted_out(tmp_path, monkeypatch):
-    monkeypatch.delenv("SOL3_MERMAID_NO_SANDBOX", raising=False)
-    assert diagrams._puppeteer_config(str(tmp_path)) is None
-
-    monkeypatch.setenv("SOL3_MERMAID_NO_SANDBOX", "1")
-    config = diagrams._puppeteer_config(str(tmp_path))
-    assert config is not None
-    assert json.loads(config.read_text())["args"] == ["--no-sandbox", "--disable-setuid-sandbox"]
-
-
-def test_a_missing_theme_does_not_raise():
-    assert diagrams.load_theme("no-such-theme")["palette"] == {}
-
-
-def test_plantuml_uses_the_selected_white_paper_palette():
-    args = diagrams.plantuml_style_args("spillwave-light")
-    assert "-SbackgroundColor=#eef2f7" in args
-    assert "-SsequenceArrowColor=#1a365d" in args
-    assert "-SdefaultFontSize=18" in args
-
-
-class FakePng:
-    def __init__(self, size=100_000, there=True):
-        self._size = size
-        self._there = there
-
-    def exists(self):
-        return self._there
-
-    def stat(self):
-        return type("S", (), {"st_size": self._size})()
-
-
-def test_the_judge_catches_a_missing_label():
-    inv = diagrams.inventory(SIMPLE, "mermaid")
-    verdict = diagrams.judge_png(FakePng(), inv, "boxes labelled Plan and Search")
-    assert not verdict.passed
-    assert any("Grounded?" in miss for miss in verdict.misses)
-
-
-def test_the_judge_catches_visible_source_syntax():
-    inv = diagrams.inventory(SIMPLE, "mermaid")
-    verdict = diagrams.judge_png(FakePng(), inv, "flowchart LR Plan Search Grounded?")
-    assert any("source syntax" in miss for miss in verdict.misses)
-
-
-def test_the_judge_reports_a_missing_image():
-    verdict = diagrams.judge_png(FakePng(there=False), diagrams.inventory(SIMPLE, "mermaid"))
-    assert not verdict.passed
-
-
-def test_alt_text_names_the_labels():
-    alt = diagrams.alt_text(diagrams.inventory(SIMPLE, "mermaid"), "the loop")
-    assert "Plan" in alt and "2 relationships" in alt
-
-
-def test_alt_text_omits_diagram_shape_syntax_and_line_break_escapes():
+def test_alt_text_names_labels_but_not_source_syntax():
     inv = diagrams.Inventory(labels=["[Start]", "Maker\\nwrite scope"], edges=1)
-    alt = diagrams.alt_text(inv, "the loop")
-    assert "[" not in alt and "\\n" not in alt
-    assert "Start" in alt and "Maker write scope" in alt
+    text = diagrams.alt_text(inv, "the loop")
+    assert "Start" in text and "Maker write scope" in text
+    assert "[" not in text and "\\n" not in text
 
 
-def test_a_figure_ships_its_svg_until_a_png_is_judged_good():
-    figure = diagrams.Figure(name="x", source=Path("x.mmd"), svg=Path("x.svg"))
-    assert figure.best == Path("x.svg")
-    figure.png = Path("x.png")
-    assert figure.best == Path("x.svg"), "an unjudged png does not ship"
-    figure.rasterized = True
-    assert figure.best == Path("x.png"), "the deterministic print PNG is safe to ship"
-    figure.rasterized = False
-    figure.polished = True
-    assert figure.best == Path("x.png")
+def test_available_requires_both_plugin_scripts(monkeypatch, tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    monkeypatch.setattr(diagrams, "SCRIPTS", scripts)
+    (scripts / "render.py").write_text("")
+    assert not diagrams.available()
+    (scripts / "judge.py").write_text("")
+    assert diagrams.available()
 
 
-def test_missing_imagen_keeps_the_deterministic_figure(tmp_path, monkeypatch):
-    """No CLI and no key is a fact about the laptop, not a failed run."""
-    monkeypatch.setattr(diagrams, "imagen_available", lambda: False)
-    monkeypatch.setattr(diagrams, "PLUGIN_RENDER", tmp_path / "absent.py")
-    src = tmp_path / "d.mmd"
-    src.write_text(SIMPLE)
-    monkeypatch.setattr(diagrams, "render_svg", lambda s, o, **_: _stub_svg(o, s))
-    monkeypatch.setattr(diagrams, "render_mermaid_png", lambda s, o, **_: _stub_png(o, s))
+def test_renderer_child_receives_the_imagen_06_key_alias(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("GEMINI_API_KEY", "secret-value")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
-    figure = diagrams.render(src, tmp_path / "out", polish=True)
-    assert figure.polished is False
-    assert figure.svg.exists()
-    assert figure.rasterized is True
-    assert figure.best == figure.png
-    assert "embedded print PNG" in figure.note
+    def run(*_args, **kwargs):
+        seen.update(kwargs["env"])
+        return result()
+
+    monkeypatch.setattr(diagrams.subprocess, "run", run)
+    diagrams._run("render.py", [])
+    assert seen["GOOGLE_API_KEY"] == "secret-value"
 
 
-def test_plantuml_also_gets_a_deterministic_print_png(tmp_path, monkeypatch):
-    """A PDF should not need a browser's SVG/foreign-object support to print a figure."""
-    monkeypatch.setattr(diagrams, "render_svg", lambda s, o, **_: _stub_svg(o, s))
-    monkeypatch.setattr(diagrams, "render_plantuml_png", lambda s, o, **_: _stub_png(o, s))
-    src = tmp_path / "maker-checker.puml"
-    src.write_text(PUML)
+def test_local_themes_are_copied_into_the_disposable_clone(monkeypatch, tmp_path):
+    local = tmp_path / "local"
+    remote = tmp_path / "remote"
+    local.mkdir()
+    remote.mkdir()
+    (local / "paper.yaml").write_text("id: paper\n")
+    monkeypatch.setattr(diagrams, "THEMES", local)
+    monkeypatch.setattr(diagrams, "RENDERER_THEMES", remote)
 
-    figure = diagrams.render(src, tmp_path / "out", polish=False)
+    diagrams.ensure_theme()
 
-    assert figure.rasterized is True
-    assert figure.best == figure.png
-
-
-def _stub_svg(out_dir: Path, src: Path) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    target = out_dir / f"{src.stem}.svg"
-    target.write_text("<svg/>")
-    return target
+    assert (remote / "paper.yaml").read_text() == "id: paper\n"
 
 
-def _stub_png(out_dir: Path, src: Path) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    target = out_dir / f"{src.stem}.png"
-    target.write_bytes(b"\x89PNG\r\n\x1a\n")
-    return target
-
-
-def test_a_matching_hash_skips_the_render(tmp_path, monkeypatch):
-    """This is what makes a resumed run cheap. A rerender costs an image call."""
-    calls = []
-    monkeypatch.setattr(diagrams, "imagen_available", lambda: False)
-    monkeypatch.setattr(diagrams, "PLUGIN_RENDER", tmp_path / "absent.py")
-    monkeypatch.setattr(
-        diagrams, "render_svg", lambda s, o, **_: (calls.append(s), _stub_svg(o, s))[1]
-    )
-    monkeypatch.setattr(diagrams, "render_mermaid_png", lambda s, o, **_: _stub_png(o, s))
-
-    src = tmp_path / "d.mmd"
-    src.write_text(SIMPLE)
+def test_render_invokes_only_imagen_diagrams_v020(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text(SIMPLE)
     out = tmp_path / "out"
-    diagrams.render(src, out, polish=True)
-    assert len(calls) == 1
+    calls = []
+    monkeypatch.setattr(diagrams, "available", lambda: True)
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
 
-    figure = diagrams.render(src, out, polish=True)
-    assert len(calls) == 1, "the second run must not rerender"
-    assert figure.note == "unchanged, reused"
+    def run(script, args):
+        calls.append((script, args))
+        out.mkdir(exist_ok=True)
+        (out / "figure_imagen.png").write_bytes(b"x" * 5000)
+        return result()
 
-    src.write_text(SIMPLE + '  C --> D["Write"]\n')
-    diagrams.render(src, out, polish=True)
-    assert len(calls) == 2, "a changed source must rerender"
+    monkeypatch.setattr(diagrams, "_run", run)
+    png = diagrams.render_png(source, "loop safety", out)
+
+    assert png == out / "figure_imagen.png"
+    assert calls == [
+        (
+            "render.py",
+            [
+                "--source",
+                str(source),
+                "--topic",
+                "loop safety",
+                "--theme",
+                diagrams.DEFAULT_THEME,
+                "--density",
+                "article",
+                "--output-dir",
+                str(out),
+            ],
+        )
+    ]
 
 
-def test_the_sidecar_records_what_happened(tmp_path, monkeypatch):
-    monkeypatch.setattr(diagrams, "imagen_available", lambda: False)
-    monkeypatch.setattr(diagrams, "PLUGIN_RENDER", tmp_path / "absent.py")
-    monkeypatch.setattr(diagrams, "render_svg", lambda s, o, **_: _stub_svg(o, s))
-    monkeypatch.setattr(diagrams, "render_mermaid_png", lambda s, o, **_: _stub_png(o, s))
-    src = tmp_path / "d.mmd"
-    src.write_text(SIMPLE)
-    diagrams.render(src, tmp_path / "out", polish=True, topic="loops")
+def test_missing_plugin_fails_closed_and_leaves_a_prompt(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text(SIMPLE)
+    out = tmp_path / "out"
+    monkeypatch.setattr(diagrams, "available", lambda: False)
 
-    sidecar = json.loads((tmp_path / "out" / "d.imagen.json").read_text())
-    assert sidecar["polished"] is False
-    assert sidecar["rasterized"] is True
-    assert sidecar["source_hash"]
-    assert "Plan" in sidecar["alt"]
+    with pytest.raises(diagrams.ImageBackendUnavailable) as exc:
+        diagrams.render_png(source, "loop safety", out)
+
+    assert exc.value.exit_code == 2
+    assert exc.value.prompt_file == out / "figure_imagen.prompt.txt"
+    assert "Run `task setup`" in exc.value.prompt_file.read_text()
+    assert not list(out.glob("*.svg"))
+    assert not list(out.glob("figure.png"))
+
+
+def test_plugin_no_backend_keeps_its_themed_prompt_and_exits_two(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text(SIMPLE)
+    out = tmp_path / "out"
+    prompt = out / "figure_imagen.prompt.txt"
+    monkeypatch.setattr(diagrams, "available", lambda: True)
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+
+    def run(_script, _args):
+        out.mkdir(exist_ok=True)
+        prompt.write_text("plugin-built themed prompt")
+        return result(diagrams.NO_BACKEND)
+
+    monkeypatch.setattr(diagrams, "_run", run)
+    with pytest.raises(diagrams.ImageBackendUnavailable) as exc:
+        diagrams.render_png(source, "loop safety", out)
+    assert exc.value.prompt_file == prompt
+    assert prompt.read_text() == "plugin-built themed prompt"
+
+
+def test_backend_auth_failure_also_fails_closed_with_the_prompt(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text(SIMPLE)
+    out = tmp_path / "out"
+    prompt = out / "figure_imagen.prompt.txt"
+    monkeypatch.setattr(diagrams, "available", lambda: True)
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+
+    def run(_script, _args):
+        out.mkdir(exist_ok=True)
+        prompt.write_text("plugin-built themed prompt")
+        return result(1, stderr="Google API key not configured")
+
+    monkeypatch.setattr(diagrams, "_run", run)
+    with pytest.raises(diagrams.ImageBackendUnavailable) as exc:
+        diagrams.render_png(source, "loop safety", out)
+    assert exc.value.exit_code == 2
+    assert exc.value.prompt_file == prompt
+
+
+def test_a_plain_png_cannot_masquerade_as_the_publication_figure():
+    figure = diagrams.Figure(
+        name="loop", source=Path("loop.mmd"), png=Path("loop.png"), polished=True
+    )
+    assert figure.best is None
+    figure.png = Path("loop_imagen.png")
+    assert figure.best == Path("loop_imagen.png")
+    figure.polished = False
+    assert figure.best is None
+
+
+def test_judge_uses_the_plugin_and_names_its_sidecar(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    png = tmp_path / "figure_imagen.png"
+    calls = []
+
+    def run(script, args):
+        calls.append((script, args))
+        return result(stdout='{"pass": true, "misses": []}')
+
+    monkeypatch.setattr(diagrams, "_run", run)
+    assert diagrams.judge(source, png) == {"pass": True, "misses": []}
+    assert calls == [
+        (
+            "judge.py",
+            [
+                "--source",
+                str(source),
+                "--png",
+                str(png),
+                "--sidecar",
+                str(tmp_path / "figure_imagen.judge.json"),
+            ],
+        )
+    ]
+
+
+def test_judge_fails_when_it_returns_no_json(monkeypatch, tmp_path):
+    monkeypatch.setattr(diagrams, "_run", lambda *_args: result(stdout="not json"))
+    verdict = diagrams.judge(tmp_path / "f.mmd", tmp_path / "f_imagen.png")
+    assert verdict["pass"] is False
+    assert "no JSON" in verdict["misses"][0]
+
+
+def test_render_accepts_only_a_plugin_judged_png(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text(SIMPLE)
+    out = tmp_path / "out"
+
+    def render_png(_source, _topic, output, _theme):
+        png = output / "figure_imagen.png"
+        png.write_bytes(b"x" * 5000)
+        return png
+
+    monkeypatch.setattr(diagrams, "render_png", render_png)
+    monkeypatch.setattr(diagrams, "judge", lambda *_args: {"pass": True, "misses": []})
+    figure = diagrams.render(source, out, topic="loops")
+
+    assert figure.best == out / "figure_imagen.png"
+    assert figure.polished
+    audit = json.loads((out / "figure.imagen.json").read_text())
+    assert audit["renderer"] == diagrams.PIPELINE_VERSION
+    assert audit["png"] == "figure_imagen.png"
+
+
+def test_plugin_judge_rejection_never_publishes_the_png(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text(SIMPLE)
+    out = tmp_path / "out"
+
+    def render_png(_source, _topic, output, _theme):
+        png = output / "figure_imagen.png"
+        png.write_bytes(b"x" * 5000)
+        return png
+
+    monkeypatch.setattr(diagrams, "render_png", render_png)
+    monkeypatch.setattr(
+        diagrams, "judge", lambda *_args: {"pass": False, "misses": ["lost Done"]}
+    )
+    figure = diagrams.render(source, out)
+    assert figure.best is None
+    assert figure.misses == ["lost Done"]
+
+
+def test_no_polish_flag_cannot_restore_the_old_svg_path(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text(SIMPLE)
+    out = tmp_path / "out"
+    calls = []
+
+    def render_png(_source, _topic, output, _theme):
+        calls.append(True)
+        png = output / "figure_imagen.png"
+        png.write_bytes(b"x" * 5000)
+        return png
+
+    monkeypatch.setattr(diagrams, "render_png", render_png)
+    monkeypatch.setattr(diagrams, "judge", lambda *_args: {"pass": True, "misses": []})
+    assert diagrams.render(source, out, polish=False).best.name == "figure_imagen.png"
+    assert calls == [True]
+
+
+def test_matching_accepted_hash_reuses_the_plugin_png(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text(SIMPLE)
+    out = tmp_path / "out"
+    calls = []
+
+    def render_png(_source, _topic, output, _theme):
+        calls.append(True)
+        png = output / "figure_imagen.png"
+        png.write_bytes(b"x" * 5000)
+        return png
+
+    monkeypatch.setattr(diagrams, "render_png", render_png)
+    monkeypatch.setattr(diagrams, "judge", lambda *_args: {"pass": True, "misses": []})
+    diagrams.render(source, out)
+    reused = diagrams.render(source, out)
+    assert calls == [True]
+    assert reused.note == "unchanged, reused"
+
+
+def test_main_returns_two_for_a_missing_backend(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text(SIMPLE)
+    prompt = tmp_path / "out" / "figure_imagen.prompt.txt"
+
+    def unavailable(*_args, **_kwargs):
+        prompt.parent.mkdir()
+        prompt.write_text("retry me")
+        raise diagrams.ImageBackendUnavailable(prompt)
+
+    monkeypatch.setattr(diagrams, "render", unavailable)
+    assert diagrams.main(["--src", str(source), "--out", str(prompt.parent)]) == 2

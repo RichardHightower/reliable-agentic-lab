@@ -392,12 +392,20 @@ class Figure:
     def __init__(self, name):
         self.name = name
         self.alt = f"A diagram of {name}"
-        self.polished = False
-        self.svg = type("P", (), {"name": f"{name}.svg"})()
+        self.polished = True
+        self.png = type("P", (), {"name": f"{name}_imagen.png"})()
 
     @property
     def best(self):
-        return self.svg
+        return self.png
+
+
+def test_figure_block_rejects_any_non_plugin_asset():
+    figure = Figure("loop")
+    figure.png = type("P", (), {"name": "loop.svg"})()
+    with pytest.raises(GateFailed) as exc:
+        stages.figure_block(figure)
+    assert exc.value.signature == ("figure_asset",)
 
 
 def test_assemble_generates_the_references_from_the_ledger():

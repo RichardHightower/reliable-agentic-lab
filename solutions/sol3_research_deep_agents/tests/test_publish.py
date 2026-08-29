@@ -12,8 +12,8 @@ BODY = (
     "---\ntitle: X\n---\n\n"
     "# Exit conditions\n\n"
     "A fact. [1]\n\n"
-    "![A flowchart of the exits](figures/exits.svg)\n\n"
-    "![A sequence of the roles](figures/roles.png)\n\n"
+    "![A flowchart of the exits](figures/exits_imagen.png)\n\n"
+    "![A sequence of the roles](figures/roles_imagen.png)\n\n"
     "![remote](https://example.com/x.png)\n\n"
     "## References\n\n1. https://a.example\n"
 )
@@ -24,8 +24,8 @@ def ready(tmp_path: Path) -> Path:
     work = tmp_path / "run"
     (work / "figures").mkdir(parents=True)
     (work / "whitepaper.md").write_text(BODY)
-    (work / "figures" / "exits.svg").write_text("<svg/>")
-    (work / "figures" / "roles.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (work / "figures" / "exits_imagen.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (work / "figures" / "roles_imagen.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (work / "gates.json").write_text(json.dumps({"passed": True, "failures": []}))
     return work
 
@@ -80,7 +80,7 @@ def test_figures_are_staged_with_an_order_prefix(ready, tmp_path):
     """A gist is flat, and figure names collide across papers."""
     publish.push(ready, dry_run=True, out_dir=tmp_path / "staged")
     staged = sorted(p.name for p in (tmp_path / "staged").iterdir())
-    assert staged == ["01-exits.svg", "02-roles.png", "whitepaper.md"]
+    assert staged == ["01-exits_imagen.png", "02-roles_imagen.png", "whitepaper.md"]
 
 
 def test_the_markdown_is_staged_first(ready, tmp_path):
@@ -92,8 +92,8 @@ def test_the_markdown_is_staged_first(ready, tmp_path):
 def test_local_image_links_become_raw_urls(ready, tmp_path):
     publish.push(ready, dry_run=True, gist_id="abc123", out_dir=tmp_path / "staged")
     body = (tmp_path / "staged" / "whitepaper.md").read_text()
-    assert "/abc123/raw/01-exits.svg" in body
-    assert "/abc123/raw/02-roles.png" in body
+    assert "/abc123/raw/01-exits_imagen.png" in body
+    assert "/abc123/raw/02-roles_imagen.png" in body
 
 
 def test_a_remote_image_is_left_alone(ready, tmp_path):
@@ -104,10 +104,10 @@ def test_a_remote_image_is_left_alone(ready, tmp_path):
 
 def test_a_missing_figure_keeps_its_original_link(ready, tmp_path):
     """Better a broken relative link than a raw URL to a file that is not there."""
-    (ready / "figures" / "exits.svg").unlink()
+    (ready / "figures" / "exits_imagen.png").unlink()
     publish.push(ready, dry_run=True, gist_id="abc123", out_dir=tmp_path / "staged")
     body = (tmp_path / "staged" / "whitepaper.md").read_text()
-    assert "(figures/exits.svg)" in body
+    assert "(figures/exits_imagen.png)" in body
 
 
 # -- the id map ------------------------------------------------------------

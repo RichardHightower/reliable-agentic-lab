@@ -398,24 +398,26 @@ def main(argv: list[str] | None = None) -> int:
 def demo() -> None:
     body = (
         "---\ntitle: X\nauthor: Y\n---\n\n"
-        "# Paper\n\n![A flowchart of the loop](figures/loop.svg)\n\n"
+        "# Paper\n\n![A flowchart of the loop](figures/loop_imagen.png)\n\n"
         "![remote](https://example.com/x.png)\n"
     )
     stripped = strip_front_matter(body)
     assert stripped.startswith("# Paper"), stripped[:40]
     assert "title: X" not in stripped
 
-    assert figure_names(stripped) == ["loop.svg"], "a remote image is not staged"
-    assert staged_name(1, "loop.svg") == "01-loop.svg"
+    assert figure_names(stripped) == ["loop_imagen.png"], "a remote image is not staged"
+    assert staged_name(1, "loop_imagen.png") == "01-loop_imagen.png"
 
-    out = rewrite_images(stripped, {"loop.svg": "01-loop.svg"}, "owner", "abc123")
-    assert f"{RAW_BASE}/owner/abc123/raw/01-loop.svg" in out
+    out = rewrite_images(
+        stripped, {"loop_imagen.png": "01-loop_imagen.png"}, "owner", "abc123"
+    )
+    assert f"{RAW_BASE}/owner/abc123/raw/01-loop_imagen.png" in out
     assert "https://example.com/x.png" in out, "a remote image is left alone"
 
     # A figure that was never staged keeps its original link rather than
     # pointing at a raw URL that does not exist.
     out = rewrite_images(stripped, {}, "owner", "abc123")
-    assert "(figures/loop.svg)" in out
+    assert "(figures/loop_imagen.png)" in out
 
     # Check the argv the code actually builds, not the source text. A grep for
     # the flag matches this comment and proves nothing.

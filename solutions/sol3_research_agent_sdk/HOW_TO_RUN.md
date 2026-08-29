@@ -72,15 +72,15 @@ task e2e-fixture
 
 This uses a recorded primary-source corpus but the installed
 [`imagen-diagrams`](https://github.com/SpillwaveSolutions/imagen-diagrams)
-v0.2.0 renderer and fidelity judge. The renderer can use the locally installed
-[`image-gen`](https://github.com/SpillwaveSolutions/image_gen) v2.1.0 plugin's
-image-engine contract. It therefore needs `task setup` plus one approved
-image backend, in this order: `imagen`, `grok`, then `codex`. The plugin uses
-the `imagen-cli-vars` brace policy for Imagen and `grok-imagine` for Grok and
-Codex. `GEMINI_API_KEY` is passed to the Imagen CLI under the
-`GOOGLE_API_KEY` name it expects. If a backend exits without a PNG, the harness
-keeps that attempt's prompt and metadata before trying the next backend. If all
-three fail, it writes the final `<stem>_imagen.prompt.txt` and exits 2.
+v0.2.0 renderer and fidelity judge. That plugin alone turns `.mmd` or `.puml`
+source into the paper's `*_imagen.png` diagrams. The separately installed
+[`image-gen`](https://github.com/SpillwaveSolutions/image_gen) v2.1.0 plugin is
+reserved for cover and non-diagram artwork. The diagram renderer uses its own
+approved backend order: `imagen`, `grok`, then `codex`. `GEMINI_API_KEY` is
+passed to the Imagen CLI under the `GOOGLE_API_KEY` name it expects. If a
+backend exits without a PNG, the harness keeps that attempt's prompt and
+metadata before trying the next backend. If all three fail, it writes the final
+`<stem>_imagen.prompt.txt` and exits 2; it never substitutes SVG or a plain PNG.
 Each accepted figure retains the plugin's render and judge sidecars. No model
 key or research network access is needed for the recorded research corpus
 itself.
