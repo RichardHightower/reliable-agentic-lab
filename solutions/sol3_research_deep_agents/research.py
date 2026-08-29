@@ -1,12 +1,16 @@
-"""One research boundary, three backends.
+"""One filtered research boundary, with provider fallbacks.
 
-    perplexity   the MCP server, when the attendee has a key
-    websearch    the coding agent's built-in tool, when they do not
-    fixture      a recorded answer, when there is no network
+    perplexity   Search API through the MCP server or vendor REST endpoint
+    anthropic    one domain-filtered web-search request
+    openai       one domain-filtered web-search request
+    fixture      a recorded answer, when no live provider is available
 
 The attendee decides. The loop does not know which one it holds, which is the
 same tool-contract idea as MCP and as the repo contract: name the boundary,
-keep the caller ignorant of what is behind it.
+keep the caller ignorant of what is behind it. The only exception is the
+explicit `WebSearchBackend`, retained for the Saturday-style classroom demo
+when the caller asks for `--backend websearch`; paper auto mode never chooses
+it.
 
 Every call goes through a budget with a hard cap, ported from
 `v3/article_pipeline/util/cost.py`. An agent that can search without a ceiling
@@ -26,6 +30,8 @@ from threading import Lock
 from typing import Callable
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
+
+import source_policy
 
 
 HERE = Path(__file__).resolve().parent
@@ -94,18 +100,38 @@ class Budget:
     on_charge: Callable[[float], None] | None = field(default=None, repr=False, compare=False)
     _request_limit: int | None = field(default=None, init=False, repr=False, compare=False)
     _request_calls: int = field(default=0, init=False, repr=False, compare=False)
+    _tool_limit: int | None = field(default=None, init=False, repr=False, compare=False)
+    _tool_calls: int = field(default=0, init=False, repr=False, compare=False)
     _lock: Lock = field(default_factory=Lock, init=False, repr=False, compare=False)
 
-    def begin_request(self, max_calls: int | None = None) -> None:
-        """Start one agent request with an optional per-request tool ceiling."""
+    def begin_request(
+        self, max_calls: int | None = None, *, max_provider_calls: int | None = None
+    ) -> None:
+        """Start one agent request with tool and provider-call ceilings.
+
+        The research role gets one tool invocation. That one invocation may make
+        Scout, Retrieve, and the narrow Ask repair, so provider charges have a
+        separate cap and cannot be mistaken for extra model-issued searches.
+        """
         with self._lock:
-            self._request_limit = max_calls
+            self._request_limit = max_provider_calls if max_provider_calls is not None else max_calls
             self._request_calls = 0
+            self._tool_limit = max_calls
+            self._tool_calls = 0
 
     def end_request(self) -> None:
         with self._lock:
             self._request_limit = None
             self._request_calls = 0
+            self._tool_limit = None
+            self._tool_calls = 0
+
+    def reserve_tool(self) -> None:
+        """Spend one role-visible tool invocation before it reaches a backend."""
+        with self._lock:
+            if self._tool_limit is not None and self._tool_calls + 1 > self._tool_limit:
+                raise BudgetExceeded(f"request search budget spent: {self._tool_limit} tool call")
+            self._tool_calls += 1
 
     def charge(self, usd: float) -> None:
         """Reserve a provider call before issuing it.
@@ -146,6 +172,7 @@ class Finding:
     backend: str = ""
     usd: float = 0.0
     note: str = ""
+    provider_unavailable: bool = False
 
     @property
     def empty(self) -> bool:
@@ -169,7 +196,7 @@ class Backend:
     def available(self) -> bool:
         return True
 
-    def search(self, question: str) -> Finding:
+    def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
         raise NotImplementedError
 
 
@@ -184,7 +211,9 @@ class FixtureBackend(Backend):
     def available(self) -> bool:
         return self.path.exists()
 
-    def search(self, question: str) -> Finding:
+    def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        if reserve is not None:
+            reserve(self.cost_per_call)
         data = json.loads(self.path.read_text(encoding="utf-8"))
         best = data.get(question)
         if best is None:
@@ -302,7 +331,9 @@ class WebSearchBackend(Backend):
     def available(self) -> bool:
         return True
 
-    def search(self, question: str) -> Finding:
+    def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        if reserve is not None:
+            reserve(self.cost_per_call)
         answers = {}
         if self.inbox and self.inbox.exists():
             answers = json.loads(self.inbox.read_text(encoding="utf-8"))
@@ -355,13 +386,12 @@ class WebSearchBackend(Backend):
 
 
 class PerplexityBackend(Backend):
-    """Perplexity, through whichever transport this laptop can reach.
+    """Perplexity Scout + Retrieve, with an Ask fallback only for no quotes.
 
-    The previous version piped a JSON blob into `npx -y server-perplexity-ask`
-    and read stdout. An MCP server does not work that way. It speaks JSON-RPC
-    over stdio and expects an `initialize` handshake before any `tools/call`, so
-    that version could only ever return an empty finding. `mcp_tools` does the
-    handshake, and falls back to the vendor's REST endpoint when it cannot.
+    Search receives the Python-owned filter and returns URLs/snippets. Scout may
+    discover another official documentation host, then retrieve queries the
+    merged list. Both calls happen inside this one tool invocation, so the
+    researcher cannot spend a third model-issued search call.
     """
 
     name = "perplexity"
@@ -374,23 +404,198 @@ class PerplexityBackend(Backend):
     def available(self) -> bool:
         return bool(os.environ.get("PERPLEXITY_API_KEY"))
 
-    def search(self, question: str) -> Finding:
-        from mcp_tools import TransportUnavailable, ask_perplexity  # noqa: PLC0415
+    def _call(self, operation, question, allowlist, reserve):
+        if reserve is not None:
+            reserve(self.cost_per_call)
+        return operation(question, allowlist, self.config)
+
+    def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        from mcp_tools import TransportUnavailable, ask_perplexity, search_perplexity  # noqa: PLC0415
 
         try:
-            answer = ask_perplexity(question, self.config)
+            scout = self._call(search_perplexity, question, source_policy.SEED_ALLOWLIST, reserve)
+            allowlist = source_policy.merge_allowlist(scout.citations)
+            retrieved = self._call(search_perplexity, question, allowlist, reserve)
         except TransportUnavailable as exc:
-            # An empty finding, not a raise. The loop counts empty answers and
-            # escalates on no source, which is the honest outcome here.
-            return Finding(question, "", backend=self.name, note=str(exc))
+            return Finding(
+                question,
+                "",
+                backend=self.name,
+                note=str(exc),
+                provider_unavailable=True,
+            )
+
+        answer = retrieved
+        calls = 2
+        # Ask is deliberately not a normal second pass. It is only a repair for
+        # a real result bundle that did not contain enough source text to quote.
+        if retrieved.hits and not retrieved.has_usable_quotes:
+            try:
+                answer = self._call(ask_perplexity, question, allowlist, reserve)
+                calls += 1
+            except TransportUnavailable as exc:
+                return Finding(question, "", backend=self.name, note=str(exc), provider_unavailable=True)
+
+        citations = source_policy.filter_urls(answer.citations, allowlist)
+        if not citations:
+            return Finding(
+                question,
+                "",
+                backend=self.name,
+                usd=calls * self.cost_per_call,
+                note="search returned no citations on the approved allowlist",
+            )
         self.transport = answer.transport
         return Finding(
             question=question,
             answer=answer.text,
-            citations=answer.citations,
+            citations=citations,
             backend=self.name,
-            usd=answer.usd,
+            usd=calls * self.cost_per_call,
+            note=f"{calls} filtered Perplexity requests",
         )
+
+
+class AnthropicBackend(Backend):
+    """One official-domain Anthropic web search when Perplexity is unavailable."""
+
+    name = "anthropic"
+    cost_per_call = 0.02
+
+    def available(self) -> bool:
+        return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        key = os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            return Finding(question, "", backend=self.name, note="ANTHROPIC_API_KEY is not set", provider_unavailable=True)
+        if reserve is not None:
+            reserve(self.cost_per_call)
+        try:
+            import httpx  # noqa: PLC0415
+
+            response = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": os.environ.get("ANTHROPIC_SEARCH_MODEL", "claude-haiku-4-5-20251001"),
+                    "max_tokens": 900,
+                    "messages": [{"role": "user", "content": question}],
+                    "tools": [
+                        {
+                            "type": "web_search_20260209",
+                            "name": "web_search",
+                            "max_uses": 1,
+                            "allowed_domains": list(source_policy.provider_domains(source_policy.SEED_ALLOWLIST)),
+                        }
+                    ],
+                },
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            return Finding(question, "", backend=self.name, note=f"anthropic web search failed: {exc}", provider_unavailable=True)
+        text = "\n".join(
+            str(block.get("text", ""))
+            for block in payload.get("content", [])
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+        citations = source_policy.filter_urls(_urls_in(payload), source_policy.SEED_ALLOWLIST)
+        return _filtered_finding(question, text, citations, self.name, self.cost_per_call)
+
+
+class OpenAIBackend(Backend):
+    """One official-domain OpenAI web search before the recorded fixture."""
+
+    name = "openai"
+    cost_per_call = 0.02
+
+    def available(self) -> bool:
+        return bool(os.environ.get("OPENAI_API_KEY"))
+
+    def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        key = os.environ.get("OPENAI_API_KEY")
+        if not key:
+            return Finding(question, "", backend=self.name, note="OPENAI_API_KEY is not set", provider_unavailable=True)
+        if reserve is not None:
+            reserve(self.cost_per_call)
+        try:
+            import httpx  # noqa: PLC0415
+
+            response = httpx.post(
+                "https://api.openai.com/v1/responses",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={
+                    "model": os.environ.get("OPENAI_SEARCH_MODEL", "gpt-5.6"),
+                    "input": question,
+                    "tools": [
+                        {
+                            "type": "web_search",
+                            "filters": {
+                                "allowed_domains": list(
+                                    source_policy.provider_domains(source_policy.SEED_ALLOWLIST)
+                                )
+                            },
+                        }
+                    ],
+                    "include": ["web_search_call.action.sources"],
+                },
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            return Finding(question, "", backend=self.name, note=f"openai web search failed: {exc}", provider_unavailable=True)
+        text = str(payload.get("output_text") or "")
+        if not text:
+            text = "\n".join(_texts_in(payload))
+        citations = source_policy.filter_urls(_urls_in(payload), source_policy.SEED_ALLOWLIST)
+        return _filtered_finding(question, text, citations, self.name, self.cost_per_call)
+
+
+def _urls_in(value) -> list[str]:
+    """Read source URLs from either provider's nested response without an SDK."""
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "url" and isinstance(item, str):
+                found.append(item)
+            else:
+                found.extend(_urls_in(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.extend(_urls_in(item))
+    return list(dict.fromkeys(found))
+
+
+def _texts_in(value) -> list[str]:
+    found: list[str] = []
+    if isinstance(value, dict):
+        if value.get("type") == "output_text" and isinstance(value.get("text"), str):
+            found.append(value["text"])
+        for item in value.values():
+            found.extend(_texts_in(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.extend(_texts_in(item))
+    return found
+
+
+def _filtered_finding(question: str, text: str, citations: list[str], backend: str, usd: float) -> Finding:
+    if not citations:
+        return Finding(
+            question,
+            "",
+            backend=backend,
+            usd=usd,
+            note="search returned no citations on the approved allowlist",
+        )
+    return Finding(question, text, citations=citations, backend=backend, usd=usd)
 
 
 class Context7Backend(Backend):
@@ -417,7 +622,7 @@ class Context7Backend(Backend):
 
         return ctx7_available() or bool(self.config)
 
-    def search(self, question: str) -> Finding:
+    def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
         from mcp_tools import TransportUnavailable, ask_context7  # noqa: PLC0415
 
         library, _, query = question.partition("::")
@@ -429,6 +634,8 @@ class Context7Backend(Backend):
                 note="context7 needs 'library :: question'",
             )
         try:
+            if reserve is not None:
+                reserve(self.cost_per_call)
             answer = ask_context7(library.strip(), query.strip(), self.config)
         except TransportUnavailable as exc:
             return Finding(question, "", backend=self.name, note=str(exc))
@@ -441,22 +648,65 @@ class Context7Backend(Backend):
         )
 
 
-def choose(*, fixture: Path | str | None = None, inbox: Path | str | None = None) -> Backend:
-    """Pick the best backend available. The attendee's environment decides.
+class FallbackBackend(Backend):
+    """Try the paper-safe provider chain without exposing it to the role.
 
-    Order matters: a real search beats a recorded one, and a recorded one beats
-    nothing. Nothing is never an option, because a research loop that silently
-    returns no evidence is worse than one that refuses.
+    An empty but non-provider-error result is a source shortfall, not permission
+    to hunt more broadly. Only an unavailable provider advances to the next
+    backend. That keeps a DeepWiki-only result from quietly becoming a blog hunt.
     """
-    candidates: list[Backend] = [PerplexityBackend(), WebSearchBackend(inbox)]
+
+    name = "fallback"
+    cost_per_call = 0.0
+
+    def __init__(self, candidates: list[Backend]):
+        self.candidates = candidates
+        self.last_backend: Backend | None = None
+
+    @property
+    def active_name(self) -> str:
+        if self.last_backend is not None:
+            return self.last_backend.name
+        return next((item.name for item in self.candidates if item.available()), self.name)
+
+    def available(self) -> bool:
+        return any(candidate.available() for candidate in self.candidates)
+
+    def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        notes = []
+        for candidate in self.candidates:
+            if not candidate.available():
+                continue
+            finding = candidate.search(question, reserve)
+            self.last_backend = candidate
+            if not finding.provider_unavailable:
+                return finding
+            notes.append(f"{candidate.name}: {finding.note}")
+        return Finding(
+            question,
+            "",
+            backend=self.name,
+            note="; ".join(notes) or "no paper-safe research backend is available",
+            provider_unavailable=True,
+        )
+
+
+def choose(*, fixture: Path | str | None = None, inbox: Path | str | None = None) -> Backend:
+    """Build the Deep Agents paper chain: Perplexity, Anthropic, OpenAI, fixture.
+
+    `inbox` is intentionally ignored here. The legacy Bing inbox remains an
+    explicit classroom-only backend in `researcher.py --backend websearch`.
+    """
+    del inbox
+    candidates: list[Backend] = [PerplexityBackend(), AnthropicBackend(), OpenAIBackend()]
     if fixture:
         candidates.append(FixtureBackend(fixture))
-    for backend in candidates:
-        if backend.available():
-            return backend
+    chain = FallbackBackend(candidates)
+    if chain.available():
+        return chain
     raise RuntimeError(
-        "no research backend is available. Set PERPLEXITY_API_KEY, restore "
-        "network access for web search, or point at a fixture file."
+        "no paper-safe research backend is available. Set PERPLEXITY_API_KEY, "
+        "ANTHROPIC_API_KEY, or OPENAI_API_KEY, or point at a fixture file."
     )
 
 
@@ -469,9 +719,8 @@ class Researcher:
     findings: list[Finding] = field(default_factory=list)
 
     def ask(self, question: str) -> Finding:
-        self.budget.charge(self.backend.cost_per_call)
-        finding = self.backend.search(question)
-        finding.backend = self.backend.name
+        finding = self.backend.search(question, self.budget.charge)
+        finding.backend = finding.backend or self.backend.name
         self.findings.append(finding)
         return finding
 

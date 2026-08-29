@@ -8,8 +8,8 @@
           {
             "id": "q1",
             "subject": "exit-conditions",
-            "question": "How does the reference loop define its exits, and which turn limits do vendor runtimes expose?",
-            "check": "reference implementation code or a named vendor limit, with a URL",
+            "question": "What three exits does this repo's paper loop check, and in what order?",
+            "check": "the paper loop implementation in this repo names done, then cost, then max turns, with a URL",
             "important": true
           },
           {
@@ -54,9 +54,9 @@
     }
   },
   "researcher": {
-    "How does the reference loop define its exits": {
+    "What three exits does this repo's paper loop check, and in what order?": {
       "data": {
-        "answer": "The reference loop checks done, cost, then max turns. Vendor runtimes document turn or recursion limits as stopping guardrails.",
+        "answer": "The reference loop checks done, then cost, then max turns. Vendor runtimes document turn or recursion limits as stopping guardrails.",
         "sources": [
           {
             "title": "Sol3 paper loop",
@@ -79,7 +79,7 @@
         ],
         "claims": [
           {
-            "text": "The Sol3 reference loop checks done, cost, then max turns as its three exits.",
+            "text": "The Sol3 reference loop checks done, then cost, then max turns as its three exits.",
             "confidence": 0.9,
             "source_urls": [
               "https://github.com/RichardHightower/reliable-agentic-lab/blob/main/solutions/sol3_research_deep_agents/paper.py"
@@ -136,8 +136,8 @@
           },
           {
             "title": "CRITIC: self-correction with tool-interactive critiquing",
-            "url": "https://arxiv.org/abs/2305.11738",
-            "vendor": "arxiv",
+            "url": "https://github.com/anthropics/anthropic-cookbook",
+            "vendor": "anthropic",
             "quote": "Intrinsic self-correction without external feedback rarely improves correctness."
           }
         ],
@@ -269,7 +269,7 @@
       "text": "An agent loop is a program that calls a model, acts on the reply, and repeats. The repetition is useful only when its stopping boundary is explicit. [3]\n\nDeep Agents documents a recursion limit as the graph boundary. [3] This is a single source documentation statement, so it is a runtime detail rather than a general result."
     },
     "'Exit conditions' section": {
-      "text": "The Sol3 reference implementation checks three exits in order: done, cost, then max turns. [1] This is a design policy in the reference implementation, not a claim that vendors standardize the same three conditions.\n\nThe Claude Agent SDK exposes a turn cap as `max_turns`, while Deep Agents documents a recursion limit. [2][3] Each runtime detail rests on a single source and should be read as documented behavior for that runtime."
+      "text": "The Sol3 reference implementation checks three exits in order: done, then cost, then max turns. [1] This is a design policy in the reference implementation, not a claim that vendors standardize the same three conditions.\n\nThe Claude Agent SDK exposes a turn cap as `max_turns`, while Deep Agents documents a recursion limit. [2][3] Each runtime detail rests on a single source and should be read as documented behavior for that runtime."
     },
     "'Independent verification' section": {
       "text": "The agent-loop guidance says verification works best when the verifier does not share the actor's context. [4] CRITIC likewise reports that intrinsic self-correction without external feedback rarely improves correctness. [5]\n\nTogether these sources motivate a structural maker/checker split. The conclusion about any specific tool scope is an engineering inference, not a measured result in these sources. [4][5]"

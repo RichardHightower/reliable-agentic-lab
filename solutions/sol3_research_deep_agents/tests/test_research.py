@@ -4,10 +4,13 @@ import os
 from pathlib import Path
 
 import loop
+import mcp_tools
+import evidence
 import research
 import researcher
 import pytest
 import roles
+import stages
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "fixtures" / "research.json"
@@ -63,6 +66,102 @@ def test_budget_limits_one_research_request_and_persists_its_charge():
     assert charges == [0.01]
     assert budget.calls == 1
     assert budget.spent_usd == 0.01
+
+
+def test_one_tool_request_can_reserve_scout_retrieve_and_no_quote_ask():
+    budget = research.Budget(max_calls=4, max_usd=1)
+    budget.begin_request(max_calls=1, max_provider_calls=3)
+    budget.reserve_tool()
+    budget.charge(0.01)
+    budget.charge(0.01)
+    budget.charge(0.01)
+    with pytest.raises(research.BudgetExceeded, match="tool call"):
+        budget.reserve_tool()
+    with pytest.raises(research.BudgetExceeded, match="request search budget"):
+        budget.charge(0.01)
+    budget.end_request()
+
+
+def test_perplexity_drops_deepwiki_and_does_not_ask_when_search_has_quotes(monkeypatch):
+    calls = []
+
+    def search(question, domains, config=None):
+        calls.append(("search", domains))
+        return mcp_tools.Answer(
+            text="A quoted official source https://docs.langchain.com/deep-agents",
+            citations=["https://deepwiki.com/langchain", "https://docs.langchain.com/deep-agents"],
+            hits=2,
+            usable_quotes=True,
+        )
+
+    monkeypatch.setattr(mcp_tools, "search_perplexity", search)
+    monkeypatch.setattr(
+        mcp_tools,
+        "ask_perplexity",
+        lambda *_: pytest.fail("Ask may only run for hits without usable quotes"),
+    )
+
+    finding = research.PerplexityBackend().search("q")
+
+    assert len(calls) == 2, "Scout and Retrieve are inside one researcher tool call"
+    assert finding.citations == ["https://docs.langchain.com/deep-agents"]
+    assert "deepwiki" not in finding.answer.lower() or "deepwiki" not in finding.citations
+
+
+def test_perplexity_asks_once_when_search_hits_lack_usable_quotes(monkeypatch):
+    calls = {"search": 0, "ask": 0}
+
+    def search(question, domains, config=None):
+        calls["search"] += 1
+        return mcp_tools.Answer(
+            text="Result https://docs.langchain.com/deep-agents",
+            citations=["https://docs.langchain.com/deep-agents"],
+            hits=1,
+            usable_quotes=False,
+        )
+
+    def ask(question, domains, config=None):
+        calls["ask"] += 1
+        return mcp_tools.Answer(
+            text="The official source says the graph has a recursion limit.",
+            citations=["https://docs.langchain.com/deep-agents"],
+        )
+
+    monkeypatch.setattr(mcp_tools, "search_perplexity", search)
+    monkeypatch.setattr(mcp_tools, "ask_perplexity", ask)
+
+    finding = research.PerplexityBackend().search("q")
+
+    assert calls == {"search": 2, "ask": 1}
+    assert finding.citations == ["https://docs.langchain.com/deep-agents"]
+
+
+def test_python_post_filter_keeps_docs_and_drops_deepwiki_from_model_json(tmp_path):
+    ledger = evidence.Ledger(tmp_path / "evidence")
+    finding = stages.record_findings(
+        ledger,
+        {"subject": "sources", "question": "q", "important": True},
+        {
+            "answer": "mixed sources",
+            "sources": [
+                {"title": "DeepWiki", "url": "https://deepwiki.com/langchain", "quote": "no"},
+                {"title": "LangChain docs", "url": "https://docs.langchain.com/deep-agents", "quote": "yes"},
+            ],
+            "claims": [
+                {
+                    "text": "An allowed fact",
+                    "confidence": 0.8,
+                    "source_urls": [
+                        "https://deepwiki.com/langchain",
+                        "https://docs.langchain.com/deep-agents",
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert finding.claim_ids
+    assert [source.url for source in ledger.sources.values()] == ["https://docs.langchain.com/deep-agents"]
 
 
 @pytest.mark.parametrize("location", range(4))

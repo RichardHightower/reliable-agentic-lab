@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 import brief
 import evidence
+import source_policy
 
 # The sections a technical white paper has. A reader looking for limitations
 # should not have to guess whether the author considered them.
@@ -36,6 +37,7 @@ HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.M)
 IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 FENCE = re.compile(r"```(\w*)\n(.*?)```", re.S)
 REFERENCE_ROW = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)[.)])\s+(.*\S)\s*$", re.M)
+URL = re.compile(r"https?://[^\s)\]<>\"']+")
 
 # Source syntax that must never survive into a published figure or body.
 SOURCE_SYNTAX = re.compile(
@@ -51,6 +53,7 @@ MIN_WORDS = 400
 # Whether a section says enough is a judgment, and judgment belongs to the
 # reviewer, where being wrong costs a retry instead of blocking a good paper.
 MIN_SECTION_WORDS = 5
+EXIT_TERMS = (re.compile(r"\bdone\b", re.I), re.compile(r"\bcost\b", re.I), re.compile(r"\bmax\s+turns\b", re.I))
 
 SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
 
@@ -177,6 +180,32 @@ def reference_rows(body: str) -> list[str]:
     for marker, number, text in REFERENCE_ROW.findall(tail):
         rows.append(f"[{marker or number}] {text}")
     return rows
+
+
+def reference_urls(body: str) -> list[str]:
+    """Every URL rendered in the bibliography, rather than model prose."""
+    urls: list[str] = []
+    for row in reference_rows(body):
+        for url in URL.findall(row):
+            clean = url.rstrip(".,;")
+            if clean not in urls:
+                urls.append(clean)
+    return urls
+
+
+def has_exit_doctrine(body: str) -> bool:
+    """The workshop doctrine is done, then cost, then max turns—no reordering."""
+    content = "\n".join(body_sections(body))
+    found = [term.search(content) for term in EXIT_TERMS]
+    return all(found) and [match.start() for match in found] == sorted(match.start() for match in found)
+
+
+def false_langgraph_limitation(body: str, urls: list[str]) -> bool:
+    """Do not claim no official LangGraph page while citing one."""
+    phrase = "no official langgraph page"
+    if phrase not in body.lower():
+        return False
+    return any(source_policy.host(url) in {"docs.langchain.com", "reference.langchain.com"} for url in urls)
 
 
 STOPWORDS = frozenset(
@@ -351,6 +380,39 @@ def check(
         )
     )
 
+    urls = list(dict.fromkeys([*sources, *reference_urls(body)]))
+    allowlist = source_policy.merge_allowlist(urls)
+    blocked = source_policy.unallowed_urls(urls, allowlist)
+    checks.append(
+        Check(
+            "reference_hosts",
+            not blocked,
+            "every reference host is on the approved allowlist"
+            if not blocked
+            else f"unapproved: {blocked}",
+        )
+    )
+
+    checks.append(
+        Check(
+            "exit_doctrine",
+            has_exit_doctrine(body),
+            "the body names done, then cost, then max turns"
+            if has_exit_doctrine(body)
+            else "name done, then cost, then max turns in that order",
+        )
+    )
+
+    checks.append(
+        Check(
+            "langgraph_limitations",
+            not false_langgraph_limitation(body, urls),
+            "limitations do not contradict an official LangGraph reference"
+            if not false_langgraph_limitation(body, urls)
+            else "the limitations deny an official LangGraph page that the references cite",
+        )
+    )
+
     loose = uncaveated_single_source(body, ledger)
     checks.append(
         Check(
@@ -397,15 +459,15 @@ def demo() -> None:
         "## Abstract\n\n"
         "A loop without an exit spends until someone notices. [1]\n\n"
         "## Introduction\n\n"
-        "Three exits cover the observed cases: done, cost, and turns. [1][2]\n\n"
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
         "![A flowchart of the three exits](figures/exits.svg)\n\n"
         "## Limitations\n\n"
         "This paper measures two runtimes only. [2]\n\n"
         "## References\n\n"
-        "1. https://a.example/one\n"
-        "2. https://b.example/two\n"
+        "1. https://docs.langchain.com/one\n"
+        "2. https://docs.claude.com/two\n"
     )
-    urls = ["https://a.example/one", "https://b.example/two"]
+    urls = ["https://docs.langchain.com/one", "https://docs.claude.com/two"]
 
     score = check(good, urls)
     assert score.passed, score.report()
@@ -413,9 +475,9 @@ def demo() -> None:
     # A paper of headings and a reference list satisfies every other gate,
     # because each of them checks content that is not there.
     hollow = (
-        "# Exit conditions\n\n## Abstract\n\n## Introduction\n\n"
+        "# Exit conditions\n\n## Abstract\n\ndone, then cost, then max turns. [1]\n\n## Introduction\n\n"
         "## Limitations\n\n## References\n\n"
-        "1. https://a.example/one\n2. https://b.example/two\n"
+        "1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
     )
     score = check(hollow, urls)
     assert not score.passed, score.report()
@@ -423,7 +485,7 @@ def demo() -> None:
 
     # One sentence under a heading is not a section either.
     thin = good.replace(
-        "Three exits cover the observed cases: done, cost, and turns. [1][2]", "Yes. [1]"
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]", "Yes. [1]"
     )
     assert "has_body" in check(thin, urls).signature()
 
@@ -471,7 +533,7 @@ def demo() -> None:
 
     # A single-source important claim must admit it in its own paragraph.
     ledger = evidence.Ledger("/nonexistent")
-    src = evidence.SourceDocument(title="One", url="https://a.example/one", subject="exits")
+    src = evidence.SourceDocument(title="One", url="https://docs.langchain.com/one", subject="exits")
     claim = evidence.Claim(
         text="Three exits cover the observed cases",
         subject="exits",
@@ -483,16 +545,16 @@ def demo() -> None:
     ledger.add_claim(claim)
 
     body = good.replace(
-        "Three exits cover the observed cases: done, cost, and turns. [1][2]",
-        "Three exits cover the observed cases. [1] https://a.example/one",
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]",
+        "Three exits cover the observed cases: done, then cost, then max turns. [1] https://docs.langchain.com/one",
     )
     score = check(body, urls, ledger=ledger)
     assert not score.passed
     assert "single_source_caveat" in score.signature()
 
     caveated = body.replace(
-        "Three exits cover the observed cases. [1]",
-        "Three exits cover the observed cases, on a single source. [1]",
+        "Three exits cover the observed cases: done, then cost, then max turns. [1]",
+        "Three exits cover the observed cases: done, then cost, then max turns, on a single source. [1]",
     )
     score = check(caveated, urls, ledger=ledger)
     assert "single_source_caveat" not in score.signature(), score.report()
