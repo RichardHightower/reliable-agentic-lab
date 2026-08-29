@@ -15,6 +15,7 @@ import roles as deep
 from contract import Contract, ContractError
 
 LOOP = "implementer"
+LIVE_RECURSION_LIMIT = 16
 
 
 def cast(contract):
@@ -39,7 +40,11 @@ def backend(contract):
             "code": deep.build_agent(
                 contract, loop=LOOP, subagent_names=frozenset({"code-implementer"})
             ),
-        }
+        },
+        # The runtime's recursion guard is the model-turn ceiling for this
+        # live probe. It leaves time for the deterministic test/rubric pass and
+        # receipt instead of letting the outer 420-second watchdog kill it.
+        recursion_limit=LIVE_RECURSION_LIMIT,
     )
 
 

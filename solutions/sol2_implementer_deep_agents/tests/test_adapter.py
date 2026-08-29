@@ -170,8 +170,8 @@ class FakeAgent:
         self.usd = usd
         self.calls = []
 
-    def invoke(self, payload):
-        self.calls.append(payload)
+    def invoke(self, payload, config=None):
+        self.calls.append((payload, config))
         return state(ai(self.text, {"total_cost": self.usd}))
 
 
@@ -189,6 +189,15 @@ def test_phase_backend_selects_the_graph_with_only_that_role(tmp_path):
     assert backend.run(repo=tmp_path, prompt="write code", allow=["app/**"]).output == "code phase"
     assert len(test_agent.calls) == 1
     assert len(code_agent.calls) == 1
+
+
+def test_phase_backend_sets_the_documented_recursion_limit(tmp_path):
+    agent = FakeAgent()
+    backend = adapter.DeepAgentsBackend(agent, recursion_limit=16)
+
+    backend.run(repo=tmp_path, prompt="write code", allow=["app/**"])
+
+    assert agent.calls[0][1] == {"recursion_limit": 16}
 
 
 def test_changed_files_includes_a_new_untracked_test(tmp_path):

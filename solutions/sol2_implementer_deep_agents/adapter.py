@@ -182,11 +182,12 @@ class DeepAgentsBackend(Backend):
 
     name = "deep_agents"
 
-    def __init__(self, agent=None, *, phase_agents=None):
+    def __init__(self, agent=None, *, phase_agents=None, recursion_limit: int | None = None):
         if agent is None and not phase_agents:
             raise ValueError("provide an agent or one agent for each implementation phase")
         self.agent = agent
         self.phase_agents = phase_agents
+        self.recursion_limit = recursion_limit
 
     def _agent_for(self, allow: list[str]):
         """Choose the graph whose cast matches the driver's current phase."""
@@ -203,7 +204,9 @@ class DeepAgentsBackend(Backend):
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
         try:
             before = _changed_files(repo)
-            result = self._agent_for(allow).invoke({"messages": [{"role": "user", "content": prompt}]})
+            payload = {"messages": [{"role": "user", "content": prompt}]}
+            config = {"recursion_limit": self.recursion_limit} if self.recursion_limit else None
+            result = self._agent_for(allow).invoke(payload, config=config)
             after = _changed_files(repo)
             scope = WriteScope(allow=allow)
             wrote = sorted(path for path in (after - before) if scope.permits(path))
