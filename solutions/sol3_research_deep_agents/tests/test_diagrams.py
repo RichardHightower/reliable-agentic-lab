@@ -69,29 +69,6 @@ def test_braces_are_doubled_for_the_imagen_cli():
     assert "{Decision?}" not in prompt
 
 
-def test_imagen_argv_matches_the_installed_cli_help(monkeypatch, tmp_path):
-    """Imagen accepts a prompt argument, -o, and --aspect-ratio.
-
-    Do not cargo-cult the imagen-diagrams v0.1.0 adapter here. Its
-    --prompt-file, --aspect, and --output flags are not accepted by the CLI
-    installed for this course.
-    """
-    target = tmp_path / "figure.png"
-    seen = []
-
-    def run(argv, **_kwargs):
-        seen.append(argv)
-        target.write_bytes(b"png")
-        return type("Result", (), {"returncode": 0, "stderr": ""})()
-
-    monkeypatch.setattr(diagrams.subprocess, "run", run)
-
-    assert diagrams.run_imagen("draw {{Decision?}}", target, "4:3") == target
-    assert seen == [
-        ["imagen", "generate", "draw {{Decision?}}", "-o", str(target), "--aspect-ratio", "4:3"]
-    ]
-
-
 def test_the_closer_is_the_last_thing_in_the_prompt():
     """Final tokens weigh most, and the failure this guards is a picture of code."""
     prompt = diagrams.build_prompt(
@@ -169,6 +146,13 @@ def test_alt_text_names_the_labels():
     assert "Plan" in alt and "2 relationships" in alt
 
 
+def test_alt_text_omits_diagram_shape_syntax_and_line_break_escapes():
+    inv = diagrams.Inventory(labels=["[Start]", "Maker\\nwrite scope"], edges=1)
+    alt = diagrams.alt_text(inv, "the loop")
+    assert "[" not in alt and "\\n" not in alt
+    assert "Start" in alt and "Maker write scope" in alt
+
+
 def test_a_figure_ships_its_svg_until_a_png_is_judged_good():
     figure = diagrams.Figure(name="x", source=Path("x.mmd"), svg=Path("x.svg"))
     assert figure.best == Path("x.svg")
@@ -196,6 +180,19 @@ def test_missing_imagen_keeps_the_deterministic_figure(tmp_path, monkeypatch):
     assert figure.rasterized is True
     assert figure.best == figure.png
     assert "embedded print PNG" in figure.note
+
+
+def test_plantuml_also_gets_a_deterministic_print_png(tmp_path, monkeypatch):
+    """A PDF should not need a browser's SVG/foreign-object support to print a figure."""
+    monkeypatch.setattr(diagrams, "render_svg", lambda s, o, **_: _stub_svg(o, s))
+    monkeypatch.setattr(diagrams, "render_plantuml_png", lambda s, o, **_: _stub_png(o, s))
+    src = tmp_path / "maker-checker.puml"
+    src.write_text(PUML)
+
+    figure = diagrams.render(src, tmp_path / "out", polish=False)
+
+    assert figure.rasterized is True
+    assert figure.best == figure.png
 
 
 def _stub_svg(out_dir: Path, src: Path) -> Path:

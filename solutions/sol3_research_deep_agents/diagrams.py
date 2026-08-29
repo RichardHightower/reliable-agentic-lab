@@ -133,7 +133,7 @@ def inventory(source: str, kind: str) -> Inventory:
             text = next((group for group in match.groups()[1:] if group), "")
             # An empty bracket means the node id is the label. Falling back to
             # the id keeps the judge honest about what a reader will see.
-            label = (text or match.group(1)).strip()
+            label = (text or match.group(1)).strip().strip("[]").replace("\\n", " ")
             if label and label not in labels:
                 labels.append(label)
         first = source.strip().split("\n", 1)[0]
@@ -261,6 +261,14 @@ def render_mermaid_png(src: Path, out_dir: Path, *, theme_name: str = DEFAULT_TH
             target,
             MMDC_TIMEOUT,
         )
+
+
+def render_plantuml_png(src: Path, out_dir: Path, *, theme_name: str = DEFAULT_THEME) -> Path:
+    """Render a two-times PNG for print PDFs alongside PlantUML's SVG."""
+    target = out_dir / f"{src.stem}.png"
+    argv = ["plantuml", "-tpng", "-Playout=smetana", "-Sscale=2", *plantuml_style_args(theme_name)]
+    argv += ["-o", str(out_dir.resolve()), str(src)]
+    return _run_renderer(argv, src, target, PLANTUML_TIMEOUT)
 
 
 # -- step 2, the polish ---------------------------------------------------
@@ -407,7 +415,9 @@ def judge_png(png: Path, inv: Inventory, described: str = "") -> Verdict:
 
 def alt_text(inv: Inventory, topic: str) -> str:
     """Alt text a screen reader can use. Not decoration, an accessibility floor."""
-    head = ", ".join(inv.labels[:6])
+    # Brackets are Mermaid shape syntax, and ``\\n`` is PlantUML's line-break
+    # escape. Neither belongs in a sentence a screen reader announces.
+    head = ", ".join(label.strip("[]").replace("\\n", " ") for label in inv.labels[:6])
     more = f", and {inv.nodes - 6} more" if inv.nodes > 6 else ""
     return (
         f"A {inv.diagram_type} diagram of {topic}, showing {head}{more}, "
@@ -517,6 +527,12 @@ def render(  # noqa: PLR0913  (every knob here is a real caller option)
     if kind_of(src) == "mermaid":
         try:
             figure.png = render_mermaid_png(src, out_dir, theme_name=theme_name)
+            figure.rasterized = True
+        except RuntimeError as exc:
+            figure.note = f"local PNG render failed, kept the SVG: {exc}"
+    else:
+        try:
+            figure.png = render_plantuml_png(src, out_dir, theme_name=theme_name)
             figure.rasterized = True
         except RuntimeError as exc:
             figure.note = f"local PNG render failed, kept the SVG: {exc}"
