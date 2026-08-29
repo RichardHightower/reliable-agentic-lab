@@ -154,6 +154,13 @@ def run(  # noqa: PLR0915
         if path != steps.STEPS_FILE and path not in preexisting
     }
     scope_violations = tester.violations(sorted(after_test_phase))
+    trace["test_phase"] = {
+        "wrote": list(test_result.wrote),
+        "files": sorted(after_test_phase),
+        "violations": list(scope_violations),
+        "ok": test_result.ok,
+        "usd": test_result.usd,
+    }
 
     # Step 4. The red gate.
     if contract.rubric.get("require_red", True) and not red_ids:
@@ -163,6 +170,7 @@ def run(  # noqa: PLR0915
             "any code exists proves nothing."
         )
         trace["red_ids"] = []
+        trace["scope_violations"] = list(scope_violations)
         return _finish(contract, trace, write_trace)
 
     trace["red_ids"] = sorted(red_ids)

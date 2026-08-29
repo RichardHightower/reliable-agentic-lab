@@ -24,6 +24,13 @@ tasks:
 
   # -- no runtime, no key, no clone -----------------------------------------
 
+  test-setup:
+    desc: Create .venv with pytest and coverage only. No Deep Agents.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - test -x {{.RUN_PY}} || {{.PY}} -m venv {{.VENV}}
+      - '{{.RUN_PY}} -m pip install --quiet pytest coverage'
+
   test:
     desc: Run this folder's unit tests. No SDK and no target repo needed.
     dir: '{{.TASKFILE_DIR}}'
@@ -33,6 +40,17 @@ tasks:
           "{{.RUN_PY}}" -m pytest tests -q
         else
           {{.PY}} -m pytest tests -q
+        fi
+
+  e2e:
+    desc: Offline loop tests. No SDK, no key, no public CRM clone.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" -m pytest tests/test_implementer.py tests/test_adapter.py -q
+        else
+          {{.PY}} -m pytest tests/test_implementer.py tests/test_adapter.py -q
         fi
 
   table:
@@ -48,7 +66,7 @@ tasks:
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - test -x {{.RUN_PY}} || {{.PY}} -m venv {{.VENV}}
-      - '{{.RUN_PY}} -m pip install --quiet "deepagents>=0.7.0" pytest'
+      - '{{.RUN_PY}} -m pip install --quiet "deepagents>=0.7.0" pytest coverage'
 
   clone:
     desc: Clone your CRM (from config.json) into work/. Skips if it is already there.
@@ -59,15 +77,22 @@ tasks:
       - mkdir -p {{.TASKFILE_DIR}}/../../work
       - git clone --quiet https://github.com/$(python3 -c "import json;print(json.load(open('{{.TASKFILE_DIR}}/config.json'))['fork_owner'])")/$(python3 -c "import json;print(json.load(open('{{.TASKFILE_DIR}}/config.json'))['repo_name'])").git {{.TARGET}}
 
-  # -- the loop. Needs deepagents, a key, and a clone for --doer deep --------
+  # -- the loop. --doer deep needs Deep Agents. none and reference do not ----
 
   run:
     desc: Implementer loop against TARGET. Pass --doer deep to use Deep Agents.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - |
-        if [ ! -x "{{.RUN_PY}}" ]; then
-          echo "run task setup first. It creates .venv in this folder and installs Deep Agents."
-          exit 1
+        args=" {{.CLI_ARGS}} "
+        if echo "$args" | grep -q -- " --doer deep"; then
+          if [ ! -x "{{.RUN_PY}}" ]; then
+            echo "run task setup first. --doer deep needs Deep Agents in .venv."
+            exit 1
+          fi
+          "{{.RUN_PY}}" harness.py --repo {{.TARGET}} {{.CLI_ARGS}}
+        elif [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" harness.py --repo {{.TARGET}} {{.CLI_ARGS}}
+        else
+          {{.PY}} harness.py --repo {{.TARGET}} {{.CLI_ARGS}}
         fi
-        "{{.RUN_PY}}" harness.py --repo {{.TARGET}} {{.CLI_ARGS}}

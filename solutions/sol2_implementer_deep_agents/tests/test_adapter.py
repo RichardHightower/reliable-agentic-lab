@@ -6,6 +6,7 @@ whole graph state, and never set `usd` at all.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import adapter
@@ -370,3 +371,56 @@ def test_write_refuses_a_path_outside_the_repo(fake_langchain, tmp_path):
 
     assert out.startswith("REFUSED")
     assert not (tmp_path / "escaped.txt").exists()
+
+
+# -- untracked writes ------------------------------------------------------
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "lab@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "lab"], cwd=path, check=True)
+    (path / "README.md").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=path, check=True, capture_output=True)
+    return path
+
+
+class WritingAgent:
+    """Creates a new untracked file during invoke. That is the live write."""
+
+    def __init__(self, repo: Path, relative: str, text="ok", usd=0.0):
+        self.repo = repo
+        self.relative = relative
+        self.text = text
+        self.usd = usd
+
+    def invoke(self, _payload):
+        target = self.repo / self.relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(self.text, encoding="utf-8")
+        return state(ai("wrote it", {"total_cost": self.usd}))
+
+
+def test_an_untracked_file_counts_as_a_write(tmp_path):
+    """`git diff --name-only` cannot see a new file. The adapter must."""
+    repo = _git_repo(tmp_path / "repo")
+    backend = adapter.DeepAgentsBackend(
+        WritingAgent(repo, "tests/test_due.py", text="def test_due(): assert False\n")
+    )
+    result = backend.run(repo=repo, prompt="go", allow=["tests/**"])
+    assert result.ok
+    assert "tests/test_due.py" in result.wrote
+
+
+def test_an_out_of_scope_untracked_file_is_not_claimed(tmp_path):
+    """The adapter still filters `wrote` by allow. The loop sees the disk."""
+    repo = _git_repo(tmp_path / "repo")
+    backend = adapter.DeepAgentsBackend(
+        WritingAgent(repo, "app/model.py", text="x = 1\n")
+    )
+    result = backend.run(repo=repo, prompt="go", allow=["tests/**"])
+    assert result.ok
+    assert "app/model.py" not in result.wrote
+    assert (repo / "app" / "model.py").exists()

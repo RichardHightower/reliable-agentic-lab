@@ -36,10 +36,24 @@ class Backend:
 
 
 def _changed_files(repo: Path) -> set[str]:
+    """Every path this working tree changes, including untracked files.
+
+    `git diff --name-only` only sees tracked edits. A Deep Agents write that
+    creates a new test file is the common case, and that file would vanish
+    from `DoerResult.wrote` if we asked diff.
+    """
     out = subprocess.run(
-        ["git", "diff", "--name-only"], cwd=repo, text=True, capture_output=True, check=False
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
     )
-    return {line.strip() for line in out.stdout.splitlines() if line.strip()}
+    paths: set[str] = set()
+    for line in out.stdout.splitlines():
+        if len(line) > 3:
+            paths.add(line[3:].strip().split(" -> ")[-1])
+    return paths
 
 
 def _messages(result):
