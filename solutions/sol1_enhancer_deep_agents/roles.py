@@ -2,8 +2,9 @@
 
 Deep Agents scopes three ways, and this port uses all three.
 
-1. Each subagent gets its own tool list. The judge is never handed a write tool.
-2. The doer's write tool checks `tickets/**` before it touches the disk.
+1. Deep Agents supplies the read-only filesystem tools through its mounted
+   backend. The judge receives no extra tools that could shadow those routes.
+2. The doer's one custom write tool checks `tickets/**` before it touches disk.
 3. The harness itself is fenced: no general-purpose subagent, no built-in
    `write_file` on the orchestrator, `FilesystemBackend(virtual_mode=True)`,
    and declarative `permissions=` that deny writes outside `tickets/**`.
@@ -95,22 +96,6 @@ def scoped_write_tool(repo: Path, role: RolePlan):
     return write
 
 
-def read_tool(repo: Path):
-    from langchain.tools import tool  # noqa: PLC0415  (optional dependency)
-
-    @tool
-    def read_file(path: str) -> str:
-        """Read a file from the target repo."""
-        target = _inside(repo, path)
-        if target is None:
-            return f"REFUSED. {path} is outside the target repo."
-        if not target.exists():
-            return f"no such file: {path}"
-        return target.read_text(encoding="utf-8")
-
-    return read_file
-
-
 def permission_rules(role: RolePlan) -> list[dict]:
     """Declarative filesystem rules for one role. First match wins.
 
@@ -143,12 +128,14 @@ def _skill_text(name: str) -> str:
 def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
     """One Deep Agents subagent per role in this loop's cast, with its own tools."""
     repo = Path(contract.repo)
-    reader = read_tool(repo)
     out = []
     for role in plan(contract, loop).values():
         if role.name == "orchestrator":
             continue
-        tools = [reader]
+        # `create_deep_agent` adds its backend-aware filesystem tools. Do not
+        # add a custom function named `read_file`: it wins the duplicate tool
+        # name and cannot resolve the `/skills/**` and `/memory/**` mounts.
+        tools = []
         if role.can_write:
             tools.append(scoped_write_tool(repo, role))
         # Mount or inline, not both. Deep Agents loads a skill in two levels:
@@ -158,7 +145,13 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
         # cost the mount exists to avoid. A role with a directory gets the
         # mount below. A role without one keeps its prompt line.
         prompt = f"You are the {role.name}. {role.purpose}"
-        if not (SKILLS_DIR / role.name).is_dir():
+        skill_dir = SKILLS_DIR / role.name
+        if skill_dir.is_dir():
+            prompt += (
+                f" Before you grade or draft, use the built-in read_file tool "
+                f"to read /skills/{role.name}/SKILL.md and follow it."
+            )
+        else:
             skill = _skill_text(role.name)
             if skill:
                 prompt = f"{prompt}\n\n{skill}"
@@ -176,7 +169,7 @@ def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
         # this line named one role. Its text still reached the judge through the
         # prompt above, which is the inline half of the same idea, so nothing
         # looked broken.
-        if (SKILLS_DIR / role.name).is_dir():
+        if skill_dir.is_dir():
             spec["skills"] = [f"/skills/{role.name}/"]
         out.append(spec)
     return out
@@ -188,7 +181,13 @@ def _as_permissions(rules: list[dict]):
     return [FilesystemPermission(**rule) for rule in rules]
 
 
-def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
+def build_agent(
+    contract,
+    loop: str = DEFAULT_LOOP,
+    model: str = DEFAULT_MODEL,
+    *,
+    debug: bool = False,
+):
     """The orchestrator, holding the subagents and nothing that writes.
 
     Needs `deepagents>=0.7`. The default general-purpose subagent is turned
@@ -241,4 +240,5 @@ def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
         permissions=orchestrator_permissions,
         memory=memory,
         skills=skills,
+        debug=debug,
     )

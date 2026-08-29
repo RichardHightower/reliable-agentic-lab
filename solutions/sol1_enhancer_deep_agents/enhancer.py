@@ -440,6 +440,8 @@ class Enhancer:
             'of the shape {"kind": ..., "present_fields": [...]} and nothing else.'
         )
         if not result.ok:
+            if getattr(result, "timed_out", False):
+                raise TicketBlocked(result.output)
             raise EnhancerError(f"the judge failed: {result.output}")
         verdict = parse_judge(result.output)
         try:
@@ -477,6 +479,8 @@ class Enhancer:
             allow=DOER_ALLOW,
         )
         if not result.ok:
+            if getattr(result, "timed_out", False):
+                raise TicketBlocked(result.output)
             raise EnhancerError(f"the doer failed: {result.output}")
         if not candidate.exists():
             raise EnhancerError(f"the doer wrote no candidate at {relative}")
@@ -585,26 +589,30 @@ class Enhancer:
         if "needs-human" in self.gh.labels(issue):
             return Outcome(tkt.id, "escalated", "needs-human is already set")
 
-        # 5. grade the real ticket. The rubric decides ready, never the comment.
-        verdict = self.judge(tkt.path)
+        try:
+            # 5. grade the real ticket. The rubric decides ready, never the comment.
+            verdict = self.judge(tkt.path)
 
-        # 6. decide from `ready` and LGTM only. Label after a real write, not here.
-        if verdict["ready"] and (comment or "").strip() == LGTM:
-            set_front_matter(tkt.path, state="ready", loop="implementer")
-            self.gh.add_label(issue, "ready")
-            state.clear(Path(self.repo), tkt.id)
-            return Outcome(tkt.id, "passed", "rubric green and a human said LGTM")
-        if verdict["ready"]:
-            if "enhanced" not in self.gh.labels(issue):
-                self.gh.add_label(issue, "enhanced")
-            if state.last_comment_id != "asked-lgtm":
-                self.gh.comment(issue, "This ticket meets the rubric. Comment `LGTM` to release it.")
-                state.last_comment_id = "asked-lgtm"
-                state.save(Path(self.repo), tkt.id)
-            return Outcome(tkt.id, "waiting", "ready, waiting for LGTM")
+            # 6. decide from `ready` and LGTM only. Label after a real write, not here.
+            if verdict["ready"] and (comment or "").strip() == LGTM:
+                set_front_matter(tkt.path, state="ready", loop="implementer")
+                self.gh.add_label(issue, "ready")
+                state.clear(Path(self.repo), tkt.id)
+                return Outcome(tkt.id, "passed", "rubric green and a human said LGTM")
+            if verdict["ready"]:
+                if "enhanced" not in self.gh.labels(issue):
+                    self.gh.add_label(issue, "enhanced")
+                if state.last_comment_id != "asked-lgtm":
+                    self.gh.comment(issue, "This ticket meets the rubric. Comment `LGTM` to release it.")
+                    state.last_comment_id = "asked-lgtm"
+                    state.save(Path(self.repo), tkt.id)
+                return Outcome(tkt.id, "waiting", "ready, waiting for LGTM")
 
-        # 7. enhance because the ticket still needs work, not because someone commented.
-        signature = self._improve(tkt, verdict, None, issue)
+            # 7. enhance because the ticket still needs work, not because someone commented.
+            signature = self._improve(tkt, verdict, None, issue)
+        except TicketBlocked as blocked:
+            self.gh.add_label(issue, "needs-human")
+            return Outcome(tkt.id, "escalated", str(blocked))
 
         # 8. the exits, computed rather than judged. Three of them: cost, max
         # turns, or done. A repeated signature is stuck work, not an exit.
@@ -668,8 +676,9 @@ class Enhancer:
         standing still.
         """
         before = set(verdict["missing_fields"])
-        candidate = self.draft(tkt, verdict["kind"], verdict["missing_fields"], comment)
+        candidate = Path(self.repo) / "tickets" / f"{tkt.id}{CANDIDATE_SUFFIX}"
         try:
+            self.draft(tkt, verdict["kind"], verdict["missing_fields"], comment)
             after_verdict = self.judge(candidate)
             after = set(after_verdict["missing_fields"])
             if after < before:

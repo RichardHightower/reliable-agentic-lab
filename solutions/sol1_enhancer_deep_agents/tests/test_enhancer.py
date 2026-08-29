@@ -400,6 +400,23 @@ def test_a_failed_backend_stops_the_ticket(target):
         engine(target, FakeBackend([], ok=False), FakeGh()).poll()
 
 
+def test_a_timed_out_backend_escalates_only_this_ticket(target):
+    class TimedOutBackend:
+        def run(self, *, repo, prompt, allow):
+            return DoerResult(
+                ok=False,
+                timed_out=True,
+                output="Deep Agents query exceeded 180 seconds",
+            )
+
+    gh = FakeGh()
+    [outcome] = engine(target, TimedOutBackend(), gh).poll()
+
+    assert outcome.status == "escalated"
+    assert "exceeded 180 seconds" in outcome.detail
+    assert "needs-human" in gh.added
+
+
 # -- LGTM and the ready exit ------------------------------------------------
 
 

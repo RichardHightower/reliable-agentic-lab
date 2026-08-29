@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import adapter
+import contextlib
+import signal
+import time
 import pytest
 
 # -- shapes a LangChain run actually returns -------------------------------
@@ -114,6 +117,52 @@ def test_a_failing_agent_returns_not_ok(tmp_path, monkeypatch):
     assert result.wrote == []
     assert "deep agents backend failed" in result.output
     assert "no key" in result.output
+
+
+def test_a_timeout_returns_a_distinct_fail_closed_result(tmp_path, monkeypatch):
+    _diffs(monkeypatch, before=set(), after=set())
+
+    @contextlib.contextmanager
+    def expires(_seconds):
+        raise adapter.QueryTimedOut("Deep Agents query exceeded 180 seconds")
+        yield  # pragma: no cover - keeps this a context manager for the adapter
+
+    monkeypatch.setattr(adapter, "_wall_clock_timeout", expires)
+    result = adapter.DeepAgentsBackend(FakeAgent()).run(
+        repo=tmp_path, prompt="Use the judge subagent. Read tickets/T001.md", allow=[]
+    )
+
+    assert result.ok is False
+    assert result.timed_out is True
+    assert "exceeded 180 seconds" in result.output
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is unavailable on Windows")
+def test_the_wall_clock_guard_interrupts_a_blocked_sync_invoke(tmp_path, monkeypatch):
+    _diffs(monkeypatch, before=set(), after=set())
+
+    class SlowAgent:
+        def invoke(self, _payload):
+            time.sleep(1)
+
+    started = time.monotonic()
+    result = adapter.DeepAgentsBackend(SlowAgent(), timeout_s=0.05).run(
+        repo=tmp_path, prompt="Use the judge subagent. Read tickets/T001.md", allow=[]
+    )
+
+    assert result.timed_out is True
+    assert time.monotonic() - started < 0.5
+
+
+def test_a_completed_call_persists_its_prompt_and_returned_text(tmp_path, monkeypatch):
+    _diffs(monkeypatch, before=set(), after=set())
+    adapter.DeepAgentsBackend(FakeAgent(answer='{"kind": "feature"}')).run(
+        repo=tmp_path, prompt="Use the judge subagent. Read tickets/T001.md", allow=[]
+    )
+
+    trace = (tmp_path / ".harness" / "last-deep-agents-judge-T001.md").read_text()
+    assert "Use the judge subagent" in trace
+    assert '{"kind": "feature"}' in trace
 
 
 def test_the_backend_names_itself():
@@ -284,53 +333,6 @@ def test_object_messages_take_the_same_path():
         ]
     )
     assert adapter.last_ai_text(result) == '{"verdict": "current"}'
-
-
-# -- the custom read tool is not covered by harness permissions -------------
-
-
-def test_read_file_refuses_a_path_outside_the_repo(fake_langchain, tmp_path):
-    """`virtual_mode` fences the built-in filesystem tools. It does not fence a
-    tool this folder wrote. Without a check here, `..` walks off the repo."""
-    import roles  # noqa: PLC0415
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (tmp_path / "outside.txt").write_text("SECRET")
-
-    out = roles.read_tool(repo)("../outside.txt")
-    assert "SECRET" not in out
-    assert out.startswith("REFUSED")
-
-
-def test_read_file_refuses_an_absolute_path(fake_langchain, tmp_path):
-    import roles  # noqa: PLC0415  (sys.path is set by conftest first)
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (tmp_path / "outside.txt").write_text("SECRET")
-
-    out = roles.read_tool(repo)(str(tmp_path / "outside.txt"))
-    assert "SECRET" not in out
-
-
-def test_read_file_still_reads_a_nested_path(fake_langchain, tmp_path):
-    """The containment check must not break the tool it protects."""
-    import roles  # noqa: PLC0415
-
-    repo = tmp_path / "repo"
-    (repo / "app" / "deep").mkdir(parents=True)
-    (repo / "app" / "deep" / "x.py").write_text("kept")
-
-    assert roles.read_tool(repo)("app/deep/x.py") == "kept"
-
-
-def test_read_file_still_reports_a_missing_file(fake_langchain, tmp_path):
-    import roles  # noqa: PLC0415
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    assert roles.read_tool(repo)("nope.md").startswith("no such file")
 
 
 def test_write_refuses_a_path_outside_the_repo(fake_langchain, tmp_path):
