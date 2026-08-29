@@ -23,6 +23,11 @@ Required fields:
 
 A field is present only if it has real content. A heading with no body is absent.
 
+Use these exact headings: **Problem**, **Proposal**, **Value**, and
+**Acceptance criteria**. Make every acceptance criterion a concrete,
+numbered `(AC-n)` statement. For a `ui` ticket, also add a readable ASCII
+**Wireframe**. Do not add a wireframe to a bug or ordinary feature ticket.
+
 5. Write the full rewritten ticket to the candidate path you were given.
 6. Write nothing else.
 

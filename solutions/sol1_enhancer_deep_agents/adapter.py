@@ -12,7 +12,12 @@ nothing extra to import lazily here. Nothing in this module is exercised by
 
 from __future__ import annotations
 
+import contextlib
+import re
+import signal
 import subprocess
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,6 +30,7 @@ class DoerResult:
     output: str = ""
     usd: float = 0.0
     ok: bool = True
+    timed_out: bool = False
 
 
 class Backend:
@@ -39,6 +45,60 @@ def _changed_files(repo: Path) -> set[str]:
         ["git", "diff", "--name-only"], cwd=repo, text=True, capture_output=True, check=False
     )
     return set(proc.stdout.splitlines())
+
+
+class QueryTimedOut(TimeoutError):
+    """The one graph invocation exceeded this ticket's wall-clock allowance."""
+
+
+@contextlib.contextmanager
+def _wall_clock_timeout(seconds: float):
+    """Interrupt a synchronous graph call on platforms that support SIGALRM.
+
+    A worker thread cannot safely cancel a blocked HTTP request, and letting its
+    executor wait would recreate the hang this guard is meant to prevent.
+    LangGraph runs this synchronous adapter on the main thread, so SIGALRM
+    interrupts the call directly on macOS and Linux. On platforms without it,
+    the provider-level timeout remains the fallback.
+    """
+    can_alarm = (
+        seconds > 0
+        and hasattr(signal, "SIGALRM")
+        and hasattr(signal, "setitimer")
+        and threading.current_thread() is threading.main_thread()
+    )
+    if not can_alarm:
+        yield
+        return
+
+    def expired(_signum, _frame):
+        raise QueryTimedOut(f"Deep Agents query exceeded {seconds:g} seconds")
+
+    old_handler = signal.signal(signal.SIGALRM, expired)
+    old_timer = signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
+        if old_timer[0] > 0:
+            signal.setitimer(signal.ITIMER_REAL, *old_timer)
+
+
+def _call_kind(prompt: str) -> tuple[str, str]:
+    role = "judge" if "judge subagent" in prompt else "doer"
+    match = re.search(r"(?:tickets/|ticket )(T\d+)", prompt)
+    return role, match.group(1) if match else "unknown"
+
+
+def _trace(repo: Path, *, role: str, ticket: str, prompt: str, result: str) -> None:
+    """Persist the one bounded call's prompt and returned text for diagnosis."""
+    path = repo / ".harness" / f"last-deep-agents-{role}-{ticket}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"# Deep Agents {role} call for {ticket}\n\n## Prompt\n\n{prompt}\n\n## Result\n\n{result}\n",
+        encoding="utf-8",
+    )
 
 
 def _messages(result):
@@ -187,17 +247,36 @@ class DeepAgentsBackend(Backend):
 
     name = "deep_agents"
 
-    def __init__(self, agent):
+    def __init__(self, agent, *, timeout_s: float = 180.0):
         self.agent = agent
+        self.timeout_s = timeout_s
 
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
+        role, ticket = _call_kind(prompt)
+        print(f"deep-agents {ticket} {role}: started", flush=True)
         try:
             scope = WriteScope(allow=list(allow))
             before = _changed_files(repo)
-            result = self.agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+            started = time.monotonic()
+            with _wall_clock_timeout(self.timeout_s):
+                result = self.agent.invoke({"messages": [{"role": "user", "content": prompt}]})
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]
-            return DoerResult(wrote=wrote, output=last_ai_text(result), usd=last_usd(result))
+            output = last_ai_text(result)
+            _trace(repo, role=role, ticket=ticket, prompt=prompt, result=output)
+            print(
+                f"deep-agents {ticket} {role}: completed in {time.monotonic() - started:.1f}s",
+                flush=True,
+            )
+            return DoerResult(wrote=wrote, output=output, usd=last_usd(result))
+        except QueryTimedOut as exc:
+            message = str(exc)
+            _trace(repo, role=role, ticket=ticket, prompt=prompt, result=message)
+            print(f"deep-agents {ticket} {role}: timed out", flush=True)
+            return DoerResult(ok=False, timed_out=True, output=message)
         # Graceful failure, mirrors CliBackend.run. A backend that raises
         # takes the loop down with it.
         except Exception as exc:
-            return DoerResult(ok=False, output=f"deep agents backend failed: {exc}")
+            message = f"deep agents backend failed: {exc}"
+            _trace(repo, role=role, ticket=ticket, prompt=prompt, result=message)
+            print(f"deep-agents {ticket} {role}: failed: {exc}", flush=True)
+            return DoerResult(ok=False, output=message)
