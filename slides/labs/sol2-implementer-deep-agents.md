@@ -6,9 +6,22 @@ footer: Spillwave Solutions | spillwave.com
 ---
 # sol2_implementer_deep_agents
 
-The working filled Lab 2 loop. Take-home issue 118.
+The Lab 2 take-home driver. A ready ticket in. A green rubric out.
 
-Python holds Pass / Retry / Escalate. Deep Agents is the maker. The red gate is `junit.xml`.
+Python holds Pass, Retry, and Escalate. Deep Agents is the maker. The red gate is `junit.xml`.
+
+Saturday fills three stubs in `labs/lab2_implementer`. Demo T001 from here.
+
+Read `HOW_TO_RUN.md` and `DESIGN_DOC.md`. Skills are mounted, not pasted.
+
+
+---
+
+# Driver, not a cast
+
+![h:420](images/driver-versus-cast.jpg)
+
+Demo T001 from this folder. The Agent SDK twin prints options. It does not implement the ticket.
 
 
 ---
@@ -17,65 +30,73 @@ Python holds Pass / Retry / Escalate. Deep Agents is the maker. The red gate is 
 
 | File | Role |
 |---|---|
-| `harness.py` | `red_gate`, `run_loop`, CLI |
+| `harness.py` | CLI, `red_gate`, `run_loop` |
 | `implementer.py` | eight-step loop |
 | `doers.py` | `none` / `reference` / `cli` / Deep Agents |
 | `rubric.py` / `gates.py` / `contract.py` | copies, not a library |
 | `roles.py` | `create_deep_agent` |
-| `tests/` | judge read-only, refuse `tests/**` |
+| `skills/` | mounted per writing role |
+
+`task loop:implementer` is gone from the root Taskfile. Run `task run` here.
 
 
 ---
 
-# Why it exists
+# Setup. Two venvs on purpose
 
-Saturday fills three stubs. There is no drop-in `harness.py`. This folder is the shipped eight-step answer.
-
-`task loop:implementer` is gone from the root Taskfile. Demo from here. Each criterion becomes two nodes in `steps.jsonl`.
-
-
----
-
-# Learning objectives
-
-- Walk `implementer.run` step by step
-- Prove `--doer none` escalates
-- Prove `--doer reference` can pass under WriteScope
-- Configure Deep Agents so the judge holds `read_file` only
-- Grep for `from loops` and fail if it returns
-
-
----
-
-# Starting architecture
-
+```bash
+cd solutions/sol2_implementer_deep_agents
+cp config.json.example config.json
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
+task test-setup     # .venv + pytest. Enough for none and reference.
+task clone
 ```
-orchestrator  writes nothing, owns budget
-  planner            steps.jsonl
-  test_implementer   tests/**
-  code_implementer   app/**, denied tests/**
-  judge              read_file only
-           │
-           ▼
-     red gate  →  ten-row rubric  →  gates.decide
-           │
-           ▼
-     .harness/last-implementer.json
+
+`--doer deep` needs one more step:
+
+```bash
+task setup          # same .venv, plus deepagents>=0.7
 ```
+
+Do not activate the venv. Task uses it.
+
+
+---
+
+# Scripts with no model
+
+```bash
+task table          # judge writes must print no
+task test
+task e2e            # offline loop against a disposable fixture
+```
+
+If judge prints `yes`, stop. None of these need a key, Deep Agents, or the public CRM.
+
+
+---
+
+# Architecture
+
+![h:360](images/lab2-harness-flow.jpg)
+
+Python runs the suite through `Contract`. No role holds a shell. See `docs/diagrams/architecture.svg`.
 
 
 ---
 
 # Eight steps in `implementer.run`
 
-1. Read ticket. Refuse if not `ready`.
-2. `plan_for`: one test step and one code step per criterion. Derived, not generated. This is Graph Engineering. Not LangGraph.
+1. Read the ticket. Refuse if it is still a draft.
+2. `plan_for`: one test step and one code step per criterion. Derived, not generated. Graph Engineering.
 3. `test_implementer` writes under `tests/**`.
-4. Red gate. Empty new-ids → escalate.
-5. `code_implementer` writes `app/**` until green.
+4. Red gate. Empty new-ids → escalate. Stop. Do not write app code.
+5. `code_implementer` writes `app/**` until green. Denied `tests/**`.
 6. Ten-row rubric. No model.
-7. `judge_done=None`, so a green rubric is enough. Session 2 still teaches a model judge.
+7. `judge_done=None`. A green rubric is enough on this path. Session 2 still teaches a model judge.
 8. `gates.decide`. Trace to `.harness/last-implementer.json`.
+
+`create_deep_agent` does not count retries.
 
 
 ---
@@ -94,35 +115,21 @@ A test that already existed and still fails is not proof of a new contract.
 
 ---
 
-# Deep Agents wiring
+# Three doers
 
-```python
-return create_deep_agent(
-    model="anthropic:claude-sonnet-5",
-    tools=[run_tests_tool(repo)],
-    subagents=subagents_for(contract, loop),
-)
-```
-
-Judge tools = `["read_file"]`. Code-implementer write tool refuses `tests/**` with a sentence.
-
-`create_deep_agent` does **not** count retries. Python still owns `gates.decide`.
-
-
----
-
-# Commands
+| Spec | Needs | Behavior |
+|---|---|---|
+| `none` | nothing | writes nothing. Honesty check. |
+| `reference` | clone | copies `known-good` inside WriteScope |
+| `deep` | `task setup` + key | Deep Agents makers |
 
 ```bash
-cd solutions/sol2_implementer_deep_agents
-python3 -m pytest tests -q
-python3 harness.py --table-only
-python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer none
-python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
-python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer deep
+task run -- --ticket T001 --doer none
+task run -- --ticket T001 --doer reference
+task run -- --ticket T001 --doer deep
 ```
 
-`--doer deep` needs `deepagents` and a key. Tests do not.
+`task run` is `harness.py --repo <target>`. Extra flags after `--` go to `harness.py`.
 
 
 ---
@@ -141,31 +148,48 @@ reason: red gate: no new test was observed failing.
 
 ---
 
-# Troubleshooting
+# Skills, not a stuffed prompt
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `task loop:implementer` missing | engine deleted | run this `harness.py` |
-| `--doer none` is green | red gate not stopping | empty new-ids must escalate |
-| Wrote `tests/**` as coder | write tool not scoped | sentence refusal |
-| `from loops` in a file | design leaked | `test_standalone.py` fails the build |
+Each writing role mounts `/skills/<role>/`. Deep Agents loads the body when the role is invoked.
+
+`/memory/` routes at `memory/`, not this folder.
+
+Do not paste `SKILL.md` into a subagent prompt. Do not shadow `read_file` with a custom tool.
 
 
 ---
 
-# Validation
+# Testing skill
 
-- [ ] pytest: judge tools `== ["read_file"]`
-- [ ] coder write to `tests/test_due.py` returns REFUSED
-- [ ] `_new_test_ids({"old"}, {"old","new"}) == {"new"}`
-- [ ] same signature twice → `ESCALATE`
-- [ ] `--table-only` prints `judge` with no repo
+`.agents/skills/test-ticket-implementer/`
+
+Works on every `solutions/sol2_implementer_*` folder. Track A is this driver. Track B plugs another runtime into it.
+
+Read `HOW_TO_RUN.md` first. Run `task test` and `task e2e` before any live spend.
+
+The product is `.harness/last-implementer.json`, not a process exit code.
+
+
+---
+
+# Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `task loop:implementer` missing | `task run` in this folder |
+| `--doer none` is green | empty new-ids must escalate |
+| Wrote `tests/**` as coder | scoped write tool, sentence refusal |
+| `--doer deep` refuses | `task setup` first |
+| `from loops` in a file | `test_standalone.py` fails the build |
+| Skill not loading | do not shadow `read_file` |
 
 
 ---
 
 # Recap
 
-Same role table as Saturday. Enforcement is a missing tool, plus a path check, plus Python on the outside.
+Python owns the red gate and the three exits. Deep Agents writes tests, then code.
+
+Same table as Saturday. Enforcement is a missing tool, plus a path check, plus Python on the outside.
 
 If a port imports `loops`, the design leaked.

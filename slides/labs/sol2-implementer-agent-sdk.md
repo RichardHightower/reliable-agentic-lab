@@ -10,7 +10,18 @@ Take-home **configuration port**. It does not run the eight-step loop.
 
 This is the role graph. The live harness is `sol2_implementer_deep_agents`.
 
-It prints the role table and builds `ClaudeAgentOptions`. There is no `implementer.py`, no `gates.py`, and no `rubric.py`. The driver lives in the Deep Agents twin. There is a `tests/` now, and it is what keeps the fence honest.
+`task run` prints `ClaudeAgentOptions`. It does not implement T001.
+
+Read `HOW_TO_RUN.md`, `DESIGN_DOC.md`, `TEST_PLAN.md`, and `E2E_PLAN.md`.
+
+
+---
+
+# Cast, not the driver
+
+![h:420](images/driver-versus-cast.jpg)
+
+`task run` prints `ClaudeAgentOptions`. It does not implement T001.
 
 
 ---
@@ -28,36 +39,44 @@ code_implementer    yes     app/**, src/**   denied tests/**
 judge               no      nothing
 ```
 
-Do not copy this folder into `labs/lab2_implementer/harness.py`. The Saturday stub wants `red_gate` / `score_attempt` / `run_loop`. This file exports `cast` / `build` / `backend`.
+Missing on purpose: `implementer.py`, `gates.py`, `rubric.py`, `doers.py`.
+
+Do not copy this folder into `labs/lab2_implementer/harness.py`. Saturday wants `red_gate` / `score_attempt` / `run_loop`.
 
 
 ---
 
-# Learning objectives
+# Setup. Folder-local venv
 
-- Read `roleplan.LOOPS["implementer"]`
-- Wire `tools=[...]` plus PreToolUse
-- Print `--table-only` with no SDK and no key
-- Pair this port with `sol2_implementer_deep_agents` when you want the eight steps to run
+```bash
+cd solutions/sol2_implementer_agent_sdk
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
+task setup          # .venv + claude-agent-sdk. PEP 668.
+task clone          # only if you want live options against a real repo
+```
+
+Do not `pip install` into Homebrew Python.
 
 
 ---
 
-# Starting architecture
+# Scripts with no model
 
-```
-python3 harness.py --table-only
-  └── roleplan.plan(contract, "implementer")
-         five RolePlans, judge can_write False
-
-python3 harness.py --repo CRM
-  └── ClaudeAgentOptions
-         agents for planner, test_implementer, code_implementer, judge
-         permission_mode=dontAsk
-         one PreToolUse scope_hook for the whole cast
+```bash
+task table          # judge writes must print no
+task test           # pytest. No key, no SDK, no clone.
 ```
 
-No call to `implementer.run`.
+If judge prints `yes`, stop. The port is wrong.
+
+
+---
+
+# Architecture
+
+![h:360](images/sdk-two-fences.jpg)
+
+`task run --` prints options with `dontAsk` and one PreToolUse hook. No call to `implementer.run`.
 
 
 ---
@@ -66,59 +85,80 @@ No call to `implementer.run`.
 
 `tools=[...]` decides whether a role can write at all.
 
-`scope_hook` decides which paths. Deny envelope:
+One `PreToolUse` hook reads `agent_type` and looks up that role's scope.
+
+A write with no agent is denied. The parent has no business writing anything.
+
+Deny envelope:
 
 ```
 hookSpecificOutput.hookEventName = PreToolUse
 hookSpecificOutput.permissionDecision = deny
 ```
 
-A typo fails **open**. The field is `maxTurns`, camelCase: `max_turns=` raises `TypeError` on the real SDK, and a test fake taking `**kwargs` hides it.
+A typo fails **open**. The field is `maxTurns`, camelCase.
 
 
 ---
 
-# Commands
+# `task run` is configuration
 
 ```bash
-cd solutions/sol2_implementer_agent_sdk
-python3 harness.py --table-only
-python3 harness.py --repo ../../work/northwind-field-crm
-task test    # pytest. task table is --table-only
+task run --
 ```
 
-`--table-only` with a missing repo still prints the table and exits 0.
+Needs `task setup`. Prints options. Stops.
+
+That is not a ticket run. A test that expects `task run -- --ticket T001` to implement a ticket is testing a product this folder refused to be.
 
 
 ---
 
-# Expected table
+# Live T001. Glue, not a second loop
 
-Judge must print `no`. Code implementer allow `app/**, src/**`, deny `tests/**`.
+`e2e_t001.py` hands `AgentSdkBackend` to the Deep Agents driver.
 
-If judge prints `yes`, the port is wrong. Stop.
+Both folders ship `adapter.py` and `roles.py`. Putting both on `sys.path` shadows one of them. The glue loads each folder in an isolated import scope.
+
+Do not invent a shared `loops/` package. Do not copy `implementer.py` into this folder.
+
+Read `E2E_PLAN.md` before spending a token.
+
+
+---
+
+# Testing skill
+
+`.agents/skills/test-ticket-implementer/`
+
+Track A is `sol2_implementer_deep_agents`. Track B is this backend plugged into that driver.
+
+Run `task test` here first. Do not spend a token to diagnose a failing offline suite.
+
+
+---
+
+# Plugin files vs Python
+
+```
+plugin/agents/...
+plugin/skills/...
+```
+
+The plugin is the readable specification. Python owns the options. When an agent markdown file and the role table disagree, `options_for` raises.
 
 
 ---
 
 # Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Thought this ran T001 | config port | use Deep Agents `harness.py` |
-| Judge writes `yes` | tools leaked Edit | strip judge tools |
-| Fail-open writes | deny shape typo | full `hookSpecificOutput` |
-| Copied into lab2 stub | wrong artifact | Saturday wants three functions |
-
-
----
-
-# Validation
-
-- [ ] table: five roles, judge `no`
-- [ ] no `implementer.py` in this folder (on purpose)
-- [ ] `task test` needs no key, no SDK, and no clone
-- [ ] you can name the folder that actually runs the loop
+| Symptom | Fix |
+|---|---|
+| Thought this ran T001 | config port. Use Deep Agents `task run` |
+| Judge writes `yes` | strip Write from judge tools |
+| Fail-open writes | full `hookSpecificOutput` deny |
+| `externally-managed-environment` | `task setup`, not system pip |
+| Copied into lab2 stub | Saturday wants three functions |
 
 
 ---
@@ -129,46 +169,4 @@ Config port, not a filled loop. Same table, different enforcement knob.
 
 The eight steps live in `sol2_implementer_deep_agents`. This folder proves the table survived.
 
----
-
-# Prerequisites
-
-```bash
-cd solutions/sol2_implementer_agent_sdk
-python3 -c "import roleplan, roles, write_scope; print('ok')"
-```
-
-No API key. No CRM clone. `claude-agent-sdk` is only needed if you call `options_for` without stubbing.
-
-Saturday Lab 2 still fills `labs/lab2_implementer/harness.py`. This folder is take-home.
-
----
-
-# Files in this folder
-
-```
-SPEC.md  Taskfile.yml
-adapter.py  contract.py  harness.py
-roleplan.py  roles.py  write_scope.py
-```
-
-Missing on purpose: `implementer.py`, `gates.py`, `rubric.py`, `doers.py`, `tests/`.
-
----
-
-# Same table, three enforcements
-
-| Runtime | How judge cannot write |
-|---|---|
-| Saturday Claude | YAML tools omit Write |
-| Agent SDK (this folder) | tools omit Edit/Write, plus PreToolUse |
-| Deep Agents | subagent tools = `[read_file]` |
-
----
-
-# Final checklist
-
-- [ ] `--table-only` prints judge `no`
-- [ ] code_implementer deny includes `tests/**`
-- [ ] you did not copy this `harness.py` over the Saturday stub
-- [ ] you know `sol2_implementer_deep_agents` is the live loop
+`task setup`, `task table`, `task test`, `task run`. Read `HOW_TO_RUN.md`.

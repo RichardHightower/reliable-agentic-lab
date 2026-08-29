@@ -1,0 +1,7 @@
+This is a slide diagram for a technical presentation about three fencing layers in Deep Agents.
+Clean minimalist technical illustration. Boxes, arrows, labels. Landscape 16:9.
+Palette: background #07141f, surface #0d1e2c, primary #2dd4bf, accent #d4a84b, ink #eef4f6.
+No source syntax, no ASCII, no tiny labels, no watermarks, no logos, no em dash characters.
+Diagram type: layered architecture.
+Tool list per subagent, path check inside the write tool, fence around the harness with general-purpose subagent OFF, scoped write only.
+Convert the visual boxes, arrows, and labels. The image must show a finished diagram, not Mermaid or PlantUML code.

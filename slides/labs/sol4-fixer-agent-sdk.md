@@ -6,9 +6,13 @@ footer: Spillwave Solutions | spillwave.com
 ---
 # sol4_fixer_agent_sdk
 
-The working Module 4 loop. Issue 120.
+The working Module 4 loop. A failing branch in. A green one out, or an honest explanation.
 
 `query()`, not `ClaudeSDKClient`. `permission_mode: dontAsk`. Merge is never a tool.
+
+Saturday fills two stubs in `labs/lab4_fixer`. Demo `broken-pr` from here.
+
+Read `HOW_TO_RUN.md`, `DESIGN_DOC.md`, and `E2E_PLAN.md`.
 
 
 ---
@@ -19,103 +23,77 @@ The working Module 4 loop. Issue 120.
 loop.py       summarize_failure + repair_until_green wrappers
 fixer.py      the while loop
 doers.py      none / reference / cli / SDK backend
-gates.py      identical copy to sol3
-contract.py   Taskfile + junit + coverage
+gates.py      pass, retry, escalate
 roles.py      dontAsk, one PreToolUse hook, deny tests/**
 tests/        hook deny/allow, same-signature escalate
 ```
 
-No `unattended.py`. Durable `.harness/state.json` and exit 0/2/1 lived there and were not copied. This CLI returns `0 if green else 1`. Name that drift.
+The Deep Agents twin is the graph, not the repair loop.
 
 
 ---
 
-# Learning objectives
+# Setup. Stash first.
 
-- Walk `fixer.run`
-- Set `permission_mode: dontAsk` because nobody is in the chair
-- Deny `tests/**` on the code implementer
-- Stash before `--branch broken-pr`
-- Leave a comment when the loop gives up
+```bash
+git -C ../../work/northwind-field-crm stash --include-untracked
+cd solutions/sol4_fixer_agent_sdk
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
+task setup          # .venv + claude-agent-sdk. PEP 668.
+task clone
+task reset          # checkout broken-pr. Refuses a dirty clone.
+```
+
+Say the stash out loud. That refusal is on brand.
 
 
 ---
 
-# Starting architecture
+# Scripts with no model
 
+```bash
+task table          # judge writes must print no
+task test
 ```
-Trigger → fixer.run
-            contract.run("test")
-            green? PASS
-            never ran? ESCALATE
-            same failing ids twice? ESCALATE + comment
-            else doer repairs inside app/**
-         → .harness/last-fixer.json
-         → Human merge
-```
+
+If judge prints `yes`, stop. Neither needs a key, the SDK, or a clone.
+
+
+---
+
+# Architecture
+
+![h:360](images/lab4-four-stops.jpg)
+
+Cast is three roles. No planner. See `docs/diagrams/architecture.svg`.
 
 
 ---
 
 # Five unattended lines
 
-```
-permission_mode: dontAsk         # never prompts, and fails closed
-PreToolUse deny tests/**         # cannot weaken a test
-maxTurns=12                      # camelCase. max_turns= is a TypeError
-tests after every turn = pytest  # not a claim
-Merge is never a tool
-```
+![h:360](images/sol4-dontask.jpg)
 
-This port used `acceptEdits` and that was the bug. Both modes never prompt.
-`acceptEdits` auto-accepts every edit **before** the allow list is read, so the
-hook is the only fence, and the hook fails open on a typo. `dontAsk` denies
-anything not pre-approved, which makes `allowed_tools` a real second gate.
-
-"Nobody is in the chair" is the argument for `dontAsk`, not against it.
-
-
----
-
-# `failure_summary`
-
-```python
-def failure_summary(run_result) -> str:
-    failed = sorted(run_result.junit.failed_ids)
-    lines = [f"{len(failed)} failing: {', '.join(failed[:5])}"] if failed else ["the suite is red"]
-    error = ERROR_IN_OUTPUT.search(run_result.output or "")
-    if error:
-        lines.append(error.group(0).strip()[:200])
-    return "\n".join(lines)
-```
+`acceptEdits` auto-accepts edits before the allow list. `dontAsk` denies anything not pre-approved.
 
 
 ---
 
 # Doers
 
-| Spec | Behavior |
-|---|---|
-| `none` | writes nothing. Loop still reports the truth |
-| `reference` | copies `known-good` inside WriteScope |
-| `sdk` | `AgentSdkBackend` wrapping `query()` |
-| `claude` / `codex` / `grok` | `CliBackend` |
-
-Reference skipping `tests/**` is the whole point.
-
-
----
-
-# Commands
+| Spec | Needs | Behavior |
+|---|---|---|
+| `none` | clone | writes nothing. Loop still reports the truth |
+| `reference` | clone | copies `known-good` inside `app/**` |
+| `sdk` | `task setup` + key | `AgentSdkBackend` wrapping `query()` |
 
 ```bash
-cd solutions/sol4_fixer_agent_sdk
-python3 -m pytest tests -q
-python3 loop.py --table-only
-# after stash:
-python3 loop.py --repo ../../work/northwind-field-crm --branch broken-pr --doer none
-python3 loop.py --repo ../../work/northwind-field-crm --branch broken-pr --doer reference
+task run -- --branch broken-pr --doer none
+task run -- --branch broken-pr --doer reference
+task run -- --branch broken-pr --doer sdk
 ```
+
+`--research` defaults to `off`. `--doer sdk` refuses if you skipped `task setup`.
 
 
 ---
@@ -130,30 +108,45 @@ The fixer gave up.
 A human should take this one.
 ```
 
+`--doer reference` against `broken-pr`: `gate: pass`. Files copied from `known-good` inside `app/**` only.
+
 
 ---
 
-# Tests
+# What Python still owns
 
-| Test | Asserts |
-|---|---|
-| `test_hook_denies_test_write` | Write `tests/test_x.py` → deny |
-| `test_hook_allows_app_write` | Write `app/main.py` → `{}` |
-| `test_the_permission_mode_denies_rather_than_prompts` | `permission_mode == "dontAsk"` |
-| `test_same_failing_ids_escalate` | same signature → ESCALATE |
-| `test_no_loops_import` | no `from loops` |
+`summarize_failure` from junit. Four stop paths:
+
+1. Suite green → pass
+2. Suite never ran → escalate on round 1
+3. Same failing ids twice → escalate, leave a comment
+4. Budget spent → escalate, "A human should take this one"
+
+Scope violations escalate even if the suite is green. Spend comes from `total_cost_usd`, so the money gate can fire.
+
+
+---
+
+# E2E. Disposable clones
+
+Do not use `work/northwind-field-crm` for a live probe. It may hold Lab 2 work.
+
+`E2E_PLAN.md` clones into `/tmp`, prepares the target venv, then runs `--doer none` and `--doer reference` before `--doer sdk`.
+
+`task setup` here installs the SDK. It does not install the CRM's test dependencies.
 
 
 ---
 
 # Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Dirty tree | Lab 2 leftover | stash |
-| Green on `none` | missing signature stop | `gates.decide` |
-| Edited a test | hook fail-open | full deny envelope |
-| Exit 1 on escalate | unattended.py missing | named drift, not a silent bug |
+| Symptom | Fix |
+|---|---|
+| Dirty tree | stash, out loud |
+| Green on `none` | same ids twice must escalate |
+| Edited a test | full deny envelope on `tests/**` |
+| `acceptEdits` in options | must be `dontAsk` |
+| Thought DA repaired it | that twin is graph only |
 
 
 ---
@@ -162,39 +155,6 @@ A human should take this one.
 
 Same graph, nobody at the keyboard. Reference doer still bound by WriteScope. Human owns merge.
 
-Rebuild `unattended.py` in this folder if you need exit 2 for escalate.
+`dontAsk`. Deny `tests/**`. Leave a comment when you give up.
 
----
-
-# Prerequisites
-
-```bash
-cd solutions/sol4_fixer_agent_sdk
-python3 -m pytest tests -q
-git -C ../../work/northwind-field-crm stash --include-untracked
-```
-
-`--doer sdk` needs `claude-agent-sdk`. `--doer none` and `--doer reference` do not.
-
----
-
-# `repair_until_green` wrapper
-
-```python
-def repair_until_green(contract, budget: int = 3, doer: str = "reference") -> dict:
-    if doer == "sdk":
-        doer = backend(contract)
-    return fixer.run(repo=contract.repo, budget=budget, doer=doer, research_backend=None)
-```
-
-Saturday types a body. This folder delegates to `fixer.run`.
-
----
-
-# Final checklist
-
-- [ ] pytest green without a key
-- [ ] table: judge `no`, coder denied `tests/**`
-- [ ] `permission_mode == "dontAsk"`
-- [ ] `--doer none` on `broken-pr` escalates with a comment
-- [ ] merge is not in any tool list
+The loop is the product. The prompt is not.

@@ -55,14 +55,7 @@ A model that may both act and verify can invent its own evidence. That is why th
 
 # Starting architecture
 
-```
-Trigger  →  fixer.run
-              judge: contract.run("test") → junit
-              code_implementer: app/**, denied tests/**
-              optional research once (2 calls, $0.05)
-         →  .harness/last-fixer.json
-         →  Human merge. Loop never gets a merge tool.
-```
+![h:360](images/lab4-four-stops.jpg)
 
 Cast is three roles, not five. No planner. The work is defined by what is red.
 
@@ -148,17 +141,25 @@ Scope violations escalate even if the suite is green. Reaching green by editing 
 
 # Commands. Live first.
 
-`task loop:fixer` is gone with `loops/`.
-
 Saturday: `task test` imports `loop`.
 
-Runnable filled loop:
+Stash Lab 2 work first. Then demo the live fixer from the Agent SDK port:
 
 ```bash
+git -C ../../work/northwind-field-crm stash --include-untracked
 cd ../../solutions/sol4_fixer_agent_sdk
-python3 loop.py --repo ../../work/northwind-field-crm --branch broken-pr --doer reference
-python3 loop.py --repo ../../work/northwind-field-crm --branch broken-pr --doer none
+task setup
+task test
+task table          # judge writes must print no
+task clone
+task reset          # checkout broken-pr. Refuses a dirty clone.
+task run -- --branch broken-pr --doer reference
+task run -- --branch broken-pr --doer sdk
 ```
+
+`--doer reference` needs no key. `--doer sdk` needs `ANTHROPIC_API_KEY`. `permission_mode` is `dontAsk`. Merge is never a tool.
+
+Read `HOW_TO_RUN.md` and `E2E_PLAN.md` in that folder. The Deep Agents twin is the graph, not the repair loop.
 
 
 ---
