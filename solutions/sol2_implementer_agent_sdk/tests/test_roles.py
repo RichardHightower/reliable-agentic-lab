@@ -217,6 +217,18 @@ def test_the_cost_ceiling_comes_off_the_contract(fake_sdk, contract):
     assert roles.options_for(contract, max_usd=0.5).max_budget_usd == 0.5
 
 
+def test_options_can_expose_only_one_phase_role(fake_sdk, contract):
+    fake_sdk()
+    options = roles.options_for(
+        contract,
+        max_turns=4,
+        role_names=frozenset({"test_implementer"}),
+    )
+    assert set(options.agents) == {"implementer-test-implementer"}
+    assert options.max_turns == 4
+    assert options.agents["implementer-test-implementer"].maxTurns == 4
+
+
 def test_the_hook_is_registered_once_per_write_tool(fake_sdk, contract):
     """Three matchers, not nine. One hook serves the cast."""
     fake_sdk()

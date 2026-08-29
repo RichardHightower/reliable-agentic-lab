@@ -122,7 +122,7 @@ def scope_hook(repo: Path, roles: dict[str, RolePlan]):
     return check
 
 
-def agent_definitions(roles: dict[str, RolePlan]):
+def agent_definitions(roles: dict[str, RolePlan], *, max_turns: int = DEFAULT_MAX_TURNS):
     """One `AgentDefinition` per role, with the prompt read from the plugin.
 
     The role table is authoritative on tools. When an agent file and the table
@@ -152,7 +152,7 @@ def agent_definitions(roles: dict[str, RolePlan]):
             # camelCase on purpose. `max_turns=` raises TypeError on the real
             # SDK and is swallowed by a fake that takes `**kwargs`.
             disallowedTools=NO_WRITE if not role.can_write else [],
-            maxTurns=DEFAULT_MAX_TURNS,
+            maxTurns=max_turns,
             # SDK 2.1.198 defaults a subagent to background. The driver needs
             # the verdict, so wait for it.
             background=False,
@@ -160,7 +160,14 @@ def agent_definitions(roles: dict[str, RolePlan]):
     return agents
 
 
-def options_for(contract, loop: str = DEFAULT_LOOP, *, max_usd: float | None = None):
+def options_for(
+    contract,
+    loop: str = DEFAULT_LOOP,
+    *,
+    max_usd: float | None = None,
+    max_turns: int = DEFAULT_MAX_TURNS,
+    role_names: frozenset[str] | None = None,
+):
     """Build `ClaudeAgentOptions` with one subagent per role in this loop's cast.
 
     Imported lazily. This folder's tests run without the SDK installed.
@@ -169,6 +176,11 @@ def options_for(contract, loop: str = DEFAULT_LOOP, *, max_usd: float | None = N
 
     repo = Path(contract.repo)
     roles = plan(contract, loop)
+    if role_names is not None:
+        unknown = role_names - set(roles)
+        if unknown:
+            raise ValueError(f"unknown Agent SDK role(s): {sorted(unknown)}")
+        roles = {name: role for name, role in roles.items() if name in role_names}
 
     hook = scope_hook(repo, roles)
     hooks = [HookMatcher(matcher=tool, hooks=[hook]) for tool in WRITE_TOOL_NAMES]
@@ -181,7 +193,7 @@ def options_for(contract, loop: str = DEFAULT_LOOP, *, max_usd: float | None = N
 
     return ClaudeAgentOptions(
         cwd=str(repo),
-        agents=agent_definitions(roles),
+        agents=agent_definitions(roles, max_turns=max_turns),
         allowed_tools=allowed,
         disallowed_tools=GLOBAL_DENY,
         permission_mode="dontAsk",
@@ -190,7 +202,7 @@ def options_for(contract, loop: str = DEFAULT_LOOP, *, max_usd: float | None = N
         setting_sources=["project"],
         plugins=[{"type": "local", "path": str(PLUGIN)}],
         system_prompt=PARENT_PROMPT,
-        max_turns=DEFAULT_MAX_TURNS,
+        max_turns=max_turns,
         max_budget_usd=max_usd if max_usd is not None else _budget_usd(contract),
         # The built-in general-purpose agent ships with filesystem tools.
         # Leaving it enabled is how a scoped implementer edits a test.

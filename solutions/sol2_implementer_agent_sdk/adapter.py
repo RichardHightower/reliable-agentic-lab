@@ -104,12 +104,13 @@ class AgentSdkBackend(Backend):
 
     name = "agent_sdk"
 
-    def __init__(self, options):
+    def __init__(self, options, *, timeout_seconds: float = QUERY_TIMEOUT_SECONDS):
         self.options = options
+        self.timeout_seconds = timeout_seconds
 
     def run(self, *, repo: Path, prompt: str, allow: list[str], **extra) -> DoerResult:
         try:
-            from claude_agent_sdk import ResultMessage, query  # noqa: PLC0415
+            from claude_agent_sdk import ResultError, ResultMessage, query  # noqa: PLC0415
 
             scope = WriteScope(allow=list(allow))
             before = _changed_files(repo)
@@ -137,32 +138,41 @@ class AgentSdkBackend(Backend):
                 structured = None
                 ok = True
                 reason = None
-                async for message in query(prompt=prompt, options=options):
-                    raw_events.append(_raw_event(message))
-                    if not isinstance(message, (ResultMessage, str)):
-                        continue
-                    text, cost, parsed, error, stop = _from_result(message)
-                    if text:
-                        result_text = text
-                    if cost:
-                        usd = cost
-                    if parsed is not None:
-                        structured = parsed
-                    if error is True:
-                        ok = False
-                    if stop:
-                        reason = stop
-                        ok = False
+                saw_result = False
+                try:
+                    async for message in query(prompt=prompt, options=options):
+                        raw_events.append(_raw_event(message))
+                        if not isinstance(message, (ResultMessage, str)):
+                            continue
+                        saw_result = saw_result or isinstance(message, ResultMessage)
+                        text, cost, parsed, error, stop = _from_result(message)
+                        if text:
+                            result_text = text
+                        if cost:
+                            usd = cost
+                        if parsed is not None:
+                            structured = parsed
+                        if error is True:
+                            ok = False
+                        if stop:
+                            reason = stop
+                            ok = False
+                except ResultError:
+                    # The SDK yields its terminal ResultMessage and then raises
+                    # ResultError for the CLI's non-zero exit. Keep the terminal
+                    # ceiling visible to the loop instead of erasing it.
+                    if not saw_result:
+                        raise
                 return result_text, usd, structured, ok, reason
 
             try:
                 output, usd, structured, ok, reason = asyncio.run(
-                    asyncio.wait_for(collect(), timeout=QUERY_TIMEOUT_SECONDS)
+                    asyncio.wait_for(collect(), timeout=self.timeout_seconds)
                 )
             except asyncio.TimeoutError:
                 return DoerResult(
                     ok=False,
-                    output=f"agent sdk query timed out after {QUERY_TIMEOUT_SECONDS} seconds",
+                    output=f"agent sdk query timed out after {self.timeout_seconds} seconds",
                     stop_reason="query timeout",
                     raw_output="\n".join(raw_events),
                 )
