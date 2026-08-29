@@ -1,7 +1,8 @@
 # Extra credit solutions
 
 One folder per assignment. `s_ext_<n>` matches `ext_<n>` under
-`labs/extra-credit/`.
+`labs/extra-credit/`. Each folder has one prompt in
+[`labs/extra-credit/prompts/`](../../labs/extra-credit/prompts/).
 
 | Folder | Assignment | Holds |
 |---|---|---|

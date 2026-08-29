@@ -52,6 +52,9 @@ a variant prompt, add the folder.
 | `sol3_research_deep_agents` | [lab3_research/prompts/deep-agents.md](lab3_research/prompts/deep-agents.md) |
 | `sol4_fixer_agent_sdk` | [lab4_fixer/prompts/agent-sdk.md](lab4_fixer/prompts/agent-sdk.md) |
 | `sol4_fixer_deep_agents` | [lab4_fixer/prompts/deep-agents.md](lab4_fixer/prompts/deep-agents.md) |
+| `extra_credit/s_ext_1_webhook` | [extra-credit/prompts/ext1-webhook.md](extra-credit/prompts/ext1-webhook.md) |
+| `extra_credit/s_ext_2_ngrok` | [extra-credit/prompts/ext2-ngrok.md](extra-credit/prompts/ext2-ngrok.md) |
+| `extra_credit/s_ext_5_digitalocean` | [extra-credit/prompts/ext5-digitalocean.md](extra-credit/prompts/ext5-digitalocean.md) |
 
 Labs 2 to 4 also keep four Saturday prompts (`claude-code`, `codex`,
 `grok-build`, `opencode`). Those fill `harness.py` or `loop.py`. There is no
