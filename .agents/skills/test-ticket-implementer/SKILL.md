@@ -1,6 +1,6 @@
 ---
 name: test-ticket-implementer
-description: Test a standalone Lab 2 ticket-implementer runtime end to end against the shared T001 CRM fixture. Use for Deep Agents, Agent SDK, or a future runtime such as CrewAI; it verifies the free golden path and one bounded live path without creating a shared loop engine.
+description: Test a standalone Lab 2 ticket-implementer runtime end to end, from a fast local phase-fence regression to the shared T001 CRM fixture. Use for Deep Agents, Agent SDK, or a future runtime such as CrewAI without creating a shared loop engine.
 ---
 
 # Test a ticket implementer
@@ -37,6 +37,29 @@ disposable CRM clone, not model prose or a process exit code alone.
 4. Follow [the shared golden path](references/golden-path.md) exactly. It
    contains the current paths, commands, receipt contract, Track A, Track B,
    cleanup, and verdict rules.
+
+## Fast phase-fence regression
+
+When changing role scopes, phase graphs, or judge behavior, add and run a
+folder-local scripted E2E before touching the shared CRM. It must complete
+without an SDK, key, model call, or outer timeout.
+
+Use one small acceptance criterion whose result is easy to inspect—for example,
+rename a backend field and its UI field. The scenario should prove, in order:
+
+- `implementer.run()` persisted a plan with a test step and a code step;
+- the test phase changed a real file under `tests/**` and produced a new red
+  test id;
+- the code phase changed only the allowed backend/UI paths and left the test's
+  final bytes intact; and
+- a judge-only graph contains only the judge and its read tool. A code-doer
+  attempt to rewrite that test must be refused.
+
+Keep the fake reports and scripted backend in the runtime folder's own tests.
+This is structural proof of the hand-off, not a replacement for Track A's
+public-CRM receipt or Track B's bounded live check. Run the folder's `task e2e`
+after adding the regression; a timeout-prone model probe is never the first
+test of a permission boundary.
 
 ## Adding another runtime
 
