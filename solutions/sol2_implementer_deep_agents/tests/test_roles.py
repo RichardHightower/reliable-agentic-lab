@@ -75,9 +75,15 @@ def test_permissions_put_deny_before_allow(contract):
     list silently wins on an overlap."""
     rules = roles.permission_rules(roleplan.plan(contract)["code_implementer"])
     assert rules[0]["mode"] == "deny"
-    assert "tests/**" in rules[0]["paths"]
+    assert "/tests/**" in rules[0]["paths"]
     assert rules[1]["mode"] == "allow"
     assert rules[-1] == roles.DENY_EVERY_WRITE
+
+
+def test_permissions_are_rooted_for_current_deep_agents_sdk(contract):
+    for role in roleplan.plan(contract).values():
+        for rule in roles.permission_rules(role):
+            assert all(path.startswith("/") for path in rule["paths"])
 
 
 def test_build_agent_fences_the_harness(contract, fake_langchain, fake_deepagents):
@@ -101,6 +107,14 @@ def test_build_agent_passes_every_subagent_permission(contract, fake_langchain, 
     for spec in fake_deepagents["subagents"]:
         assert spec["permissions"], spec["name"]
         assert spec["permissions"][-1].mode == "deny"
+
+
+def test_build_agent_can_restrict_the_phase_cast(contract, fake_langchain, fake_deepagents):
+    roles.build_agent(
+        contract,
+        subagent_names=frozenset({"test-implementer"}),
+    )
+    assert [spec["name"] for spec in fake_deepagents["subagents"]] == ["test-implementer"]
 
 
 # -- what the judge may say -------------------------------------------------

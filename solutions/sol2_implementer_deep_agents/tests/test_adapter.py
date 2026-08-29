@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 import adapter
+import doers
 import gates
 import loop_roles
 
@@ -167,9 +168,44 @@ class FakeAgent:
     def __init__(self, text="done", usd=0.0):
         self.text = text
         self.usd = usd
+        self.calls = []
 
-    def invoke(self, _payload):
+    def invoke(self, payload, config=None):
+        self.calls.append((payload, config))
         return state(ai(self.text, {"total_cost": self.usd}))
+
+
+def test_deep_agents_backend_passes_through_the_local_doers_factory():
+    backend = adapter.DeepAgentsBackend(FakeAgent())
+    assert doers.build(backend) is backend
+
+
+def test_phase_backend_selects_the_graph_with_only_that_role(tmp_path):
+    test_agent = FakeAgent("test phase")
+    code_agent = FakeAgent("code phase")
+    backend = adapter.DeepAgentsBackend(phase_agents={"test": test_agent, "code": code_agent})
+
+    assert backend.run(repo=tmp_path, prompt="write a test", allow=["tests/**"]).output == "test phase"
+    assert backend.run(repo=tmp_path, prompt="write code", allow=["app/**"]).output == "code phase"
+    assert len(test_agent.calls) == 1
+    assert len(code_agent.calls) == 1
+
+
+def test_phase_backend_sets_the_documented_recursion_limit(tmp_path):
+    agent = FakeAgent()
+    backend = adapter.DeepAgentsBackend(agent, recursion_limit=16)
+
+    backend.run(repo=tmp_path, prompt="write code", allow=["app/**"])
+
+    assert agent.calls[0][1] == {"recursion_limit": 16}
+
+
+def test_changed_files_includes_a_new_untracked_test(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_new.py").write_text("def test_new(): pass\n", encoding="utf-8")
+
+    assert adapter._changed_files(tmp_path) == {"tests/test_new.py"}
 
 
 def test_the_backend_reports_what_the_run_cost(tmp_path):

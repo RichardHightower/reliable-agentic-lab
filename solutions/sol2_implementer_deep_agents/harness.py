@@ -15,6 +15,7 @@ import roles as deep
 from contract import Contract, ContractError
 
 LOOP = "implementer"
+LIVE_RECURSION_LIMIT = 16
 
 
 def cast(contract):
@@ -28,7 +29,23 @@ def build(contract):
 def backend(contract):
     from adapter import DeepAgentsBackend  # noqa: PLC0415
 
-    return DeepAgentsBackend(deep.build_agent(contract, loop=LOOP))
+    # One graph per implementation phase. A test-phase graph has no code
+    # implementer to delegate to, so the role split is structural rather than
+    # a request the parent model can ignore.
+    return DeepAgentsBackend(
+        phase_agents={
+            "test": deep.build_agent(
+                contract, loop=LOOP, subagent_names=frozenset({"test-implementer"})
+            ),
+            "code": deep.build_agent(
+                contract, loop=LOOP, subagent_names=frozenset({"code-implementer"})
+            ),
+        },
+        # The runtime's recursion guard is the model-turn ceiling for this
+        # live probe. It leaves time for the deterministic test/rubric pass and
+        # receipt instead of letting the outer 420-second watchdog kill it.
+        recursion_limit=LIVE_RECURSION_LIMIT,
+    )
 
 
 def red_gate(before, after) -> set[str]:
