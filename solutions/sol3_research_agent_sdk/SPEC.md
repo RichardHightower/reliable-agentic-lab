@@ -173,18 +173,22 @@ task run TOPIC="..." -- --backend perplexity  # real search, templated prose
 task publish TOPIC="..."                    # also pushes to a private gist
 task e2e-fixture                             # illustrated offline acceptance test
 LIVE_E2E_MAX_USD=10 task e2e-live            # bounded live Agent SDK acceptance test
+REPORT_DIR=work/e2e-loop-engineering-live task pdf
+REPORT_DIR=work/e2e-loop-engineering-live task publish-report
 ```
 
 Output lands in `work/<slug>/`:
 
 ```
 paper.md                 the deliverable
+paper.pdf                Arctic Fox publication export
+paper.pdf.json           PDF theme, page, figure, and byte receipt
 diagrams/*.png           the figures, and the source that produced them
 knowledge/research/      the RKC bundle: sources, claims, evidence, findings
 .harness/state.json      per-phase status and cost
 ```
 
-`--private` on a gist means unlisted, not access controlled. Anyone holding the
+"Secret" on a gist means unlisted, not access controlled. Anyone holding the
 URL can read the paper and fetch every figure. Treat the URL as the credential.
 
 ## What one run does
@@ -335,10 +339,9 @@ that citations are arithmetic.
 disposable, `task setup` rebuilds it, and nothing in it is edited by hand.
 
 `plugin/skills/research-loop/SKILL.md` is not a runnable skill here. It is the
-readable specification of what `paper.py` implements, and `options_for` does
-not pass `skills=`, so the parent cannot invoke it. An earlier draft loaded it
-and asked the model not to run it in the system prompt. A parent that can
-invoke the loop is a second orchestrator, and a sentence is not a fence.
+readable specification of what `paper.py` implements. `options_for` enables
+only the two qualified image skills, so the parent cannot invoke the research
+loop as a second orchestrator. A sentence is not a fence.
 
 ### Publication figures
 
@@ -359,3 +362,8 @@ be rendered at article density, and pass the plugin's source-inventory check.
 The harness then keeps the retry cap and validates document embedding and
 resolution. A future vision pass can strengthen label readability without
 replacing this source-of-truth renderer.
+The publication theme is the plugin's built-in `arctic-fox` theme. Figure
+render sidecars must record `theme: arctic-fox` and `density: article`; the E2E
+gate rejects drift. `pdf_report.py` applies the same palette and restrained
+print system to `paper.pdf`, embeds the accepted figures, then reopens the PDF
+and writes `paper.pdf.json` as its receipt.

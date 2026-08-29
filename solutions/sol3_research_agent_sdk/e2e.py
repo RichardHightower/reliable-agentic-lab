@@ -39,6 +39,7 @@ BACKEND_POLICY = {
     "grok": "grok-imagine",
     "codex": "grok-imagine",
 }
+PUBLICATION_THEME = "arctic-fox"
 
 
 def _read_json(path: Path) -> dict:
@@ -180,6 +181,11 @@ def validate(work_dir: Path, *, max_usd: float | None = None) -> dict:
                 failures.append(f"required figure {name!r} records the wrong brace policy")
             if rendered.get("density") != "article":
                 failures.append(f"required figure {name!r} was not rendered at article density")
+            if rendered.get("theme") != PUBLICATION_THEME:
+                failures.append(
+                    f"required figure {name!r} used {rendered.get('theme')!r}, "
+                    f"not the {PUBLICATION_THEME!r} publication theme"
+                )
         if not judge_sidecar.is_file():
             failures.append(f"required figure {name!r} is missing the imagen-diagrams judge sidecar")
         elif not _read_json(judge_sidecar).get("pass"):

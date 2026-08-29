@@ -21,7 +21,8 @@ system Python or `~/.claude`.
 task setup
 ```
 
-Creates `.venv`, `.cache/imagen-diagrams` at v0.2.0, and `.cache/image-gen` at
+Creates `.venv`, installs the Agent SDK plus the PDF dependencies,
+`.cache/imagen-diagrams` at v0.2.0, and `.cache/image-gen` at
 v2.1.0 in this folder. `ClaudeAgentOptions.plugins` loads both local manifests,
 and its exact skill allowlist exposes only `imagen-diagrams:imagen-diagrams`
 and `image-gen:image-gen`. It does not discover user or parent-project skills.
@@ -76,7 +77,10 @@ v0.2.0 renderer and fidelity judge. The renderer can use the locally installed
 image-engine contract. It therefore needs `task setup` plus one approved
 image backend, in this order: `imagen`, `grok`, then `codex`. The plugin uses
 the `imagen-cli-vars` brace policy for Imagen and `grok-imagine` for Grok and
-Codex. If none is on PATH, it writes `<stem>_imagen.prompt.txt` and exits 2.
+Codex. `GEMINI_API_KEY` is passed to the Imagen CLI under the
+`GOOGLE_API_KEY` name it expects. If a backend exits without a PNG, the harness
+keeps that attempt's prompt and metadata before trying the next backend. If all
+three fail, it writes the final `<stem>_imagen.prompt.txt` and exits 2.
 Each accepted figure retains the plugin's render and judge sidecars. No model
 key or research network access is needed for the recorded research corpus
 itself.
@@ -90,6 +94,32 @@ research tools, so it requires `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, the
 renderer, and an approved image backend. It never publishes a gist. The resulting figures must
 have no fidelity misses, be embedded in the paper, and meet the resolution
 floor recorded in `e2e-report.json`.
+
+Both E2E lanes render article figures with imagen-diagrams' built-in
+`arctic-fox` theme. The acceptance report rejects a figure whose render sidecar
+records another theme.
+
+## Export and publish an existing report
+
+Export the default live E2E report as a publication PDF:
+
+```bash
+REPORT_DIR=work/e2e-loop-engineering-live task pdf
+```
+
+The command writes `paper.pdf` and `paper.pdf.json` beside `paper.md`. The PDF
+uses the same Arctic Fox white, deep-navy, royal-blue, and silver-grey visual
+system as its article figures.
+
+Publish the existing Markdown, PDF, and figures without rerunning research:
+
+```bash
+REPORT_DIR=work/e2e-loop-engineering-live task publish-report
+```
+
+The repo-local `$e2e-test-research-report` skill runs the live E2E lane by
+default, exports and visually checks the PDF, then attempts this secret-Gist
+publication step. Use its fixture lane when live credentials are unavailable.
 
 ## Live paper
 
