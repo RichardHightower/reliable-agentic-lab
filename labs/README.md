@@ -32,6 +32,34 @@ not at the Saturday stub.
 
 See [HOW-TO-RUN.md](HOW-TO-RUN.md).
 
+## One prompt per solution variant
+
+Every folder under [`solutions/`](../solutions/) has one prompt in the matching
+lab. That is the map. If you add a solution folder, add the prompt. If you add
+a variant prompt, add the folder.
+
+| Solution | Prompt |
+|---|---|
+| `sol1_enhancer` | [lab1_enhancer/prompts/claude-code.md](lab1_enhancer/prompts/claude-code.md) |
+| `sol1_enhancer_agent_sdk` | [lab1_enhancer/prompts/agent-sdk.md](lab1_enhancer/prompts/agent-sdk.md) |
+| `sol1_enhancer_codex` | [lab1_enhancer/prompts/codex.md](lab1_enhancer/prompts/codex.md) |
+| `sol1_enhancer_deep_agents` | [lab1_enhancer/prompts/deep-agents.md](lab1_enhancer/prompts/deep-agents.md) |
+| `sol1_enhancer_grok_build` | [lab1_enhancer/prompts/grok-build.md](lab1_enhancer/prompts/grok-build.md) |
+| `sol1_enhancer_opencode` | [lab1_enhancer/prompts/opencode.md](lab1_enhancer/prompts/opencode.md) |
+| `sol2_implementer_agent_sdk` | [lab2_implementer/prompts/agent-sdk.md](lab2_implementer/prompts/agent-sdk.md) |
+| `sol2_implementer_deep_agents` | [lab2_implementer/prompts/deep-agents.md](lab2_implementer/prompts/deep-agents.md) |
+| `sol3_research_agent_sdk` | [lab3_research/prompts/agent-sdk.md](lab3_research/prompts/agent-sdk.md) |
+| `sol3_research_deep_agents` | [lab3_research/prompts/deep-agents.md](lab3_research/prompts/deep-agents.md) |
+| `sol4_fixer_agent_sdk` | [lab4_fixer/prompts/agent-sdk.md](lab4_fixer/prompts/agent-sdk.md) |
+| `sol4_fixer_deep_agents` | [lab4_fixer/prompts/deep-agents.md](lab4_fixer/prompts/deep-agents.md) |
+
+Labs 2 to 4 also keep four Saturday prompts (`claude-code`, `codex`,
+`grok-build`, `opencode`). Those fill `harness.py` or `loop.py`. There is no
+`sol2_implementer` folder. The filled stub is the Saturday answer.
+
+`scripts/tests/test_prompt_solution_map.py` fails if this table and the
+`solutions/` tree drift.
+
 ## Take-home
 
 `takehome/` holds a fill-`loop.py` stub of the Module 2 implementer in the

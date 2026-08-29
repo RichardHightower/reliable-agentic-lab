@@ -4,8 +4,12 @@ The answer to every lab. `sol<n>` matches `lab<n>`. The suffix names the tool or
 the runtime, so a folder is `sol<n>_<name>_<product>`.
 
 Labs 2 to 4 no longer ship four coding-tool copies of the same Python file.
-Saturday fills the stub in `labs/`. The solutions tree keeps Lab 1 (four real
-shapes) and the two runtime ports.
+Saturday fills the stub in `labs/`. The solutions tree keeps Lab 1 (six real
+shapes: four products plus two runtimes) and the two runtime ports of labs
+2 to 4.
+
+Each of those folders has one prompt in the matching lab. The table lives in
+[`labs/README.md`](../labs/README.md).
 
 ## Lab 1 is the exception
 
