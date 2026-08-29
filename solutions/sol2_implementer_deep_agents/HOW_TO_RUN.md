@@ -4,8 +4,9 @@ Everything here runs from `solutions/sol2_implementer_deep_agents/`, standalone.
 task in this folder depends on the repo root or on any other folder outside
 it.
 
-You need `python3`, `task`, `deepagents>=0.7`, and an `ANTHROPIC_API_KEY` for
-`--doer deep`. `--doer reference` needs none of those extras.
+You need `python3` and `task`. `--doer reference` and `--doer none` need no
+SDK and no key. `--doer deep` also needs `deepagents>=0.7` and an
+`ANTHROPIC_API_KEY`.
 
 This is the take-home runtime. Saturday live path is `labs/lab2_implementer`.
 Do not copy these harness fences into that folder.
@@ -29,15 +30,21 @@ the rubric, and it does not decide Pass, Retry, or Escalate.
    echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
    ```
 
-3. Install the runtime.
+3. Install what you need.
+
+   ```bash
+   task test-setup
+   ```
+
+   That creates `.venv` in this folder and installs pytest plus coverage.
+   Use it for `task test` and for `--doer none` / `--doer reference`.
 
    ```bash
    task setup
    ```
 
-   This creates `.venv` in this folder and installs `deepagents` plus pytest.
-   `task run` uses that virtual environment automatically. You do not need to
-   activate it.
+   That adds `deepagents` to the same virtual environment. Only `--doer deep`
+   needs this step. You do not need to activate the venv.
 
 4. Clone the CRM:
 
@@ -53,16 +60,19 @@ the rubric, and it does not decide Pass, Retry, or Escalate.
 ```bash
 task table
 task test
+task e2e
 ```
 
 `task table` prints the role table. The judge must print `no` in the writes
-column. If it prints `yes`, stop. `task test` is the pytest suite. Neither
-needs the SDK, a key, or a clone.
+column. If it prints `yes`, stop. `task test` is the pytest suite. `task e2e`
+is the offline loop against a disposable fixture. None of them need the SDK,
+a key, or a clone of the public CRM.
 
 ## Run the implementer
 
-Needs the clone. `--doer reference` needs no key. `--doer deep` needs
-`task setup` and the key. Refuses if you skipped `task setup`.
+Needs the clone. `--doer none` and `--doer reference` need no key and no
+Deep Agents venv. `--doer deep` needs `task setup` and the key. That path
+refuses if you skipped `task setup`.
 
 ```bash
 task run -- --ticket T001 --doer reference
