@@ -33,6 +33,8 @@ from write_scope import WriteScope
 
 LOOP = "research"
 FOLDER = Path(__file__).resolve().parent
+IMAGEN_DIAGRAMS_PLUGIN = FOLDER / ".cache" / "imagen-diagrams"
+IMAGE_GEN_PLUGIN = FOLDER / ".cache" / "image-gen"
 
 # Task resolves these same paths. Keep this local to the standalone port: an
 # attendee can copy the folder and put a key beside it, beside `solutions/`, at
@@ -114,13 +116,49 @@ def mcp_servers() -> dict:
     servers: dict = {"context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}}
     key = environment_value("PERPLEXITY_API_KEY")
     if key:
-        servers["perplexity-ask"] = {
+        servers["perplexity"] = {
             "type": "stdio",
             "command": "npx",
-            "args": ["-y", "server-perplexity-ask"],
+            # The official Perplexity MCP exposes `perplexity_search` and
+            # `perplexity_ask`, including `search_domain_filter`.  `-q` keeps
+            # npx installation chatter off stdout, where it would corrupt the
+            # stdio JSON-RPC protocol on a first run.
+            "args": ["-yq", "@perplexity-ai/mcp-server"],
             "env": {"PERPLEXITY_API_KEY": key},
         }
     return servers
+
+
+def local_plugins() -> list[dict[str, str]]:
+    """Plugins owned by this standalone folder, in deterministic order.
+
+    The research cast is always present.  `task setup` installs the two image
+    plugins under `.cache/`; include each only when its Claude plugin manifest
+    exists so table and unit-test commands still work before setup.  No path in
+    this list depends on `~/.claude` or another checkout.
+    """
+    plugins = [{"type": "local", "path": str(PLUGIN)}]
+    for path in (IMAGEN_DIAGRAMS_PLUGIN, IMAGE_GEN_PLUGIN):
+        if (path / ".claude-plugin" / "plugin.json").is_file():
+            plugins.append({"type": "local", "path": str(path)})
+    return plugins
+
+
+def local_image_skills() -> list[str]:
+    """The exact plugin-qualified image skills installed by ``task setup``.
+
+    A non-empty SDK ``skills`` list is both discovery policy and tool policy.
+    Keep it exact so the image plugins are available without also exposing the
+    research-loop skill as a second orchestrator.
+    """
+    skills = []
+    for path, name in (
+        (IMAGEN_DIAGRAMS_PLUGIN, "imagen-diagrams:imagen-diagrams"),
+        (IMAGE_GEN_PLUGIN, "image-gen:image-gen"),
+    ):
+        if (path / ".claude-plugin" / "plugin.json").is_file():
+            skills.append(name)
+    return skills
 
 
 def agent_name(role_name: str) -> str:
@@ -266,13 +304,16 @@ def options_for(work_dir: Path | str, *, max_usd: float | None = None, loop: str
         # cannot change what this folder can reach.
         mcp_servers=mcp_servers(),
         strict_mcp_config=True,
-        # `plugins=` and not `skills=`. The plugin is what makes the agent
-        # markdown visible, because `cwd` is the work directory and not this
-        # folder. The loop skill stays on disk as the readable specification
-        # and is deliberately not loaded: a parent that can invoke it is a
-        # second orchestrator, and asking it not to in the system prompt was a
-        # sentence where a missing capability belongs.
-        plugins=[{"type": "local", "path": str(PLUGIN)}],
+        # The plugin is what makes the agent markdown visible, because `cwd`
+        # is the work directory and not this folder. Enable only the two image
+        # skills when setup installed them. The research-loop skill stays on
+        # disk as the readable specification and is deliberately not loaded: a
+        # parent that can invoke it is a second orchestrator.
+        plugins=local_plugins(),
+        skills=local_image_skills(),
+        # Plugin paths above are explicit. Do not also discover settings or
+        # skills from this machine's ~/.claude or from a parent checkout.
+        setting_sources=[],
         system_prompt=PARENT_PROMPT,
         max_turns=DEFAULT_MAX_TURNS,
         max_budget_usd=max_usd,

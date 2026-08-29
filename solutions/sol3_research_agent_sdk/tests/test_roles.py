@@ -108,7 +108,8 @@ def test_the_allowlist_covers_every_tool_the_cast_holds(fake_sdk, work, monkeypa
     for role in roleplan.plan(None, "research").values():
         for tool in role.tools:
             assert tool in options.allowed_tools, f"{role.name} would be denied {tool}"
-    assert "mcp__perplexity-ask__perplexity_ask" in options.allowed_tools
+    assert "mcp__perplexity__perplexity_search" in options.allowed_tools
+    assert "mcp__perplexity__perplexity_ask" in options.allowed_tools
     assert "Write" in options.allowed_tools
 
 
@@ -148,7 +149,7 @@ def test_the_parent_is_kept_from_writing_by_the_hook_not_the_allowlist(fake_sdk,
     )
 
 
-def test_the_plugin_loads_and_the_skill_does_not(fake_sdk, work):
+def test_the_research_plugin_loads_but_its_orchestrator_skill_does_not(fake_sdk, work):
     """The parent cannot invoke what it was never given.
 
     `plugins=` is what makes the agent markdown visible, because `cwd` is the
@@ -158,8 +159,35 @@ def test_the_plugin_loads_and_the_skill_does_not(fake_sdk, work):
     """
     fake_sdk()
     options = roles.options_for(work)
-    assert options.plugins == [{"type": "local", "path": str(roles.PLUGIN)}]
-    assert options.skills == []
+    assert options.plugins[0] == {"type": "local", "path": str(roles.PLUGIN)}
+    assert "research-loop" not in options.skills
+    assert all(not name.endswith(":research-loop") for name in options.skills)
+    assert options.setting_sources == []
+
+
+def test_folder_local_image_plugins_are_loaded_after_setup(fake_sdk, work, monkeypatch, tmp_path):
+    diagrams = tmp_path / ".cache" / "imagen-diagrams"
+    images = tmp_path / ".cache" / "image-gen"
+    for plugin in (diagrams, images):
+        manifest = plugin / ".claude-plugin" / "plugin.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{}\n")
+    monkeypatch.setattr(roles, "IMAGEN_DIAGRAMS_PLUGIN", diagrams)
+    monkeypatch.setattr(roles, "IMAGE_GEN_PLUGIN", images)
+    fake_sdk()
+
+    plugins = roles.options_for(work).plugins
+
+    assert plugins == [
+        {"type": "local", "path": str(roles.PLUGIN)},
+        {"type": "local", "path": str(diagrams)},
+        {"type": "local", "path": str(images)},
+    ]
+    assert roles.options_for(work).skills == [
+        "imagen-diagrams:imagen-diagrams",
+        "image-gen:image-gen",
+    ]
+    assert all(not plugin["path"].startswith(str(Path.home() / ".claude")) for plugin in plugins)
 
 
 def test_the_parent_prompt_does_not_forbid_a_ghost(fake_sdk, work):
@@ -174,9 +202,10 @@ def test_the_folder_declares_its_own_search_boundary(fake_sdk, work, monkeypatch
     monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
     fake_sdk()
     options = roles.options_for(work)
-    assert set(options.mcp_servers) == {"context7", "perplexity-ask"}
+    assert set(options.mcp_servers) == {"context7", "perplexity"}
     assert options.mcp_servers["context7"]["url"].startswith("https://mcp.context7.com")
-    assert options.mcp_servers["perplexity-ask"]["env"]["PERPLEXITY_API_KEY"] == "test-key"
+    assert options.mcp_servers["perplexity"]["env"]["PERPLEXITY_API_KEY"] == "test-key"
+    assert options.mcp_servers["perplexity"]["args"] == ["-yq", "@perplexity-ai/mcp-server"]
     # Only these. A broken server in the machine's own config cannot leak in.
     assert options.strict_mcp_config is True
 
@@ -200,7 +229,7 @@ def test_a_nearby_dotenv_supplies_the_perplexity_key(fake_sdk, work, monkeypatch
 
     options = roles.options_for(work)
 
-    assert options.mcp_servers["perplexity-ask"]["env"]["PERPLEXITY_API_KEY"] == "near-key"
+    assert options.mcp_servers["perplexity"]["env"]["PERPLEXITY_API_KEY"] == "near-key"
 
 
 def test_the_exported_perplexity_key_beats_every_dotenv(monkeypatch, tmp_path):

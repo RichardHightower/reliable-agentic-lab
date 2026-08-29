@@ -343,7 +343,12 @@ invoke the loop is a second orchestrator, and a sentence is not a fence.
 ### Publication figures
 
 `task setup` pins and clones
-[`SpillwaveSolutions/imagen-diagrams`](https://github.com/SpillwaveSolutions/imagen-diagrams).
+[`SpillwaveSolutions/imagen-diagrams`](https://github.com/SpillwaveSolutions/imagen-diagrams)
+v0.2.0. `task setup` also installs
+[`SpillwaveSolutions/image_gen`](https://github.com/SpillwaveSolutions/image_gen)
+v2.1.0 under this folder's `.cache/`; the Agent SDK loads both local plugin
+manifests and exposes only their two plugin-qualified image skills, without
+depending on `~/.claude` or project-level skill discovery.
 `diagrams.py` invokes the plugin's `render.py` and `judge.py` directly. The
 plugin owns its `imagen`, `grok`, then `codex` backend selection and the brace
 policy for each backend. It writes a themed prompt sidecar before it fails

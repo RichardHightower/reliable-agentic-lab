@@ -28,7 +28,8 @@ READ_TOOLS = ("Read", "Glob", "Grep")
 # says it should do.
 SEARCH_TOOLS = (
     "WebSearch",
-    "mcp__perplexity-ask__perplexity_ask",
+    "mcp__perplexity__perplexity_search",
+    "mcp__perplexity__perplexity_ask",
     "mcp__context7__resolve-library-id",
     "mcp__context7__query-docs",
 )

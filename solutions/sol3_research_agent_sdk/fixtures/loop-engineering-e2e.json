@@ -2,10 +2,10 @@
   "_note": "Recorded primary-source summaries for the illustrated loop-engineering E2E scenario. The fixture keeps research deterministic; renderer fidelity remains a real acceptance condition.",
   "loop engineering best practices": {
     "question": "loop engineering best practices",
-    "answer": "A bounded agent loop needs runtime limits that the model cannot override. Claude Agent SDK configuration exposes max_turns and a task budget, so the host can set an execution ceiling independently of the model's own assessment.",
-    "citations": ["https://github.com/anthropics/claude-agent-sdk-python"],
+    "answer": "This repository's paper loop checks done, then cost, then max turns. Done is the deterministic paper-check and judge result, cost is the configured USD ceiling, and max turns is the runtime safety ceiling; it does not teach whichever fires first.",
+    "citations": ["https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk"],
     "sources": [
-      {"url": "https://github.com/anthropics/claude-agent-sdk-python", "title": "Claude Agent SDK for Python"}
+      {"url": "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk", "title": "sol3_research_agent_sdk"}
     ]
   },
   "loop engineering best practices common mistake": {

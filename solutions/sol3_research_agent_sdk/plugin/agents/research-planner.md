@@ -40,6 +40,17 @@ limitations come before the conclusion, never after it.
 One question per thing the paper asserts and cannot assert from first
 principles. Each question names the section it serves.
 
+The first question is binding. Write it exactly as follows, before every other
+question:
+
+```text
+What three exits does this repo's paper loop check, and in what order?
+```
+
+It must serve the section that explains loop control. The answer is grounded in
+this repository's implementation; it is not an invitation to substitute a
+framework's generic "whichever comes first" rule.
+
 A good question is answerable from a primary source: official documentation, a
 specification, a paper, a vendor repository, or a standard. Prefer:
 

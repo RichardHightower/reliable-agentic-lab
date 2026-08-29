@@ -87,10 +87,9 @@ def available() -> bool:
 def ensure_theme() -> None:
     """Copy this folder's themes into the renderer clone.
 
-    v0.1.0 resolves a theme against its own `themes/` directory only, whatever
-    the README says about `.imagen-diagrams/themes/`. The clone lives in
-    `.cache/`, which is disposable, so the copy runs before every render rather
-    than once at setup.
+    v0.2.0 ships built-in themes and the fixed Imagen 0.6 CLI adapter. This
+    solution still owns `spillwave-navy`, so copy that local theme into the
+    disposable plugin clone before each render.
     """
     if not RENDERER_THEMES.is_dir() or not THEMES.is_dir():
         return

@@ -82,6 +82,38 @@ def test_every_written_section_satisfies_the_row():
     assert checks.check(body, ["https://a"], headings=["The problem"]).passed
 
 
+def test_the_paper_gate_requires_done_then_cost_then_max_turns_in_figure_one():
+    body = (
+        "# T\n\n## Control\n\n"
+        "The paper exits on done, then cost, then max turns [1].\n\n"
+        "![Figure 1: done, then cost, then max turns](exits.png)\n\n"
+        "Figure 1 shows done, then cost, then max turns."
+    )
+    score = checks.check(
+        body,
+        ["https://docs.langchain.com/oss/python/langchain/overview"],
+        enforce_source_policy=True,
+        enforce_loop_doctrine=True,
+    )
+    assert score.passed, score.report()
+
+
+def test_the_paper_gate_rejects_whichever_fires_first_and_blog_references():
+    body = (
+        "# T\n\n## Control\n\n"
+        "The loop has five exits and stops whichever fires first [1].\n\n"
+        "![Figure 1: budget and attempt cap](exits.png)\n\n"
+        "Figure 1 shows budget and an attempt cap."
+    )
+    score = checks.check(
+        body,
+        ["https://deepwiki.com/example"],
+        enforce_source_policy=True,
+        enforce_loop_doctrine=True,
+    )
+    assert score.signature() == ("doctrine", "hosts")
+
+
 def test_heading_case_and_depth_are_noise():
     assert checks.missing_sections("### the PROBLEM", ["The problem"]) == []
     assert checks.missing_sections("## A\n\ntext\n\n## B", ["A", "B"]) == []

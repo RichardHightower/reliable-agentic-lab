@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import research
+import source_policy
 import turns as t
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
@@ -50,7 +52,7 @@ def test_a_note_in_the_fixture_is_not_an_answer():
 
 def test_the_fixture_falls_back_to_the_nearest_question():
     finding = research.FixtureBackend(FIXTURE).search("loop engineering exit criteria")
-    assert "max_turns" in finding.answer
+    assert "done, then cost, then max turns" in finding.answer
     assert finding.citations
 
 
@@ -61,21 +63,26 @@ def test_a_missing_fixture_is_unavailable_not_a_crash(tmp_path):
 # -- perplexity -------------------------------------------------------------
 
 
-def test_sonar_citations_and_search_results_are_merged():
+def test_legacy_sonar_payloads_still_pass_the_source_wall():
     payload = {
         "choices": [{"message": {"content": " an answer "}}],
-        "search_results": [{"url": "https://a", "title": "A"}],
-        "citations": ["https://a", "https://b"],
+        "search_results": [{"url": "https://docs.langchain.com/a", "title": "A"}],
+        "citations": ["https://docs.langchain.com/a", "https://deepwiki.com/b"],
     }
     finding = research._finding_from_sonar("q", payload, "perplexity", 0.006)
     assert finding.answer == "an answer"
-    assert finding.citations == ["https://a", "https://b"]
-    assert finding.sources[0] == {"url": "https://a", "title": "A"}
+    assert finding.citations == ["https://docs.langchain.com/a"]
+    assert finding.sources[0] == {"url": "https://docs.langchain.com/a", "title": "A"}
 
 
-def test_a_response_missing_search_results_keeps_its_citations():
-    payload = {"choices": [{"message": {"content": "x"}}], "citations": ["https://a"]}
-    assert research._finding_from_sonar("q", payload, "p", 0.0).citations == ["https://a"]
+def test_a_response_missing_search_results_keeps_an_allowed_citation():
+    payload = {
+        "choices": [{"message": {"content": "x"}}],
+        "citations": ["https://docs.langchain.com/a"],
+    }
+    assert research._finding_from_sonar("q", payload, "p", 0.0).citations == [
+        "https://docs.langchain.com/a"
+    ]
 
 
 def test_an_empty_response_produces_no_citations():
@@ -84,12 +91,116 @@ def test_an_empty_response_produces_no_citations():
     assert finding.answer == "" and finding.citations == []
 
 
-def test_choose_prefers_the_agent_then_perplexity_then_the_fixture(monkeypatch):
+def test_choose_uses_perplexity_then_anthropic_then_the_fixture(monkeypatch):
     monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
-    assert research.choose(fixture=FIXTURE, ask=lambda q: None).name == "agent"
+    assert research.FALLBACK_CHAIN == ("perplexity", "anthropic", "fixture")
+    assert research.choose(fixture=FIXTURE, ask=lambda q: None).name == "anthropic"
     assert research.choose(fixture=FIXTURE).name == "fixture"
     monkeypatch.setenv("PERPLEXITY_API_KEY", "x")
     assert research.choose(fixture=FIXTURE).name == "perplexity"
+
+
+class _Response:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def _perplexity_responses(monkeypatch, payloads):
+    calls = []
+
+    def open_(request, timeout):
+        calls.append((request.full_url, json.loads(request.data.decode("utf-8"))))
+        return _Response(payloads.pop(0))
+
+    monkeypatch.setattr(research.urllib.request, "urlopen", open_)
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
+    return calls
+
+
+def test_perplexity_search_sends_the_allowlist_and_drops_deepwiki(monkeypatch):
+    calls = _perplexity_responses(
+        monkeypatch,
+        [
+            {"results": [{"url": "https://medium.com/post", "title": "Blog", "snippet": "no"}]},
+            {
+                "results": [
+                    {
+                        "url": "https://docs.langchain.com/oss/python/langchain/overview",
+                        "title": "LangChain docs",
+                        "snippet": "Official excerpt.",
+                    },
+                    {
+                        "url": "https://deepwiki.com/langchain-ai/langchain",
+                        "title": "DeepWiki",
+                        "snippet": "A blog-like copy.",
+                    },
+                ]
+            },
+        ],
+    )
+
+    finding = research.PerplexityBackend().search("how does the loop stop")
+
+    assert finding.citations == ["https://docs.langchain.com/oss/python/langchain/overview"]
+    assert len(calls) == 2
+    assert all(url == research.PERPLEXITY_SEARCH_URL for url, _ in calls)
+    assert calls[0][1]["search_domain_filter"] == list(source_policy.SEED_ALLOWLIST)
+    assert calls[1][1]["search_domain_filter"] == list(source_policy.SEED_ALLOWLIST)
+
+
+def test_scout_rejects_medium_but_can_add_an_official_docs_host():
+    merged = source_policy.merge_scout_domains(
+        ["https://medium.com/guess", "https://docs.example.vendor/guide"]
+    )
+    assert "medium.com" not in merged
+    assert "docs.example.vendor" in merged
+
+
+def test_perplexity_does_not_ask_when_search_includes_quotes(monkeypatch):
+    calls = _perplexity_responses(
+        monkeypatch,
+        [
+            {"results": [{"url": "https://docs.langchain.com/a", "title": "A", "snippet": "Scout"}]},
+            {"results": [{"url": "https://docs.langchain.com/a", "title": "A", "snippet": "Quote"}]},
+        ],
+    )
+
+    research.PerplexityBackend().search("q")
+
+    assert len(calls) == 2
+    assert all(urlsplit(url).path == "/search" for url, _ in calls)
+
+
+def test_perplexity_asks_once_when_search_has_hits_but_no_quote(monkeypatch):
+    calls = _perplexity_responses(
+        monkeypatch,
+        [
+            {"results": [{"url": "https://docs.langchain.com/a", "title": "A", "snippet": "Scout"}]},
+            {"results": [{"url": "https://docs.langchain.com/a", "title": "A", "snippet": ""}]},
+            {
+                "output_text": "Quoted answer.",
+                "citations": ["https://docs.langchain.com/a"],
+            },
+        ],
+    )
+
+    finding = research.PerplexityBackend().search("q")
+
+    assert finding.answer == "Quoted answer."
+    assert len(calls) == 3
+    assert calls[-1][0] == research.PERPLEXITY_ASK_URL
+    assert calls[-1][1]["tools"][0]["filters"]["search_domain_filter"] == calls[1][1][
+        "search_domain_filter"
+    ]
 
 
 def test_no_backend_at_all_refuses(monkeypatch, tmp_path):
@@ -179,6 +290,68 @@ def test_a_generating_turn_carries_the_grounding_contract(work):
     backend = Backend([result(structured={"answer": "", "sources": [], "claims": []})])
     t.SdkTurns(backend=backend, work_dir=work).research("q")
     assert "grounding_contract" in backend.prompts[0][0]
+
+
+def test_sdk_research_cannot_return_a_deepwiki_claim(work):
+    backend = Backend(
+        [
+            result(
+                structured={
+                    "answer": "two sources",
+                    "sources": [
+                        {"url": "https://deepwiki.com/x", "title": "copy"},
+                        {"url": "https://docs.langchain.com/x", "title": "docs"},
+                    ],
+                    "claims": [
+                        {"text": "bad", "source_url": "https://deepwiki.com/x", "quote": "bad"},
+                        {"text": "good", "source_url": "https://docs.langchain.com/x", "quote": "good"},
+                    ],
+                }
+            )
+        ]
+    )
+
+    finding = t.SdkTurns(backend=backend, work_dir=work).research("q")
+
+    assert finding["sources"] == [{"url": "https://docs.langchain.com/x", "title": "docs"}]
+    assert finding["claims"] == [
+        {"text": "good", "source_url": "https://docs.langchain.com/x", "quote": "good"}
+    ]
+
+
+def test_the_exit_doctrine_finding_accepts_only_this_repository(work):
+    repository = "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk"
+    backend = Backend(
+        [
+            result(
+                structured={
+                    "answer": "two sources",
+                    "sources": [
+                        {"url": "https://docs.langchain.com/x", "title": "framework"},
+                        {"url": repository, "title": "this repository"},
+                    ],
+                    "claims": [
+                        {"text": "framework", "source_url": "https://docs.langchain.com/x", "quote": "x"},
+                        {"text": "repo", "source_url": repository, "quote": "y"},
+                    ],
+                }
+            )
+        ]
+    )
+
+    finding = t.SdkTurns(backend=backend, work_dir=work).research(t.EXIT_DOCTRINE_QUESTION)
+
+    assert [source["url"] for source in finding["sources"]] == [repository]
+    assert [claim["text"] for claim in finding["claims"]] == ["repo"]
+
+
+def test_the_first_planner_question_is_the_repository_exit_doctrine(work):
+    offline = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
+    assert offline.plan("topic", "")["questions"][0]["text"] == t.EXIT_DOCTRINE_QUESTION
+
+    backend = Backend([result(structured={"title": "t", "sections": [], "questions": [], "diagrams": []})])
+    t.SdkTurns(backend=backend, work_dir=work).plan("topic", "")
+    assert t.EXIT_DOCTRINE_QUESTION in backend.prompts[0][0]
 
 
 def test_each_turn_declares_the_scope_it_may_write(work):

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import research
+import source_policy
 from load_agents import (
     DIAGRAM_SCHEMA,
     GROUNDING,
@@ -37,6 +38,7 @@ from load_agents import (
 # the turns it drives.
 MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
+EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
 
 class TurnFailed(RuntimeError):
@@ -82,6 +84,31 @@ def extract_json(text: str) -> dict | None:
                 except json.JSONDecodeError:
                     return None
     return None
+
+
+def bind_exit_doctrine(plan: dict) -> dict:
+    """Make the Agent SDK planner's first question non-optional.
+
+    The planner prompt tells the model this rule, but a prompt is not a gate.
+    Bind the question here at the structured-output boundary while leaving the
+    generic Python phase tests free to supply their minimal synthetic plans.
+    """
+    sections = plan.get("sections") or []
+    if not sections:
+        return plan
+    first_section = sections[0].get("id")
+    if not first_section:
+        return plan
+    questions = [
+        question
+        for question in plan.get("questions", [])
+        if question.get("text", "").strip() != EXIT_DOCTRINE_QUESTION
+    ]
+    plan["questions"] = [
+        {"id": "q-exits", "text": EXIT_DOCTRINE_QUESTION, "section": first_section},
+        *questions,
+    ]
+    return plan
 
 
 @dataclass
@@ -165,6 +192,14 @@ class SdkTurns(Turns):
             "discarded is dropped with them. Plan a paper that fits: fewer sections, each "
             "one answered, beats more sections half-researched."
         )
+        doctrine = (
+            "\n\nThe first research question is binding and must be exactly:\n"
+            f'"{EXIT_DOCTRINE_QUESTION}"\n'
+            "It belongs in the section that explains loop control. Its answer must be "
+            "grounded in this repository's implementation; if no repository source is "
+            "available, the researcher returns an empty finding rather than substituting "
+            "a framework or blog."
+        )
         commissioning = (
             "\n\nThe commissioning brief below is binding. Satisfy its required sections, "
             "questions, sources, and figures without exceeding the stated budget.\n"
@@ -172,20 +207,35 @@ class SdkTurns(Turns):
             if brief.strip()
             else ""
         )
-        return self._json(
+        return bind_exit_doctrine(self._json(
             "research-planner",
-            f"Plan a technical white paper on: {topic}\n\n{limits}{commissioning}\n\n{known}\n"
+            f"Plan a technical white paper on: {topic}\n\n{limits}{doctrine}{commissioning}\n\n{known}\n"
             f"{note}\n\n{GROUNDING}",
             PLAN_SCHEMA,
-        )
+        ))
 
     def research(self, question: str, note: str = "") -> dict:
-        return self._json(
+        result = self._json(
             "research-researcher",
             f"Answer this research question from primary sources: {question}\n"
             f"{note}\n\n{GROUNDING}",
             RESEARCH_SCHEMA,
         )
+        domains = (
+            ("github.com/RichardHightower",)
+            if question.strip() == EXIT_DOCTRINE_QUESTION
+            else source_policy.SEED_ALLOWLIST
+        )
+        sources = source_policy.filter_sources(result.get("sources", []), allowed_domains=domains)
+        source_urls = {source["url"] for source in sources}
+        claims = source_policy.filter_claims(result.get("claims", []), allowed_domains=domains)
+        result["sources"] = sources
+        # A claim that names an allowed URL the researcher never reported as a
+        # source is still ungrounded.  Do not let it bypass the evidence list.
+        result["claims"] = [
+            claim for claim in claims if claim.get("source_url", "") in source_urls
+        ]
+        return result
 
     def verify(self, claim: str) -> dict:
         # The claim and nothing else. Passing the source that produced it would
@@ -271,7 +321,7 @@ class OfflineTurns(Turns):
             },
         ]
         questions = [
-            {"id": "q1", "text": topic, "section": "problem"},
+            {"id": "q1", "text": EXIT_DOCTRINE_QUESTION, "section": "problem"},
             {"id": "q2", "text": f"{topic} common mistake", "section": "approach"},
             {"id": "q3", "text": f"{topic} how to verify", "section": "limits"},
         ]
@@ -283,7 +333,7 @@ class OfflineTurns(Turns):
             "diagrams": [
                 {
                     "name": "control-loop",
-                    "concept": f"the phases and exits of {topic}",
+                    "concept": "the three exits: done, then cost, then max turns",
                     "section": "approach",
                 },
                 {
@@ -350,7 +400,7 @@ class OfflineTurns(Turns):
                 "  Research --> Verify[Verify]\n"
                 "  Verify --> Write[Write]\n"
                 "  Write --> Check[Check]\n"
-                "  Check --> Exit[Pass retry or escalate]\n"
+                "  Check --> Exit[done, then cost, then max turns]\n"
             )
         return {
             "language": "mermaid",

@@ -148,6 +148,10 @@ class Run:
     brain: Path | None = BRAIN
     brief: str = ""
     should_publish: bool = False
+    # The workshop entry point enables these hard gates.  Keeping synthetic
+    # phase tests opt-in lets them exercise one phase at a time without having
+    # to manufacture the whole loop-control paper contract.
+    enforce_research_policy: bool = False
     log: object = print
 
     # -- files -------------------------------------------------------------
@@ -674,6 +678,8 @@ def check(run: Run) -> dict:
         base_dir=run.work_dir,
         corpus=corpus_for(run),
         headings=[section["heading"] for section in planned["sections"]],
+        enforce_source_policy=run.enforce_research_policy,
+        enforce_loop_doctrine=run.enforce_research_policy,
     )
     run.write_json("check.json", score.to_dict())
     return score.to_dict()
