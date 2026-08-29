@@ -30,6 +30,20 @@ tasks:
       - mkdir -p {{.TASKFILE_DIR}}/../../work
       - git clone --quiet https://github.com/$(jq -r .fork_owner {{.TASKFILE_DIR}}/config.json)/$(jq -r .repo_name {{.TASKFILE_DIR}}/config.json).git {{.TARGET}}
 
+  test:
+    desc: Run the standalone deterministic rubric checks.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 .agents/skills/enhancer-loop/scripts/check_fields.py --demo
+      - bash -n bin/role.sh
+      - tests/test_role_output.sh
+
+  checks:
+    desc: Run the demo's deterministic checks before a live poll.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - task test
+
   create-test-tickets:
     desc: Create GitHub issues for every draft ticket. task run never opens issues.
     dir: '{{.TASKFILE_DIR}}'

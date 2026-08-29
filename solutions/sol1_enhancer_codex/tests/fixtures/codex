@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Test double for bin/role.sh. It recognizes only the output-file flag used by
+# the role runner; the rest of the real Codex CLI contract is irrelevant here.
+set -euo pipefail
+
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      out="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [ "${FAKE_CODEX_MODE:-write}" = "write" ]; then
+  printf 'fresh role output\n' > "$out"
+fi

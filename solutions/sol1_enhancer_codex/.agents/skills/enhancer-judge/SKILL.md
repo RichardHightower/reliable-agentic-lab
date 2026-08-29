@@ -21,12 +21,17 @@ candidate file someone else drafted. Read it.
 
 ## Step 1: classify
 
-Read the title and body. Classify as one of:
+If the caller says `Required kind: bug`, `Required kind: feature`, or
+`Required kind: ui`, return exactly that kind. The caller has already
+classified this ticket; a candidate cannot change its kind.
+
+Otherwise, read the title and body and classify as one of:
 
 - `bug`, if it names a broken behavior: words like broken, crash, error,
   fails, regression.
-- `ui`, if it names a screen or a control: words like form, page, button,
-  screen, template, layout.
+- `ui`, only if the primary requested outcome is a screen, control, template,
+  or layout. A feature remains `feature` when it merely mentions a page,
+  button, form, or link as one implementation detail or acceptance criterion.
 - `feature`, otherwise.
 
 ## Step 2: check each required field for that kind
