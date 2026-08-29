@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import re
+from datetime import date
 from pathlib import Path
 
 # ReportLab is an optional artifact dependency, not part of the standalone
@@ -21,7 +23,7 @@ from pathlib import Path
 # PDF is built.
 colors = None
 TA_CENTER = TA_LEFT = None
-letter = None
+letter = inch = None
 ParagraphStyle = getSampleStyleSheet = None
 BaseDocTemplate = Frame = Image = KeepTogether = None
 NextPageTemplate = PageBreak = PageTemplate = Paragraph = Spacer = ImageReader = None
@@ -30,7 +32,7 @@ PAGE_WIDTH, PAGE_HEIGHT = 612, 792  # Letter, in PostScript points.
 MARGIN = 0.72 * 72
 CONTENT_WIDTH = PAGE_WIDTH - 2 * MARGIN
 NAVY = INK = MUTED = ICE = ORANGE = TEAL = None
-DATE = "28 August 2026"
+DATE = date.today().strftime("%d %B %Y").lstrip("0")
 
 HEADING = re.compile(r"^##\s+(.+?)\s*$", re.M)
 IMAGE = re.compile(r"^!\[([^\]]+)\]\(([^)]+)\)\s*$")
@@ -40,7 +42,7 @@ REFERENCE = re.compile(r"^(\d+)\.\s+(.*)$")
 
 def _load_reportlab() -> None:
     """Load the optional PDF stack only when the export command is invoked."""
-    global colors, TA_CENTER, TA_LEFT, letter, ParagraphStyle, getSampleStyleSheet
+    global colors, TA_CENTER, TA_LEFT, letter, inch, ParagraphStyle, getSampleStyleSheet
     global BaseDocTemplate, Frame, Image, KeepTogether, NextPageTemplate, PageBreak
     global PageTemplate, Paragraph, Spacer, ImageReader, NAVY, INK, MUTED, ICE, ORANGE, TEAL
     if colors is not None:
@@ -49,6 +51,7 @@ def _load_reportlab() -> None:
         from reportlab.lib import colors as reportlab_colors
         from reportlab.lib.enums import TA_CENTER as center, TA_LEFT as left
         from reportlab.lib.pagesizes import letter as letter_page
+        from reportlab.lib.units import inch as inch_unit
         from reportlab.lib.styles import ParagraphStyle as paragraph_style, getSampleStyleSheet as samples
         from reportlab.platypus import (
             BaseDocTemplate as doc_template,
@@ -66,7 +69,7 @@ def _load_reportlab() -> None:
         raise RuntimeError(
             "PDF export needs ReportLab. Use the bundled workspace Python or install reportlab."
         ) from exc
-    colors, TA_CENTER, TA_LEFT, letter = reportlab_colors, center, left, letter_page
+    colors, TA_CENTER, TA_LEFT, letter, inch = reportlab_colors, center, left, letter_page, inch_unit
     ParagraphStyle, getSampleStyleSheet = paragraph_style, samples
     BaseDocTemplate, Frame, Image, KeepTogether = doc_template, frame, image, keep_together
     NextPageTemplate, PageBreak, PageTemplate = next_page_template, page_break, page_template
@@ -81,6 +84,13 @@ def _load_reportlab() -> None:
 
 def inline(text: str) -> str:
     """Escape model prose while retaining compact, readable citation markers."""
+    # Helvetica covers the Latin publication text but not arbitrary CJK source
+    # titles. Dropping unsupported title glyphs is better than printing black
+    # squares; the English title fragment and source URL remain intact.
+    text = text.translate(
+        str.maketrans({"\u2011": "-", "\u2013": "-", "\u2014": "-", "\u2018": "'", "\u2019": "'"})
+    )
+    text = "".join(char for char in text if ord(char) < 128).strip()
     safe = html.escape(text, quote=False)
     safe = re.sub(r"`([^`]+)`", r'<font name="Courier" color="#1A365D">\1</font>', safe)
     safe = safe.replace("**", "")
@@ -115,6 +125,27 @@ def parsed_sections(markdown: str) -> list[tuple[str, list[str | tuple[str, str]
 def publication_figure_target(target: str) -> bool:
     """PDF diagram assets come only from the imagen-diagrams output contract."""
     return Path(target).name.endswith("_imagen.png")
+
+
+def publication_stats(sections: list[tuple[str, list[str | tuple[str, str]]]]) -> str:
+    """Describe this paper on its cover using counts derived from its body."""
+    sources = sum(
+        1
+        for heading, blocks in sections
+        if heading.strip().lower() == "references"
+        for block in blocks
+        if isinstance(block, str) and REFERENCE.match(block)
+    )
+    figures = sum(
+        1 for _heading, blocks in sections for block in blocks if isinstance(block, tuple)
+    )
+    body_sections = sum(
+        1 for heading, _blocks in sections if heading.strip().lower() != "references"
+    )
+    return (
+        f"{sources} cited sources  •  {figures} technical figures  •  "
+        f"{body_sections} evidence-backed sections"
+    )
 
 
 def styles() -> dict[str, ParagraphStyle]:
@@ -245,7 +276,7 @@ def body_page(canvas, doc) -> None:
     canvas.restoreState()
 
 
-def build(markdown: Path, output: Path) -> None:
+def build(markdown: Path, output: Path) -> dict:
     _load_reportlab()
     raw = markdown.read_text(encoding="utf-8")
     title_line, _, remainder = raw.partition("\n")
@@ -281,7 +312,7 @@ def build(markdown: Path, output: Path) -> None:
             style["subtitle"],
         ),
         Spacer(1, 0.35 * inch),
-        Paragraph("32 web sources  •  24 documented claims  •  3 technical figures", style["cover_meta"]),
+        Paragraph(publication_stats(sections), style["cover_meta"]),
         Spacer(1, 0.11 * inch),
         Paragraph(f"Research completed {DATE}", style["cover_meta"]),
         NextPageTemplate("body"),
@@ -290,7 +321,11 @@ def build(markdown: Path, output: Path) -> None:
 
     for heading, blocks in sections:
         if heading.lower() == "references":
-            story.extend([PageBreak(), Paragraph(heading, style["section"])])
+            # Let references use the space left after the conclusion. Forcing
+            # a new page can strand one short concluding paragraph on an
+            # otherwise blank page. The section style keeps the heading with
+            # the first reference when the remaining space is genuinely tight.
+            story.append(Paragraph(heading, style["section"]))
             for block in blocks:
                 if not isinstance(block, str):
                     continue
@@ -320,15 +355,38 @@ def build(markdown: Path, output: Path) -> None:
                 story.append(Paragraph(inline(block), style["body"]))
 
     doc.build(story)
+    figure_inventory = [
+        Path(target).name
+        for _heading, blocks in sections
+        for block in blocks
+        if isinstance(block, tuple)
+        for _caption, target in [block]
+    ]
+    return {
+        "source": str(markdown),
+        "pdf": str(output),
+        "pages": doc.page,
+        "figures": figure_inventory,
+        "bytes": output.stat().st_size,
+    }
+
+
+def sidecar_path(output: Path) -> Path:
+    return Path(f"{output}.json")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("markdown", type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--theme", default="arctic-fox")
     args = parser.parse_args(argv)
-    build(args.markdown, args.out)
+    metadata = build(args.markdown, args.out)
+    metadata["theme"] = args.theme
+    sidecar = sidecar_path(args.out)
+    sidecar.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print(args.out)
+    print(sidecar)
     return 0
 
 

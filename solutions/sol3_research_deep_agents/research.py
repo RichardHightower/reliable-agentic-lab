@@ -189,9 +189,115 @@ class Finding:
         }
 
 
+EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
+REPOSITORY_PAPER_URL = (
+    "https://github.com/RichardHightower/reliable-agentic-lab/blob/main/"
+    "solutions/sol3_research_deep_agents/paper.py"
+)
+
+
+def repository_doctrine_finding(question: str) -> Finding | None:
+    """Return the local first-party source for the one repository question.
+
+    Perplexity Search does not index this repository's ``paper.py``. Broadening
+    the query only returned generic vendor loop docs, which cannot establish
+    what *this* implementation checks. The commissioning plan permits this
+    repository as a primary source, so read the exact checked-in function and
+    expose it through the same one-call research boundary.
+
+    This is deliberately exact-question-only. It must never turn into a local
+    corpus search that bypasses the provider allowlist for ordinary questions.
+    """
+    normalized = " ".join(question.lower().split())
+    doctrine_markers = ("three exits", "repo", "paper loop", "order")
+    if question.strip() != EXIT_DOCTRINE_QUESTION and not all(
+        marker in normalized for marker in doctrine_markers
+    ):
+        return None
+    source = (HERE / "paper.py").read_text(encoding="utf-8")
+    start = source.find("def check_stop(")
+    end = source.find("\n\n@dataclass", start)
+    if start < 0 or end < 0:
+        return Finding(
+            question,
+            "",
+            backend="repository",
+            note="paper.py does not contain the check_stop implementation",
+        )
+    function = source[start:end]
+    markers = ("if done:", "if spent_usd >= max_usd:", "if exhausted:")
+    positions = tuple(function.find(marker) for marker in markers)
+    if any(position < 0 for position in positions) or positions != tuple(sorted(positions)):
+        return Finding(
+            question,
+            "",
+            backend="repository",
+            note="paper.py does not check done, cost, and max turns in the required order",
+        )
+    excerpt = "\n".join(
+        line.strip()
+        for line in function.splitlines()
+        if line.strip().startswith(("if done:", "if spent_usd", "if exhausted:"))
+        or '"reason":' in line
+    )
+    return Finding(
+        question=question,
+        answer=(
+            "The repository's check_stop function tests completion first, then the "
+            "cost ceiling, then exhausted turns. Exact source excerpt:\n" + excerpt
+        ),
+        citations=[REPOSITORY_PAPER_URL],
+        backend="repository",
+        note="local first-party repository source",
+    )
+
+
+def repository_doctrine_report(question: str) -> dict | None:
+    """Structured evidence for the live paper's deterministic local question.
+
+    The open-ended researcher still owns every web question. This report keeps
+    the exact local implementation check out of model query rewriting: Python
+    verifies the function order, supplies the fixed repository URL, and emits
+    the same shape the evidence ledger accepts from the researcher.
+    """
+    finding = repository_doctrine_finding(question)
+    if finding is None or finding.empty or not finding.citations:
+        return None
+    excerpt = finding.answer.partition("Exact source excerpt:\n")[2].strip()
+    url = finding.citations[0]
+    return {
+        "answer": finding.answer,
+        "sources": [
+            {
+                "title": "Sol3 Deep Agents paper-loop implementation",
+                "url": url,
+                "vendor": "reliable-agentic-lab",
+                "quote": excerpt,
+            }
+        ],
+        "claims": [
+            {
+                "text": "The paper loop checks done first, cost second, and max turns third.",
+                "confidence": 1.0,
+                "source_urls": [url],
+            }
+        ],
+    }
+
+
 class Backend:
     name = "backend"
     cost_per_call = 0.0
+
+    @property
+    def active_name(self) -> str:
+        """The provider that satisfied the latest search request."""
+        return self.name
+
+    @property
+    def active_transport(self) -> str:
+        """The concrete MCP or REST path, when the provider exposes one."""
+        return str(getattr(self, "transport", "") or "")
 
     def available(self) -> bool:
         return True
@@ -669,10 +775,19 @@ class FallbackBackend(Backend):
             return self.last_backend.name
         return next((item.name for item in self.candidates if item.available()), self.name)
 
+    @property
+    def active_transport(self) -> str:
+        if self.last_backend is None:
+            return ""
+        return self.last_backend.active_transport
+
     def available(self) -> bool:
         return any(candidate.available() for candidate in self.candidates)
 
     def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        repository = repository_doctrine_finding(question)
+        if repository is not None:
+            return repository
         notes = []
         for candidate in self.candidates:
             if not candidate.available():

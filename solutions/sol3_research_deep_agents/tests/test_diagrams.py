@@ -49,6 +49,31 @@ def test_inventory_falls_back_to_a_bare_node_id():
     assert inv.labels == ["A", "Search"]
 
 
+def test_inventory_reads_state_nodes_from_edges():
+    source = "stateDiagram-v2\n  [*] --> Planning\n  Planning --> Done\n  Done --> [*]\n"
+    inv = diagrams.inventory(source, "mermaid")
+    assert inv.labels == ["Planning", "Done"]
+
+
+def test_inventory_reads_sequence_participant_labels():
+    source = "sequenceDiagram\n  participant Loop as Agent Loop\n  participant Tool\n  Loop->>Tool: call\n"
+    inv = diagrams.inventory(source, "mermaid")
+    assert inv.labels == ["Agent Loop", "Tool"]
+
+
+def test_exit_order_gate_rejects_parallel_branches_and_accepts_a_chain():
+    parallel = (
+        "flowchart LR\n  X[\"Check exits\"] --> D[\"Done\"]\n"
+        "  X --> C[\"Cost\"]\n  X --> M[\"Max turns\"]\n"
+    )
+    ordered = (
+        "flowchart LR\n  D{\"Done?\"} -->|no| C{\"Cost spent?\"}\n"
+        "  C -->|no| M{\"Max turns?\"}\n"
+    )
+    assert not diagrams.ordered_exit_checks(parallel)
+    assert diagrams.ordered_exit_checks(ordered)
+
+
 def test_plantuml_inventory_is_local_too():
     inv = diagrams.inventory(PUML, "plantuml")
     assert inv.labels == ["Maker", "Checker"]

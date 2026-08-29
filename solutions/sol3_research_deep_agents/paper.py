@@ -488,8 +488,17 @@ class Paper:
                 f"Topic: {self.topic}\n\nWrite plan.json for a technical white paper "
                 f"on this topic.\n{extra}",
             )
-            self.plan = reply.json()
             usd = reply.usd
+            # The Deep Agents planner owns exactly one scoped write:
+            # ``plan.json``. Its useful result can therefore be the file while
+            # its final message is only a tool receipt such as "wrote
+            # plan.json". Prefer that artifact when the role produced it.
+            # Fixture and answer-only runners still return the plan directly.
+            self.plan = (
+                stages.parse_json(path.read_text(encoding="utf-8"))
+                if path.exists()
+                else reply.json()
+            )
         self.plan = stages.normalize_plan(self.plan)
         stages.plan_gate(self.plan)
         path.write_text(json.dumps(self.plan, indent=2), encoding="utf-8")
@@ -508,7 +517,30 @@ class Paper:
         self._need_plan()
         usd = 0.0
         for question in self.plan["questions"]:
-            if any(f.subject == question["subject"] for f in self.ledger.findings.values()):
+            # Only a finding with admitted claims is complete. Persisting an
+            # empty finding is useful diagnostics, but treating it as answered
+            # makes the stage's "search again with narrower wording" retry a
+            # no-op that immediately fails with the same signature.
+            if any(
+                f.subject == question["subject"]
+                and (f.claim_ids or not question.get("important"))
+                for f in self.ledger.findings.values()
+            ):
+                continue
+            # This one binding question is about checked-in Python, not the
+            # web. Perplexity does not index the file, and asking a model to
+            # rewrite the query can turn the exact repository lookup into a
+            # generic vendor search. Validate and record the first-party source
+            # deterministically; every other question still goes through the
+            # Deep Agents researcher and its single filtered search tool.
+            repository_report = (
+                research.repository_doctrine_report(question["question"])
+                if self.runner.name == "deep_agents"
+                else None
+            )
+            if repository_report is not None:
+                stages.record_findings(self.ledger, question, repository_report)
+                self.ledger.write()
                 continue
             # The researcher has one tool call. Its filtered Perplexity boundary
             # may spend Scout, Retrieve, and the no-quote Ask repair inside that
@@ -533,11 +565,21 @@ class Paper:
             self.ledger.write()
         stages.search_gate(self.ledger, self.plan)
         self.ledger.write()
+        provider = self.backend.active_name
+        transport = self.backend.active_transport
         return StageResult(
             "search",
             usd=usd,
-            artifacts={"claims": len(self.ledger.claims), "sources": len(self.ledger.sources)},
-            summary=f"{len(self.ledger.claims)} claims from {len(self.ledger.sources)} sources",
+            artifacts={
+                "claims": len(self.ledger.claims),
+                "sources": len(self.ledger.sources),
+                "provider": provider,
+                "transport": transport,
+            },
+            summary=(
+                f"{len(self.ledger.claims)} claims from {len(self.ledger.sources)} sources "
+                f"via {provider}" + (f" ({transport})" if transport else "")
+            ),
         )
 
     # -- 3. verify ---------------------------------------------------------
@@ -563,7 +605,8 @@ class Paper:
             '"corroborate_status": "agreed|disagreed|not_found", "quote": "..."}]}',
         )
         counts = stages.apply_verification(
-            self.ledger, stages.resolve_placeholders(reply.json(), self.ledger)
+            self.ledger,
+            stages.resolve_placeholders(self._json_reply("verifier", reply), self.ledger),
         )
         stages.verify_gate(self.ledger)
         self.ledger.write()
@@ -597,7 +640,9 @@ class Paper:
             + '\n\nReturn JSON: {"sections": [{"heading": "...", "purpose": "...", '
             '"claim_ids": ["..."], "figures": ["..."]}]}',
         )
-        self.outline = stages.resolve_placeholders(reply.json(), self.ledger)
+        self.outline = stages.resolve_placeholders(
+            self._json_reply("writer-outline", reply), self.ledger
+        )
         stages.outline_gate(self.outline, self.ledger, self.plan)
         path = self.work_dir / "outline.json"
         path.write_text(json.dumps(self.outline, indent=2), encoding="utf-8")
@@ -629,20 +674,57 @@ class Paper:
             # `_retry_targets` says which those are.
             if target.exists() and name not in self._redraw:
                 continue
+            ordered_exits = all(
+                term in figure.get("shows", "").lower()
+                for term in ("done", "cost", "max-turn", "order")
+            )
+            order_instruction = (
+                "\nDraw done, cost, and max-turns as sequential decision nodes. "
+                "The no edge from done leads to cost, and the no edge from cost leads "
+                "to max turns. Never fan all three exits out from one node."
+                if ordered_exits
+                else ""
+            )
             reply = self._ask(
                 "diagrammer",
                 f"Draw a {figure['kind']} diagram named {name}.\n"
-                f"It must show: {figure['shows']}\n"
+                f"It must show: {figure['shows']}{order_instruction}\n"
                 f"Paper topic: {self.topic}\n{extra}\n\n"
                 "Return only the diagram source. No fences, no commentary.",
             )
             usd += reply.usd
-            target.write_text(_strip_fence(reply.text), encoding="utf-8")
+            # A scoped Deep Agents diagrammer writes the requested source.
+            # Its final message may only acknowledge that tool call. Preserve
+            # the file in that case; answer-only and fixture runners still
+            # supply source in the reply for Python to checkpoint.
+            if not target.exists():
+                target.write_text(_strip_fence(reply.text), encoding="utf-8")
+
+        semantic_complaints = []
+        for figure in planned:
+            description = figure.get("shows", "").lower()
+            if not all(term in description for term in ("done", "cost", "max-turn", "order")):
+                continue
+            name = evidence.slug(figure["name"])
+            suffix = ".mmd" if figure["kind"] == "mermaid" else ".puml"
+            target = self.diagram_src / f"{name}{suffix}"
+            if figure["kind"] != "mermaid" or not diagrams.ordered_exit_checks(
+                target.read_text(encoding="utf-8")
+            ):
+                semantic_complaints.append(
+                    f"{target.name}: show done, then cost, then max turns as sequential "
+                    "checks; do not draw them as parallel branches."
+                )
+        if semantic_complaints:
+            self._redraw = {
+                Path(complaint.split(":", 1)[0]).stem for complaint in semantic_complaints
+            }
+            raise GateFailed(" ".join(semantic_complaints), ("exit_order",))
 
         self.figures, complaints = stages.render_figures(
             self.diagram_src,
             self.figure_dir,
-            self.topic,
+            self.plan.get("title") or self.topic,
             theme_name=self.theme,
         )
         self._redraw = {Path(c.split(":", 1)[0]).stem for c in complaints}
@@ -694,17 +776,23 @@ class Paper:
                 }
             )
             briefs = "\n".join(stages.claim_brief(self.ledger, cid, index) for cid in claim_ids)
+            word_range = "90 to 180" if len(claim_ids) < 3 else "180 to 300"
             reply = self._ask(
                 "writer",
                 f"Write the {heading!r} section of {self.plan['title']!r}.\n"
                 f"Purpose: {section.get('purpose', '')}\n"
                 f"Audience: {self.plan['audience']}\n{extra}\n\n"
                 f"Use only these claims and their citation markers:\n{briefs}\n\n"
-                "Return 180 to 300 words of section body as markdown. No heading "
+                f"Return {word_range} words of section body as markdown. No heading "
                 "line, the assembler adds it. No references section. The word "
                 "limit is part of the contract: prefer concise, cited mechanisms "
                 "over an exhaustive survey. Every prose paragraph that makes a "
-                "factual claim must include one or more of its allowed citation markers.",
+                "factual claim must include one or more of its allowed citation markers. "
+                "Every sentence must be entailed by a listed claim. Omit unsupported "
+                "background, framing, forecasts, and generalizations instead of padding. "
+                "The gate treats scope, transition, recommendation, and limitation paragraphs "
+                "as prose claims too, so every prose paragraph must carry at least one allowed "
+                "marker; do not leave an editorial paragraph uncited.",
             )
             usd += reply.usd
             body = section_body(reply.text, heading)
@@ -719,6 +807,7 @@ class Paper:
                 (diagnostics / f"last-writer-{evidence.slug(heading)}.md").write_text(
                     body, encoding="utf-8"
                 )
+            body = stages.drop_uncited_prose(body)
             # Store first, then gate. A failure drops this section only, so the
             # retry re-asks for it and leaves its neighbours alone.
             stages.write_gate(heading, body, allowed)
@@ -782,23 +871,39 @@ class Paper:
                 }
             )
             briefs = "\n".join(stages.claim_brief(self.ledger, claim_id, index) for claim_id in claim_ids)
+            word_range = "90 to 180" if len(claim_ids) < 3 else "180 to 300"
+            earlier = []
+            for prior_heading, prior_body in self.written.items():
+                if prior_heading == heading:
+                    break
+                earlier.append(f"## {prior_heading}\n{prior_body}")
+            earlier_context = "\n\n".join(earlier)
             reply = self._ask(
                 "writer",
                 f"Revise the existing {heading!r} section of {self.plan['title']!r}.\n\n"
                 f"Reviewer feedback to fix:\n{feedback}\n\n"
                 f"Current section:\n{self.written[heading]}\n\n"
                 f"Use only these claims and their citation markers:\n{briefs}\n\n"
-                "Return 180 to 300 words of replacement markdown body. No heading or references. "
+                f"Earlier sections, supplied only to prevent repetition:\n{earlier_context}\n\n"
+                f"Return {word_range} words of replacement markdown body. No heading or references. "
                 "Preserve factual grounding and citation markers. Where the reviewer asks for a "
                 "tradeoff, name a credible alternative and its cost without inventing evidence. "
                 "Do not repeat the paper's section list or its abstract in this section. Define every "
                 "specialized term before its first use; the abstract must avoid or define terms that "
                 "body sections introduce later. Do not reuse a citation for a distinct claim unless the "
                 "provided claim brief explicitly supports both claims. Every prose paragraph that makes "
-                "a factual claim must include one or more of its allowed citation markers.",
+                "a factual claim must include one or more of its allowed citation markers. "
+                "Every sentence must be entailed by a listed claim. Omit unsupported background, "
+                "framing, forecasts, and generalizations instead of padding. "
+                "Do not restate a mechanism already explained in an earlier section. Build on it "
+                "with a new implication supported by this section's claims, or omit it. "
+                "The gate treats scope, transition, recommendation, and limitation paragraphs "
+                "as prose claims too, so every prose paragraph must carry at least one allowed "
+                "marker; do not leave an editorial paragraph uncited.",
             )
             usd += reply.usd
             body = section_body(reply.text, heading)
+            body = stages.drop_uncited_prose(body)
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body
             self._save_sections()
@@ -808,13 +913,17 @@ class Paper:
 
     def stage_review(self, extra: str = "") -> StageResult:
         self._need_written()
+        self.written = stages.define_acronym_once(
+            self.written, "Model Context Protocol", "MCP"
+        )
+        self._save_sections()
         draft = "\n\n".join(f"## {head}\n\n{body}" for head, body in self.written.items())
         reply = self._ask(
             "reviewer",
             f"Grade this draft against the rubric.\n{extra}\n\n{draft}\n\n"
             'Return JSON: {"failed_rows": ["..."], "notes": ["..."]}',
         )
-        verdict = reply.json()
+        verdict = self._json_reply("reviewer", reply)
         stages.review_gate(verdict)
         return StageResult("review", usd=reply.usd, summary="every rubric row passed")
 

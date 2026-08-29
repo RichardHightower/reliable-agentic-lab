@@ -31,6 +31,11 @@ import source_policy
 # A plan that asks fewer than this is not research, it is a lookup.
 MIN_QUESTIONS = 3
 MAX_QUESTIONS = 8
+# Verification cost scales with this count, not with the prose length. Three
+# load-bearing questions are enough for a focused workshop paper; marking five
+# speculative questions important made one unavailable standards host block an
+# otherwise well-sourced run.
+MAX_IMPORTANT_QUESTIONS = 3
 EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
 # Sections that bind to no claims of their own. The abstract restates what the
@@ -117,8 +122,15 @@ def plan_gate(plan: dict) -> None:
         if label in seen:
             misses.append(f"{label} is used twice. Every question needs its own id.")
         seen.add(label)
-    if not any(question.get("important") for question in questions):
+    important = [question for question in questions if question.get("important")]
+    if not important:
         misses.append("no question is marked important. The verifier would check nothing.")
+    if len(important) > MAX_IMPORTANT_QUESTIONS:
+        misses.append(
+            f"there are {len(important)} important questions. Mark at most "
+            f"{MAX_IMPORTANT_QUESTIONS} load-bearing questions important; the rest may still "
+            "contribute sources without blocking the paper."
+        )
     if not plan.get("sections"):
         misses.append("the plan names no sections.")
     for figure in plan.get("diagrams") or []:
@@ -549,6 +561,47 @@ def write_gate(section: str, body: str, allowed: list[int]) -> None:
             "Put an allowed marker in every paragraph that makes a factual claim.",
             ("uncited_paragraph",),
         )
+
+
+def drop_uncited_prose(body: str) -> str:
+    """Remove model-added prose that has no traceable source.
+
+    This never invents a marker or attaches a convenient source to unsupported
+    framing. The raw writer response is preserved in diagnostics before this
+    filter runs, and the remaining body still has to pass every paper gate.
+    """
+    return "\n\n".join(
+        block.strip()
+        for block in body.split("\n\n")
+        if block.strip() and not brief.uncited_claims(block)
+    )
+
+
+def define_acronym_once(sections: dict[str, str], phrase: str, acronym: str) -> dict[str, str]:
+    """Define an acronym at its first use and collapse later redefinitions."""
+    definition = f"{phrase} ({acronym})"
+    definition_re = re.compile(rf"\b{re.escape(phrase)}\s*\({re.escape(acronym)}\)", re.I)
+    acronym_re = re.compile(rf"\b{re.escape(acronym)}\b")
+    seen = False
+    normalized: dict[str, str] = {}
+    for heading, body in sections.items():
+        if seen:
+            normalized[heading] = definition_re.sub(acronym, body)
+            continue
+        defined = definition_re.search(body)
+        used = acronym_re.search(body)
+        if defined is not None and (used is None or defined.start() <= used.start()):
+            end = defined.end()
+            normalized[heading] = body[:end] + definition_re.sub(acronym, body[end:])
+            seen = True
+        elif used is not None:
+            expanded = body[: used.start()] + definition + body[used.end() :]
+            first_end = used.start() + len(definition)
+            normalized[heading] = expanded[:first_end] + definition_re.sub(acronym, expanded[first_end:])
+            seen = True
+        else:
+            normalized[heading] = body
+    return normalized
 
 
 # -- 7. review ------------------------------------------------------------
