@@ -3,6 +3,18 @@
 Everything here runs from `solutions/sol1_enhancer/`, standalone. No task in
 this folder depends on the repo root or on any other folder outside it.
 
+This folder is Claude Code. `task run` calls `claude`. If that binary is
+missing, the preflight prints the Grok, OpenCode, and Codex folders and
+exits 127. Do not install Claude Code just to satisfy a Grok lab.
+
+| Tool | Folder |
+|---|---|
+| Claude Code | `solutions/sol1_enhancer/` (this one) |
+| Grok Build | `solutions/sol1_enhancer_grok_build/` |
+| OpenCode | `solutions/sol1_enhancer_opencode/` |
+| Codex | `solutions/sol1_enhancer_codex/` |
+| Lab (detects the skill tree) | `labs/lab1_enhancer/` (`task detect`) |
+
 ## One-time setup
 
 1. Copy the config template and fill in your GitHub username:

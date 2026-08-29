@@ -2,8 +2,14 @@
 
 ## `"claude": executable file not found in $PATH`
 
-This is the error `task run` used to always throw if Claude Code was not
-installed, even when you had built a Grok, Codex, or OpenCode plugin.
+If you ran `task create-test-tickets && task run --` from
+`solutions/sol1_enhancer`, that is expected. That folder is Claude Code
+only. Leave it. Use this lab folder, or `solutions/sol1_enhancer_grok_build`
+/ `solutions/sol1_enhancer_opencode`.
+
+This is also the error `task run` used to always throw from *this* folder
+if Claude Code was not installed, even when you had built a Grok, Codex,
+or OpenCode plugin.
 
 `task run` now looks at the skill tree in this folder and calls that CLI:
 

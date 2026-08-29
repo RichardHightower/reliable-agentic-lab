@@ -41,8 +41,11 @@ tasks:
     # Pinning dir here, not just TARGET, means the claude -p subprocess
     # always starts from this exact folder. SKILL.md reads ./config.json
     # from its cwd, so that has to be right too, not only the --repo path.
+    # require_claude.sh runs first so a Grok or OpenCode student who landed
+    # here from INSTRUCTIONS.md gets the sibling folders, not a bare 127.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
+      - bin/require_claude.sh
       - claude -p "/enhancer-loop --repo {{.TARGET}} {{.CLI_ARGS}}"
 
   poll-forever:
