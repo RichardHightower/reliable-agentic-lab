@@ -8,6 +8,7 @@ from pathlib import Path
 import contract as contract_mod
 import doers
 import implementer
+import roles
 from contract import CoverageReport, RunResult, SuiteReport
 
 TASKFILE = """\
@@ -146,6 +147,51 @@ def _patch_runs(monkeypatch, runs: list[RunResult]):
     monkeypatch.setattr(implementer.Contract, "run", fake_run)
 
 
+def _seed_field_rename_ticket(repo: Path) -> tuple[Path, Path, Path]:
+    ticket = """\
+---
+id: T002
+title: Rename a task field
+state: ready
+---
+
+# T002 Rename a task field
+
+## Acceptance criteria
+
+- (AC-1) The backend payload and task form both call the field `display_name`.
+"""
+    test_path = repo / "tests" / "test_task_fields.py"
+    backend_path = repo / "app" / "task_fields.py"
+    form_path = repo / "app" / "templates" / "task_form.html"
+    test_path.write_text(
+        'def test_task_uses_legacy_field_name():\n    assert "task_title" == "task_title"\n',
+        encoding="utf-8",
+    )
+    backend_path.write_text(
+        "def task_payload():\n    return {'task_title': 'Ada'}\n", encoding="utf-8"
+    )
+    form_path.parent.mkdir()
+    form_path.write_text('<input name="taskTitle" data-field="task_title">\n', encoding="utf-8")
+    (repo / "tickets" / "T002.md").write_text(ticket, encoding="utf-8")
+    subprocess.run(
+        [
+            "git",
+            "add",
+            "app/task_fields.py",
+            "app/templates/task_form.html",
+            "tests/test_task_fields.py",
+            "tickets/T002.md",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed rename ticket"], cwd=repo, check=True, capture_output=True
+    )
+    return test_path, backend_path, form_path
+
+
 def test_red_gate_escalates_when_nothing_new_fails(tmp_path, monkeypatch):
     repo = _git_repo(tmp_path / "repo")
     baseline = _run(passed=("tests/test_health.py::test_health",))
@@ -235,3 +281,84 @@ def test_code_phase_cannot_hide_a_test_write(tmp_path, monkeypatch):
     report = trace.get("rubric", "")
     assert "write_scope" in report
     assert "FAIL" in report
+
+
+def test_simple_field_rename_reaches_a_read_only_judge(
+    tmp_path, monkeypatch, fake_langchain, fake_deepagents
+):
+    """A tiny offline story: plan, change one test, rename backend/UI fields,
+    then enter a judge-only graph that has no way to weaken that test.
+
+    This must stay entirely scripted. It is the fast regression for the phase
+    boundary, not a live-model proxy that can hang or spend a token.
+    """
+    repo = _git_repo(tmp_path / "repo")
+    test_path, backend_path, form_path = _seed_field_rename_ticket(repo)
+
+    old_id = "tests.test_task_fields::test_task_uses_legacy_field_name"
+    renamed_id = "tests.test_task_fields::test_AC-1_display_name"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(old_id,)),
+            _run(passed=(old_id,), failed=(renamed_id,)),
+            _run(passed=(renamed_id,)),
+        ],
+    )
+    renamed_test = """\
+from app.task_fields import task_payload
+
+
+def test_ac_1_backend_and_ui_use_display_name():
+    assert task_payload()["display_name"] == "Ada"
+"""
+    renamed_backend = "def task_payload():\n    return {'display_name': 'Ada'}\n"
+    renamed_form = '<input name="display_name" data-field="display_name">\n'
+    backend = ScriptedBackend(
+        [
+            [("tests/test_task_fields.py", renamed_test)],
+            [
+                ("app/task_fields.py", renamed_backend),
+                ("app/templates/task_form.html", renamed_form),
+            ],
+        ]
+    )
+
+    trace = implementer.run(repo=repo, ticket_id="T002", doer=backend, budget=1)
+
+    assert trace["gate"] == "pass"
+    assert trace["red_ids"] == [renamed_id]
+    assert backend.calls == 2
+    assert trace["test_phase"]["files"] == ["tests/test_task_fields.py"]
+    assert len(trace["iterations"]) == 1
+    iteration = trace["iterations"][0]
+    assert iteration["iteration"] == 1
+    assert iteration["wrote"] == ["app/task_fields.py", "app/templates/task_form.html"]
+    assert all(iteration["rows"].values())
+    assert iteration["failed"] == []
+    assert iteration["gate"] == "pass"
+    assert iteration["reason"] == "the rubric is green"
+    plan = (repo / "steps.jsonl").read_text(encoding="utf-8")
+    assert "display_name" in plan
+    assert '"role": "test_implementer"' in plan
+    assert '"role": "code_implementer"' in plan
+    assert test_path.read_text(encoding="utf-8") == renamed_test
+    assert backend_path.read_text(encoding="utf-8") == renamed_backend
+    assert form_path.read_text(encoding="utf-8") == renamed_form
+    assert "task_title" not in backend_path.read_text(encoding="utf-8")
+    assert "taskTitle" not in form_path.read_text(encoding="utf-8")
+
+    # Judge mode is a separate graph: it admits only the read-only judge. The
+    # former code doer is absent, and its scoped writer still refuses tests.
+    contract = contract_mod.Contract(repo)
+    assert roles.build_agent(contract, subagent_names=frozenset({"judge"})) == "agent"
+    judge_specs = fake_deepagents["subagents"]
+    assert [spec["name"] for spec in judge_specs] == ["judge"]
+    assert [tool.__name__ for tool in judge_specs[0]["tools"]] == ["read_file"]
+
+    code_spec = next(
+        spec for spec in roles.subagents_for(contract) if spec["name"] == "code-implementer"
+    )
+    refused = code_spec["tools"][1]("tests/test_task_fields.py", "def test_weakened(): pass\n")
+    assert refused.startswith("REFUSED")
+    assert test_path.read_text(encoding="utf-8") == renamed_test
