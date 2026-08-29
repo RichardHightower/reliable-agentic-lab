@@ -47,11 +47,24 @@ else does.
 
 ## Build it
 
-Follow [prompts/claude-code.md](prompts/claude-code.md): four prompts,
-pasted one at a time into an interactive `claude` session, each building one
-piece (the judge agent, the doer agent, the deterministic field check, the
-orchestrator skill). A fifth prompt at the end has Claude Code diff your
-result against the answer.
+One prompt per solution variant. Paste into the tool named in the prompt.
+
+| Prompt | Answer |
+|---|---|
+| [prompts/claude-code.md](prompts/claude-code.md) | `solutions/sol1_enhancer/` |
+| [prompts/codex.md](prompts/codex.md) | `solutions/sol1_enhancer_codex/` |
+| [prompts/grok-build.md](prompts/grok-build.md) | `solutions/sol1_enhancer_grok_build/` |
+| [prompts/opencode.md](prompts/opencode.md) | `solutions/sol1_enhancer_opencode/` |
+| [prompts/agent-sdk.md](prompts/agent-sdk.md) | `solutions/sol1_enhancer_agent_sdk/` |
+| [prompts/deep-agents.md](prompts/deep-agents.md) | `solutions/sol1_enhancer_deep_agents/` |
+
+Saturday default is Claude Code: four prompts, pasted one at a time into an
+interactive `claude` session, each building one piece (the judge agent, the
+doer agent, the deterministic field check, the orchestrator skill). A fifth
+prompt at the end has Claude Code diff your result against the answer.
+
+Agent SDK and Deep Agents are take-home. Python owns the loop. Do not copy
+those fences into `.claude/`.
 
 ## Verify
 

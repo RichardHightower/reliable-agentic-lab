@@ -713,7 +713,7 @@ def main(argv: list[str] | None = None) -> int:
         for tool_key in TOOLS:
             write(folder / "prompts" / f"{tool_key}.md", prompt_for(lab, tool_key))
             written += 1
-        for stale in ("agent-sdk.md", "langgraph.md"):
+        for stale in ("langgraph.md",):
             (folder / "prompts" / stale).unlink(missing_ok=True)
 
     # The solution tree. One folder per lab per tool, always filled in. The

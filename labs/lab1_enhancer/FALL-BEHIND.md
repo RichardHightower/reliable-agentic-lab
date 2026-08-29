@@ -80,6 +80,58 @@ explains plugin loading.
 
 ## OpenCode
 
-No OpenCode answer exists yet. Copy the Claude Code section above and run it
-with Claude Code for this hour. See
-[solutions/sol1_enhancer_opencode/README.md](../../solutions/sol1_enhancer_opencode/README.md).
+```bash
+cp -R ../../solutions/sol1_enhancer_opencode/.opencode .
+cp ../../solutions/sol1_enhancer_opencode/opencode.json .
+cp ../../solutions/sol1_enhancer_opencode/AGENTS.md .
+cp ../../solutions/sol1_enhancer_opencode/config.json.example .
+```
+
+Isolation is the per-agent `permission` block: `edit: deny` and `bash: deny`
+on the judge and the doer. Headless is `opencode run`, not the TUI.
+
+The design is
+[solutions/sol1_enhancer_opencode/SPEC.md](../../solutions/sol1_enhancer_opencode/SPEC.md),
+and
+[IMPLEMENTATION_NOTES.md](../../solutions/sol1_enhancer_opencode/IMPLEMENTATION_NOTES.md)
+explains loading and the judge jail.
+
+## Claude Agent SDK (take-home)
+
+Do not copy these fences into this lab folder. Run the answer:
+
+```bash
+cd ../../solutions/sol1_enhancer_agent_sdk
+cp config.json.example config.json   # fill in your GitHub username
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
+task setup
+task table          # judge writes must print no
+task test
+task clone
+task create-test-tickets
+task run --
+```
+
+The build prompts are [prompts/agent-sdk.md](prompts/agent-sdk.md). The design
+is
+[solutions/sol1_enhancer_agent_sdk/SPEC.md](../../solutions/sol1_enhancer_agent_sdk/SPEC.md).
+
+## LangChain Deep Agents (take-home)
+
+Do not copy these fences into this lab folder. Run the answer:
+
+```bash
+cd ../../solutions/sol1_enhancer_deep_agents
+cp config.json.example config.json   # fill in your GitHub username
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
+task setup
+task table          # judge writes must print no
+task test
+task clone
+task create-test-tickets
+task run --
+```
+
+The build prompts are [prompts/deep-agents.md](prompts/deep-agents.md). The
+design is
+[solutions/sol1_enhancer_deep_agents/SPEC.md](../../solutions/sol1_enhancer_deep_agents/SPEC.md).

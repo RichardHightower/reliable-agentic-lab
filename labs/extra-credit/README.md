@@ -16,8 +16,20 @@ behind ngrok. Assignment 5 puts assignment 1 on a Droplet.
 
 ## Start one
 
-Each folder holds its own `README.md` with the brief. Read
-[SETUP.md](SETUP.md) first, then the folder you picked.
+One prompt per solution folder. Read [SETUP.md](SETUP.md) first, then paste
+the prompt for the assignment you picked.
+
+| Solution | Prompt |
+|---|---|
+| `s_ext_1_webhook` | [prompts/ext1-webhook.md](prompts/ext1-webhook.md) |
+| `s_ext_2_ngrok` | [prompts/ext2-ngrok.md](prompts/ext2-ngrok.md) |
+| `s_ext_5_digitalocean` | [prompts/ext5-digitalocean.md](prompts/ext5-digitalocean.md) |
+
+Each folder also holds its own `README.md` with the brief.
+
+Claude Code is not required. The four Saturday tools can drive any of those
+prompts: [claude-code](prompts/claude-code.md), [codex](prompts/codex.md),
+[grok-build](prompts/grok-build.md), [opencode](prompts/opencode.md).
 
 ## The rule that does not change
 

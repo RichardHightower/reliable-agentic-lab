@@ -1,4 +1,4 @@
-# Extra credit prompt
+# Extra credit. Pick a tool
 
 Claude Code is not required. Headless:
 
@@ -9,21 +9,21 @@ codex exec "$(cat labs/extra-credit/prompts/claude-code.md)"
 grok -p "$(cat labs/extra-credit/prompts/claude-code.md)" --no-auto-update
 ```
 
-This is extra credit. Not Saturday.
+This is extra credit. Not Saturday. Do one assignment at a time. Each has
+its own prompt, one per solution folder.
 
-Two assignments remain. Do one at a time.
-
-| Assignment | You fill | Answer |
+| Assignment | Prompt | Answer |
 |---|---|---|
-| `ext_2_ngrok` | nothing to code. Expose a local receiver and take a delivery. | its `README.md` |
-| `ext_5_digitalocean` | nothing to code. Deploy a receiver behind nginx. | its `README.md` |
+| `ext_1_webhook` | [ext1-webhook.md](ext1-webhook.md) | `solutions/extra_credit/s_ext_1_webhook/` |
+| `ext_2_ngrok` | [ext2-ngrok.md](ext2-ngrok.md) | `solutions/extra_credit/s_ext_2_ngrok/` |
+| `ext_5_digitalocean` | [ext5-digitalocean.md](ext5-digitalocean.md) | `solutions/extra_credit/s_ext_5_digitalocean/` |
 
-Requirements:
+Paste the assignment prompt, not this file, into the tool.
+
+Requirements that do not change:
 
 - Trigger may be ngrok or a DigitalOcean Droplet. Not a polling loop.
 - The receiver must verify `X-Hub-Signature-256`.
 - Log JSON. Comment when you give up.
 - Do not enable extra-credit workflows on the instructor repo.
 - Do not edit the target repo's tests. Do not skip Module 2.
-
-Working example: `solutions/extra_credit/`.

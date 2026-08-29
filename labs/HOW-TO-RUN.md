@@ -22,6 +22,17 @@ its tool scope, and nothing from the other three.
 | Grok Build | `grok -p "$(cat prompts/grok-build.md)" --no-auto-update` | `grok` |
 | OpenCode | `opencode run "$(cat prompts/opencode.md)"` | `opencode` |
 
+Lab 1 also ships take-home prompts for two other runtimes. They are not
+Saturday. They rebuild the same loop as a Python harness:
+
+| Runtime | Prompt | Answer |
+|---|---|---|
+| Claude Agent SDK | `prompts/agent-sdk.md` | `solutions/sol1_enhancer_agent_sdk/` |
+| LangChain Deep Agents | `prompts/deep-agents.md` | `solutions/sol1_enhancer_deep_agents/` |
+
+Labs 2 to 4 ship the same two filenames, pointed at that module's solution
+folder. Saturday still fills the stub with one of the four tools above.
+
 For interactive mode, start the tool in the lab folder and paste everything
 below the line in the prompt file.
 
