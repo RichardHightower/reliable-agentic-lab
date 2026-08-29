@@ -26,9 +26,9 @@ Code project: it has a `.claude/` with the tool scope for that lab, and a
 
 Claude Code, Codex, Grok Build, OpenCode, or VS Code. You choose, and the lab
 does not care. Every lab ships Saturday prompts in `prompts/`. Lab 1 also
-ships take-home prompts for Claude Agent SDK and LangChain Deep Agents. Labs
-2 to 4 ship those two as well, pointed at the standalone solution folders,
-not at the Saturday stub.
+ships Copilot CLI and Antigravity product ports, plus take-home prompts for
+Claude Agent SDK and LangChain Deep Agents. Labs 2 to 4 ship those two as
+well, pointed at the standalone solution folders, not at the Saturday stub.
 
 See [HOW-TO-RUN.md](HOW-TO-RUN.md).
 
@@ -47,6 +47,8 @@ a variant prompt, add the folder.
 | `sol1_enhancer_grok_build` | [lab1_enhancer/prompts/grok-build.md](lab1_enhancer/prompts/grok-build.md) |
 | `sol1_enhancer_opencode` | [lab1_enhancer/prompts/opencode.md](lab1_enhancer/prompts/opencode.md) |
 | `sol1_enhancer_vscode` | [lab1_enhancer/prompts/vscode.md](lab1_enhancer/prompts/vscode.md) |
+| `sol1_enhancer_copilot_cli` | [lab1_enhancer/prompts/copilot-cli.md](lab1_enhancer/prompts/copilot-cli.md) |
+| `sol1_enhancer_antigravity` | [lab1_enhancer/prompts/antigravity.md](lab1_enhancer/prompts/antigravity.md) |
 | `sol2_implementer_agent_sdk` | [lab2_implementer/prompts/agent-sdk.md](lab2_implementer/prompts/agent-sdk.md) |
 | `sol2_implementer_deep_agents` | [lab2_implementer/prompts/deep-agents.md](lab2_implementer/prompts/deep-agents.md) |
 | `sol3_research_agent_sdk` | [lab3_research/prompts/agent-sdk.md](lab3_research/prompts/agent-sdk.md) |

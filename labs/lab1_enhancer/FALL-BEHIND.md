@@ -150,6 +150,72 @@ and
 [IMPLEMENTATION_NOTES.md](../../solutions/sol1_enhancer_vscode/IMPLEMENTATION_NOTES.md)
 explains plugin loading.
 
+## GitHub Copilot CLI
+
+```bash
+cp -R ../../solutions/sol1_enhancer_copilot_cli/.github .
+cp ../../solutions/sol1_enhancer_copilot_cli/AGENTS.md .
+cp ../../solutions/sol1_enhancer_copilot_cli/config.json.example .
+mkdir -p bin
+cp ../../solutions/sol1_enhancer_copilot_cli/bin/fence_check.py bin/
+```
+
+`cp -R` copies the three symlinks under `.github/agents/` and `.github/skills/`
+as symlinks, which is what you want. They point at
+`../plugins/ticket-enhancer/`, so they keep working after the copy.
+
+Two things Copilot CLI needs before this runs at all:
+
+1. Start `copilot` from **this folder**. Skills are discovered from cwd.
+2. Confirm the names:
+
+   ```bash
+   python3 bin/fence_check.py
+   copilot skill list
+   ```
+
+   `enhancer-loop` must be listed. If it is not, the symlinks did not survive
+   the copy, or Copilot started at the repo root.
+
+The design is
+[solutions/sol1_enhancer_copilot_cli/SPEC.md](../../solutions/sol1_enhancer_copilot_cli/SPEC.md),
+and
+[IMPLEMENTATION_NOTES.md](../../solutions/sol1_enhancer_copilot_cli/IMPLEMENTATION_NOTES.md)
+explains plugin loading.
+
+## Google Antigravity
+
+```bash
+cp -R ../../solutions/sol1_enhancer_antigravity/.agents .
+cp ../../solutions/sol1_enhancer_antigravity/AGENTS.md .
+cp ../../solutions/sol1_enhancer_antigravity/config.json.example .
+mkdir -p bin
+cp ../../solutions/sol1_enhancer_antigravity/bin/fence_check.py bin/
+```
+
+`cp -R` copies the three symlinks under `.agents/agents/` and `.agents/skills/`
+as symlinks, which is what you want. They point at
+`../plugins/ticket-enhancer/`, so they keep working after the copy.
+
+Two things Antigravity needs before this runs at all:
+
+1. Open **this folder** as the workspace, or run `agy` from here.
+   Skills are discovered from the workspace root.
+2. Confirm the names:
+
+   ```bash
+   python3 bin/fence_check.py
+   ```
+
+   `enhancer-loop` must be listed. If it is not, the symlinks did not survive
+   the copy, or `agy` started at the repo root.
+
+The design is
+[solutions/sol1_enhancer_antigravity/SPEC.md](../../solutions/sol1_enhancer_antigravity/SPEC.md),
+and
+[IMPLEMENTATION_NOTES.md](../../solutions/sol1_enhancer_antigravity/IMPLEMENTATION_NOTES.md)
+explains plugin loading.
+
 ## Claude Agent SDK (take-home)
 
 Do not copy these fences into this lab folder. Run the answer:

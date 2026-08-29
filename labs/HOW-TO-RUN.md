@@ -22,6 +22,15 @@ its tool scope, and nothing from the other three.
 | Grok Build | `grok -p "$(cat prompts/grok-build.md)" --no-auto-update` | `grok` |
 | OpenCode | `opencode run "$(cat prompts/opencode.md)"` | `opencode` |
 
+Lab 1 also ships two more product ports. They are not Saturday fill-the-stub
+tools for labs 2 to 4:
+
+| Tool | Headless | Interactive |
+|---|---|---|
+| VS Code | `copilot --allow-all --prompt "$(cat prompts/vscode.md)"` | Copilot Chat in this folder |
+| Copilot CLI | `copilot --allow-all --prompt "$(cat prompts/copilot-cli.md)"` | `copilot` |
+| Antigravity | `agy --dangerously-skip-permissions -p "$(cat prompts/antigravity.md)"` | `agy` |
+
 Lab 1 also ships take-home prompts for two other runtimes. They are not
 Saturday. They rebuild the same loop as a Python harness:
 

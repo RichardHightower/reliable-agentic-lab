@@ -1,0 +1,14 @@
+flowchart LR
+    Task["Task command"] --> Plugin["VS Code agent plugin"]
+    Plugin --> Orchestrator["Orchestrator instructions"]
+    Orchestrator --> Doer["Doer role"]
+    Orchestrator --> Judge["Judge role"]
+    Orchestrator --> Checks["Local check scripts"]
+    Orchestrator --> GitHub["GitHub issue actions"]
+    Orchestrator --> Tickets["Target tickets"]
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class Task,GitHub,Tickets boundary
+    class Plugin,Orchestrator,Doer,Judge agent
+    class Checks control

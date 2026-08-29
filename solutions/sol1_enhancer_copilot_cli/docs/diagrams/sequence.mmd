@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant O as Plugin orchestrator
+    participant J as VS Code judge
+    participant D as VS Code doer
+    participant C as Check scripts
+    participant G as GitHub
+    O->>J: assess ticket
+    J-->>O: kind and present fields
+    O->>C: check fields and stopping rule
+    C-->>O: gaps or terminal decision
+    alt gaps remain
+        O->>D: draft required additions
+        D-->>O: candidate only
+    else terminal decision
+        O->>G: update ticket labels and body
+    end
