@@ -1,0 +1,21 @@
+flowchart LR
+    CLI["loop.py or Task"] --> Pipeline["Paper pipeline"]
+    Pipeline --> Graph["Deep Agents parent graph"]
+    Graph --> Planner["Planner"]
+    Graph --> Researcher["Filtered researcher"]
+    Graph --> Verifier["Evidence verifier"]
+    Graph --> Diagrammer["Diagrammer"]
+    Graph --> Writer["Paper writer"]
+    Graph --> Reviewer["Read-only reviewer"]
+    Pipeline --> Stages["Stage gates and checkpoint"]
+    Researcher --> Providers["Perplexity, Anthropic, OpenAI, fixture"]
+    Verifier --> Providers
+    Writer --> Work["work slash paper slash slug"]
+    Diagrammer --> Figure["Judged image backend"]
+    Stages --> Publish["Opt-in secret gist"]
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class CLI,Providers,Work,Figure,Publish boundary
+    class Graph,Planner,Researcher,Verifier,Diagrammer,Writer,Reviewer agent
+    class Pipeline,Stages control

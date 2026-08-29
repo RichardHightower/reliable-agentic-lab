@@ -1,0 +1,16 @@
+flowchart TD
+    Start([One poll]) --> Find["Discover draft ticket"]
+    Find --> Judge["Deep Agent judge"]
+    Judge --> Fields["check_fields"]
+    Fields --> Ready{"Required fields found?"}
+    Ready -- No --> Doer["Deep Agent doer"]
+    Doer --> Candidate["Candidate under ticket scope"]
+    Candidate --> Judge
+    Ready -- Yes --> Review{"Latest comment is LGTM?"}
+    Review -- Yes --> Publish["Orchestrator updates ticket"]
+    Review -- No --> Stop["check_stop"]
+    Stop --> Repeat{"Continue?"}
+    Repeat -- Yes --> Doer
+    Repeat -- No --> Escalate["Record needs-human"]
+    Publish --> End([Outcome])
+    Escalate --> End

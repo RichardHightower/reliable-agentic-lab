@@ -1,0 +1,20 @@
+@startuml
+left to right direction
+actor Operator
+actor "Human reviewer" as Human
+actor GitHub
+rectangle "Codex Ticket Enhancer" {
+  usecase "Run one poll" as Poll
+  usecase "Invoke read-only judge" as Judge
+  usecase "Invoke read-only doer" as Doer
+  usecase "Evaluate deterministic gates" as Gate
+  usecase "Update issue and labels" as Update
+}
+Operator --> Poll
+Poll .> Judge : includes
+Poll .> Gate : includes
+Poll .> Doer : includes
+Poll --> Update
+Human --> Update : LGTM
+GitHub --> Update
+@enduml

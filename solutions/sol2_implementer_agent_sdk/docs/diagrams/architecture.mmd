@@ -1,0 +1,16 @@
+flowchart LR
+    CLI["harness.py or Task"] --> Contract["Contract"]
+    Contract --> Roles["Role plan"]
+    Roles --> SDK["Claude Agent SDK options"]
+    SDK --> Hook["Single PreToolUse hook"]
+    SDK --> Cast["Five scoped roles"]
+    CLI --> Target["Target CRM repository"]
+    CLI --> Suite["contract.run test"]
+    Hook --> Target
+    Cast --> Target
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class CLI,Target,Suite boundary
+    class SDK,Hook,Cast agent
+    class Contract,Roles control

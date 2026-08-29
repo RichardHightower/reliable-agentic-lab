@@ -1,0 +1,12 @@
+flowchart TD
+    Start([Broken branch]) --> Run["Run test task"]
+    Run --> Parse["Parse failing ids"]
+    Parse --> Fix["Scoped code implementer"]
+    Fix --> Rerun["Rerun test task"]
+    Rerun --> Judge["Judge reads evidence"]
+    Judge --> Gate["Evaluate exits"]
+    Gate --> Green{"Green suite?"}
+    Green -- Yes --> Done([Done])
+    Green -- No --> Stop{"Repeated failures or budget?"}
+    Stop -- No --> Fix
+    Stop -- Yes --> Escalate([Return explanation])

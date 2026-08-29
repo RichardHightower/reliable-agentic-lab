@@ -1,0 +1,14 @@
+flowchart LR
+    Task["Task command"] --> OpenCode["OpenCode configuration"]
+    OpenCode --> Orchestrator["Orchestrator agent"]
+    Orchestrator --> TaskRole["Task tool subagents"]
+    TaskRole --> Doer["Doer with edit denied"]
+    TaskRole --> Judge["Judge with edit and bash denied"]
+    Orchestrator --> Checks["Field and stop checks"]
+    Orchestrator --> GitHub["GitHub issue updates"]
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class Task,GitHub boundary
+    class OpenCode,Orchestrator,TaskRole,Doer,Judge agent
+    class Checks control

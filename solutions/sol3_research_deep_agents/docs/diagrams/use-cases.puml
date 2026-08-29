@@ -1,0 +1,23 @@
+@startuml
+left to right direction
+actor Operator
+actor "Research providers" as Sources
+actor "Image backend" as Images
+actor "Gist service" as Gist
+rectangle "Deep Agents white paper pipeline" {
+  usecase "Plan bounded questions" as Plan
+  usecase "Research and filter sources" as Research
+  usecase "Verify claims" as Verify
+  usecase "Render judged figures" as Diagram
+  usecase "Write and review paper" as Paper
+  usecase "Hard-check and publish" as Publish
+}
+Operator --> Plan
+Operator --> Publish
+Sources --> Research
+Sources --> Verify
+Images --> Diagram
+Diagram --> Paper
+Paper --> Publish
+Publish --> Gist
+@enduml

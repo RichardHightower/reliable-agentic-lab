@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant H as harness.py
+    participant P as Planner
+    participant W as Writers
+    participant T as Python test contract
+    participant J as Judge
+    H->>P: create scoped plan
+    P-->>H: steps.jsonl summary
+    H->>W: test and code implementation turns
+    W-->>H: scoped changes
+    H->>T: run test task and read JUnit
+    T-->>H: red or green report
+    H->>J: inspect report and diff
+    J-->>H: rubric verdict
+    alt all gates pass
+        H-->>H: record completion
+    else retryable failure
+        H->>W: send failure summary
+    else terminal failure
+        H-->>H: escalate
+    end

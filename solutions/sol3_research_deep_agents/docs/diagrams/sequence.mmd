@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant L as loop.py
+    participant G as Deep Agents graph
+    participant S as Search providers
+    participant P as Paper pipeline
+    participant Q as Gates
+    L->>P: run paper(topic, budget)
+    P->>G: plan bounded questions
+    P->>G: research each question
+    G->>S: filtered search or retrieval
+    S-->>G: evidence candidates
+    P->>G: verify and create figures
+    G-->>P: findings and judged figures
+    P->>G: write and review sections
+    G-->>P: scoped files and verdict
+    P->>Q: hard-check paper and state
+    Q-->>L: done, retry, cost, or max turns

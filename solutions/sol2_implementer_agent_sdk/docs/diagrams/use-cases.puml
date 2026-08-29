@@ -1,0 +1,24 @@
+@startuml
+left to right direction
+actor Operator
+actor "Claude Agent SDK" as SDK
+actor "Target repository" as Repo
+rectangle "Lab 2 Agent SDK cast" {
+  usecase "Display fenced role plan" as Table
+  usecase "Plan implementation" as Plan
+  usecase "Write tests" as Tests
+  usecase "Write application code" as Code
+  usecase "Run test contract" as Run
+  usecase "Judge implementation" as Judge
+}
+Operator --> Table
+Operator --> Plan
+SDK --> Plan
+SDK --> Tests
+SDK --> Code
+Tests --> Repo
+Code --> Repo
+Operator --> Run
+Run --> Repo
+Operator --> Judge
+@enduml

@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant H as Harness
+    participant A as Deep Agents graph
+    participant R as Scoped role
+    participant T as Test contract
+    participant G as Deterministic gate
+    H->>A: invoke implementation loop
+    A->>R: planner writes plan
+    A->>R: test writer writes tests
+    H->>T: run target test task
+    T-->>H: JUnit report
+    A->>R: code writer fixes app files
+    H->>T: rerun suite
+    A->>R: judge reads report
+    R-->>H: score and findings
+    H->>G: decide pass, retry, or escalate
+    G-->>H: terminal state or next attempt

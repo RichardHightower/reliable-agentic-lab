@@ -1,0 +1,19 @@
+@startuml
+left to right direction
+actor Operator
+actor "Deep Agents runtime" as Runtime
+actor "Target repository" as Repo
+rectangle "Deep Agents PR Fixer" {
+  usecase "Run failing suite" as Test
+  usecase "Repair app-only paths" as Fix
+  usecase "Apply virtual filesystem fences" as Fence
+  usecase "Judge repair evidence" as Judge
+  usecase "Stop green, stalled, or over budget" as Stop
+}
+Operator --> Test
+Runtime --> Fix
+Fix .> Fence : includes
+Fix --> Repo
+Operator --> Judge
+Operator --> Stop
+@enduml

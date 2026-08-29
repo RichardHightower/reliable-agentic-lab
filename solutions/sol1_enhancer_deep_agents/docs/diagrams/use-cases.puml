@@ -1,0 +1,23 @@
+@startuml
+left to right direction
+actor Operator
+actor "Human reviewer" as Human
+actor "Deep Agents runtime" as Runtime
+actor GitHub
+rectangle "Deep Agents Ticket Enhancer" {
+  usecase "Poll ticket" as Poll
+  usecase "Judge completeness" as Judge
+  usecase "Draft missing content" as Draft
+  usecase "Apply scoped write policy" as Scope
+  usecase "Update ticket lifecycle" as Update
+}
+Operator --> Poll
+Poll .> Judge : includes
+Poll .> Draft : includes
+Draft .> Scope : includes
+Poll --> Update
+Human --> Update : LGTM
+Runtime --> Judge
+Runtime --> Draft
+GitHub --> Update
+@enduml

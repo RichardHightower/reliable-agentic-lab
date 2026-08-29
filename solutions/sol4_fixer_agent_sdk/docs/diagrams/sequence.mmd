@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant L as loop.py
+    participant F as Fixer
+    participant T as Test contract
+    participant A as Agent SDK doer
+    participant G as Gate
+    L->>F: repair_until_green
+    F->>T: run suite and parse JUnit
+    T-->>F: failure summary
+    loop bounded attempts
+        F->>A: fix app paths only
+        A-->>F: changes and cost
+        F->>T: rerun suite
+        T-->>F: updated report
+        F->>G: compare green, repeating ids, and budget
+        G-->>F: done, retry, or escalate
+    end
+    F-->>L: trace and comment

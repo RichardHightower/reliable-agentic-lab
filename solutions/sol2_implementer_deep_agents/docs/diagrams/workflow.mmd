@@ -1,0 +1,13 @@
+flowchart TD
+    Start([Ready ticket]) --> Plan["Planner writes steps.jsonl"]
+    Plan --> Test["Test implementer writes tests"]
+    Test --> Red["Run suite and parse JUnit"]
+    Red --> Code["Code implementer edits app"]
+    Code --> Rerun["Run suite"]
+    Rerun --> Judge["Judge reads diff and reports"]
+    Judge --> Gate["gates.decide"]
+    Gate --> Passed{"Pass?"}
+    Passed -- Yes --> Done([Complete])
+    Passed -- No --> Stall{"Retry allowed?"}
+    Stall -- Yes --> Code
+    Stall -- No --> Escalate([Escalate])

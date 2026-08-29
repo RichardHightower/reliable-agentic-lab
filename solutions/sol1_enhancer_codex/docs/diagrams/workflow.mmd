@@ -1,0 +1,16 @@
+flowchart TD
+    Start([Task poll]) --> Select["Select open issue"]
+    Select --> Judge["Launch judge role"]
+    Judge --> Fields["Deterministic field check"]
+    Fields --> Complete{"Complete?"}
+    Complete -- No --> Doer["Launch doer role"]
+    Doer --> Candidate["Return candidate text only"]
+    Candidate --> Judge
+    Complete -- Yes --> Approval{"LGTM comment?"}
+    Approval -- Yes --> Ready["Orchestrator updates issue"]
+    Approval -- No --> Stop["Deterministic stop check"]
+    Stop --> Retry{"Retry allowed?"}
+    Retry -- Yes --> Doer
+    Retry -- No --> Human["Set needs-human"]
+    Ready --> End([Return])
+    Human --> End

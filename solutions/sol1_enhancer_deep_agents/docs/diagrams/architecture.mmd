@@ -1,0 +1,16 @@
+flowchart LR
+    CLI["loop.py or Task"] --> Runner["Python loop"]
+    Runner --> Contract["Contract and role plan"]
+    Runner --> Enhancer["Enhancer state machine"]
+    Enhancer --> Agent["Deep Agents graph"]
+    Agent --> Roles["Scoped subagents"]
+    Roles --> Scope["Tool and path fences"]
+    Enhancer --> Checks["Deterministic gates"]
+    Enhancer --> GitHub["GitHub issue actions"]
+    Enhancer --> Target["Target ticket files"]
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class CLI,GitHub,Target boundary
+    class Agent,Roles,Scope agent
+    class Contract,Enhancer,Checks control

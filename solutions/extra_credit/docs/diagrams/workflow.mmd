@@ -1,0 +1,24 @@
+flowchart TD
+    Start([GitHub delivery]) --> Raw["Read raw request body"]
+    Raw --> Secret{"Secret configured?"}
+    Secret -- No --> Service["503"]
+    Secret -- Yes --> HMAC{"HMAC valid?"}
+    HMAC -- No --> Unauthorized["401"]
+    HMAC -- Yes --> Event["Route event"]
+    Event --> Ping{"Ping?"}
+    Ping -- Yes --> Pong["200 pong"]
+    Ping -- No --> Ticket{"Ticket id available?"}
+    Ticket -- No --> Ignore["Journal and stop"]
+    Ticket -- Yes --> Duplicate{"Delivery or issue locked?"}
+    Duplicate -- Yes --> Accepted["202 without duplicate run"]
+    Duplicate -- No --> Attempts{"Attempt cap reached?"}
+    Attempts -- Yes --> Escalate["Comment or label and clear guard"]
+    Attempts -- No --> Launch["Return 202 and spawn one enhancer run"]
+    Launch --> Journal["Write delivery journal"]
+    Journal --> End([Loop owns exits])
+    Pong --> End
+    Service --> End
+    Unauthorized --> End
+    Ignore --> End
+    Accepted --> End
+    Escalate --> End

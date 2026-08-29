@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant L as Python loop
+    participant E as Enhancer
+    participant D as Deep Agents graph
+    participant C as Checks
+    participant G as GitHub
+    L->>E: poll
+    E->>D: invoke judge subagent
+    D-->>E: field assessment
+    E->>C: validate fields and exits
+    C-->>E: retry, ready, or escalate
+    opt retry
+        E->>D: invoke scoped doer
+        D-->>E: candidate and diagnostics
+    end
+    opt terminal action
+        E->>G: update labels or issue body
+    end
+    E-->>L: Outcome

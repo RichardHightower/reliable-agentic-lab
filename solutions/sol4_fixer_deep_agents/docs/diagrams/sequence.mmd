@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant L as Python loop
+    participant D as Deep Agents graph
+    participant R as Scoped code role
+    participant T as Test contract
+    participant G as Deterministic gate
+    L->>T: run suite
+    T-->>L: JUnit failures
+    loop until terminal
+        L->>D: delegate repair
+        D->>R: edit allowed app files
+        R-->>L: repair result
+        L->>T: rerun suite
+        T-->>L: suite status
+        L->>G: evaluate outcome
+        G-->>L: retry, done, or escalate
+    end

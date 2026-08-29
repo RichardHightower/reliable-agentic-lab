@@ -1,0 +1,28 @@
+classDiagram
+    class Contract {
+        +repo: Path
+        +budget: dict
+        +run(task): RunResult
+    }
+    class RolePlan {
+        +name: str
+        +tools: tuple
+        +allow: tuple
+        +deny: tuple
+    }
+    class Enhancer {
+        +poll(ticket): Outcome[]
+    }
+    class AgentSdkBackend {
+        +judge(path): DoerResult
+        +draft(ticket): DoerResult
+    }
+    class Ticket {
+        +id: str
+        +kind: str
+        +criteria: Criterion[]
+    }
+    Contract --> RolePlan
+    Enhancer --> AgentSdkBackend
+    Enhancer --> Ticket
+    AgentSdkBackend --> RolePlan

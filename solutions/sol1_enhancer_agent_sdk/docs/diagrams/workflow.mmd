@@ -1,0 +1,18 @@
+flowchart TD
+    Start([One poll]) --> Open["open_tickets"]
+    Open --> Choose{"Ticket available?"}
+    Choose -- No --> End([Return])
+    Choose -- Yes --> Inspect["Agent SDK judge turn"]
+    Inspect --> Fields["check_fields"]
+    Fields --> Ready{"Ready?"}
+    Ready -- No --> Candidate["Agent SDK doer turn"]
+    Candidate --> Persist["Store candidate and events"]
+    Persist --> Inspect
+    Ready -- Yes --> LGTM{"Human LGTM?"}
+    LGTM -- Yes --> Publish["Orchestrator writes issue and labels"]
+    LGTM -- No --> Gate["check_stop"]
+    Gate --> Decision{"Retry?"}
+    Decision -- Yes --> Candidate
+    Decision -- No --> Escalate["Mark needs-human"]
+    Publish --> End
+    Escalate --> End

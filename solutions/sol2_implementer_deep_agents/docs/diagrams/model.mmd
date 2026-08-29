@@ -1,0 +1,23 @@
+classDiagram
+    class Harness {
+        +run(ticket, doer): dict
+    }
+    class Contract {
+        +run(task): RunResult
+        +role(name): Scope
+    }
+    class RolePlan {
+        +allow: tuple
+        +deny: tuple
+    }
+    class WriteScope {
+        +allows(path): bool
+    }
+    class GateDecision {
+        +state: str
+        +reason: str
+    }
+    Harness --> Contract
+    Contract --> RolePlan
+    RolePlan --> WriteScope
+    Harness --> GateDecision

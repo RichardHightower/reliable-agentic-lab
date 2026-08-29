@@ -1,0 +1,28 @@
+classDiagram
+    class Claim {
+        +text: str
+        +source_id: str
+        +status: str
+    }
+    class SourceDocument {
+        +url: str
+        +quote: str
+        +provider: str
+    }
+    class Finding {
+        +claim_id: str
+        +truth_state: str
+    }
+    class PaperRun {
+        +topic: str
+        +max_usd: float
+        +run(): int
+    }
+    class GateDecision {
+        +state: str
+        +signature: str
+    }
+    Claim --> SourceDocument
+    Finding --> Claim
+    PaperRun --> Finding
+    PaperRun --> GateDecision

@@ -1,0 +1,18 @@
+flowchart TD
+    Start([One poll]) --> Find["Find open ticket"]
+    Find --> Empty{"Ticket found?"}
+    Empty -- No --> End([No work])
+    Empty -- Yes --> Label["Add enhanced label"]
+    Label --> Judge["Judge ticket fields"]
+    Judge --> Check["check_fields.py"]
+    Check --> Ready{"All fields present?"}
+    Ready -- No --> Draft["Doer drafts candidate"]
+    Draft --> Judge
+    Ready -- Yes --> Human{"Latest comment is LGTM?"}
+    Human -- Yes --> Release["Write ticket and add ready"]
+    Human -- No --> Stop["check_stop.py"]
+    Stop --> Again{"Retry allowed?"}
+    Again -- Yes --> Draft
+    Again -- No --> Escalate["Add needs-human"]
+    Release --> End
+    Escalate --> End

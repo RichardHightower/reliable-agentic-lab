@@ -1,0 +1,13 @@
+flowchart TD
+    Start([Broken branch]) --> Test["Run target test task"]
+    Test --> Summary["Summarize failing ids"]
+    Summary --> Doer["Code implementer edits app only"]
+    Doer --> Retest["Rerun suite"]
+    Retest --> Judge["Judge reads report and diff"]
+    Judge --> Gate["gates.decide"]
+    Gate --> Green{"Suite green?"}
+    Green -- Yes --> Done([Return green result])
+    Green -- No --> Exit{"Stall or cost exhausted?"}
+    Exit -- No --> Doer
+    Exit -- Yes --> Comment["Return honest failure comment"]
+    Comment --> End([Escalate])

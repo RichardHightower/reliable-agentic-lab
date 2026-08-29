@@ -1,0 +1,23 @@
+classDiagram
+    class RoleLauncher {
+        +run(role, context): str
+    }
+    class CheckFields {
+        +check(kind, present_fields): dict
+    }
+    class CheckStop {
+        +check(round, signature): dict
+    }
+    class Orchestrator {
+        +poll(): Outcome
+        +write_issue(): void
+    }
+    class Ticket {
+        +number: int
+        +body: str
+        +labels: str[]
+    }
+    Orchestrator --> RoleLauncher
+    Orchestrator --> CheckFields
+    Orchestrator --> CheckStop
+    Orchestrator --> Ticket

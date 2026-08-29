@@ -1,0 +1,17 @@
+flowchart TD
+    Start([Topic]) --> Plan["Plan bounded questions and figures"]
+    Plan --> Research["Research atomic claims"]
+    Research --> Verify["Independently verify claims"]
+    Verify --> Diagram["Generate and render figures"]
+    Diagram --> Write["Write surviving claims by section"]
+    Write --> Assemble["Assemble paper and references"]
+    Assemble --> Check["Run seven deterministic checks"]
+    Check --> Gate["Pass, retry, or escalate"]
+    Gate --> Pass{"Passed?"}
+    Pass -- Yes --> Publish{"Publish requested?"}
+    Publish -- Yes --> Gist["Publish secret gist"]
+    Publish -- No --> Done([Keep work bundle])
+    Gist --> Done
+    Pass -- No --> Retry{"Stall, turn, or cost exit?"}
+    Retry -- No --> Research
+    Retry -- Yes --> Escalate([Keep evidence and report failure])

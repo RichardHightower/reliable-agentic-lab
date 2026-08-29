@@ -1,0 +1,21 @@
+@startuml
+left to right direction
+actor GitHub
+actor Operator
+actor "Human reviewer" as Human
+actor "DigitalOcean Droplet" as Droplet
+rectangle "Extra credit trigger adapters" {
+  usecase "Verify signed webhook" as Verify
+  usecase "Route one ticket event" as Route
+  usecase "Start one Lab 1 enhancer run" as Start
+  usecase "Record and clear delivery guard" as Guard
+  usecase "Expose receiver through ngrok or Nginx" as Expose
+}
+GitHub --> Verify
+Verify --> Route
+Route --> Start
+Start --> Guard
+Operator --> Expose
+Droplet --> Expose
+Human --> Start : produces approval comment
+@enduml

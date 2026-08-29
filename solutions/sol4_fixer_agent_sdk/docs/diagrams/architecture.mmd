@@ -1,0 +1,17 @@
+flowchart LR
+    CLI["loop.py or Task"] --> Contract["Contract"]
+    Contract --> Fixer["fixer.run"]
+    Fixer --> Backend["Agent SDK backend"]
+    Backend --> Hook["PreToolUse scope hook"]
+    Backend --> Doer["Code implementer"]
+    Fixer --> Judge["Read-only judge"]
+    Fixer --> Tests["Target test task and JUnit"]
+    Fixer --> Gates["Green, stall, and cost exits"]
+    Doer --> Repo["Target app files"]
+    Tests --> Repo
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class CLI,Repo boundary
+    class Backend,Hook,Doer,Judge agent
+    class Contract,Fixer,Tests,Gates control

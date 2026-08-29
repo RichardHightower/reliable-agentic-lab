@@ -1,0 +1,28 @@
+classDiagram
+    class GitHub {
+        +get_issue(number): dict
+        +add_label(number, label)
+        +comment(number, text)
+    }
+    class FakeGitHub {
+        +calls: list
+        +add_label(number, label)
+    }
+    class Delivery {
+        +event: str
+        +delivery_id: str
+        +issue_number: int
+    }
+    class WebhookReceiver {
+        +verify_signature(body, header)
+        +route_event(event, payload)
+        +run_routed(route, number)
+    }
+    class Sol1Handoff {
+        +command_for(ticket): list
+        +run_sol1(ticket): int
+    }
+    GitHub <|-- FakeGitHub
+    WebhookReceiver --> Delivery
+    WebhookReceiver --> Sol1Handoff
+    WebhookReceiver --> GitHub

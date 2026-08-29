@@ -1,0 +1,23 @@
+classDiagram
+    class Contract {
+        +run(task): RunResult
+    }
+    class Fixer {
+        +run(repo, doer, budget): trace
+        +failure_summary(report): str
+    }
+    class AgentSdkBackend {
+        +fix(summary): DoerResult
+    }
+    class SuiteReport {
+        +green: bool
+        +failing_ids: str[]
+    }
+    class GateDecision {
+        +gate: str
+        +reason: str
+    }
+    Fixer --> Contract
+    Fixer --> AgentSdkBackend
+    Fixer --> SuiteReport
+    Fixer --> GateDecision

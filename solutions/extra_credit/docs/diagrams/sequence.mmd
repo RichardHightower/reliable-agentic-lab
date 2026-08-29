@@ -1,0 +1,20 @@
+sequenceDiagram
+    participant G as GitHub
+    participant R as Receiver or adapter
+    participant S as Security and lock policy
+    participant E as sol1 enhancer subprocess
+    participant J as Journal or GitHub API
+    G->>R: signed webhook delivery
+    R->>S: verify HMAC and deduplicate
+    alt accepted ticket event
+        S-->>R: route ticket and acquire lock
+        R-->>G: 202 Accepted
+        R->>E: task run for ticket
+        E->>J: update ticket lifecycle
+        E-->>R: exit status
+        R->>S: release in-progress guard
+        R->>J: write delivery record
+    else rejected or ignored
+        S-->>R: 401, 503, or ignore decision
+        R-->>G: status response
+    end

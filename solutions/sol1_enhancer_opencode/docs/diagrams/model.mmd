@@ -1,0 +1,25 @@
+classDiagram
+    class OpenCodeConfig {
+        +agents: dict
+        +permissions: dict
+    }
+    class Orchestrator {
+        +poll(): Outcome
+        +write_issue(): void
+    }
+    class TaskSubagent {
+        +run(context): str
+    }
+    class DeterministicChecks {
+        +check_fields(): dict
+        +check_stop(): dict
+    }
+    class Issue {
+        +title: str
+        +body: str
+        +labels: str[]
+    }
+    OpenCodeConfig --> Orchestrator
+    Orchestrator --> TaskSubagent
+    Orchestrator --> DeterministicChecks
+    Orchestrator --> Issue

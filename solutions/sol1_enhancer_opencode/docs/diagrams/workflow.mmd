@@ -1,0 +1,16 @@
+flowchart TD
+    Start([Run poll]) --> Issue["Select unready issue"]
+    Issue --> Judge["Task judge returns JSON"]
+    Judge --> Check["Validate field set"]
+    Check --> Ready{"Ready?"}
+    Ready -- No --> Doer["Task doer drafts text"]
+    Doer --> Candidate["Return candidate without writing"]
+    Candidate --> Judge
+    Ready -- Yes --> Human{"Latest comment is LGTM?"}
+    Human -- Yes --> Publish["Orchestrator writes issue"]
+    Human -- No --> Stop["Validate retry limits"]
+    Stop --> Retry{"Continue?"}
+    Retry -- Yes --> Doer
+    Retry -- No --> Escalate["Mark needs-human"]
+    Publish --> End([Outcome])
+    Escalate --> End

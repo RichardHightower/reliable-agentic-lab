@@ -1,0 +1,23 @@
+classDiagram
+    class Contract {
+        +repo: Path
+        +budget: dict
+    }
+    class RolePlan {
+        +tools: tuple
+        +allow: tuple
+        +deny: tuple
+    }
+    class Enhancer {
+        +poll(ticket): Outcome[]
+    }
+    class DeepAgentsBackend {
+        +run_doer(): DoerResult
+        +run_judge(): DoerResult
+    }
+    class WriteScope {
+        +allows(path): bool
+    }
+    Contract --> RolePlan
+    Enhancer --> DeepAgentsBackend
+    DeepAgentsBackend --> WriteScope

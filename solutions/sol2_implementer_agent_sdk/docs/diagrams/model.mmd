@@ -1,0 +1,25 @@
+classDiagram
+    class Contract {
+        +repo: Path
+        +run(task): RunResult
+    }
+    class RolePlan {
+        +name: str
+        +tools: tuple
+        +allow: tuple
+        +deny: tuple
+    }
+    class WriteScopeHook {
+        +validate(agent_type, path): decision
+    }
+    class SuiteReport {
+        +green: bool
+        +failures: list
+    }
+    class AgentSdkBackend {
+        +run(role, prompt): DoerResult
+    }
+    Contract --> RolePlan
+    RolePlan --> WriteScopeHook
+    Contract --> SuiteReport
+    AgentSdkBackend --> RolePlan

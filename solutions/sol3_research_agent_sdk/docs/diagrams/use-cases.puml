@@ -1,0 +1,21 @@
+@startuml
+left to right direction
+actor Operator
+actor "MCP source provider" as Sources
+actor "Gist service" as Gist
+rectangle "Agent SDK research pipeline" {
+  usecase "Plan bounded research" as Plan
+  usecase "Research claims" as Research
+  usecase "Independently verify claims" as Verify
+  usecase "Render publication figures" as Diagram
+  usecase "Write evidence-backed paper" as Paper
+  usecase "Check and optionally publish" as Publish
+}
+Operator --> Plan
+Operator --> Publish
+Sources --> Research
+Sources --> Verify
+Diagram --> Paper
+Paper --> Publish
+Publish --> Gist
+@enduml
