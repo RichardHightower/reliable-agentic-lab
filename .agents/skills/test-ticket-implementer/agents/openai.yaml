@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Ticket Implementer"
+  short_description: "Run shared Track A and Track B implementer E2E tests"
+  default_prompt: "Use $test-ticket-implementer to test a standalone ticket implementer runtime end to end."
