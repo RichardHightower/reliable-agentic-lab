@@ -205,8 +205,11 @@ class DeepAgentsBackend(Backend):
         try:
             before = _changed_files(repo)
             payload = {"messages": [{"role": "user", "content": prompt}]}
-            config = {"recursion_limit": self.recursion_limit} if self.recursion_limit else None
-            result = self._agent_for(allow).invoke(payload, config=config)
+            agent = self._agent_for(allow)
+            if self.recursion_limit:
+                result = agent.invoke(payload, config={"recursion_limit": self.recursion_limit})
+            else:
+                result = agent.invoke(payload)
             after = _changed_files(repo)
             scope = WriteScope(allow=allow)
             wrote = sorted(path for path in (after - before) if scope.permits(path))

@@ -165,6 +165,7 @@ def run(  # noqa: PLR0915
     # Step 4. The red gate.
     if scope_violations:
         trace["test_phase_scope_violations"] = sorted(scope_violations)
+        trace["scope_violations"] = sorted(scope_violations)
         trace["gate"] = gates.ESCALATE
         trace["reason"] = (
             "test phase wrote outside its scope: " + ", ".join(sorted(scope_violations))
