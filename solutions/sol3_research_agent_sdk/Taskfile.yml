@@ -3,7 +3,8 @@
 #
 # `task test`, `task table`, and `task checks` need no SDK, no API key, and no
 # network. `task demo` needs the renderer. `task run` and `task publish` need a
-# key, and `task publish` also needs `gh` with the `gist` scope.
+# key, and `task publish` also needs `gh` with the `gist` scope. `task setup`
+# creates `.venv` in this folder so Homebrew Python (PEP 668) is not in the way.
 version: '3'
 
 # Task loads these for every task below. The repo root `.env` is the normal
@@ -18,6 +19,8 @@ vars:
   # invoking process's cwd being exactly right, and when it is not, this port
   # can end up writing a paper into a different checkout.
   PY: '{{.PY | default "python3"}}'
+  VENV: '{{.TASKFILE_DIR}}/.venv'
+  RUN_PY: '{{.RUN_PY | default (printf "%s/bin/python" .VENV)}}'
   TOPIC: '{{.TOPIC | default "loop engineering exit criteria"}}'
   RENDERER: 'https://github.com/SpillwaveSolutions/imagen-diagrams'
   RENDERER_TAG: 'v0.1.0'
@@ -32,7 +35,12 @@ tasks:
     desc: Unit tests for this folder. No SDK, no API key, no network.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} -m pytest tests -q'
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" -m pytest tests -q
+        else
+          {{.PY}} -m pytest tests -q
+        fi
 
   table:
     desc: Print the role table and exit, with no SDK installed.
@@ -52,10 +60,11 @@ tasks:
   # -- setup ----------------------------------------------------------------
 
   setup:
-    desc: Install the Agent SDK and clone the diagram renderer into .cache/.
+    desc: Create .venv in this folder, install the Agent SDK, clone the renderer.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} -m pip install --quiet claude-agent-sdk pytest'
+      - test -x {{.RUN_PY}} || {{.PY}} -m venv {{.VENV}}
+      - '{{.RUN_PY}} -m pip install --quiet claude-agent-sdk pytest'
       - task: renderer
 
   renderer:
@@ -73,19 +82,34 @@ tasks:
     desc: A full offline run over the recorded fixture. No key, no network.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} loop.py --topic "{{.TOPIC}}" --backend fixture --fresh'
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" --backend fixture --fresh
+        else
+          {{.PY}} loop.py --topic "{{.TOPIC}}" --backend fixture --fresh
+        fi
 
   run:
     desc: Research a topic and write the paper. Needs a key. TOPIC=... to set it.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} loop.py --topic "{{.TOPIC}}" {{.CLI_ARGS}}'
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates .venv in this folder and installs claude-agent-sdk."
+          exit 1
+        fi
+        "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" {{.CLI_ARGS}}
 
   publish:
     desc: Run, then push the paper and its figures to a private gist.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} loop.py --topic "{{.TOPIC}}" --publish {{.CLI_ARGS}}'
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates .venv in this folder and installs claude-agent-sdk."
+          exit 1
+        fi
+        "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" --publish {{.CLI_ARGS}}
 
   clean:
     desc: Delete every run under work/. The renderer clone in .cache/ stays.

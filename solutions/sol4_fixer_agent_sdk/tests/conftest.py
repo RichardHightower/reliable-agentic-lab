@@ -100,6 +100,7 @@ class FakeClaudeAgentOptions:
     system_prompt: str = ""
     max_turns: int = 0
     max_budget_usd: float | None = None
+    output_format: dict | None = None
     env: dict = field(default_factory=dict)
 
 
@@ -107,6 +108,7 @@ class FakeClaudeAgentOptions:
 class FakeResultMessage:
     result: str = ""
     total_cost_usd: float = 0.0
+    structured_output: dict | None = None
     is_error: bool = False
     subtype: str = "success"
 

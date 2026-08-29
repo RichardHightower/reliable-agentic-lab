@@ -117,3 +117,26 @@ def test_every_agent_file_declares_the_tools_the_table_grants(name):
     rather than failing inside an SDK call."""
     declared = load_agents.agent_files()[roles.agent_name(name)]["tools"]
     assert sorted(declared) == sorted(CAST[name].tools)
+
+
+def test_setup_creates_a_local_venv_and_how_to_run_exists():
+    """Homebrew Python is PEP 668. pip into system Python is how a live demo
+    died. task setup creates .venv in this folder."""
+    taskfile = (FOLDER / "Taskfile.yml").read_text(encoding="utf-8")
+    how = FOLDER / "HOW_TO_RUN.md"
+    assert ".venv" in taskfile
+    assert "venv you activated" not in taskfile
+    assert how.is_file()
+    text = how.read_text(encoding="utf-8")
+    assert "venv you activated" not in text
+    assert "task setup" in text
+    assert "labs/lab3_research" in text
+
+
+def test_the_docs_name_only_tasks_that_exist():
+    taskfile = (FOLDER / "Taskfile.yml").read_text(encoding="utf-8")
+    declared = set(re.findall(r"^  (\w[\w-]*):$", taskfile, re.M))
+    for name in ("SPEC.md", "HOW_TO_RUN.md"):
+        prose = (FOLDER / name).read_text(encoding="utf-8")
+        for named in re.findall(r"task ([a-z][a-z-]*)", prose):
+            assert named in declared, f"{name} names `task {named}`, the Taskfile does not"

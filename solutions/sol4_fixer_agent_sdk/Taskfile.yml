@@ -1,6 +1,17 @@
+# Standalone. No dependency on the root Taskfile.
+#
+# `task test` and `task table` need no SDK, no API key, and no clone.
+# `task run` needs the SDK, a key, and a clone. `task setup` creates `.venv`
+# in this folder so Homebrew Python (PEP 668) is not in the way.
 version: '3'
 
 dotenv: ['../../.env', '.env']
+
+vars:
+  TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
+  VENV: '{{.TASKFILE_DIR}}/.venv'
+  PY: '{{.PY | default "python3"}}'
+  RUN_PY: '{{.RUN_PY | default (printf "%s/bin/python" .VENV)}}'
 
 tasks:
   default:
@@ -10,22 +21,51 @@ tasks:
     desc: Unit tests. No Agent SDK and no CRM clone.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 -m pytest tests -q
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" -m pytest tests -q
+        else
+          {{.PY}} -m pytest tests -q
+        fi
 
   table:
     desc: Print the role table and stop, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py --table-only
+      - '{{.PY}} loop.py --table-only'
 
   setup:
-    desc: Install the Agent SDK and pytest into the venv you activated.
+    desc: Create .venv in this folder and install the Agent SDK into it.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 -m pip install --quiet claude-agent-sdk pytest
+      - test -x {{.RUN_PY}} || {{.PY}} -m venv {{.VENV}}
+      - '{{.RUN_PY}} -m pip install --quiet claude-agent-sdk pytest'
+
+  clone:
+    desc: Clone northwind-field-crm into work/. Skips if it is already there.
+    status:
+      - test -d {{.TARGET}}/.git
+    cmds:
+      - mkdir -p {{.TASKFILE_DIR}}/../../work
+      - git clone --quiet https://github.com/RichardHightower/northwind-field-crm.git {{.TARGET}}
+
+  reset:
+    desc: Check out broken-pr in the CRM clone. Refuses if the tree is dirty.
+    cmds:
+      - |
+        if [ ! -d "{{.TARGET}}/.git" ]; then
+          echo "run task clone first."
+          exit 1
+        fi
+        git -C {{.TARGET}} checkout broken-pr
 
   run:
     desc: Repair a branch. Needs the SDK, a key, and a clone.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py {{.CLI_ARGS}}
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates .venv in this folder and installs claude-agent-sdk."
+          exit 1
+        fi
+        "{{.RUN_PY}}" loop.py --repo {{.TARGET}} {{.CLI_ARGS}}

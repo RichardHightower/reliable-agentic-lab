@@ -90,3 +90,69 @@ def test_it_fails_gracefully_with_no_sdk(repo, monkeypatch):
     result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
     assert not result.ok
     assert "agent sdk backend failed" in result.output
+
+
+def test_it_does_not_join_streamed_tool_events(fake_sdk, repo):
+    """Joining every event is how Grep output became a candidate."""
+
+    class StreamEvent:
+        def __str__(self):
+            return "30\tGrep dump of app/models.py"
+
+    fake_sdk([StreamEvent(), FakeResultMessage(result="the answer")])
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert result.output == "the answer"
+    assert "Grep dump" not in result.output
+    assert "StreamEvent" in result.raw_output
+
+
+def test_a_hung_query_times_out(fake_sdk, repo, monkeypatch):
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached")
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 0.05)
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert not result.ok
+    assert result.stop_reason == "query timeout"
+    assert "timed out" in result.output
+    assert "never reached" not in result.output
+
+
+def test_it_reads_structured_output(fake_sdk, repo):
+    fake_sdk(
+        [
+            FakeResultMessage(
+                result="fallback",
+                structured_output={"done": True, "issues": []},
+            )
+        ]
+    )
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert result.structured == {"done": True, "issues": []}
+    assert result.output == "fallback"
+
+
+def test_a_per_turn_override_does_not_mutate_the_shared_options(fake_sdk, repo):
+    module = fake_sdk([FakeResultMessage(result="x")])
+    options = module.ClaudeAgentOptions(cwd=str(repo))
+    adapter.AgentSdkBackend(options).run(repo=repo, prompt="p", allow=[], output_format={"s": 1})
+    assert options.output_format is None
+    assert module.last_options.output_format == {"s": 1}
+
+
+def test_it_sees_a_brand_new_untracked_file(fake_sdk, repo):
+    """`git diff --name-only` misses a file git has never heard of."""
+    module = fake_sdk([FakeResultMessage(result="x")])
+
+    async def query(*, prompt, options):
+        (repo / "app" / "new_mod.py").write_text("x = 3\n")
+        for message in [FakeResultMessage(result="x")]:
+            yield message
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=["app/**"])
+    assert result.wrote == ["app/new_mod.py"]
