@@ -41,12 +41,19 @@ below the line in the prompt file.
 You can still do labs 2 through 4 by filling the stub by hand. Watch Rick
 if you stall. Labs 2 to 4 have no drop-in solution folder; Lab 1 still does.
 
-Lab 1 is a Claude Code plugin. It needs an LLM:
+Lab 1 is a plugin in `labs/lab1_enhancer`. It needs an LLM, but it does
+not need Claude Code if you built with Grok, Codex, or OpenCode. Work from
+the lab folder. `task run` looks at the skill tree you built and calls
+that CLI:
 
 ```bash
-cd solutions/sol1_enhancer
+cd labs/lab1_enhancer
+task detect
 task create-test-tickets && task run --
 ```
+
+The Claude Code answer still lives at `solutions/sol1_enhancer/` if you
+want to run that copy instead.
 
 ## Four rules, whichever tool you picked
 

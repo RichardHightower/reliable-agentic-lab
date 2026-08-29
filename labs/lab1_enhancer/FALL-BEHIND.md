@@ -10,6 +10,9 @@ one.
 
 Every command below runs from `labs/lab1_enhancer/`.
 
+`task run` looks at the skill tree you copied and calls that CLI. A Grok
+copy does not need Claude Code on PATH. `task detect` prints the choice.
+
 ## Claude code
 
 This is Saturday's default path.
@@ -21,7 +24,8 @@ cp -r ../../solutions/sol1_enhancer/.claude/skills/* .claude/skills/
 cp ../../solutions/sol1_enhancer/config.json.example .
 ```
 
-Run it: `task create-test-tickets` then `task run --`.
+Run it: `task create-test-tickets` then `task run --`. Needs `claude` on
+PATH.
 
 The full design is
 [solutions/sol1_enhancer/SPEC.md](../../solutions/sol1_enhancer/SPEC.md).
@@ -31,15 +35,23 @@ The full design is
 ```bash
 mkdir -p .agents bin
 cp -r ../../solutions/sol1_enhancer_codex/.agents/* .agents/
-cp -r ../../solutions/sol1_enhancer_codex/bin/* bin/
+cp ../../solutions/sol1_enhancer_codex/bin/role.sh bin/
+cp ../../solutions/sol1_enhancer_codex/bin/fence_check.sh bin/
 cp ../../solutions/sol1_enhancer_codex/AGENTS.md .
 cp ../../solutions/sol1_enhancer_codex/config.json.example .
 chmod +x bin/*.sh
 ```
 
+Copy `role.sh` and `fence_check.sh` only. Do not copy the whole `bin/`
+over this folder's `bin/run_loop.sh`. That script is what makes
+`task run` call `codex` instead of `claude`.
+
 `bin/role.sh` starts the judge and the doer as their own read-only `codex
 exec` processes. Isolation in Codex is a process sandbox, not a per-agent tool
 list, so that script is the fence. Do not lose the execute bit.
+
+Run it: `task detect` should print `codex`. Then
+`task create-test-tickets` and `task run --`. Needs `codex` on PATH.
 
 The design is
 [solutions/sol1_enhancer_codex/SPEC.md](../../solutions/sol1_enhancer_codex/SPEC.md),
@@ -72,6 +84,10 @@ Two things Grok needs before this runs at all:
    All three must be listed. If they are not, the symlinks did not survive the
    copy.
 
+Run it: `task detect` should print `grok`. Then
+`task create-test-tickets` and `task run --`. Needs `grok` on PATH, not
+`claude`.
+
 The design is
 [solutions/sol1_enhancer_grok_build/SPEC.md](../../solutions/sol1_enhancer_grok_build/SPEC.md),
 and
@@ -89,6 +105,9 @@ cp ../../solutions/sol1_enhancer_opencode/config.json.example .
 
 Isolation is the per-agent `permission` block: `edit: deny` and `bash: deny`
 on the judge and the doer. Headless is `opencode run`, not the TUI.
+
+Run it: `task detect` should print `opencode`. Then
+`task create-test-tickets` and `task run --`. Needs `opencode` on PATH.
 
 The design is
 [solutions/sol1_enhancer_opencode/SPEC.md](../../solutions/sol1_enhancer_opencode/SPEC.md),
