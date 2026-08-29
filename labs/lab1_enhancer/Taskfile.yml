@@ -39,12 +39,27 @@ tasks:
 
   run:
     desc: One poll-and-act step over every open ticket, using the plugin you built here.
-    # Pinning dir here, not just TARGET, means the claude -p subprocess
-    # always starts from this exact folder. SKILL.md reads ./config.json
-    # from its cwd, so that has to be right too, not only the --repo path.
+    # Pinning dir here, not just TARGET, means the CLI subprocess always
+    # starts from this exact folder. SKILL.md reads ./config.json from its
+    # cwd, so that has to be right too, not only the --repo path.
+    # bin/run_loop.sh looks at the skill tree (.grok/, .agents/, .opencode/,
+    # or .claude/skills/) and calls that CLI. It does not assume Claude Code.
+    # A .claude/settings.json stub is not a plugin.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - claude -p "/enhancer-loop --repo {{.TARGET}} {{.CLI_ARGS}}"
+      - bin/run_loop.sh {{.TARGET}} {{.CLI_ARGS}}
+
+  detect:
+    desc: Print which CLI task run would call (claude, grok, codex, or opencode).
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/run_loop.sh --detect
+
+  test:
+    desc: Detection tests for the runner. No model, no GitHub.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bash tests/test_run_loop.sh
 
   poll-forever:
     desc: Poll forever until killed (Ctrl-C). Seminar-only stand-in for a real scheduler, see SPEC.md.

@@ -1,5 +1,37 @@
 # Troubleshooting. Lab 1
 
+## `"claude": executable file not found in $PATH`
+
+This is the error `task run` used to always throw if Claude Code was not
+installed, even when you had built a Grok, Codex, or OpenCode plugin.
+
+`task run` now looks at the skill tree in this folder and calls that CLI:
+
+```bash
+task detect
+```
+
+A `.claude/settings.json` stub is not a plugin. You need one of:
+
+- `.claude/skills/enhancer-loop` → needs `claude` on PATH
+- `.grok/plugins/ticket-enhancer/skills/enhancer-loop` → needs `grok`
+- `.agents/skills/enhancer-loop` → needs `codex`
+- `.opencode/skills/enhancer-loop` → needs `opencode`
+
+If `task detect` prints `grok` and then `task run` still dies on `grok`
+not found, install the Grok CLI. Do not install Claude Code just to
+satisfy a Grok lab.
+
+If `task detect` says there is no enhancer-loop skill, build from
+`prompts/`, or copy the answer for your tool from
+[FALL-BEHIND.md](FALL-BEHIND.md).
+
+If more than one tree is present:
+
+```bash
+AGENT=grok task run --
+```
+
 ## The skill stops and asks for `config.json`
 
 Copy the template and fill in your GitHub username:
