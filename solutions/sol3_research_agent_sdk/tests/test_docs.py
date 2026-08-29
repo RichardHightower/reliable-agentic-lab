@@ -133,6 +133,18 @@ def test_setup_creates_a_local_venv_and_how_to_run_exists():
     assert "labs/lab3_research" in text
 
 
+def test_setup_pins_the_local_image_plugin_releases():
+    taskfile = (FOLDER / "Taskfile.yml").read_text(encoding="utf-8")
+    assert "RENDERER_TAG: 'v0.2.0'" in taskfile
+    assert "IMAGE_GEN_TAG: 'v2.1.0'" in taskfile
+    assert ".cache/imagen-diagrams" in taskfile
+    assert ".cache/image-gen" in taskfile
+
+    how = (FOLDER / "HOW_TO_RUN.md").read_text(encoding="utf-8")
+    assert "does not modify Homebrew's\nsystem Python or `~/.claude`" in how
+    assert "v0.2.0" in how and "v2.1.0" in how
+
+
 def test_the_docs_name_only_tasks_that_exist():
     taskfile = (FOLDER / "Taskfile.yml").read_text(encoding="utf-8")
     declared = set(re.findall(r"^  (\w[\w-]*):$", taskfile, re.M))

@@ -178,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         max_claims=args.max_claims,
         brief=brief,
         should_publish=args.publish,
+        enforce_research_policy=True,
     )
 
     print()

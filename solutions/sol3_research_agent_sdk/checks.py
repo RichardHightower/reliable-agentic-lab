@@ -31,6 +31,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import source_policy
+
 CITATION = re.compile(r"\[(\d+)\]")
 EM_DASH = re.compile(r"\s*—\s*")
 EN_DASH = re.compile(r"(?<=\w)–(?=\w)")  # noqa: RUF001  (the dash is the target)
@@ -44,6 +46,8 @@ HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.M)  # re.M so finditer sees every he
 # bibliography.
 UNCITED_SECTIONS = {"abstract", "references", "summary"}
 IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
+EXIT_ORDER = re.compile(r"\bdone\b[\s\S]{0,240}?\bcost\b[\s\S]{0,240}?\bmax(?:imum)?\s+turns?\b", re.I)
+WHICHEVER_FIRST = re.compile(r"\bwhichever\s+(?:comes|fires)\s+first\b", re.I)
 
 # A section the writer appended that assembly owns. Two "References" headings in
 # one paper is the visible symptom; the cause is a writer doing the harness's
@@ -270,6 +274,35 @@ def unresolved_images(body: str, base_dir: Path | str | None) -> list[str]:
     return missing
 
 
+def doctrine_failure(body: str) -> str | None:
+    """Return the first reason the paper teaches the wrong exit doctrine.
+
+    The control order is deliberate: a completed result exits before the cost
+    ceiling, which exits before the maximum-turn safety stop.  "Whichever fires
+    first" teaches a different loop and is not an acceptable paraphrase.
+    """
+    if WHICHEVER_FIRST.search(body):
+        return "must not teach 'whichever comes first'"
+    if not EXIT_ORDER.search(body):
+        return "must name done, then cost, then max turns in that order"
+
+    first = IMAGE.search(body)
+    if first is None:
+        return "Figure 1 must show done, then cost, then max turns"
+    # The figure's alt text plus its immediate caption are the source-visible
+    # representation of Figure 1.  Requiring those labels keeps a polished but
+    # semantically wrong diagram from clearing the paper gate.
+    nearby = body[first.start() : body.find("\n\n", first.end()) if "\n\n" in body[first.end() :] else len(body)]
+    if not EXIT_ORDER.search(nearby):
+        return "Figure 1 must label done, then cost, then max turns"
+    return None
+
+
+def disallowed_reference_hosts(sources: list[str]) -> list[str]:
+    """References from blogs and DeepWiki never become a paper's bibliography."""
+    return [url for url in sources if not source_policy.is_allowed_url(url)]
+
+
 def check(
     body: str,
     sources: list[str],
@@ -277,11 +310,27 @@ def check(
     base_dir: Path | str | None = None,
     corpus: str = "",
     headings: list[str] | None = None,
+    enforce_source_policy: bool = False,
+    enforce_loop_doctrine: bool = False,
 ) -> Score:
     """Score a paper. No model call."""
     checks: list[Check] = []
 
     checks.append(Check("sources", bool(sources), f"{len(sources)} sources retrieved"))
+
+    if enforce_source_policy:
+        rejected = disallowed_reference_hosts(sources)
+        checks.append(
+            Check(
+                "hosts",
+                not rejected,
+                "every reference host is allowed" if not rejected else f"not allowed: {rejected[:3]}",
+            )
+        )
+
+    if enforce_loop_doctrine:
+        failure = doctrine_failure(body)
+        checks.append(Check("doctrine", failure is None, "exit order and Figure 1 agree" if failure is None else failure))
 
     absent = missing_sections(body, headings or [])
     checks.append(

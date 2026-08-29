@@ -59,6 +59,7 @@ class FakeClaudeAgentOptions:
     strict_mcp_config: bool = False
     plugins: list = field(default_factory=list)
     skills: list = field(default_factory=list)
+    setting_sources: list | None = None
     system_prompt: str = ""
     max_turns: int = 0
     max_budget_usd: float | None = None

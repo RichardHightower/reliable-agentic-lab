@@ -32,6 +32,11 @@ needs two figures and draw the more useful one.
 Label every node with words a reader knows. A node labeled with a class name is
 a node only the author can read.
 
+For the first loop-control figure, label the exits exactly in their paper order:
+`done`, then `cost`, then `max turns`. Do not replace them with "budget", an
+attempt cap, or "whichever fires first"; those are different control rules and
+the deterministic paper gate rejects the figure.
+
 ## When you are told what the render lost
 
 The harness renders your source and runs a fidelity judge against it. When the

@@ -36,8 +36,8 @@ Plus the research record that produced them, as an RKC knowledge bundle under
 | --- | --- | --- |
 | orchestrator | `Task` | nothing |
 | planner | read tools | nothing |
-| researcher | read tools, `WebSearch`, Perplexity, Context7 | nothing |
-| verifier | `Read`, `WebSearch`, Perplexity, Context7 | nothing |
+| researcher | read tools, `WebSearch`, filtered Perplexity, Context7 | nothing |
+| verifier | `Read`, `WebSearch`, filtered Perplexity, Context7 | nothing |
 | diagrammer | read tools | nothing |
 | writer | read tools, `Write` | `sections/**` |
 | judge | read tools | nothing |
@@ -75,8 +75,10 @@ search and write can adjust the evidence to fit the paper.
    the image lost. Three attempts, then keep the closest image.
 5. **Write.** One section at a time, from verified claims only.
 6. **Assemble.** Stitch the sections and append the reference list.
-7. **Check.** Run the deterministic rows: sources, complete, grounded, cited,
-   sourced, images, style. No model votes here.
+7. **Check.** Run the deterministic rows: sources, hosts, doctrine, complete,
+   grounded, cited, sourced, images, style. The paper names its exits in order:
+   done, then cost, then max turns; Figure 1 shows the same order. No model
+   votes here.
 8. **Review.** The judge scores what a script cannot.
 9. **Publish.** Push the paper and its figures to a secret gist, on request,
    and only after the paper passes.
@@ -98,7 +100,11 @@ soften, not one you adjudicate with a third model.
 
 ## The exits
 
-Three, and no fourth: pass, retry, escalate.
+The paper's control doctrine is distinct from the run's final outcomes. The
+paper checks exits in this order: **done**, then **cost**, then **max turns**.
+It does not teach a generic "whichever fires first" rule.
+
+The run itself has three outcomes: pass, retry, escalate.
 
 - **Pass.** The deterministic checks are green and the judge agrees.
 - **Escalate on a stall.** This attempt failed in exactly the same way as the

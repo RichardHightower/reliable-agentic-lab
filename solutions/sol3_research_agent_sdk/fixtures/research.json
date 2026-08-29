@@ -2,10 +2,10 @@
   "_note": "Recorded answers, so this folder runs in a room with no network. Every URL here was checked and every statement is one the cited page supports. A fixture that records a plausible-looking answer teaches the loop to accept plausible-looking answers.",
   "loop engineering exit criteria": {
     "question": "loop engineering exit criteria",
-    "answer": "An agent loop needs an exit condition that the model does not get a vote on. The Claude Agent SDK exposes two runtime ceilings for this, max_turns and max_budget_usd, and ends the query itself when either fires rather than asking the model whether to continue.",
-    "citations": ["https://github.com/anthropics/claude-agent-sdk-python"],
+    "answer": "This repository's paper loop checks done, then cost, then max turns. Done means the deterministic paper checks and judge agree; cost means the configured USD ceiling is spent; max turns is the runtime safety ceiling. It does not use a generic whichever-fires-first rule.",
+    "citations": ["https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk"],
     "sources": [
-      {"url": "https://github.com/anthropics/claude-agent-sdk-python", "title": "claude-agent-sdk-python"}
+      {"url": "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk", "title": "sol3_research_agent_sdk"}
     ]
   },
   "loop engineering exit criteria common mistake": {

@@ -13,17 +13,20 @@ with `task test`. This folder is the take-home white-paper port.
 
 ## One-time setup
 
-Create the folder-local Python virtual environment, install the Claude
-Agent SDK, and clone the diagram renderer. This does not modify Homebrew's
-system Python.
+Create the folder-local Python virtual environment, install the Claude Agent
+SDK, and install the pinned image plugins. This does not modify Homebrew's
+system Python or `~/.claude`.
 
 ```bash
 task setup
 ```
 
-Creates `.venv` in this folder. Homebrew Python will not let `pip` write to
-the system interpreter (PEP 668). `task run` uses this venv. You do not
-activate it.
+Creates `.venv`, `.cache/imagen-diagrams` at v0.2.0, and `.cache/image-gen` at
+v2.1.0 in this folder. `ClaudeAgentOptions.plugins` loads both local manifests,
+and its exact skill allowlist exposes only `imagen-diagrams:imagen-diagrams`
+and `image-gen:image-gen`. It does not discover user or parent-project skills.
+Homebrew Python will not let `pip` write to the system interpreter (PEP 668).
+`task run` uses this venv. You do not activate it.
 
 Put the API key in `.env`, `../.env`, `../../.env`, or `../../../.env`, or
 export it in this shell. The closest dotenv file wins. Direct `python loop.py`
@@ -34,8 +37,15 @@ echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
 ```
 
 Perplexity is optional. Set `PERPLEXITY_API_KEY` the same way if you want
-that server. Context7 is declared in this folder. A missing root `.mcp.json`
-must not change the tool boundary.
+that server. This port launches Perplexity's official MCP package locally; its
+researcher starts with filtered `perplexity_search`, and may use one filtered
+`perplexity_ask` fallback only when search results contain no usable excerpt.
+The Python source wall admits the documented official-host allowlist only.
+When Perplexity is unavailable the Agent SDK researcher may use Anthropic
+`WebSearch` and the same post-filter; with no live provider, select the
+recorded fixture. This port has no OpenAI or Bing fallback. Context7 is
+declared in this folder. A missing root `.mcp.json` must not change the tool
+boundary.
 
 ## Scripts you can run without a model
 
@@ -61,7 +71,9 @@ task e2e-fixture
 
 This uses a recorded primary-source corpus but the installed
 [`imagen-diagrams`](https://github.com/SpillwaveSolutions/imagen-diagrams)
-renderer and fidelity judge. It therefore needs `task setup` plus one approved
+v0.2.0 renderer and fidelity judge. The renderer can use the locally installed
+[`image-gen`](https://github.com/SpillwaveSolutions/image_gen) v2.1.0 plugin's
+image-engine contract. It therefore needs `task setup` plus one approved
 image backend, in this order: `imagen`, `grok`, then `codex`. The plugin uses
 the `imagen-cli-vars` brace policy for Imagen and `grok-imagine` for Grok and
 Codex. If none is on PATH, it writes `<stem>_imagen.prompt.txt` and exits 2.
@@ -100,4 +112,4 @@ timeout 420 task run --
 task clean
 ```
 
-Deletes `work/`. The renderer clone in `.cache/` stays.
+Deletes `work/`. Both pinned plugin clones in `.cache/` stay.

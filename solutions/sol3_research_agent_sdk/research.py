@@ -1,18 +1,16 @@
-"""One research boundary, three backends.
+"""One filtered research boundary, three backends.
 
-    agent        the researcher subagent, which holds the MCP tools
-    perplexity   the Sonar HTTP API, called straight from Python
+    perplexity   the Search API, then fast Agent API only when quotes are absent
+    anthropic    the researcher subagent's WebSearch fallback
     fixture      a recorded answer, when there is no network
 
 The caller does not know which one answered. That is the same tool-contract
 idea as MCP itself: name the boundary, keep the caller ignorant of what is
 behind it.
 
-Two backends exist for one reason, and it is not redundancy. Phase 2 researches
-a question through the agent, which reaches Perplexity and Context7 over MCP.
-Phase 3 verifies the resulting claim through a different backend that never saw
-the agent's answer. A second opinion from the same context is not a second
-opinion.
+The source policy is Python-owned.  Perplexity receives the allowlist, and the
+same list post-filters every backend's sources and claims.  A provider filter
+is a net; post-filtering is the wall.
 
 Every call goes through a budget with a hard cap, ported from
 `v3/article_pipeline/util/cost.py`. An agent that can search without a ceiling
@@ -28,12 +26,12 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions"
+import source_policy
 
-# Keep the model named here so swapping it is one edit. `sonar-pro` searches the
-# open web. `sonar-deep-research` is far slower and far more expensive, and a
-# per-claim verification does not need it.
-PERPLEXITY_MODEL = "sonar-pro"
+PERPLEXITY_SEARCH_URL = "https://api.perplexity.ai/search"
+PERPLEXITY_ASK_URL = "https://api.perplexity.ai/v1/agent"
+PERPLEXITY_ASK_PRESET = "fast-search"
+FALLBACK_CHAIN = ("perplexity", "anthropic", "fixture")
 
 
 class BudgetExceeded(RuntimeError):
@@ -106,11 +104,12 @@ class Finding:
 class Backend:
     name = "backend"
     cost_per_call = 0.0
+    charges_provider_calls = False
 
     def available(self) -> bool:
         return True
 
-    def search(self, question: str) -> Finding:
+    def search(self, question: str, *, charge=None) -> Finding:
         raise NotImplementedError
 
 
@@ -125,7 +124,7 @@ class FixtureBackend(Backend):
     def available(self) -> bool:
         return self.path.exists()
 
-    def search(self, question: str) -> Finding:
+    def search(self, question: str, *, charge=None) -> Finding:
         data = json.loads(self.path.read_text(encoding="utf-8"))
         # A key starting with an underscore is a note to the reader, not a
         # recorded answer. Skipping non-dict values keeps a comment in the
@@ -150,58 +149,48 @@ class FixtureBackend(Backend):
             best = max(entries, key=overlap, default=None)
         if best is None:
             return Finding(question, "no recorded answer", backend=self.name)
-        citations = list(best.get("citations", []))
+        sources = source_policy.filter_sources(best.get("sources", []))
+        if not sources:
+            sources = source_policy.filter_sources(
+                [{"url": url, "title": ""} for url in best.get("citations", [])]
+            )
         return Finding(
             question=question,
             answer=best.get("answer", ""),
-            citations=citations,
-            sources=list(best.get("sources", [{"url": url, "title": ""} for url in citations])),
+            citations=[source["url"] for source in sources],
+            sources=sources,
             backend=self.name,
         )
 
 
 class PerplexityBackend(Backend):
-    """Perplexity Sonar, over plain HTTP.
+    """Perplexity Search with a bounded, filtered no-quote fallback.
 
-    The MCP server is the agent's path to Perplexity, not Python's. An MCP
-    stdio server speaks framed JSON-RPC, so piping a message blob at
-    `server-perplexity-ask` and reading stdout returns nothing usable. This
-    calls the documented REST endpoint instead, with no client library, so the
-    folder stays installable with the Agent SDK and nothing else.
+    The researcher subagent reaches the same provider through the official MCP
+    server.  This direct lane is for the no-model runtime, so it calls the
+    documented HTTP APIs without adding a second Python dependency.
     """
 
     name = "perplexity"
-    # An estimate for the budget, not a bill. It exists so the ceiling is real
-    # before the invoice is.
+    # An estimate for the budget, not a bill.  It is charged before each
+    # provider call so scout, retrieve, and the rare no-quote fallback remain
+    # visible to the ceiling.
     cost_per_call = 0.006
+    charges_provider_calls = True
 
-    def __init__(self, model: str = PERPLEXITY_MODEL, timeout: int = 120):
-        self.model = model
+    def __init__(self, timeout: int = 120):
         self.timeout = timeout
 
     def available(self) -> bool:
         return bool(os.environ.get("PERPLEXITY_API_KEY"))
 
-    def search(self, question: str) -> Finding:
-        body = json.dumps(
-            {
-                "model": self.model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a technical research assistant. Answer from primary "
-                            "sources: official documentation, specifications, papers, and "
-                            "vendor repositories. State what you could not confirm. Never "
-                            "invent a citation."
-                        ),
-                    },
-                    {"role": "user", "content": question},
-                ],
-            }
-        ).encode("utf-8")
+    def _post(self, url: str, payload: dict, *, charge=None) -> dict | None:
+        """Charge before a provider request and return JSON or a safe empty result."""
+        if charge is not None:
+            charge(self.cost_per_call)
+        body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
-            PERPLEXITY_URL,
+            url,
             data=body,
             headers={
                 "Authorization": f"Bearer {os.environ['PERPLEXITY_API_KEY']}",
@@ -211,17 +200,80 @@ class PerplexityBackend(Backend):
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                return json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-            # An empty answer with no citations. The caller's grounding check
-            # fails it, which is the right outcome. Returning a confident
-            # sentence with no source is the wrong one.
-            return Finding(question, "", backend=self.name, usd=0.0)
-        return _finding_from_sonar(question, payload, self.name, self.cost_per_call)
+            return None
+
+    @staticmethod
+    def search_body(question: str, domains: tuple[str, ...]) -> dict:
+        return {
+            "query": question,
+            "max_results": 10,
+            "max_tokens_per_page": 1200,
+            "search_domain_filter": list(domains),
+        }
+
+    @staticmethod
+    def ask_body(question: str, domains: tuple[str, ...]) -> dict:
+        return {
+            "preset": PERPLEXITY_ASK_PRESET,
+            "input": question,
+            "instructions": (
+                "Answer only from the supplied official-domain allowlist. "
+                "Quote the source text used for every substantive claim. "
+                "Say what the sources do not establish."
+            ),
+            "tools": [
+                {
+                    "type": "web_search",
+                    "filters": {"search_domain_filter": list(domains)},
+                }
+            ],
+        }
+
+    def _search(self, question: str, domains: tuple[str, ...], *, charge=None) -> Finding:
+        payload = self._post(
+            PERPLEXITY_SEARCH_URL,
+            self.search_body(question, domains),
+            charge=charge,
+        )
+        return _finding_from_search(question, payload or {}, self.name, self.cost_per_call, domains)
+
+    def _ask(self, question: str, domains: tuple[str, ...], *, charge=None) -> Finding:
+        payload = self._post(
+            PERPLEXITY_ASK_URL,
+            self.ask_body(question, domains),
+            charge=charge,
+        )
+        return _finding_from_ask(question, payload or {}, self.name, self.cost_per_call, domains)
+
+    def search(self, question: str, *, charge=None) -> Finding:
+        # Pass one is a narrow scout.  It may add only an official docs host to
+        # the working filter; medium.com, DeepWiki, and personal blogs cannot
+        # grow the allowlist merely because a provider returned them.
+        scout = self._search(
+            f"Which official documentation domains cover this question? {question}",
+            tuple(source_policy.SEED_ALLOWLIST),
+            charge=charge,
+        )
+        domains = source_policy.merge_scout_domains(
+            [source["url"] for source in scout.sources]
+        )
+
+        retrieved = self._search(question, domains, charge=charge)
+        retrieved.usd += scout.usd
+        # Search results normally carry excerpts.  Only an otherwise useful
+        # result set without one earns the single fast-answer fallback.
+        if retrieved.citations and not _has_usable_quote(retrieved):
+            fallback = self._ask(question, domains, charge=charge)
+            fallback.usd += retrieved.usd
+            if fallback.citations:
+                return fallback
+        return retrieved
 
 
-class AgentBackend(Backend):
-    """The researcher subagent, which holds the Perplexity and Context7 MCP tools.
+class AnthropicBackend(Backend):
+    """The injected Agent SDK researcher, used after Perplexity is unavailable.
 
     The loop cannot call an MCP tool directly. It spawns the researcher, which
     can, and reads the JSON that comes back. `ask` is injected by the driver so
@@ -229,7 +281,7 @@ class AgentBackend(Backend):
     phase with a plain function.
     """
 
-    name = "agent"
+    name = "anthropic"
     cost_per_call = 0.0
 
     def __init__(self, ask):
@@ -238,10 +290,78 @@ class AgentBackend(Backend):
     def available(self) -> bool:
         return self.ask is not None
 
-    def search(self, question: str) -> Finding:
+    def search(self, question: str, *, charge=None) -> Finding:
         finding = self.ask(question)
         finding.backend = self.name
-        return finding
+        return _filter_finding(finding)
+
+
+# The earlier name appears in workshop notes and third-party attendee tests.
+# Keep it as an alias while the visible fallback name is the provider it uses.
+AgentBackend = AnthropicBackend
+
+
+def _has_usable_quote(finding: Finding) -> bool:
+    return bool(finding.answer.strip())
+
+
+def _filter_finding(finding: Finding, domains=source_policy.SEED_ALLOWLIST) -> Finding:
+    """Apply the source wall after every backend, not only Perplexity."""
+    sources = source_policy.filter_sources(finding.sources, allowed_domains=domains)
+    finding.sources = sources
+    finding.citations = [source["url"] for source in sources]
+    return finding
+
+
+def _finding_from_search(
+    question: str,
+    payload: dict,
+    backend: str,
+    usd: float,
+    domains: tuple[str, ...] = source_policy.SEED_ALLOWLIST,
+) -> Finding:
+    """Turn ranked Search API hits into sources and quote-bearing research text."""
+    raw_sources = []
+    snippets = []
+    for result in payload.get("results") or []:
+        url = result.get("url")
+        if not url:
+            continue
+        snippet = str(result.get("snippet", "")).strip()
+        raw_sources.append({"url": url, "title": result.get("title", "")})
+        if snippet:
+            snippets.append(snippet)
+    finding = Finding(
+        question=question,
+        answer="\n\n".join(snippets),
+        sources=raw_sources,
+        backend=backend,
+        usd=usd,
+    )
+    return _filter_finding(finding, domains)
+
+
+def _finding_from_ask(
+    question: str,
+    payload: dict,
+    backend: str,
+    usd: float,
+    domains: tuple[str, ...] = source_policy.SEED_ALLOWLIST,
+) -> Finding:
+    """Read the Agent API response shape, retaining only allowed citations."""
+    answer = str(payload.get("output_text", "")).strip()
+    if not answer:
+        choices = payload.get("choices") or []
+        if choices:
+            answer = str((choices[0].get("message") or {}).get("content", "")).strip()
+    raw_sources = []
+    for result in payload.get("search_results") or payload.get("results") or []:
+        if result.get("url"):
+            raw_sources.append({"url": result["url"], "title": result.get("title", "")})
+    for url in payload.get("citations") or []:
+        raw_sources.append({"url": url, "title": ""})
+    finding = Finding(question=question, answer=answer, sources=raw_sources, backend=backend, usd=usd)
+    return _filter_finding(finding, domains)
 
 
 def _finding_from_sonar(question: str, payload: dict, backend: str, usd: float) -> Finding:
@@ -267,28 +387,27 @@ def _finding_from_sonar(question: str, payload: dict, backend: str, usd: float) 
             sources.append({"url": url, "title": ""})
             seen.add(url)
 
-    return Finding(
+    return _filter_finding(Finding(
         question=question,
         answer=answer.strip(),
         citations=[source["url"] for source in sources],
         sources=sources,
         backend=backend,
         usd=usd,
-    )
+    ))
 
 
 def choose(*, fixture: Path | str | None = None, ask=None) -> Backend:
     """Pick the best backend available. The environment decides.
 
-    Order matters: the agent reaches both MCP servers, direct Perplexity reaches
-    one, and a recorded answer reaches none. Nothing is never an option, because
-    a research loop that silently returns no evidence is worse than one that
-    refuses.
+    Order matters: the filtered Perplexity Search API is first, the Agent SDK's
+    Anthropic WebSearch fallback is second, and the recorded fixture is last.
+    This port deliberately has no OpenAI or Bing fallback.
     """
     candidates: list[Backend] = []
-    if ask is not None:
-        candidates.append(AgentBackend(ask))
     candidates.append(PerplexityBackend())
+    if ask is not None:
+        candidates.append(AnthropicBackend(ask))
     if fixture:
         candidates.append(FixtureBackend(fixture))
     for backend in candidates:
@@ -296,7 +415,7 @@ def choose(*, fixture: Path | str | None = None, ask=None) -> Backend:
             return backend
     raise RuntimeError(
         "no research backend is available. Set PERPLEXITY_API_KEY, pass an "
-        "agent callable, or point at a fixture file."
+        "Anthropic Agent SDK callable, or point at a fixture file."
     )
 
 
@@ -309,8 +428,11 @@ class Researcher:
     findings: list[Finding] = field(default_factory=list)
 
     def ask(self, question: str) -> Finding:
-        self.budget.charge(self.backend.cost_per_call)
-        finding = self.backend.search(question)
+        if self.backend.charges_provider_calls:
+            finding = self.backend.search(question, charge=self.budget.charge)
+        else:
+            self.budget.charge(self.backend.cost_per_call)
+            finding = self.backend.search(question)
         finding.backend = self.backend.name
         self.findings.append(finding)
         return finding
