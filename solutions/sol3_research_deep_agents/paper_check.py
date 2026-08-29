@@ -199,10 +199,20 @@ def reference_urls(body: str) -> list[str]:
 
 
 def has_exit_doctrine(body: str) -> bool:
-    """The workshop doctrine is done, then cost, then max turns—no reordering."""
-    content = "\n".join(body_sections(body))
-    found = [term.search(content) for term in EXIT_TERMS]
-    return all(found) and [match.start() for match in found] == sorted(match.start() for match in found)
+    """A body paragraph states done, then cost, then max turns in order.
+
+    Searching the first occurrence in the whole paper is wrong: an abstract
+    can discuss cost before a later case study states the complete doctrine.
+    The ordering is a local claim, so evaluate it within one prose paragraph.
+    """
+    for section in body_sections(body):
+        for paragraph in re.split(r"\n\s*\n", section):
+            found = [term.search(paragraph) for term in EXIT_TERMS]
+            if all(found) and [match.start() for match in found] == sorted(
+                match.start() for match in found
+            ):
+                return True
+    return False
 
 
 def false_langgraph_limitation(body: str, urls: list[str]) -> bool:
@@ -596,8 +606,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     body = Path(args.paper).read_text(encoding="utf-8")
-    urls = json.loads(Path(args.sources).read_text(encoding="utf-8")) if args.sources else []
     ledger = evidence.Ledger(args.evidence).load() if args.evidence else None
+    if args.sources:
+        urls = json.loads(Path(args.sources).read_text(encoding="utf-8"))
+    elif ledger is not None:
+        # Match the in-process assemble gate. The evidence directory is a
+        # complete post-run input, so callers should not also have to rebuild
+        # the bibliography as a separate JSON sidecar.
+        urls = [source.url for source in ledger.bibliography()]
+    else:
+        urls = []
     score = check(body, urls, ledger=ledger)
     print(score.report())
     return 0 if score.passed else 1

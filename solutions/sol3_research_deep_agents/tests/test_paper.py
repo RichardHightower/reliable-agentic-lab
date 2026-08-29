@@ -132,6 +132,29 @@ def test_a_resume_reruns_a_failed_stage(offline, run_dir):
     assert again.state.is_complete("write")
 
 
+def test_the_live_planner_file_is_the_plan_not_its_tool_receipt(offline, run_dir):
+    """A scoped planner writes valid JSON and commonly returns only "wrote"."""
+    from conftest import FIXTURES  # noqa: PLC0415
+
+    expected = json.loads((FIXTURES / "replies.json").read_text())["planner"][
+        "Write plan.json"
+    ]["data"]
+
+    class FilePlanner:
+        name = "deep_agents"
+
+        def ask(self, role, prompt):
+            assert role == "planner"
+            (run_dir / "plan.json").write_text(json.dumps(expected), encoding="utf-8")
+            return paper.Reply(text="wrote plan.json")
+
+    offline.runner = FilePlanner()
+    result = offline.stage_plan()
+
+    assert result.artifacts["questions"] == 3
+    assert offline.plan["title"] == expected["title"]
+
+
 def test_cost_carries_forward_across_a_resume(offline, run_dir):
     offline.run()
     st = pstate.PaperState.load_or_create(run_dir)
@@ -380,6 +403,36 @@ def test_a_fenced_diagram_reply_is_unfenced():
     assert paper._strip_fence("flowchart LR\n  A --> B") == "flowchart LR\n  A --> B\n"
 
 
+def test_the_live_diagrammer_file_is_not_replaced_by_its_tool_receipt(
+    offline, run_dir, stub_renderer
+):
+    offline.stage_plan()
+
+    class FileDiagrammer:
+        name = "deep_agents"
+
+        def ask(self, role, prompt):
+            assert role == "diagrammer"
+            diagrams = run_dir / "diagrams"
+            diagrams.mkdir(exist_ok=True)
+            if "three-exits" in prompt:
+                target = diagrams / "three-exits.mmd"
+                target.write_text('flowchart LR\n  A["Done"] --> B["Cost"]\n', encoding="utf-8")
+            else:
+                target = diagrams / "maker-checker.puml"
+                target.write_text(
+                    '@startuml\nparticipant "Maker" as M\nparticipant "Checker" as C\nM -> C: draft\n@enduml\n',
+                    encoding="utf-8",
+                )
+            return paper.Reply(text=f"wrote {target.name}")
+
+    offline.runner = FileDiagrammer()
+    offline.stage_diagram()
+
+    assert (run_dir / "diagrams" / "three-exits.mmd").read_text().startswith("flowchart")
+    assert (run_dir / "diagrams" / "maker-checker.puml").read_text().startswith("@startuml")
+
+
 # -- the cost cap ----------------------------------------------------------
 
 
@@ -512,3 +565,75 @@ def test_findings_are_written_per_question(offline, run_dir):
     offline.stage_plan()
     offline.stage_search()
     assert list((run_dir / "evidence").glob("finding.*.md"))
+
+
+def test_an_empty_checkpointed_finding_is_researched_again(offline):
+    import evidence  # noqa: PLC0415
+
+    offline.stage_plan()
+    first = offline.plan["questions"][0]
+    offline.ledger.add_finding(
+        evidence.Finding(
+            question=first["question"],
+            subject=first["subject"],
+            summary="the provider returned no admitted source",
+        )
+    )
+
+    offline.stage_search()
+
+    assert any(
+        finding.subject == first["subject"] and finding.claim_ids
+        for finding in offline.ledger.findings.values()
+    )
+
+
+def test_an_empty_nonblocking_finding_is_not_researched_again(offline):
+    import evidence  # noqa: PLC0415
+
+    offline.stage_plan()
+    question = next(q for q in offline.plan["questions"] if not q.get("important"))
+    offline.ledger.add_finding(
+        evidence.Finding(
+            question=question["question"],
+            subject=question["subject"],
+            summary="no admitted official source",
+        )
+    )
+    delegated = offline.runner
+    prompts = []
+
+    class CountingRunner:
+        name = delegated.name
+
+        def ask(self, role, prompt):
+            prompts.append(prompt)
+            return delegated.ask(role, prompt)
+
+    offline.runner = CountingRunner()
+    offline.stage_search()
+
+    assert not any(question["question"] in prompt for prompt in prompts)
+
+
+def test_live_search_records_the_repo_question_without_a_model_query(offline):
+    offline.stage_plan()
+    delegated = offline.runner
+    calls = []
+
+    class LiveLikeRunner:
+        name = "deep_agents"
+
+        def ask(self, role, prompt):
+            calls.append((role, prompt))
+            return delegated.ask(role, prompt)
+
+    offline.runner = LiveLikeRunner()
+    offline.stage_search()
+
+    first = offline.plan["questions"][0]
+    assert not any(first["question"] in prompt for _role, prompt in calls)
+    assert any(
+        finding.subject == first["subject"] and finding.claim_ids
+        for finding in offline.ledger.findings.values()
+    )

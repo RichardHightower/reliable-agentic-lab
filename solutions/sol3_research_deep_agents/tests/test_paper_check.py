@@ -25,6 +25,24 @@ def test_a_clean_paper_passes():
     assert paper_check.check(GOOD, URLS).passed
 
 
+def test_cli_uses_the_evidence_bibliography_when_sources_are_not_separate(tmp_path, capsys):
+    ledger = evidence.Ledger(tmp_path / "evidence")
+    for url in URLS:
+        source = ledger.add_source(evidence.SourceDocument(title=url, url=url, subject="exits"))
+        claim = ledger.add_claim(
+            evidence.Claim(text=f"Claim from {url}", subject="exits", source_ids=[source.id])
+        )
+        evidence.corroborate(claim)
+    ledger.write()
+    paper = tmp_path / "paper.md"
+    paper.write_text(GOOD, encoding="utf-8")
+
+    assert paper_check.main([str(paper), "--evidence", str(ledger.root)]) == 0
+    output = capsys.readouterr().out
+    assert "PASS  has_sources" in output
+    assert "2 sources retrieved" in output
+
+
 def test_a_deepwiki_reference_blocks_the_paper_but_docs_passes():
     rejected = GOOD.replace("https://docs.langchain.com/one", "https://deepwiki.com/langchain")
     score = paper_check.check(rejected, ["https://deepwiki.com/langchain", URLS[1]])
@@ -38,6 +56,15 @@ def test_exit_doctrine_requires_done_then_cost_then_max_turns():
     )
     assert "exit_doctrine" in paper_check.check(wrong, URLS).signature()
     assert "exit_doctrine" not in paper_check.check(GOOD, URLS).signature()
+
+
+def test_exit_doctrine_is_local_not_the_first_terms_in_the_whole_paper():
+    body = GOOD.replace(
+        "A loop without an exit spends until someone notices. [1]",
+        "Cost appears in the abstract before the ordered doctrine. [1]",
+    )
+
+    assert "exit_doctrine" not in paper_check.check(body, URLS).signature()
 
 
 def test_limitations_cannot_deny_a_cited_official_langgraph_page():

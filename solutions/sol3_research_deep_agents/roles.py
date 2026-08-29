@@ -36,7 +36,11 @@ DEFAULT_MODEL = "anthropic:claude-sonnet-5"
 # needs a sensible ceiling for plans and structured research, while a prose
 # section has a tighter contract of its own.
 GRAPH_MAX_TOKENS = 4_096
-WRITER_MAX_TOKENS = 2_048
+# The writer also binds the evidence ledger into a multi-section JSON outline.
+# A 2,048-token prose ceiling truncated that outline mid-string on the live
+# E2E. Section prompts still enforce 180 to 300 words; the transport ceiling
+# must accommodate the writer's larger structured turn as well.
+WRITER_MAX_TOKENS = 4_096
 MODEL_TIMEOUT_SECONDS = 120
 MODEL_MAX_RETRIES = 0
 
@@ -72,7 +76,7 @@ def bounded_model(model: str, *, max_tokens: int):
 
 
 def bounded_writer_model(model: str):
-    """The writer's 180 to 300-word contract warrants a smaller output cap."""
+    """Bound both the writer's prose and its larger structured outline turn."""
     return bounded_model(model, max_tokens=WRITER_MAX_TOKENS)
 
 RESEARCHER_RESPONSE = {

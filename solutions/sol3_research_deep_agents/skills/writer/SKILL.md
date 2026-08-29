@@ -48,8 +48,9 @@ Use American spelling and the serial comma.
 
 ## Citations
 
-Cite with `[n]`, matching the source list you were given. Every paragraph that
-asserts a fact carries at least one marker. A paragraph with no marker is a
+Cite with `[n]`, matching the source list you were given. Every prose paragraph
+carries at least one allowed marker, including scope, transition,
+recommendation, and limitation paragraphs. A paragraph with no marker is a
 claim nobody can trace, and the gate rejects it.
 
 Never cite a number you were not given. A dangling `[9]` fails the build.
@@ -62,6 +63,11 @@ source", or "not corroborated". Do not quietly upgrade it.
 Each section names the claim ids it may use. Use those and no others. A fact you
 know but that no claim supports does not go in the paper. That rule is what
 makes the citation count mean something.
+
+Do not pad a sparsely sourced section to reach a target length. Omit unsupported
+background, framing, forecasts, and generalizations. A concise section grounded
+in two claims is better than a longer section whose opening and transition have
+no evidence.
 
 ## Figures
 

@@ -42,6 +42,15 @@ price, a capability, a benchmark number, a security property. The verifier
 cross-checks only these, because corroborating every incidental sentence spends
 the budget on the sentences nobody will dispute.
 
+Mark at most three questions important. Choose the three conclusions the paper
+cannot survive without. Other questions may still add context and references;
+they do not get to block the whole paper when an official source is silent.
+
+Plan only checks that the fixed source boundary can answer: this repository,
+official LangChain, Anthropic, OpenAI, Microsoft, Stripe, MCP, or Google SRE
+documentation and their approved GitHub organizations. Do not require
+OpenTelemetry, AutoGPT, arXiv, a blog, or a postmortem host outside that list.
+
 ## Diagrams
 
 List concepts under `diagrams` only when a picture carries what prose cannot: a

@@ -136,6 +136,62 @@ def test_perplexity_asks_once_when_search_hits_lack_usable_quotes(monkeypatch):
     assert finding.citations == ["https://docs.langchain.com/deep-agents"]
 
 
+def test_fallback_receipt_names_the_provider_and_transport_that_answered():
+    class LiveProvider(research.Backend):
+        name = "perplexity"
+        transport = "perplexity-search-rest"
+
+        def search(self, question, reserve=None):
+            return research.Finding(
+                question,
+                "grounded answer",
+                citations=["https://docs.langchain.com/deep-agents"],
+                backend=self.name,
+            )
+
+    backend = research.FallbackBackend([LiveProvider()])
+    backend.search("q")
+
+    assert backend.active_name == "perplexity"
+    assert backend.active_transport == "perplexity-search-rest"
+
+
+def test_repository_exit_doctrine_uses_the_checked_in_first_party_source():
+    finding = research.FallbackBackend([]).search(research.EXIT_DOCTRINE_QUESTION)
+
+    assert finding.backend == "repository"
+    assert finding.citations == [research.REPOSITORY_PAPER_URL]
+    assert finding.answer.index("if done:") < finding.answer.index("if spent_usd")
+    assert finding.answer.index("if spent_usd") < finding.answer.index("if exhausted:")
+
+
+def test_repository_exit_doctrine_tolerates_the_researchers_narrowing_context():
+    finding = research.FallbackBackend([]).search(
+        research.EXIT_DOCTRINE_QUESTION
+        + " Cite the repo paper loop implementation and preserve the order."
+    )
+
+    assert finding.backend == "repository"
+    assert finding.citations == [research.REPOSITORY_PAPER_URL]
+
+
+def test_repository_exit_doctrine_report_is_ready_for_the_evidence_ledger():
+    report = research.repository_doctrine_report(research.EXIT_DOCTRINE_QUESTION)
+
+    assert report["sources"][0]["url"] == research.REPOSITORY_PAPER_URL
+    assert report["sources"][0]["quote"].index("if done:") < report["sources"][0][
+        "quote"
+    ].index("if spent_usd")
+    assert report["claims"][0]["source_urls"] == [research.REPOSITORY_PAPER_URL]
+
+
+def test_repository_source_adapter_does_not_answer_any_other_question():
+    finding = research.FallbackBackend([]).search("What are loop engineering best practices?")
+
+    assert finding.empty
+    assert finding.provider_unavailable
+
+
 def test_python_post_filter_keeps_docs_and_drops_deepwiki_from_model_json(tmp_path):
     ledger = evidence.Ledger(tmp_path / "evidence")
     finding = stages.record_findings(

@@ -46,6 +46,11 @@ MERMAID_NODE = re.compile(
     r'(\w+)\s*(?:\[\s*"?(.*?)"?\s*\]|\(\s*"?(.*?)"?\s*\)|\{\s*"?(.*?)"?\s*\}|>\s*"?(.*?)"?\s*\])'
 )
 MERMAID_EDGE = re.compile(r"(-{1,3}[->.=]{1,3}|={2,3}>)")
+MERMAID_PARTICIPANT = re.compile(
+    r"^\s*participant\s+(\w+)(?:\s+as\s+([^\n]+))?", re.M | re.I
+)
+MERMAID_STATE_EDGE = re.compile(r"^\s*(\w+|\[\*\])\s*-->\s*(\w+|\[\*\])", re.M)
+MERMAID_LINK = re.compile(r"^\s*(\w+).*?-->\s*(?:\|[^|]*\|\s*)?(\w+)", re.M)
 PUML_NODE = re.compile(
     r"^\s*(?:participant|actor|component|class|node|rectangle|database|queue|state|usecase)\s+"
     r'(?:(?:"([^"]+)")|(\w+))',
@@ -101,14 +106,25 @@ class Inventory:
 def inventory(source: str, kind: str) -> Inventory:
     """Read the source locally before spending an image call."""
     if kind == "mermaid":
-        labels: list[str] = []
-        for match in MERMAID_NODE.finditer(source):
-            text = next((group for group in match.groups()[1:] if group), "")
-            label = (text or match.group(1)).strip().strip("[]").replace("\\n", " ")
-            if label and label not in labels:
-                labels.append(label)
         first = source.strip().split("\n", 1)[0]
         diagram_type = first.split()[0] if first else "flowchart"
+        labels: list[str] = []
+        if diagram_type.lower() == "sequencediagram":
+            for match in MERMAID_PARTICIPANT.finditer(source):
+                label = (match.group(2) or match.group(1)).strip()
+                if label and label not in labels:
+                    labels.append(label)
+        elif diagram_type.lower().startswith("statediagram"):
+            for match in MERMAID_STATE_EDGE.finditer(source):
+                for label in match.groups():
+                    if label != "[*]" and label not in labels:
+                        labels.append(label)
+        else:
+            for match in MERMAID_NODE.finditer(source):
+                text = next((group for group in match.groups()[1:] if group), "")
+                label = (text or match.group(1)).strip().strip("[]").replace("\\n", " ")
+                if label and label not in labels:
+                    labels.append(label)
         edges = len(MERMAID_EDGE.findall(source))
     else:
         labels = []
@@ -119,6 +135,36 @@ def inventory(source: str, kind: str) -> Inventory:
         diagram_type = "sequence" if "->" in source and "participant" in source else "component"
         edges = len(PUML_EDGE.findall(source))
     return Inventory(kind=kind, diagram_type=diagram_type, labels=labels, edges=edges)
+
+
+def ordered_exit_checks(source: str) -> bool:
+    """Whether Mermaid expresses done -> cost -> max-turn checks as a chain.
+
+    The publication's first figure teaches priority, not merely membership.
+    A fan-out from one ``CheckExits`` node names all three exits but says they
+    are parallel. Check the source graph before buying an image render.
+    """
+    labels: dict[str, str] = {}
+    for match in MERMAID_NODE.finditer(source):
+        text = next((group for group in match.groups()[1:] if group), "")
+        labels[match.group(1)] = (text or match.group(1)).strip().lower()
+    for left, right in MERMAID_STATE_EDGE.findall(source):
+        for node in (left, right):
+            if node != "[*]":
+                labels.setdefault(node, node.lower())
+    edges: dict[str, set[str]] = {}
+    for left, right in MERMAID_LINK.findall(source):
+        edges.setdefault(left, set()).add(right)
+
+    def decision(term: str) -> str | None:
+        matches = [(node, label) for node, label in labels.items() if term in label]
+        if not matches:
+            return None
+        matches.sort(key=lambda item: ("?" not in item[1], len(item[1])))
+        return matches[0][0]
+
+    done, cost, turns = decision("done"), decision("cost"), decision("turn")
+    return bool(done and cost and turns and cost in edges.get(done, ()) and turns in edges.get(cost, ()))
 
 
 def simplify_instruction(inv: Inventory) -> str:

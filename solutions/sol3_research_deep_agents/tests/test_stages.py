@@ -101,6 +101,27 @@ def test_a_plan_with_nothing_important_would_verify_nothing():
     assert "important" in str(exc.value)
 
 
+def test_a_plan_cannot_make_more_than_three_questions_block_the_paper():
+    bad = plan()
+    bad["questions"].extend(
+        {
+            "id": f"q{i}",
+            "subject": f"s{i}",
+            "question": f"why {i}?",
+            "check": "an official URL",
+            "important": True,
+        }
+        for i in range(4, 7)
+    )
+    for question in bad["questions"]:
+        question["important"] = True
+
+    with pytest.raises(GateFailed) as exc:
+        stages.plan_gate(bad)
+
+    assert "at most 3" in str(exc.value)
+
+
 def test_normalize_adds_the_sections_every_paper_has():
     """Otherwise the section gate fails at stage 8, four stages too late."""
     out = stages.normalize_plan({"questions": [], "sections": ["Body"]})
@@ -364,6 +385,36 @@ def test_write_gate_rejects_an_uncited_paragraph_in_an_otherwise_cited_section()
     with pytest.raises(GateFailed) as exc:
         stages.write_gate("Introduction", "One fact. [1]\n\nAnother fact.", [1])
     assert exc.value.signature == ("uncited_paragraph",)
+
+
+def test_uncited_writer_padding_is_dropped_without_inventing_a_citation():
+    raw = (
+        "Unsupported generic framing with no source.\n\n"
+        "AgentExecutor defaults to fifteen iterations. [2][4]\n\n"
+        "![A bounded loop](figures/loop_imagen.png)"
+    )
+
+    cleaned = stages.drop_uncited_prose(raw)
+
+    assert "Unsupported generic framing" not in cleaned
+    assert "AgentExecutor defaults" in cleaned
+    assert "[2][4]" in cleaned
+    assert "![A bounded loop]" in cleaned
+    assert set(stages.CITATION.findall(cleaned)) == {"2", "4"}
+
+
+def test_an_acronym_is_defined_once_at_its_first_use():
+    sections = {
+        "Abstract": "Tool calls made through MCP can time out. [1]",
+        "Resilience": "Model Context Protocol (MCP) cancellation is explicit. [2]",
+        "Checklist": "Define Model Context Protocol (MCP) timeouts. [2]",
+    }
+
+    normalized = stages.define_acronym_once(sections, "Model Context Protocol", "MCP")
+    body = "\n".join(normalized.values())
+
+    assert normalized["Abstract"].startswith("Tool calls made through Model Context Protocol (MCP)")
+    assert body.count("Model Context Protocol (MCP)") == 1
 
 
 def test_write_gate_rejects_an_empty_section():
