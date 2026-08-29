@@ -40,6 +40,14 @@ def test_publishing_without_a_paper_refuses(tmp_path):
         publish.publish(tmp_path, topic="t")
 
 
+def test_a_failed_e2e_report_is_never_published(tmp_path):
+    (tmp_path / "paper.md").write_text("# p")
+    (tmp_path / "e2e-report.json").write_text(json.dumps({"passed": False}))
+
+    with pytest.raises(publish.PublishError, match="did not pass"):
+        publish.publish(tmp_path, topic="t")
+
+
 def test_a_missing_gh_is_named_as_the_reason(tmp_path, monkeypatch):
     """Fail with the reason, not with a git error three steps later."""
     (tmp_path / "paper.md").write_text("# p")
@@ -142,3 +150,29 @@ def test_a_dry_run_touches_nothing(tmp_path, monkeypatch):
     out = publish.publish(tmp_path, topic="t", dry_run=True)
     assert out == {"user": "someone", "images": ["diagrams/x.png"], "dry_run": True}
     assert not (tmp_path / "gist.json").exists()
+
+
+def test_an_existing_pdf_is_included_in_the_gist_record(tmp_path, monkeypatch):
+    (tmp_path / "paper.md").write_text("# p")
+    (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.7")
+    (tmp_path / "gist.json").write_text(json.dumps({"id": "abc123"}))
+    monkeypatch.setattr(publish.shutil, "which", lambda name: "/usr/bin/gh")
+
+    class Result:
+        def __init__(self, stdout="", code=0):
+            self.stdout, self.stderr, self.returncode = stdout, "", code
+
+    monkeypatch.setattr(
+        publish,
+        "_gh",
+        lambda *a, **k: Result("Token scopes: 'gist'" if a[0] == "auth" else "someone\n"),
+    )
+    monkeypatch.setattr(publish, "_git", lambda *a, **k: Result())
+    monkeypatch.setattr(publish.subprocess, "run", lambda *a, **k: Result())
+    monkeypatch.setattr(publish.shutil, "rmtree", lambda *a, **k: None)
+    monkeypatch.setattr(publish.shutil, "copyfile", lambda *a, **k: None)
+    (publish.CACHE / "gist-abc123").mkdir(parents=True, exist_ok=True)
+
+    record = publish.publish(tmp_path, topic="t")
+
+    assert "paper.pdf" in record["files"]

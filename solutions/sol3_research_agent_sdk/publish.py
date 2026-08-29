@@ -1,4 +1,4 @@
-"""Publish the finished paper and its figures to a private gist.
+"""Publish the finished paper, PDF, and figures to a secret gist.
 
 A gist is a git repository with a flat namespace and no subdirectories, and its
 web view will not render a relative image path. Publishing therefore takes four
@@ -98,12 +98,23 @@ def local_images(body: str) -> list[str]:
     return found
 
 
-def publish(work_dir: Path | str, *, topic: str, dry_run: bool = False) -> dict:
-    """Push `paper.md` and its figures. Returns the gist record."""
+def publish(
+    work_dir: Path | str,
+    *,
+    topic: str,
+    dry_run: bool = False,
+    require_pdf: bool = False,
+) -> dict:
+    """Push `paper.md`, its figures, and an existing PDF. Returns the gist record."""
     work = Path(work_dir).resolve()
     paper = work / "paper.md"
     if not paper.exists():
         raise PublishError(f"{paper} does not exist. Nothing to publish.")
+    e2e_report = work / "e2e-report.json"
+    if e2e_report.is_file() and not json.loads(e2e_report.read_text(encoding="utf-8")).get("passed"):
+        raise PublishError(f"{e2e_report} did not pass. Nothing to publish.")
+    if require_pdf and not (work / "paper.pdf").is_file():
+        raise PublishError(f"{work / 'paper.pdf'} does not exist. Run `task pdf` first.")
     preflight()
 
     body = paper.read_text(encoding="utf-8")
@@ -155,6 +166,10 @@ def publish(work_dir: Path | str, *, topic: str, dry_run: bool = False) -> dict:
         shutil.copyfile(source, clone / name)
         mapping[path] = RAW.format(user=user, gist=gist_id, name=name)
 
+    pdf = work / "paper.pdf"
+    if pdf.is_file():
+        shutil.copyfile(pdf, clone / "paper.pdf")
+
     (clone / "paper.md").write_text(rewrite_images(body, mapping), encoding="utf-8")
 
     _git("add", "-A", cwd=clone)
@@ -171,7 +186,11 @@ def publish(work_dir: Path | str, *, topic: str, dry_run: bool = False) -> dict:
         "url": f"https://gist.github.com/{user}/{gist_id}",
         "user": user,
         "topic": topic,
-        "files": ["paper.md", *sorted(mapping.values())],
+        "files": [
+            "paper.md",
+            *sorted(asset_name(path) for path in mapping),
+            *(["paper.pdf"] if pdf.is_file() else []),
+        ],
         "secret": True,
         "note": "A secret gist is unlisted, not access controlled. The URL is the credential.",
     }
@@ -205,5 +224,28 @@ def demo() -> int:
     return 0
 
 
+def main(argv: list[str] | None = None) -> int:
+    import argparse  # noqa: PLC0415
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--work-dir", type=Path, required=True)
+    parser.add_argument("--topic", required=True)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--require-pdf", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        record = publish(
+            args.work_dir,
+            topic=args.topic,
+            dry_run=args.dry_run,
+            require_pdf=args.require_pdf,
+        )
+    except PublishError as exc:
+        print(f"publish failed: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(record, indent=2))
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(demo() if "--demo" in sys.argv else 0)
+    raise SystemExit(demo() if "--demo" in sys.argv else main())

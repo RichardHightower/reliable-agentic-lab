@@ -2,7 +2,7 @@
   "_note": "Recorded answers, so this folder runs in a room with no network. Every URL here was checked and every statement is one the cited page supports. A fixture that records a plausible-looking answer teaches the loop to accept plausible-looking answers.",
   "loop engineering exit criteria": {
     "question": "loop engineering exit criteria",
-    "answer": "This repository's paper loop checks done, then cost, then max turns. Done means the deterministic paper checks and judge agree; cost means the configured USD ceiling is spent; max turns is the runtime safety ceiling. It does not use a generic whichever-fires-first rule.",
+    "answer": "This repository's paper loop checks done, then cost, then max turns. Done means the deterministic paper checks and judge agree; cost means the configured USD ceiling is spent; max turns is the runtime safety ceiling. These exits are distinct and are evaluated in that order.",
     "citations": ["https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk"],
     "sources": [
       {"url": "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk", "title": "sol3_research_agent_sdk"}

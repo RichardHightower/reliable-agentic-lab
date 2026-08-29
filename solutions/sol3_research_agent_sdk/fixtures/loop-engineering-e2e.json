@@ -2,7 +2,7 @@
   "_note": "Recorded primary-source summaries for the illustrated loop-engineering E2E scenario. The fixture keeps research deterministic; renderer fidelity remains a real acceptance condition.",
   "loop engineering best practices": {
     "question": "loop engineering best practices",
-    "answer": "This repository's paper loop checks done, then cost, then max turns. Done is the deterministic paper-check and judge result, cost is the configured USD ceiling, and max turns is the runtime safety ceiling; it does not teach whichever fires first.",
+    "answer": "This repository's paper loop checks done, then cost, then max turns. Done is the deterministic paper-check and judge result, cost is the configured USD ceiling, and max turns is the runtime safety ceiling. These exits are distinct and are evaluated in that order.",
     "citations": ["https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk"],
     "sources": [
       {"url": "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk", "title": "sol3_research_agent_sdk"}
