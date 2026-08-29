@@ -29,6 +29,16 @@ Pick one tool and paste its prompt.
 | Grok Build | `grok -p "$(cat prompts/grok-build.md)"` |
 | OpenCode | `opencode run "$(cat prompts/opencode.md)"` |
 
+## Take-home
+
+Same loop, different runtime. Not Saturday. Do not copy those fences into
+this folder.
+
+| Runtime | Prompt | Answer |
+|---|---|---|
+| Claude Agent SDK | [prompts/agent-sdk.md](prompts/agent-sdk.md) | `solutions/sol3_research_agent_sdk/` |
+| LangChain Deep Agents | [prompts/deep-agents.md](prompts/deep-agents.md) | `solutions/sol3_research_deep_agents/` |
+
 ## Verify
 
 Saturday self-check, from this folder:

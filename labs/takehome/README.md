@@ -16,6 +16,10 @@ The answers are in `solutions/sol2_implementer_agent_sdk/` and
 step-by-step build. Copy one folder somewhere else and it runs. Do not import
 a shared engine.
 
+Lab 1 ships the same two runtimes as full-port prompts, not as this fill-one-file
+stub: `labs/lab1_enhancer/prompts/agent-sdk.md` and
+`labs/lab1_enhancer/prompts/deep-agents.md`. Labs 3 and 4 do too.
+
 ## Install
 
 The five-hour labs need no model key. These two do.

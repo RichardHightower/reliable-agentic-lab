@@ -25,15 +25,22 @@ Code project: it has a `.claude/` with the tool scope for that lab, and a
 ## Pick one tool
 
 Claude Code, Codex, Grok Build, or OpenCode. You choose, and the lab does not
-care. Every lab ships the same prompt for all four in `prompts/`.
+care. Every lab ships the same four Saturday prompts in `prompts/`. Lab 1 also
+ships take-home prompts for Claude Agent SDK and LangChain Deep Agents. Labs
+2 to 4 ship those two as well, pointed at the standalone solution folders,
+not at the Saturday stub.
 
 See [HOW-TO-RUN.md](HOW-TO-RUN.md).
 
 ## Take-home
 
-`takehome/` holds the same loops in the Claude Agent SDK and in LangChain Deep
-Agents, both with Langfuse. Nobody is expected to finish these in five hours.
-Some will try.
+`takehome/` holds a fill-`loop.py` stub of the Module 2 implementer in the
+Claude Agent SDK and in LangChain Deep Agents, both with Langfuse. Nobody is
+expected to finish these in five hours. Some will try.
+
+Each lab also ships `prompts/agent-sdk.md` and `prompts/deep-agents.md` for
+the full standalone port of that module. Those prompts point at
+`solutions/sol*_agent_sdk/` and `solutions/sol*_deep_agents/`.
 
 ## If you fall behind
 

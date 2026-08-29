@@ -53,6 +53,16 @@ piece (the judge agent, the doer agent, the deterministic field check, the
 orchestrator skill). A fifth prompt at the end has Claude Code diff your
 result against the answer.
 
+Saturday's other three tools are in the same folder: [codex](prompts/codex.md),
+[grok-build](prompts/grok-build.md), [opencode](prompts/opencode.md).
+
+Take-home, not Saturday. Same loop, different runtime:
+
+| Runtime | Prompt | Answer |
+|---|---|---|
+| Claude Agent SDK | [prompts/agent-sdk.md](prompts/agent-sdk.md) | `solutions/sol1_enhancer_agent_sdk/` |
+| LangChain Deep Agents | [prompts/deep-agents.md](prompts/deep-agents.md) | `solutions/sol1_enhancer_deep_agents/` |
+
 ## Verify
 
 ```bash
