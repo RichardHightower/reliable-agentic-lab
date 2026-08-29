@@ -225,6 +225,35 @@ def test_a_review_retry_sends_failed_rows_to_the_writer(offline, monkeypatch):
     assert calls["revise"] and "names_tradeoff" in calls["revise"][0]
 
 
+def test_writer_heading_is_removed_before_the_citation_gate():
+    assert paper.section_body("## Abstract\n\nGrounded summary. [1]", "Abstract") == "Grounded summary. [1]"
+    assert paper.section_body("Abstract\n\nGrounded summary. [1]", "Abstract") == "Grounded summary. [1]"
+
+
+def test_assemble_citation_failure_revises_only_uncited_sections(offline, monkeypatch):
+    """A local citation repair must not rewrite the reviewer-approved draft."""
+    offline.run()
+    offline.state.mark_failed("assemble", "rerun")
+    offline.written["Introduction"] = "An unsupported transition."
+    calls = {"assemble": 0, "targets": None}
+
+    def assemble(_extra=""):
+        calls["assemble"] += 1
+        if calls["assemble"] == 1:
+            raise GateFailed("uncited introduction", ("cited",))
+        return paper.StageResult("assemble", summary="fixed")
+
+    def revise(_feedback, *, targets=None):
+        calls["targets"] = targets
+        return paper.StageResult("revise", summary="one section")
+
+    monkeypatch.setattr(offline, "stage_assemble", assemble)
+    monkeypatch.setattr(offline, "stage_revise", revise)
+
+    assert offline.run() == 0
+    assert calls["targets"] == ["Introduction"]
+
+
 def test_a_new_process_reloads_checkpointed_sections_before_writing(offline, run_dir):
     """A process restart happens between sections in a live run, not just retries."""
     offline.run()
