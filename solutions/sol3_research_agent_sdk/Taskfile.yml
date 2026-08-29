@@ -25,6 +25,10 @@ vars:
   RENDERER_TAG: 'v0.2.0'
   IMAGE_GEN: 'https://github.com/SpillwaveSolutions/image_gen'
   IMAGE_GEN_TAG: 'v2.1.0'
+  LIVE_REPORT: '{{.TASKFILE_DIR}}/work/e2e-loop-engineering-live'
+  FIXTURE_REPORT: '{{.TASKFILE_DIR}}/work/e2e-loop-engineering-fixture'
+  REPORT_DIR: '{{.REPORT_DIR | default .LIVE_REPORT}}'
+  PDF_OUT: '{{.PDF_OUT | default (printf "%s/paper.pdf" .REPORT_DIR)}}'
 
 tasks:
   default:
@@ -65,7 +69,7 @@ tasks:
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - test -x {{.RUN_PY}} || {{.PY}} -m venv {{.VENV}}
-      - '{{.RUN_PY}} -m pip install --quiet claude-agent-sdk pytest'
+      - '{{.RUN_PY}} -m pip install --quiet claude-agent-sdk pytest reportlab pypdf'
       - task: renderer
       - task: image-gen
 
@@ -121,7 +125,7 @@ tasks:
           echo "run task setup first. It creates .venv and installs the renderer."
           exit 1
         fi
-        "{{.RUN_PY}}" e2e.py --mode fixture
+        "{{.RUN_PY}}" e2e.py --mode fixture --out "{{.E2E_OUT | default .FIXTURE_REPORT}}"
 
   e2e-live:
     desc: Run the bounded live Agent SDK acceptance test. Needs ANTHROPIC_API_KEY and PERPLEXITY_API_KEY.
@@ -132,7 +136,29 @@ tasks:
           echo "run task setup first. It creates .venv and installs the renderer."
           exit 1
         fi
-        "{{.RUN_PY}}" e2e.py --mode live --max-usd "{{.LIVE_E2E_MAX_USD | default "10"}}"
+        "{{.RUN_PY}}" e2e.py --mode live --out "{{.E2E_OUT | default .LIVE_REPORT}}" --max-usd "{{.LIVE_E2E_MAX_USD | default "10"}}"
+
+  pdf:
+    desc: Export an existing paper and its figures as an Arctic Fox PDF.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It installs the PDF dependencies in this folder."
+          exit 1
+        fi
+        "{{.RUN_PY}}" pdf_report.py --paper "{{.REPORT_DIR}}/paper.md" --output "{{.PDF_OUT}}" --theme arctic-fox --min-figures 2
+
+  publish-report:
+    desc: Publish an existing paper, PDF, and figures to its secret GitHub Gist.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates the folder-local runtime."
+          exit 1
+        fi
+        "{{.RUN_PY}}" publish.py --work-dir "{{.REPORT_DIR}}" --topic "{{.TOPIC}}" --require-pdf
 
   run:
     desc: Research a topic and write the paper. Needs a key. TOPIC=... to set it.
@@ -146,7 +172,7 @@ tasks:
         "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" {{.CLI_ARGS}}
 
   publish:
-    desc: Run, then push the paper and its figures to a private gist.
+    desc: Run, then push the paper and its figures to a secret gist.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - |

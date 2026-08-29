@@ -21,7 +21,8 @@ system Python or `~/.claude`.
 task setup
 ```
 
-Creates `.venv`, `.cache/imagen-diagrams` at v0.2.0, and `.cache/image-gen` at
+Creates `.venv`, installs the Agent SDK plus the PDF dependencies,
+`.cache/imagen-diagrams` at v0.2.0, and `.cache/image-gen` at
 v2.1.0 in this folder. `ClaudeAgentOptions.plugins` loads both local manifests,
 and its exact skill allowlist exposes only `imagen-diagrams:imagen-diagrams`
 and `image-gen:image-gen`. It does not discover user or parent-project skills.
@@ -74,11 +75,15 @@ This uses a recorded primary-source corpus but the installed
 v0.2.0 renderer and fidelity judge. That plugin alone turns `.mmd` or `.puml`
 source into the paper's `*_imagen.png` diagrams. The separately installed
 [`image-gen`](https://github.com/SpillwaveSolutions/image_gen) v2.1.0 plugin is
-reserved for cover and non-diagram artwork. If the diagram renderer has no
-image backend, it writes `<stem>_imagen.prompt.txt` and exits 2; it never
-substitutes SVG or a plain PNG. Each accepted figure retains the plugin's
-render and judge sidecars. No model key or research network access is needed
-for the recorded research corpus itself.
+reserved for cover and non-diagram artwork. The diagram renderer uses its own
+approved backend order: `imagen`, `grok`, then `codex`. `GEMINI_API_KEY` is
+passed to the Imagen CLI under the `GOOGLE_API_KEY` name it expects. If a
+backend exits without a PNG, the harness keeps that attempt's prompt and
+metadata before trying the next backend. If all three fail, it writes the final
+`<stem>_imagen.prompt.txt` and exits 2; it never substitutes SVG or a plain PNG.
+Each accepted figure retains the plugin's render and judge sidecars. No model
+key or research network access is needed for the recorded research corpus
+itself.
 
 ```bash
 LIVE_E2E_MAX_USD=10 task e2e-live
@@ -89,6 +94,32 @@ research tools, so it requires `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, the
 renderer, and an approved image backend. It never publishes a gist. The resulting figures must
 have no fidelity misses, be embedded in the paper, and meet the resolution
 floor recorded in `e2e-report.json`.
+
+Both E2E lanes render article figures with imagen-diagrams' built-in
+`arctic-fox` theme. The acceptance report rejects a figure whose render sidecar
+records another theme.
+
+## Export and publish an existing report
+
+Export the default live E2E report as a publication PDF:
+
+```bash
+REPORT_DIR=work/e2e-loop-engineering-live task pdf
+```
+
+The command writes `paper.pdf` and `paper.pdf.json` beside `paper.md`. The PDF
+uses the same Arctic Fox white, deep-navy, royal-blue, and silver-grey visual
+system as its article figures.
+
+Publish the existing Markdown, PDF, and figures without rerunning research:
+
+```bash
+REPORT_DIR=work/e2e-loop-engineering-live task publish-report
+```
+
+The repo-local `$e2e-test-research-report` skill runs the live E2E lane by
+default, exports and visually checks the PDF, then attempts this secret-Gist
+publication step. Use its fixture lane when live credentials are unavailable.
 
 ## Live paper
 

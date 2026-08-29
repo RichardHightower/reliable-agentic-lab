@@ -145,6 +145,17 @@ def test_setup_pins_the_local_image_plugin_releases():
     assert "v0.2.0" in how and "v2.1.0" in how
 
 
+def test_the_publication_tasks_and_docs_use_arctic_fox():
+    taskfile = (FOLDER / "Taskfile.yml").read_text(encoding="utf-8")
+    diagrams = (FOLDER / "diagrams.py").read_text(encoding="utf-8")
+    how = (FOLDER / "HOW_TO_RUN.md").read_text(encoding="utf-8")
+    assert "  pdf:" in taskfile
+    assert "  publish-report:" in taskfile
+    assert "--theme arctic-fox" in taskfile
+    assert 'DEFAULT_THEME = "arctic-fox"' in diagrams
+    assert "paper.pdf.json" in how
+
+
 def test_the_docs_name_only_tasks_that_exist():
     taskfile = (FOLDER / "Taskfile.yml").read_text(encoding="utf-8")
     declared = set(re.findall(r"^  (\w[\w-]*):$", taskfile, re.M))

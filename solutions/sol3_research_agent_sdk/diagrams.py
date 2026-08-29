@@ -31,7 +31,7 @@ SCRIPTS = RENDERER / "skills" / "imagen-diagrams" / "scripts"
 RENDERER_THEMES = RENDERER / "skills" / "imagen-diagrams" / "themes"
 THEMES = FOLDER / "themes"
 
-DEFAULT_THEME = "spillwave-navy"
+DEFAULT_THEME = "arctic-fox"
 ASPECT = "16:9"
 MAX_ATTEMPTS = 3
 TIMEOUT = 300
@@ -52,7 +52,9 @@ class ImageBackendUnavailable(RuntimeError):
 
     def __init__(self, prompt_file: Path):
         self.prompt_file = Path(prompt_file)
-        super().__init__(f"no image backend is on PATH; saved prompt at {self.prompt_file}")
+        super().__init__(
+            f"every approved image backend failed; saved prompt at {self.prompt_file}"
+        )
 
 
 @dataclass
@@ -88,9 +90,9 @@ def available() -> bool:
 def ensure_theme() -> None:
     """Copy this folder's themes into the renderer clone.
 
-    v0.2.0 ships built-in themes and the fixed Imagen 0.6 CLI adapter. This
-    solution still owns `spillwave-navy`, so copy that local theme into the
-    disposable plugin clone before each render.
+    v0.2.0 ships Arctic Fox and the fixed Imagen 0.6 CLI adapter. Copy any
+    solution-local themes into the disposable clone too, but the publication
+    default stays the plugin's built-in `arctic-fox` theme.
     """
     if not RENDERER_THEMES.is_dir() or not THEMES.is_dir():
         return
@@ -103,18 +105,37 @@ def ensure_theme() -> None:
 def _run(script: str, args: list[str]) -> subprocess.CompletedProcess:
     # Running the script by path puts its own directory on sys.path, which is
     # how its sibling imports resolve.
-    environment = os.environ.copy()
-    if not environment.get("GOOGLE_API_KEY") and environment.get("GEMINI_API_KEY"):
-        environment["GOOGLE_API_KEY"] = environment["GEMINI_API_KEY"]
+    env = os.environ.copy()
+    # gemini-imagen 0.6.x names this credential GOOGLE_API_KEY even when the
+    # operator uses the provider-neutral GEMINI_API_KEY name in the shell.
+    if env.get("GEMINI_API_KEY") and not env.get("GOOGLE_API_KEY"):
+        env["GOOGLE_API_KEY"] = env["GEMINI_API_KEY"]
     return subprocess.run(
         ["python3", str(SCRIPTS / script), *args],
         cwd=str(FOLDER),
+        env=env,
         text=True,
         capture_output=True,
         check=False,
         timeout=TIMEOUT,
-        env=environment,
     )
+
+
+def _sidecar_backend(sidecar: Path) -> str | None:
+    try:
+        return json.loads(sidecar.read_text(encoding="utf-8")).get("backend")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _snapshot_failed_attempt(png: Path, backend: str) -> None:
+    """Keep each failed backend's prompt and metadata for diagnosis."""
+    prompt = png.with_suffix(".prompt.txt")
+    sidecar = png.with_suffix(".json")
+    for source, suffix in ((prompt, "prompt.txt"), (sidecar, "json")):
+        if source.is_file():
+            target = png.with_name(f"{png.stem}.{backend}.{suffix}")
+            target.write_bytes(source.read_bytes())
 
 
 def render(source: Path, topic: str, out_dir: Path, theme: str = DEFAULT_THEME) -> Path | None:
@@ -122,33 +143,42 @@ def render(source: Path, topic: str, out_dir: Path, theme: str = DEFAULT_THEME) 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     ensure_theme()
-    proc = _run(
-        "render.py",
-        [
-            "--source",
-            str(source),
-            "--topic",
-            topic,
-            "--theme",
-            theme,
-            "--density",
-            "article",
-            "--output-dir",
-            str(out_dir),
-        ],
-    )
+    args = [
+        "--source",
+        str(source),
+        "--topic",
+        topic,
+        "--theme",
+        theme,
+        "--density",
+        "article",
+        "--output-dir",
+        str(out_dir),
+    ]
     png = out_dir / f"{Path(source).stem}_imagen.png"
     prompt_file = png.with_suffix(".prompt.txt")
+    sidecar = png.with_suffix(".json")
+
+    proc = _run("render.py", args)
     if png.exists() and png.stat().st_size >= 32:
         return png
-    if proc.returncode == NO_BACKEND and prompt_file.is_file():
-        raise ImageBackendUnavailable(prompt_file)
     if proc.returncode == SALT:
         # A Salt wireframe needs the PlantUML JAR, not an image model. Handing
-        # the prompt to `imagen` anyway produces a picture of a form, which is
-        # worse than no figure because it looks like a rendering.
+        # the prompt to an image backend produces a picture of a form.
         return None
-    if proc.returncode != 0 and prompt_file.is_file():
+
+    first = _sidecar_backend(sidecar)
+    if first:
+        _snapshot_failed_attempt(png, first)
+    order = ("imagen", "grok", "codex")
+    remaining = order[order.index(first) + 1 :] if first in order else ()
+    for backend in remaining:
+        proc = _run("render.py", [*args, "--backend", backend])
+        if png.exists() and png.stat().st_size >= 32:
+            return png
+        _snapshot_failed_attempt(png, backend)
+
+    if prompt_file.is_file():
         raise ImageBackendUnavailable(prompt_file)
     return None
 

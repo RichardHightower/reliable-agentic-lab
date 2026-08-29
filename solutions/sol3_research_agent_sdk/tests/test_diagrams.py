@@ -179,6 +179,34 @@ def test_backend_auth_failure_also_fails_closed_with_the_prompt(monkeypatch, tmp
     assert exc.value.prompt_file == prompt
 
 
+def test_runtime_failure_falls_through_in_order_and_keeps_attempts(monkeypatch, tmp_path):
+    source = tmp_path / "figure.mmd"
+    source.write_text("flowchart LR\n  A[Plan] --> B[Check]")
+    out = tmp_path / "out"
+    calls = []
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+
+    def run(script, args):
+        backend = args[args.index("--backend") + 1] if "--backend" in args else "imagen"
+        calls.append(backend)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "figure_imagen.prompt.txt").write_text(f"prompt for {backend}")
+        (out / "figure_imagen.json").write_text(json.dumps({"backend": backend}))
+        if backend == "grok":
+            (out / "figure_imagen.png").write_bytes(b"x" * 64)
+            return type("Result", (), {"returncode": 0})()
+        return type("Result", (), {"returncode": 1})()
+
+    import json  # noqa: PLC0415
+
+    monkeypatch.setattr(diagrams, "_run", run)
+
+    assert diagrams.render(source, "loop safety", out) == out / "figure_imagen.png"
+    assert calls == ["imagen", "grok"]
+    assert (out / "figure_imagen.imagen.prompt.txt").read_text() == "prompt for imagen"
+    assert (out / "figure_imagen.imagen.json").is_file()
+
+
 def test_judge_persists_the_plugin_fidelity_sidecar(monkeypatch, tmp_path):
     source = tmp_path / "figure.mmd"
     png = tmp_path / "figure_imagen.png"

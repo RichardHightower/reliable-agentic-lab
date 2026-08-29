@@ -45,7 +45,7 @@ HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.M)  # re.M so finditer sees every he
 # the citation. Demanding a marker in either produces a paper that cites its own
 # bibliography.
 UNCITED_SECTIONS = {"abstract", "references", "summary"}
-IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
+IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 EXIT_ORDER = re.compile(r"\bdone\b[\s\S]{0,240}?\bcost\b[\s\S]{0,240}?\bmax(?:imum)?\s+turns?\b", re.I)
 WHICHEVER_FIRST = re.compile(r"\bwhichever\s+(?:comes|fires)\s+first\b", re.I)
 
@@ -302,7 +302,11 @@ def doctrine_failure(body: str) -> str | None:
     # The figure's alt text plus its immediate caption are the source-visible
     # representation of Figure 1.  Requiring those labels keeps a polished but
     # semantically wrong diagram from clearing the paper gate.
-    nearby = body[first.start() : body.find("\n\n", first.end()) if "\n\n" in body[first.end() :] else len(body)]
+    # Markdown normally separates a block image and its caption with a blank
+    # line. Skip that separator, then include the first caption paragraph.
+    after_image = body[first.end() :].lstrip("\n")
+    caption = after_image.split("\n\n", 1)[0]
+    nearby = f"{first.group(0)}\n{caption}"
     if not EXIT_ORDER.search(nearby):
         return "Figure 1 must label done, then cost, then max turns"
     return None

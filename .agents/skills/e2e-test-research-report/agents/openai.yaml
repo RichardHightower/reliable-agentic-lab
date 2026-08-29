@@ -1,0 +1,4 @@
+interface:
+  display_name: "E2E Test Research Report"
+  short_description: "Generate, verify, PDF, and publish a research report"
+  default_prompt: "Use $e2e-test-research-report to generate and verify a research white paper, export its Arctic Fox PDF, and publish it to a secret GitHub Gist."

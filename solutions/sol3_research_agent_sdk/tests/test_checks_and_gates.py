@@ -98,6 +98,22 @@ def test_the_paper_gate_requires_done_then_cost_then_max_turns_in_figure_one():
     assert score.passed, score.report()
 
 
+def test_the_exit_order_may_live_in_the_caption_after_a_block_image():
+    body = (
+        "# T\n\n## Control\n\n"
+        "The paper exits on done, then cost, then max turns [1].\n\n"
+        "![Figure 1: control loop](exits_imagen.png)\n\n"
+        "Figure 1 shows done, then cost, then max turns."
+    )
+    score = checks.check(
+        body,
+        ["https://docs.langchain.com/oss/python/langchain/overview"],
+        enforce_source_policy=True,
+        enforce_loop_doctrine=True,
+    )
+    assert score.passed, score.report()
+
+
 def test_the_paper_gate_rejects_whichever_fires_first_and_blog_references():
     body = (
         "# T\n\n## Control\n\n"

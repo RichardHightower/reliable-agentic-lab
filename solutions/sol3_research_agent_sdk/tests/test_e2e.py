@@ -37,7 +37,12 @@ def complete_artifact(work: Path) -> None:
         (work / "diagrams" / f"{name}.mmd").write_text("flowchart LR\nA --> B\n")
         write_json(
             image.with_suffix(".json"),
-            {"backend": "imagen", "policy": "imagen-cli-vars", "density": "article"},
+            {
+                "backend": "imagen",
+                "policy": "imagen-cli-vars",
+                "density": "article",
+                "theme": "arctic-fox",
+            },
         )
         write_json(image.with_suffix(".judge.json"), {"pass": True, "misses": []})
 
@@ -110,6 +115,20 @@ def test_a_figure_without_the_plugin_judge_record_is_not_publication_ready(tmp_p
 
     assert not report["passed"]
     assert any("judge sidecar" in failure for failure in report["failures"])
+
+
+def test_a_figure_with_the_wrong_theme_is_not_publication_ready(tmp_path):
+    work = tmp_path / "paper"
+    complete_artifact(work)
+    sidecar = work / "diagrams" / "control-loop_imagen.json"
+    rendered = json.loads(sidecar.read_text())
+    rendered["theme"] = "claude-clay"
+    write_json(sidecar, rendered)
+
+    report = e2e.validate(work)
+
+    assert not report["passed"]
+    assert any("publication theme" in failure for failure in report["failures"])
 
 
 def test_the_fixture_turns_can_use_a_scenario_specific_corpus(work, tmp_path):
