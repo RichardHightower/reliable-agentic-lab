@@ -224,17 +224,25 @@ def search_tool(backend, budget=None):
     the caller ignorant of what is behind it.
     """
     from langchain.tools import tool  # noqa: PLC0415
-    from research import BudgetExceeded  # noqa: PLC0415
+    from research import Backend, BudgetExceeded  # noqa: PLC0415
 
     @tool
     def search(question: str) -> str:
-        """Search through the research boundary. Returns an answer plus citations."""
-        if budget is not None:
-            try:
-                budget.charge(backend.cost_per_call)
-            except BudgetExceeded as exc:
-                return f"NO ANSWER. {exc}"
-        finding = backend.search(question)
+        """Run the one filtered research boundary and return its source bundle."""
+        try:
+            if budget is not None:
+                budget.reserve_tool()
+            if isinstance(backend, Backend):
+                finding = backend.search(question, budget.charge if budget is not None else None)
+            else:
+                # The lab deliberately accepts a tiny hand-written backend for
+                # a classroom recording. It cannot make nested provider calls,
+                # so preserve the original one-charge tool contract.
+                if budget is not None:
+                    budget.charge(getattr(backend, "cost_per_call", 0.0))
+                finding = backend.search(question)
+        except BudgetExceeded as exc:
+            return f"NO ANSWER. {exc}"
         if finding.empty:
             return f"NO ANSWER. {finding.note or 'the boundary returned nothing'}"
         cites = " ".join(finding.citations) or "(no citations)"
@@ -251,17 +259,22 @@ def docs_tool(backend, budget=None):
     its own mistake. Context7 reads the library's published docs instead.
     """
     from langchain.tools import tool  # noqa: PLC0415
-    from research import BudgetExceeded  # noqa: PLC0415
+    from research import Backend, BudgetExceeded  # noqa: PLC0415
 
     @tool
     def check_docs(query: str) -> str:
         """Check a library, API, or version claim. Pass 'library :: question'."""
-        if budget is not None:
-            try:
-                budget.charge(backend.cost_per_call)
-            except BudgetExceeded as exc:
-                return f"NO ANSWER. {exc}"
-        finding = backend.search(query)
+        try:
+            if budget is not None:
+                budget.reserve_tool()
+            if isinstance(backend, Backend):
+                finding = backend.search(query, budget.charge if budget is not None else None)
+            else:
+                if budget is not None:
+                    budget.charge(getattr(backend, "cost_per_call", 0.0))
+                finding = backend.search(query)
+        except BudgetExceeded as exc:
+            return f"NO ANSWER. {exc}"
         if finding.empty:
             return f"NO ANSWER. {finding.note or 'the documentation boundary returned nothing'}"
         cites = " ".join(finding.citations) or "(no citations)"

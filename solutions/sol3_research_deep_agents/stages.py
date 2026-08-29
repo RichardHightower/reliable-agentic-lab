@@ -26,10 +26,12 @@ import diagrams
 import brief
 import evidence
 import paper_check
+import source_policy
 
 # A plan that asks fewer than this is not research, it is a lookup.
 MIN_QUESTIONS = 3
 MAX_QUESTIONS = 8
+EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
 # Sections that bind to no claims of their own. The abstract restates what the
 # body already cited, so binding it would mean listing every claim twice and
@@ -111,6 +113,10 @@ def plan_gate(plan: dict) -> None:
             f"there are {len(questions)} questions. "
             f"Write between {MIN_QUESTIONS} and {MAX_QUESTIONS}."
         )
+    if questions and questions[0].get("question", "").strip() != EXIT_DOCTRINE_QUESTION:
+        misses.append(
+            "the first question must ask what three exits this repo's paper loop checks, in order."
+        )
     seen = set()
     for index, question in enumerate(questions):
         label = question.get("id") or f"question {index + 1}"
@@ -173,10 +179,12 @@ def record_findings(ledger: evidence.Ledger, question: dict, reply: dict) -> evi
     reach the writer as something that looks like evidence.
     """
     subject = question.get("subject", "topic")
+    supplied_urls = [str(item.get("url", "")) for item in reply.get("sources", [])]
+    allowlist = source_policy.merge_allowlist(supplied_urls)
     source_ids = []
     for item in reply.get("sources", []):
         url = str(item.get("url", "")).strip()
-        if not url.startswith("http"):
+        if not source_policy.url_allowed(url, allowlist):
             continue
         source = ledger.add_source(
             evidence.SourceDocument(
@@ -196,7 +204,7 @@ def record_findings(ledger: evidence.Ledger, question: dict, reply: dict) -> evi
             continue
         # A claim may name its own subset of sources. When it names none, it
         # inherits every source this answer produced.
-        wanted = item.get("source_urls") or []
+        wanted = source_policy.filter_urls(item.get("source_urls") or [], allowlist)
         ids = [
             sid
             for sid in source_ids

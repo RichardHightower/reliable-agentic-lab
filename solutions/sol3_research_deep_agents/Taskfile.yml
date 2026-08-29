@@ -74,7 +74,7 @@ tasks:
       - '{{.PY}} loop.py --paper --topic "{{.TOPIC}}" --backend {{.BACKEND}} {{.CLI_ARGS}}'
 
   live:
-    desc: A real run. Needs ANTHROPIC_API_KEY; uses Perplexity when configured, otherwise web search. Add -- --debug for subgraph traces.
+    desc: A real run. Research uses filtered Perplexity, then Anthropic, OpenAI, and fixture; never Bing. Add -- --debug for subgraph traces.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - |

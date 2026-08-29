@@ -22,7 +22,8 @@ This folder imports no shared engine. Every module below is a copy, and
 | `roles.py` | Deep Agents subagents, and the three fencing layers |
 | `write_scope.py` | `WriteScope`, `Doer`, `Judge`, `Orchestrator` |
 | `gates.py` | Three exits, and stable failure detection |
-| `research.py` | One search boundary, four backends, a hard cost cap |
+| `research.py` | One filtered search boundary, paper-safe provider fallbacks, and a hard cost cap |
+| `source_policy.py` | The explicit official-host allowlist and citation post-filter |
 | `researcher.py` | The Lab 3 runner |
 | `brief.py` | Citation arithmetic and the em dash sweep |
 | `adapter.py` | Deep Agents results into a `DoerResult` |
@@ -150,16 +151,35 @@ A claim records two separate facts. `truth_state` counts sources.
 URLs inside one search answer are two sources and one look, and a reader is
 entitled to know which claims nobody went back and checked.
 
-## One boundary, four backends
+## One filtered boundary, with no Bing paper fallback
 
-The loop never learns which one answered.
+The model never chooses who is reputable. Python sends each provider an explicit
+allowlist and drops every returned URL that does not pass the same policy. The
+paper gate repeats that check against the rendered references.
+
+For each planned question, Perplexity runs Scout then Retrieve within the one
+researcher tool invocation. Scout may add only `docs.`, `reference.`, or
+`learn.` hosts, approved vendor GitHub organizations, or this repository; the
+merged list caps at 20 entries. A filtered Search bundle with hits but no usable
+quote may use one filtered `perplexity_ask` repair. It never makes an Ask call
+after a usable Search result.
 
 | Backend | When it is available |
 | --- | --- |
-| `perplexity` | `PERPLEXITY_API_KEY` is set. MCP first, then the REST API. The key may live in `.env`, `../.env`, `../../.env`, or `../../../.env` relative to this solution. |
+| `perplexity` | `PERPLEXITY_API_KEY` is set. Filtered `perplexity_search` uses MCP first, then the Search REST API. The key may live in `.env`, `../.env`, `../../.env`, or `../../../.env` relative to this solution. |
+| `anthropic` | Perplexity is unavailable and `ANTHROPIC_API_KEY` is set. One `web_search_20260209` call with the same allowlist. |
+| `openai` | Perplexity and Anthropic are unavailable and `OPENAI_API_KEY` is set. One Responses web search with the same allowlist. |
 | `context7` | `ctx7` is on PATH, or the MCP server answers. Verification only |
-| `websearch` | No Perplexity key. The research tool queries the web; an optional inbox can provide a recorded response for a classroom demo |
 | `fixture` | Explicit offline mode. A recording, for a room with no network |
+
+The live paper chain is Perplexity, then Anthropic, then OpenAI, then fixture.
+It has no Bing fallback. `WebSearchBackend` remains only for an explicit
+`researcher.py --backend websearch` classroom recording or demo; auto paper
+runs do not select it.
+
+The paper gate also requires the body to name the local three exits in order:
+`done`, then `cost`, then `max turns`. The planner's first question asks that
+exactly and must be grounded in this repository.
 
 ## Build it step by step
 
@@ -212,8 +232,8 @@ task brief -- --question "sqlalchemy nullable datetime column"
 # offline, from a recording
 task paper
 
-# live, needs ANTHROPIC_API_KEY. It uses Perplexity when its key is available,
-# otherwise the research tool queries the web.
+# live, needs a model key. Research falls through filtered Perplexity,
+# Anthropic, OpenAI, then the recorded fixture; it never uses Bing.
 task setup
 task live TOPIC="context management in multi-agent research loops"
 

@@ -25,6 +25,16 @@ Good: "What is the documented context window limit for the Claude Agent SDK
 subagent, and where is it stated?" Check: "a version number and a URL on an
 official docs page".
 
+## The first question is not optional
+
+Make question one exactly:
+
+> What three exits does this repo's paper loop check, and in what order?
+
+Its answer must cite this repository. The paper teaches the local doctrine:
+`done`, then `cost`, then `max turns`. Do not replace that question with a
+generic vendor-runtime question.
+
 ## Mark what matters
 
 Set `important: true` on the claims a reader would act on: a version, a limit, a

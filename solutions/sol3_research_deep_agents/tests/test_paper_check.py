@@ -6,14 +6,14 @@ import evidence
 import paper_check
 import pytest
 
-URLS = ["https://a.example/one", "https://b.example/two"]
+URLS = ["https://docs.langchain.com/one", "https://docs.claude.com/two"]
 GOOD = (
     "# Exit conditions\n\n"
     "## Abstract\n\nA loop without an exit spends until someone notices. [1]\n\n"
-    "## Introduction\n\nThree exits cover the observed cases. [1][2]\n\n"
+    "## Introduction\n\nThree exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
     "![A flowchart of the three exits](figures/exits.svg)\n\n"
     "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
-    "## References\n\n1. https://a.example/one\n2. https://b.example/two\n"
+    "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
 )
 
 
@@ -23,6 +23,29 @@ def test_demo_assertions_hold():
 
 def test_a_clean_paper_passes():
     assert paper_check.check(GOOD, URLS).passed
+
+
+def test_a_deepwiki_reference_blocks_the_paper_but_docs_passes():
+    rejected = GOOD.replace("https://docs.langchain.com/one", "https://deepwiki.com/langchain")
+    score = paper_check.check(rejected, ["https://deepwiki.com/langchain", URLS[1]])
+    assert "reference_hosts" in score.signature()
+    assert paper_check.check(GOOD, URLS).passed
+
+
+def test_exit_doctrine_requires_done_then_cost_then_max_turns():
+    wrong = GOOD.replace(
+        "done, then cost, then max turns", "cost, then done, then max turns"
+    )
+    assert "exit_doctrine" in paper_check.check(wrong, URLS).signature()
+    assert "exit_doctrine" not in paper_check.check(GOOD, URLS).signature()
+
+
+def test_limitations_cannot_deny_a_cited_official_langgraph_page():
+    contradiction = GOOD.replace(
+        "This paper measures two runtimes only.",
+        "There is no official LangGraph page for this topic.",
+    )
+    assert "langgraph_limitations" in paper_check.check(contradiction, URLS).signature()
 
 
 @pytest.mark.parametrize(
@@ -90,8 +113,8 @@ def test_a_single_source_claim_must_admit_it_in_its_own_section():
     assert "single_source_caveat" in paper_check.check(GOOD, URLS, ledger=ledger).signature()
 
     caveated = GOOD.replace(
-        "Three exits cover the observed cases. [1][2]",
-        "Three exits cover the observed cases, on a single source. [1][2]",
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]",
+        "Three exits cover the observed cases: done, then cost, then max turns, on a single source. [1][2]",
     )
     assert (
         "single_source_caveat" not in paper_check.check(caveated, URLS, ledger=ledger).signature()
@@ -132,8 +155,8 @@ def test_the_signature_is_what_failed_not_how_it_was_worded():
 # -- the body --------------------------------------------------------------
 
 HOLLOW = (
-    "# Exit conditions\n\n## Abstract\n\n## Introduction\n\n## Limitations\n\n"
-    "## References\n\n1. https://a.example/one\n2. https://b.example/two\n"
+    "# Exit conditions\n\n## Abstract\n\ndone, then cost, then max turns. [1]\n\n## Introduction\n\n## Limitations\n\n"
+    "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
 )
 
 
@@ -154,14 +177,16 @@ def test_every_other_hard_gate_passes_on_the_hollow_paper():
 
 
 def test_a_stub_section_is_blocked():
-    thin = GOOD.replace("Three exits cover the observed cases. [1][2]", "Yes. [1]")
+    thin = GOOD.replace(
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]", "Yes. [1]"
+    )
     assert "has_body" in paper_check.check(thin, URLS).signature()
 
 
 def test_a_section_of_only_a_figure_is_blocked():
     """A figure still owes the reader an explanation."""
     figure_only = GOOD.replace(
-        "Three exits cover the observed cases. [1][2]\n\n"
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
         "![A flowchart of the three exits](figures/exits.svg)",
         "![A flowchart of the three exits](figures/exits.svg)",
     )

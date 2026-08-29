@@ -511,7 +511,10 @@ class Paper:
         for question in self.plan["questions"]:
             if any(f.subject == question["subject"] for f in self.ledger.findings.values()):
                 continue
-            self.budget.begin_request(max_calls=1)
+            # The researcher has one tool call. Its filtered Perplexity boundary
+            # may spend Scout, Retrieve, and the no-quote Ask repair inside that
+            # one call, so provider reservations have their own hard ceiling.
+            self.budget.begin_request(max_calls=1, max_provider_calls=3)
             try:
                 reply = self._ask(
                     "researcher",

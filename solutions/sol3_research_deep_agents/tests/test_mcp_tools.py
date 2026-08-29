@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import sys
+from types import SimpleNamespace
 
 import mcp_tools
 import pytest
 import research
+import source_policy
 
 
 def test_demo_assertions_hold():
@@ -30,9 +33,9 @@ def test_mcp_config_resolves_env(tmp_path, monkeypatch):
             {
                 "mcpServers": {
                     "context7": {"type": "http", "url": "https://mcp.context7.com/mcp"},
-                    "perplexity-ask": {
+                    "perplexity": {
                         "command": "npx",
-                        "args": ["-y", "server-perplexity-ask"],
+                        "args": ["-y", "@perplexity-ai/mcp-server"],
                         "env": {"PERPLEXITY_API_KEY": "${SOL3_TEST_KEY}"},
                     },
                 }
@@ -40,7 +43,7 @@ def test_mcp_config_resolves_env(tmp_path, monkeypatch):
         )
     )
     servers = mcp_tools.load_mcp_config(path)
-    assert servers["perplexity-ask"]["env"]["PERPLEXITY_API_KEY"] == "secret"
+    assert servers["perplexity"]["env"]["PERPLEXITY_API_KEY"] == "secret"
     assert servers["context7"]["url"].endswith("/mcp")
 
 
@@ -81,21 +84,80 @@ def test_a_missing_key_makes_perplexity_unavailable(monkeypatch):
     assert "PERPLEXITY_API_KEY" in finding.note
 
 
-def test_perplexity_falls_back_from_mcp_to_rest(monkeypatch):
+def test_perplexity_search_falls_back_from_mcp_to_rest(monkeypatch):
     monkeypatch.setenv("PERPLEXITY_API_KEY", "k")
     monkeypatch.setattr(
         mcp_tools,
-        "ask_perplexity_mcp",
-        lambda q, c=None: (_ for _ in ()).throw(mcp_tools.TransportUnavailable("no npx")),
+        "search_perplexity_mcp",
+        lambda q, domains, c=None: (_ for _ in ()).throw(mcp_tools.TransportUnavailable("no npx")),
     )
     monkeypatch.setattr(
         mcp_tools,
-        "ask_perplexity_rest",
-        lambda q: mcp_tools.Answer(text="from rest", transport="perplexity-rest", usd=0.006),
+        "search_perplexity_rest",
+        lambda q, domains: mcp_tools.Answer(
+            text="from rest", citations=["https://docs.langchain.com/x"], transport="perplexity-search-rest", usd=0.006, hits=1
+        ),
     )
-    finding = research.PerplexityBackend().search("q")
-    assert finding.answer == "from rest"
-    assert finding.usd == 0.006
+    answer = mcp_tools.search_perplexity("q", source_policy.SEED_ALLOWLIST)
+    assert answer.text == "from rest"
+    assert answer.transport == "perplexity-search-rest"
+
+
+def test_search_mcp_sends_the_python_owned_domain_filter(monkeypatch):
+    seen = {}
+
+    class Tool:
+        name = "perplexity_search"
+
+        async def ainvoke(self, args):
+            seen.update(args)
+            return "result https://docs.langchain.com/deep-agents quoted source text"
+
+    monkeypatch.setattr(mcp_tools, "mcp_tools", lambda *_: [Tool()])
+    mcp_tools.search_perplexity_mcp("q", source_policy.SEED_ALLOWLIST)
+    assert seen["search_domain_filter"] == list(source_policy.SEED_ALLOWLIST)
+    assert seen["query"] == "q"
+
+
+def test_ask_mcp_sends_the_same_domain_filter(monkeypatch):
+    seen = {}
+
+    class Tool:
+        name = "perplexity_ask"
+
+        async def ainvoke(self, args):
+            seen.update(args)
+            return "answer https://docs.langchain.com/deep-agents"
+
+    monkeypatch.setattr(mcp_tools, "mcp_tools", lambda *_: [Tool()])
+    mcp_tools.ask_perplexity_mcp("q", source_policy.SEED_ALLOWLIST)
+    assert seen["search_domain_filter"] == list(source_policy.SEED_ALLOWLIST)
+
+
+@pytest.mark.parametrize("call", ["search", "ask"])
+def test_perplexity_rest_sends_the_same_domain_filter(monkeypatch, call):
+    seen = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            if call == "search":
+                return {"results": [{"title": "Docs", "url": "https://docs.langchain.com/x", "snippet": "quoted evidence"}]}
+            return {"choices": [{"message": {"content": "answer https://docs.langchain.com/x"}}], "citations": ["https://docs.langchain.com/x"]}
+
+    def post(*_args, **kwargs):
+        seen.update(kwargs["json"])
+        return Response()
+
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "k")
+    monkeypatch.setitem(sys.modules, "httpx", SimpleNamespace(post=post))
+    if call == "search":
+        mcp_tools.search_perplexity_rest("q", source_policy.SEED_ALLOWLIST)
+    else:
+        mcp_tools.ask_perplexity_rest("q", source_policy.SEED_ALLOWLIST)
+    assert seen["search_domain_filter"] == list(source_policy.SEED_ALLOWLIST)
 
 
 def test_context7_needs_a_library(monkeypatch):
@@ -119,15 +181,22 @@ def test_context7_splits_library_from_question(monkeypatch):
     assert finding.answer == "docs say yes"
 
 
-def test_choose_prefers_a_real_search_over_a_recording(monkeypatch, tmp_path):
+def test_choose_builds_the_paper_safe_fallback_chain(monkeypatch, tmp_path):
     fixture = tmp_path / "research.json"
     fixture.write_text("{}")
     monkeypatch.setenv("PERPLEXITY_API_KEY", "k")
-    assert research.choose(fixture=fixture).name == "perplexity"
-    monkeypatch.delenv("PERPLEXITY_API_KEY")
-    assert research.choose(fixture=fixture).name == "websearch"
-
-
-def test_auto_selection_has_a_no_key_websearch_fallback(monkeypatch):
+    selected = research.choose(fixture=fixture)
+    assert isinstance(selected, research.FallbackBackend)
+    assert [backend.name for backend in selected.candidates] == ["perplexity", "anthropic", "openai", "fixture"]
     monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
-    assert research.choose().name == "websearch"
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert research.choose(fixture=fixture).active_name == "fixture"
+
+
+def test_auto_selection_never_falls_through_to_bing(monkeypatch):
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="paper-safe"):
+        research.choose()

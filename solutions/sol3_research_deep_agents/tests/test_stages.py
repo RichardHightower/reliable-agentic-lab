@@ -15,7 +15,7 @@ def plan(**overrides):
             {
                 "id": f"q{i}",
                 "subject": f"s{i}",
-                "question": f"why {i}?",
+                "question": stages.EXIT_DOCTRINE_QUESTION if i == 1 else f"why {i}?",
                 "check": "a URL",
                 "important": i == 1,
             }
@@ -531,3 +531,17 @@ def test_a_source_count_is_not_a_second_look():
     assert claim.truth_state == evidence.CORROBORATED
     assert claim.cross_checked is False
     assert led.unchecked() == [claim]
+def test_plan_requires_the_repo_exit_order_question_first():
+    plan = {
+        "questions": [
+            {"id": "q1", "question": stages.EXIT_DOCTRINE_QUESTION, "check": "the repo source", "important": True},
+            {"id": "q2", "question": "A second question", "check": "a source"},
+            {"id": "q3", "question": "A third question", "check": "a source"},
+        ],
+        "sections": ["Abstract"],
+        "diagrams": [],
+    }
+    stages.plan_gate(plan)
+    plan["questions"][0]["question"] = "Which exit happens first?"
+    with pytest.raises(stages.GateFailed, match="first question"):
+        stages.plan_gate(plan)

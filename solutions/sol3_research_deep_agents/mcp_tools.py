@@ -37,9 +37,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_MCP_CONFIG = HERE / ".." / ".." / ".mcp.json"
+DEFAULT_MCP_CONFIG = HERE / ".mcp.json"
 
 PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions"
+PERPLEXITY_SEARCH_URL = "https://api.perplexity.ai/search"
 PERPLEXITY_MODEL = os.environ.get("PERPLEXITY_MODEL", "sonar-pro")
 CONTEXT7_URL = "https://mcp.context7.com/mcp"
 
@@ -164,10 +165,21 @@ class Answer:
     citations: list[str] = field(default_factory=list)
     transport: str = ""
     usd: float = 0.0
+    hits: int = 0
+    usable_quotes: bool | None = None
 
     @property
     def empty(self) -> bool:
         return not self.text.strip()
+
+    @property
+    def has_usable_quotes(self) -> bool:
+        """Whether a raw search bundle carries more than titles and URLs."""
+        if self.usable_quotes is not None:
+            return self.usable_quotes
+        prose = URL_IN_TEXT.sub("", self.text)
+        prose = re.sub(r"[\[\]#*`_\-\d\s]", "", prose)
+        return bool(self.hits and len(prose) >= 24)
 
 
 def citations_from(text: str, extra: list | None = None) -> list[str]:
@@ -192,12 +204,103 @@ def perplexity_available() -> bool:
     return bool(os.environ.get("PERPLEXITY_API_KEY"))
 
 
-def ask_perplexity_mcp(question: str, config: dict | None = None) -> Answer:
-    tools = mcp_tools("perplexity-ask", config)
+def search_perplexity_mcp(
+    question: str, domain_filter: tuple[str, ...], config: dict | None = None
+) -> Answer:
+    """Ask the official MCP Search tool for a filtered result bundle."""
+    tools = mcp_tools("perplexity", config)
+    text = _call_mcp_tool(
+        tools,
+        "perplexity_search",
+        {
+            "query": question,
+            "max_results": 10,
+            "search_domain_filter": list(domain_filter),
+        },
+    )
+    citations = citations_from(text)
+    return Answer(
+        text=text,
+        citations=citations,
+        transport="perplexity-search-mcp",
+        usd=PERPLEXITY_COST_PER_CALL,
+        hits=len(citations),
+    )
+
+
+def search_perplexity_rest(question: str, domain_filter: tuple[str, ...]) -> Answer:
+    """Call Perplexity's Search API when the local MCP hop is unavailable."""
+    key = os.environ.get("PERPLEXITY_API_KEY")
+    if not key:
+        raise TransportUnavailable("PERPLEXITY_API_KEY is not set")
+    try:
+        import httpx  # noqa: PLC0415
+    except ImportError as exc:
+        raise TransportUnavailable(f"httpx is not installed: {exc}") from exc
+
+    try:
+        response = httpx.post(
+            PERPLEXITY_SEARCH_URL,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={
+                "query": question,
+                "max_results": 10,
+                "search_domain_filter": list(domain_filter),
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        raise TransportUnavailable(f"perplexity search REST failed: {exc}") from exc
+
+    results = payload.get("results") or payload.get("data") or []
+    lines, citations = [], []
+    usable = False
+    for index, result in enumerate(results, start=1):
+        if not isinstance(result, dict):
+            continue
+        title = str(result.get("title") or "Search result").strip()
+        url = str(result.get("url") or "").strip()
+        snippet = str(result.get("snippet") or result.get("content") or "").strip()
+        if not url:
+            continue
+        citations.append(url)
+        lines.append(f"{index}. {title}\n{url}\n{snippet}".rstrip())
+        usable = usable or bool(snippet)
+    return Answer(
+        text="\n\n".join(lines),
+        citations=citations,
+        transport="perplexity-search-rest",
+        usd=PERPLEXITY_COST_PER_CALL,
+        hits=len(citations),
+        usable_quotes=usable,
+    )
+
+
+def search_perplexity(
+    question: str, domain_filter: tuple[str, ...], config: dict | None = None
+) -> Answer:
+    """Filtered Search API, MCP first and the vendor REST endpoint second."""
+    if not perplexity_available():
+        raise TransportUnavailable("PERPLEXITY_API_KEY is not set")
+    try:
+        return search_perplexity_mcp(question, domain_filter, config)
+    except TransportUnavailable:
+        return search_perplexity_rest(question, domain_filter)
+
+
+def ask_perplexity_mcp(
+    question: str, domain_filter: tuple[str, ...], config: dict | None = None
+) -> Answer:
+    tools = mcp_tools("perplexity", config)
     text = _call_mcp_tool(
         tools,
         "perplexity_ask",
-        {"messages": [{"role": "user", "content": question}]},
+        {
+            "messages": [{"role": "user", "content": question}],
+            "search_domain_filter": list(domain_filter),
+        },
     )
     return Answer(
         text=text,
@@ -207,7 +310,7 @@ def ask_perplexity_mcp(question: str, config: dict | None = None) -> Answer:
     )
 
 
-def ask_perplexity_rest(question: str) -> Answer:
+def ask_perplexity_rest(question: str, domain_filter: tuple[str, ...]) -> Answer:
     """The vendor's OpenAI-shaped endpoint. `httpx` ships with this repo."""
     key = os.environ.get("PERPLEXITY_API_KEY")
     if not key:
@@ -224,6 +327,7 @@ def ask_perplexity_rest(question: str) -> Answer:
             json={
                 "model": PERPLEXITY_MODEL,
                 "messages": [{"role": "user", "content": question}],
+                "search_domain_filter": list(domain_filter),
             },
             timeout=HTTP_TIMEOUT,
         )
@@ -241,14 +345,16 @@ def ask_perplexity_rest(question: str) -> Answer:
     )
 
 
-def ask_perplexity(question: str, config: dict | None = None) -> Answer:
-    """MCP, then REST. The caller never learns which one answered."""
+def ask_perplexity(
+    question: str, domain_filter: tuple[str, ...], config: dict | None = None
+) -> Answer:
+    """Filtered Ask fallback, MCP first and REST second."""
     if not perplexity_available():
         raise TransportUnavailable("PERPLEXITY_API_KEY is not set")
     try:
-        return ask_perplexity_mcp(question, config)
+        return ask_perplexity_mcp(question, domain_filter, config)
     except TransportUnavailable:
-        return ask_perplexity_rest(question)
+        return ask_perplexity_rest(question, domain_filter)
 
 
 # -- Context7 -------------------------------------------------------------
