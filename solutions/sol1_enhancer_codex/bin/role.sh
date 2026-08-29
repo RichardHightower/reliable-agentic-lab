@@ -24,6 +24,12 @@ shift 2
 # outside its workspace, which is why ticket paths are passed absolute.
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Output is evidence for exactly this role invocation.  A previous doer or
+# judge reply cannot be allowed to survive a child failure and then be copied
+# as though it were a fresh answer for a different ticket or round.
+mkdir -p "$(dirname "$OUT")"
+rm -f "$OUT"
+
 # `</dev/null` is load-bearing, not tidiness. When a prompt is passed as an
 # argument and stdin is also open, `codex exec` appends stdin to the prompt
 # as a <stdin> block, so it blocks until stdin reaches EOF. Called from an
@@ -34,5 +40,10 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # stderr, and the caller wants the role's final message only: the judge's
 # JSON, or the doer's candidate body. Anything else here corrupts the parse.
 codex exec -s read-only --cd "$DIR" -o "$OUT" "\$$SKILL $*" </dev/null >/dev/null 2>&1
+
+if [ ! -s "$OUT" ]; then
+  echo "${SKILL} produced no output at ${OUT}" >&2
+  exit 1
+fi
 
 cat "$OUT"

@@ -38,6 +38,11 @@ Hard rules. A poll that breaks any of these has failed:
 - An issue opened in the GitHub UI is a ticket. Materialize a local file for it and enhance it. Do not wait for a file that is not there yet.
 - `ready` comes from `check_fields.py`, never from the judge's own claim,
   never from a label, never from a comment other than exact `LGTM`.
+- A ticket kind is stable once classified. A candidate judge may report field
+  evidence but may never change `bug`, `feature`, or `ui` for that ticket.
+- Never background, parallelize, poll, or sleep around `bin/role.sh`. Run one
+  role call to completion, require a non-empty output file, then use that one
+  output. A role failure is not permission to reuse an older `.harness/` file.
 
 This skill runs **one step** and exits. Nothing here schedules the next
 check. Repeated polling comes from outside: `task poll-forever`, a cron job,
@@ -179,16 +184,28 @@ way that expects a reply: this skill runs headlessly and cannot wait for one.
    stable-failure or budget escalation on an earlier poll: stop here, wait
    for a human.
 
-5. Grade the real ticket. Run
+5. Establish and retain the ticket kind, then grade the real ticket. `kind` in
+   the ticket frontmatter is durable across polls and candidates:
+
+   - If it is already one of `bug`, `feature`, or `ui`, retain it. Run the
+     judge with `Required kind: <kind>` in its prompt.
+   - If it is absent, run the judge without a required kind once. Read its
+     reported kind, write that valid kind into the real ticket's frontmatter,
+     and retain it for all later polls and candidate checks. A bad or missing
+     kind is a role failure; do not guess or change the ticket body.
+
+   Run
 
    ```bash
-   bin/role.sh enhancer-judge <repo>/.harness/judge-<id>.json "Grade the ticket at <absolute path to <repo>/tickets/<id>.md>"
+   bin/role.sh enhancer-judge <repo>/.harness/judge-<id>.json "Grade the ticket at <absolute path to <repo>/tickets/<id>.md>. Required kind: <kind>"
    ```
 
    Pass the ticket path as an absolute path. The judge's process starts in
    this folder, not in the target repo. Parse its JSON, then run
-   `python3 .agents/skills/enhancer-loop/scripts/check_fields.py '<judge json>'`
-   to get the authoritative `{kind, missing_fields, ready}`. Do this before
+   `python3 .agents/skills/enhancer-loop/scripts/check_fields.py --kind <kind> '<judge json>'`
+   to get the authoritative `{kind, missing_fields, ready}`. The `--kind`
+   value is mandatory once kind exists; never use a candidate judge's reported
+   kind to select a new rubric. Do this before
    looking at `LGTM`: a human's `LGTM` is not a substitute for the rubric,
       it can only confirm a ticket the rubric already accepts.
 
@@ -215,18 +232,20 @@ way that expects a reply: this skill runs headlessly and cannot wait for one.
 7. Draft a candidate, judge it, and keep it only if it is better. Run
 
    ```bash
-   bin/role.sh enhancer-doer <repo>/.harness/doer-<id>.md "<the ticket's current body, its kind, its missing_fields. Tell it there is no comment to follow.>"
+   bin/role.sh enhancer-doer <repo>/.harness/doer-<id>.md "<the ticket's current body, its stable kind, its missing_fields. Tell it there is no comment to follow.>"
    ```
 
-   Tell the doer there is no comment to follow. It investigates the target app. Copy the file
-   `bin/role.sh` wrote to `<repo>/tickets/<id>.enhancer-candidate.md`. Grade
-   that candidate the same way as step 5:
+   Tell the doer there is no comment to follow. It investigates the target app.
+   `bin/role.sh` removes any old output and fails when it did not produce a
+   non-empty file. Only after it exits successfully, copy that file to
+   `<repo>/tickets/<id>.enhancer-candidate.md`. Grade that candidate with the
+   same stable kind as step 5:
 
    ```bash
-   bin/role.sh enhancer-judge <repo>/.harness/judge-candidate-<id>.json "Grade the ticket at <absolute path to the candidate file>"
+   bin/role.sh enhancer-judge <repo>/.harness/judge-candidate-<id>.json "Grade the ticket at <absolute path to the candidate file>. Required kind: <kind>"
    ```
 
-   Run it through `check_fields.py` the same way. Compare candidate
+   Run it through `check_fields.py --kind <kind>` the same way. Compare candidate
    `missing_fields` to the current ticket's `missing_fields` from step 5:
 
    - Strict improvement (candidate's missing set is a proper subset):

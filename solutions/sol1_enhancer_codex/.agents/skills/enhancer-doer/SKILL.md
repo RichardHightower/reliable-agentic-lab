@@ -22,10 +22,11 @@ access. It takes the text of your final reply, saves it to
 candidate, and only then decides whether to replace the real ticket with it.
 
 Each time `enhancer-loop` calls you, its prompt gives you four things: the
-ticket's current body, its kind (`bug`, `feature`, or `ui`, already
+ticket's current body, its stable kind (`bug`, `feature`, or `ui`, already
 classified), its missing fields, and, if one exists, the latest comment on
 its GitHub issue. Use the kind to know which required fields apply (see
-`enhancer-judge`'s table); do not reclassify it yourself.
+`enhancer-judge`'s table); do not reclassify it yourself or add a wireframe
+to a feature merely because it mentions a page or button.
 
 ## Investigate before you invent
 

@@ -142,6 +142,7 @@ open_issue_for() {
 write_file T900 <<'EOF'
 ---
 id: T900
+kind: bug
 state: draft
 loop: enhancer
 ---
@@ -154,6 +155,7 @@ EOF
 write_file T901 <<'EOF'
 ---
 id: T901
+kind: ui
 state: draft
 loop: enhancer
 ---
@@ -166,6 +168,7 @@ EOF
 write_file T902 <<'EOF'
 ---
 id: T902
+kind: feature
 state: draft
 loop: enhancer
 ---
