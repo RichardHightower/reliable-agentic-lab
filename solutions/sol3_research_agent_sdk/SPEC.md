@@ -163,6 +163,9 @@ Those checks need no SDK, no API key, and no network. They assert:
 
 ## Run the loop
 
+The live operator path is [HOW_TO_RUN.md](HOW_TO_RUN.md). `task setup` creates
+`.venv` in this folder. Saturday Lab 3 is `labs/lab3_research`.
+
 ```bash
 task demo                                   # offline, over the fixture
 task run TOPIC="..."                        # needs PERPLEXITY_API_KEY

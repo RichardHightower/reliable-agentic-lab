@@ -25,6 +25,37 @@ AGENTS = PLUGIN / "agents"
 # the loop-level exits: green, the same failures twice, or the budget spent.
 DEFAULT_MAX_TURNS = 12
 
+# The judge reports a closed set. Python owns `gates.decide`, so this schema
+# must not name a gate.
+JUDGE_SCHEMA = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean"},
+            "summary": {"type": "string"},
+            "issues": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "severity": {
+                            "type": "string",
+                            "enum": ["critical", "major", "minor"],
+                        },
+                        "path": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["severity", "description"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["done", "issues"],
+        "additionalProperties": False,
+    },
+}
+
 # Parent prompt. Python is the harness. The model only spawns the named agent.
 PARENT_PROMPT = (
     "You are the fixer orchestrator. Python already owns the loop, the budget, "

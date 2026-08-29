@@ -104,6 +104,11 @@ this section claimed otherwise. It runs pytest now, and the suite asserts:
   brand new untracked file.
 - Every module imports with no SDK installed.
 - Every `task` this document names exists in the Taskfile.
+- `task setup` creates `.venv` in this folder. Homebrew Python will not let pip write to the system interpreter.
+
+The live operator path is [HOW_TO_RUN.md](HOW_TO_RUN.md). This folder is the
+cast, not the driver. `task run` prints this runtime's options. It does not
+drive tickets.
 
 ## What this folder is not
 

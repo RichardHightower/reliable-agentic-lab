@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 import harness
+import load_agents
 import roleplan
 
 FOLDER = Path(__file__).resolve().parents[1]
@@ -80,6 +82,32 @@ def test_the_docs_do_not_promise_a_task_that_does_not_exist():
 
     taskfile = (FOLDER / "Taskfile.yml").read_text(encoding="utf-8")
     declared = set(re.findall(r"^  (\w[\w-]*):$", taskfile, re.M))
-    spec = (FOLDER / "SPEC.md").read_text(encoding="utf-8")
-    for named in re.findall(r"task ([a-z][a-z-]*)", spec):
-        assert named in declared, f"SPEC.md names `task {named}`, the Taskfile does not"
+    for name in ("SPEC.md", "HOW_TO_RUN.md"):
+        prose = (FOLDER / name).read_text(encoding="utf-8")
+        for named in re.findall(r"task ([a-z][a-z-]*)", prose):
+            assert named in declared, f"{name} names `task {named}`, the Taskfile does not"
+
+
+def test_setup_creates_a_local_venv_and_how_to_run_exists():
+    """Homebrew Python is PEP 668. pip into the activated venv is how a live
+    demo died. task setup creates .venv in this folder."""
+    taskfile = (FOLDER / "Taskfile.yml").read_text(encoding="utf-8")
+    how = FOLDER / "HOW_TO_RUN.md"
+    assert ".venv" in taskfile
+    assert "venv you activated" not in taskfile
+    assert how.is_file()
+    text = how.read_text(encoding="utf-8")
+    assert "venv you activated" not in text
+    assert "task setup" in text
+    assert "This folder is the cast" in text or "not the driver" in text.lower()
+
+
+def test_the_judge_schema_does_not_name_a_gate():
+    """Python owns gates.decide. A schema that names a gate invites the model
+    to pick one."""
+    blob = json.dumps(load_agents.JUDGE_SCHEMA).lower()
+    for banned in ("gate", "pass", "retry", "escalate", "rubric", "score"):
+        assert banned not in blob, banned
+    props = load_agents.JUDGE_SCHEMA["schema"]["properties"]
+    assert "done" in props
+    assert "issues" in props

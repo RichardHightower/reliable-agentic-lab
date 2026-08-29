@@ -93,3 +93,42 @@ def test_the_snapshot_notices_a_same_length_overwrite(work):
     time.sleep(0.01)
     path.write_text("bbb")
     assert adapter._changed(before, adapter._snapshot(work)) == ["paper.md"]
+
+
+def test_it_does_not_join_streamed_tool_events(fake_sdk, work):
+    """Joining every event is how tool dump became a paper section."""
+
+    class StreamEvent:
+        def __str__(self):
+            return "tool dump of every search hit"
+
+    fake_sdk(
+        [
+            StreamEvent(),
+            FakeResultMessage(
+                result="the answer",
+                structured_output={"done": True, "issues": []},
+            ),
+        ]
+    )
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    assert result.output == "the answer"
+    assert result.structured == {"done": True, "issues": []}
+    assert "tool dump" not in result.output
+    assert "StreamEvent" in result.raw_output
+
+
+def test_a_hung_query_times_out(fake_sdk, work, monkeypatch):
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached")
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 0.05)
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    assert not result.ok
+    assert result.stop_reason == "query timeout"
+    assert "timed out" in result.output
+    assert "never reached" not in result.output

@@ -1,12 +1,18 @@
 # Standalone. No dependency on the root Taskfile.
 #
-# `task test` and `task table` need no SDK, no API key, and no clone. The
-# `test` target used to be `--table-only`, which printed a table and asserted
-# nothing while SPEC.md claimed it checked two things.
+# `task test` and `task table` need no SDK, no API key, and no clone.
+# `task run` prints this runtime's options and needs the SDK. This folder is
+# the cast, not the driver. `task setup` creates `.venv` in this folder so
+# Homebrew Python (PEP 668) is not in the way.
 version: '3'
 
+dotenv: ['../../.env', '.env']
+
 vars:
+  TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
+  VENV: '{{.TASKFILE_DIR}}/.venv'
   PY: '{{.PY | default "python3"}}'
+  RUN_PY: '{{.RUN_PY | default (printf "%s/bin/python" .VENV)}}'
 
 tasks:
   default:
@@ -16,7 +22,12 @@ tasks:
     desc: Unit tests for this folder. No SDK, no API key, no clone.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} -m pytest tests -q'
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" -m pytest tests -q
+        else
+          {{.PY}} -m pytest tests -q
+        fi
 
   table:
     desc: Print the role table and stop, with no SDK installed.
@@ -25,7 +36,27 @@ tasks:
       - '{{.PY}} harness.py --table-only'
 
   setup:
-    desc: Install the Agent SDK and pytest into the venv you activated.
+    desc: Create .venv in this folder and install the Agent SDK into it.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} -m pip install --quiet claude-agent-sdk pytest'
+      - test -x {{.RUN_PY}} || {{.PY}} -m venv {{.VENV}}
+      - '{{.RUN_PY}} -m pip install --quiet claude-agent-sdk pytest'
+
+  clone:
+    desc: Clone northwind-field-crm into work/. Skips if it is already there.
+    status:
+      - test -d {{.TARGET}}/.git
+    cmds:
+      - mkdir -p {{.TASKFILE_DIR}}/../../work
+      - git clone --quiet https://github.com/RichardHightower/northwind-field-crm.git {{.TARGET}}
+
+  run:
+    desc: Print this runtime's options. Needs the SDK. This folder is not the driver.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates .venv in this folder and installs claude-agent-sdk."
+          exit 1
+        fi
+        "{{.RUN_PY}}" harness.py --repo {{.TARGET}} {{.CLI_ARGS}}

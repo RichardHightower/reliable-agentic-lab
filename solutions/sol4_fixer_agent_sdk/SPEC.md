@@ -114,6 +114,9 @@ Those checks need no SDK, no key, no network, and no clone. They assert:
 
 ## Run
 
+The live operator path is [HOW_TO_RUN.md](HOW_TO_RUN.md). `task setup` creates
+`.venv` in this folder. `task clone` then `task reset` checks out `broken-pr`.
+
 ```bash
 cd solutions/sol4_fixer_agent_sdk
 task table
