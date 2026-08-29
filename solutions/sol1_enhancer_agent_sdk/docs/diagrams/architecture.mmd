@@ -1,0 +1,16 @@
+flowchart LR
+    CLI["loop.py or Task"] --> Runner["Python loop"]
+    Runner --> Contract["Contract and role plan"]
+    Runner --> Enhancer["Enhancer state machine"]
+    Enhancer --> Backend["Agent SDK backend"]
+    Backend --> Hook["PreToolUse scope hook"]
+    Backend --> Roles["Orchestrator, doer, judge"]
+    Enhancer --> Checks["check_fields and check_stop"]
+    Enhancer --> GH["GitHub CLI or API"]
+    Enhancer --> Target["Target tickets and state"]
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class CLI,GH,Target boundary
+    class Backend,Hook,Roles agent
+    class Contract,Enhancer,Checks control

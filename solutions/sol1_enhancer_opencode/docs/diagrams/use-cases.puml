@@ -1,0 +1,20 @@
+@startuml
+left to right direction
+actor Operator
+actor "Human reviewer" as Human
+actor GitHub
+rectangle "OpenCode Ticket Enhancer" {
+  usecase "Run one poll" as Poll
+  usecase "Task judge role" as Judge
+  usecase "Task doer role" as Doer
+  usecase "Check readiness and stops" as Gate
+  usecase "Update issue status" as Update
+}
+Operator --> Poll
+Poll .> Judge : includes
+Poll .> Doer : includes
+Poll .> Gate : includes
+Poll --> Update
+Human --> Update : LGTM
+GitHub --> Update
+@enduml

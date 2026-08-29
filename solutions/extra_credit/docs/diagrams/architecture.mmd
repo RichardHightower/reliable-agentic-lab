@@ -1,0 +1,18 @@
+flowchart LR
+    GitHub["GitHub webhooks"] --> Receiver["Extension 1 FastAPI receiver"]
+    GitHub --> Ngrok["Extension 2 ngrok tunnel"]
+    Ngrok --> Adapter["stdlib webhook adapter"]
+    Receiver --> Router["Route and guardrail policy"]
+    Adapter --> Copy["Copied Lab 1 plugin"]
+    Router --> Handoff["Subprocess handoff"]
+    Handoff --> Enhancer["Standalone sol1 enhancer"]
+    Copy --> Enhancer
+    Enhancer --> GitHub
+    Droplet["Extension 5 Droplet"] --> Nginx["Nginx and TLS"]
+    Nginx --> Receiver
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    classDef runtime fill:#E6F4EA,stroke:#137333,color:#202124
+    class GitHub,Ngrok,Droplet boundary
+    class Receiver,Adapter,Enhancer,Nginx runtime
+    class Router,Handoff,Copy control

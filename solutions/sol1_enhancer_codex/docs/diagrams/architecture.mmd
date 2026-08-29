@@ -1,0 +1,14 @@
+flowchart LR
+    Task["Task command"] --> Orchestrator["Codex orchestrator"]
+    Orchestrator --> Launcher["bin/role.sh"]
+    Launcher --> Doer["Read-only Codex doer"]
+    Launcher --> Judge["Read-only Codex judge"]
+    Orchestrator --> Checks["check_fields and check_stop"]
+    Orchestrator --> GitHub["GitHub actions"]
+    Orchestrator --> Target["Target tickets"]
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class Task,GitHub,Target boundary
+    class Orchestrator,Launcher,Doer,Judge agent
+    class Checks control

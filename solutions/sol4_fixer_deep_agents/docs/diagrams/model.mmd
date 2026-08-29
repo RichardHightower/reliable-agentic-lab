@@ -1,0 +1,22 @@
+classDiagram
+    class Contract {
+        +repo: Path
+        +run(task): RunResult
+    }
+    class RolePlan {
+        +allow: tuple
+        +deny: tuple
+    }
+    class DeepAgentsBackend {
+        +fix(prompt): DoerResult
+    }
+    class WriteScope {
+        +allows(path): bool
+    }
+    class RunResult {
+        +green: bool
+        +failures: list
+    }
+    Contract --> RolePlan
+    DeepAgentsBackend --> WriteScope
+    Contract --> RunResult

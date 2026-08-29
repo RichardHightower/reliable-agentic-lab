@@ -1,0 +1,22 @@
+classDiagram
+    class Ticket {
+        +id: str
+        +kind: str
+        +body: str
+        +criteria: Criterion[]
+    }
+    class Criterion {
+        +name: str
+        +present: bool
+    }
+    class State {
+        +round: int
+        +previous_signature: str
+    }
+    class Outcome {
+        +status: str
+        +reason: str
+    }
+    Ticket "1" o-- "many" Criterion
+    Ticket "1" --> "1" State
+    Ticket "1" --> "1" Outcome

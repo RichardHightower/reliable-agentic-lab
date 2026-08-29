@@ -1,0 +1,15 @@
+flowchart LR
+    Operator["Operator or scheduler"] --> Plugin["Claude Code plugin"]
+    Plugin --> Orchestrator["Orchestrator skill"]
+    Orchestrator --> Doer["Doer agent"]
+    Orchestrator --> Judge["Judge agent"]
+    Orchestrator --> Gates["Deterministic checks"]
+    Orchestrator --> GitHub["GitHub issue API"]
+    Orchestrator --> Tickets["Target tickets directory"]
+    Gates --> Orchestrator
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class Plugin,GitHub,Tickets boundary
+    class Orchestrator,Doer,Judge agent
+    class Gates control

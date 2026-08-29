@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant O as Codex orchestrator
+    participant R as role.sh
+    participant M as Child Codex role
+    participant C as Check scripts
+    participant G as GitHub
+    O->>R: launch judge in read-only mode
+    R->>M: role prompt and ticket context
+    M-->>R: field JSON
+    R-->>O: assessment
+    O->>C: calculate gaps and stop state
+    alt revision required
+        O->>R: launch doer in read-only mode
+        R->>M: role prompt and gap list
+        M-->>O: candidate text
+    else accepted or escalated
+        O->>G: perform the only external write
+    end

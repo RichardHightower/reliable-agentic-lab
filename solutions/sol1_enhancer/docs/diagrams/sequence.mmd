@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant O as Orchestrator
+    participant J as Judge
+    participant D as Doer
+    participant C as Deterministic checks
+    participant G as GitHub
+    O->>J: inspect ticket and return field JSON
+    J-->>O: kind and present fields
+    O->>C: evaluate required fields and stop rules
+    C-->>O: ready, retry, or escalate
+    alt gaps remain
+        O->>D: request candidate for missing fields
+        D-->>O: candidate text
+        O->>J: judge candidate
+    else ready and human approved
+        O->>G: update issue and labels
+    else stalled or budget exhausted
+        O->>G: add needs-human label
+    end

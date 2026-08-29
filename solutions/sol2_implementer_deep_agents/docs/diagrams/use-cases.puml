@@ -1,0 +1,21 @@
+@startuml
+left to right direction
+actor Operator
+actor "Deep Agents runtime" as Runtime
+actor "Target repository" as Repo
+rectangle "Lab 2 Deep Agents implementer" {
+  usecase "Plan implementation" as Plan
+  usecase "Write tests under tests scope" as Tests
+  usecase "Write code under app scope" as Code
+  usecase "Run deterministic red gate" as Gate
+  usecase "Judge diff and report" as Judge
+}
+Operator --> Plan
+Runtime --> Plan
+Runtime --> Tests
+Runtime --> Code
+Tests --> Repo
+Code --> Repo
+Operator --> Gate
+Operator --> Judge
+@enduml

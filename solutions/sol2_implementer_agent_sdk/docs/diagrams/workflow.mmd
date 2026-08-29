@@ -1,0 +1,15 @@
+flowchart TD
+    Start([Configure cast]) --> Table["Print role table"]
+    Table --> Validate{"Scopes valid?"}
+    Validate -- No --> Stop([Fail closed])
+    Validate -- Yes --> Plan["Planner writes steps.jsonl"]
+    Plan --> Tests["Test implementer writes tests"]
+    Tests --> Red["Python runs test suite"]
+    Red --> Code["Code implementer writes app only"]
+    Code --> Recheck["Python reruns suite"]
+    Recheck --> Judge["Judge reads reports and diff"]
+    Judge --> Gate{"Rubric and red gate pass?"}
+    Gate -- No --> Retry{"Exit condition?"}
+    Retry -- Continue --> Code
+    Retry -- Stop --> Escalate([Report failure])
+    Gate -- Yes --> Done([Implementation ready])

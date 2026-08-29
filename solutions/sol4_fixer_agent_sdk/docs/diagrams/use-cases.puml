@@ -1,0 +1,19 @@
+@startuml
+left to right direction
+actor Operator
+actor "Claude Agent SDK" as SDK
+actor "Target repository" as Repo
+rectangle "Unattended PR Fixer" {
+  usecase "Inspect failing suite" as Inspect
+  usecase "Repair application code" as Repair
+  usecase "Enforce app-only write scope" as Scope
+  usecase "Judge repair" as Judge
+  usecase "Return green result or explanation" as Result
+}
+Operator --> Inspect
+SDK --> Repair
+Repair .> Scope : includes
+Repair --> Repo
+Operator --> Judge
+Operator --> Result
+@enduml

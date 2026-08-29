@@ -1,0 +1,18 @@
+@startuml
+left to right direction
+actor Operator
+actor "Human reviewer" as Human
+actor GitHub
+rectangle "Claude Code Ticket Enhancer" {
+  usecase "Poll open tickets" as Poll
+  usecase "Draft missing ticket content" as Draft
+  usecase "Judge required fields" as Judge
+  usecase "Apply ready or needs-human labels" as Label
+}
+Operator --> Poll
+Poll .> Draft : includes
+Poll .> Judge : includes
+Poll --> Label
+Human --> Label : LGTM unlocks ready
+GitHub --> Label
+@enduml

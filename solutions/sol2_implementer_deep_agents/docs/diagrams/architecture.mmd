@@ -1,0 +1,17 @@
+flowchart LR
+    CLI["harness.py or Task"] --> Contract["Contract and role plan"]
+    Contract --> Graph["Deep Agents graph"]
+    Graph --> Planner["Planner"]
+    Graph --> TestWriter["Test implementer"]
+    Graph --> CodeWriter["Code implementer"]
+    Graph --> Judge["Read-only judge"]
+    Graph --> Scope["Scoped write tools"]
+    CLI --> Gates["Python red gate and gates.py"]
+    Scope --> Repo["Target CRM repository"]
+    Gates --> Repo
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class CLI,Repo boundary
+    class Graph,Planner,TestWriter,CodeWriter,Judge,Scope agent
+    class Contract,Gates control

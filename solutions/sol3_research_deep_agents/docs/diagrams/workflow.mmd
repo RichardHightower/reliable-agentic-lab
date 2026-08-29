@@ -1,0 +1,17 @@
+flowchart TD
+    Start([Topic]) --> Plan["Plan three to eight questions"]
+    Plan --> Search["Filtered search"]
+    Search --> Verify["Cross-check selected claims"]
+    Verify --> Outline["Build supported outline"]
+    Outline --> Diagram["Create source diagrams"]
+    Diagram --> Image["Render and judge figures"]
+    Image --> Write["Write cited sections"]
+    Write --> Review["Review rubric"]
+    Review --> Assemble["Assemble and hard-check paper"]
+    Assemble --> Exit{"Done, cost, or max turns?"}
+    Exit -- Done --> Publish{"Opt-in publication?"}
+    Publish -- Yes --> Gist["Push secret gist"]
+    Publish -- No --> Complete([Keep report bundle])
+    Gist --> Complete
+    Exit -- Retryable --> Search
+    Exit -- Cost or max turns --> Escalate([Keep checkpoint and evidence])

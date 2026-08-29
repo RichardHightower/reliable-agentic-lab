@@ -1,0 +1,23 @@
+@startuml
+left to right direction
+actor Operator
+actor "Human reviewer" as Human
+actor "Claude Agent SDK" as SDK
+actor GitHub
+rectangle "Agent SDK Ticket Enhancer" {
+  usecase "Poll one ticket" as Poll
+  usecase "Judge ticket completeness" as Judge
+  usecase "Draft a candidate" as Draft
+  usecase "Enforce write scope" as Scope
+  usecase "Publish status and labels" as Publish
+}
+Operator --> Poll
+Poll .> Judge : includes
+Poll .> Draft : includes
+Draft .> Scope : includes
+Poll --> Publish
+Human --> Publish : LGTM
+SDK --> Judge
+SDK --> Draft
+GitHub --> Publish
+@enduml

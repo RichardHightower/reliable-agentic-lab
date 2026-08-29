@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant O as OpenCode orchestrator
+    participant T as Task tool
+    participant R as Read-only role
+    participant C as Check scripts
+    participant G as GitHub
+    O->>T: start judge task
+    T->>R: inspect ticket under denied permissions
+    R-->>O: field JSON
+    O->>C: evaluate gaps and exit
+    alt candidate required
+        O->>T: start doer task
+        T->>R: draft text under denied permissions
+        R-->>O: candidate
+    else state changes
+        O->>G: perform write and label action
+    end

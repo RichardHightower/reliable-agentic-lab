@@ -1,0 +1,16 @@
+flowchart LR
+    CLI["loop.py or Task"] --> Contract["Contract and role plan"]
+    Contract --> Graph["Deep Agents graph"]
+    Graph --> Doer["Code implementer"]
+    Graph --> Judge["Read-only judge"]
+    Graph --> Fence["Tools, scope, and harness fence"]
+    CLI --> Tests["Test task and JUnit report"]
+    CLI --> Gates["Deterministic exit gate"]
+    Fence --> Repo["Virtualized target repository"]
+    Tests --> Repo
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class CLI,Repo boundary
+    class Graph,Doer,Judge,Fence agent
+    class Contract,Tests,Gates control

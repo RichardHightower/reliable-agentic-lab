@@ -1,0 +1,28 @@
+classDiagram
+    class SourceDocument {
+        +url: str
+        +quote: str
+        +host: str
+    }
+    class Claim {
+        +text: str
+        +source_ids: str[]
+        +truth_state: str
+        +cross_checked: bool
+    }
+    class Finding {
+        +claim_id: str
+        +state: str
+    }
+    class Checkpoint {
+        +completed_stages: str[]
+        +cost_usd: float
+    }
+    class PaperRun {
+        +run(): int
+        +publish: bool
+    }
+    SourceDocument --> Claim
+    Claim --> Finding
+    PaperRun --> Checkpoint
+    PaperRun --> Finding

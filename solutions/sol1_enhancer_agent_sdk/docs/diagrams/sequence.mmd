@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant L as loop.py
+    participant E as Enhancer
+    participant A as Agent SDK backend
+    participant C as Checks
+    participant G as GitHub
+    L->>E: poll(ticket)
+    E->>A: judge(ticket or candidate)
+    A-->>E: structured field assessment
+    E->>C: check_fields and check_stop
+    C-->>E: missing fields or exit
+    opt revision required
+        E->>A: draft missing fields
+        A-->>E: candidate and cost
+    end
+    opt final state
+        E->>G: write ticket, comment, and labels
+    end
+    E-->>L: outcome

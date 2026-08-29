@@ -1,0 +1,19 @@
+flowchart LR
+    CLI["loop.py or Task"] --> Pipeline["Python research pipeline"]
+    Pipeline --> Plan["Planner"]
+    Pipeline --> Researcher["Researcher with MCP"]
+    Pipeline --> Verifier["Independent verifier"]
+    Pipeline --> Diagrammer["Diagrammer"]
+    Pipeline --> Writer["Scoped writer"]
+    Pipeline --> Gates["Hard checks and exits"]
+    Researcher --> MCP["Context7 and Perplexity"]
+    Verifier --> MCP
+    Writer --> Work["work slash slug"]
+    Diagrammer --> Work
+    Gates --> Publish["Optional secret gist"]
+    classDef boundary fill:#E8F0FE,stroke:#174EA6,color:#202124
+    classDef agent fill:#E6F4EA,stroke:#137333,color:#202124
+    classDef control fill:#FEF7E0,stroke:#B06000,color:#202124
+    class CLI,MCP,Work,Publish boundary
+    class Plan,Researcher,Verifier,Diagrammer,Writer agent
+    class Pipeline,Gates control

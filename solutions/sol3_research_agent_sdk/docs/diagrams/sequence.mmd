@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant L as loop.py
+    participant R as Research roles
+    participant M as MCP sources
+    participant P as Python pipeline
+    participant G as Gates and publisher
+    L->>P: start bounded topic run
+    P->>R: plan questions
+    P->>R: research claims
+    R->>M: retrieve official sources
+    M-->>R: sources and quotes
+    P->>R: independently verify claims
+    R-->>P: findings and diagrams
+    P->>R: write scoped sections
+    R-->>P: section files
+    P->>G: check paper and exits
+    alt passes and publication requested
+        G-->>L: publish paper, PDF, and figures
+    else not published
+        G-->>L: retain work bundle or escalation
+    end
