@@ -36,10 +36,12 @@ def state(*messages):
     return {"messages": list(messages)}
 
 
-def ai(content, usage=None):
+def ai(content, usage=None, name=None):
     entry = {"role": "assistant", "content": content}
     if usage is not None:
         entry["usage_metadata"] = usage
+    if name is not None:
+        entry["name"] = name
     return entry
 
 
@@ -115,6 +117,25 @@ def test_a_result_with_no_messages_reports_itself():
 
 def test_a_state_with_no_ai_message_falls_back_to_the_last_one():
     assert adapter.last_ai_text(state({"role": "tool", "content": "only this"})) == "only this"
+
+
+def test_a_delegated_reply_ignores_the_parent_tool_receipt():
+    result = state(
+        ai("[1] cited writer body", name="writer"),
+        {"role": "tool", "content": "permission denied: /paper"},
+        ai("delegation finished", name="orchestrator"),
+    )
+    assert adapter.last_agent_ai_text(result, "writer") == "[1] cited writer body"
+
+
+def test_a_delegated_reply_falls_back_for_old_graph_shapes():
+    assert adapter.last_agent_ai_text(state(ai("plain answer")), "writer") == "plain answer"
+
+
+def test_agent_name_identifies_a_subgraph_state_without_its_namespace():
+    child = state(ai("[1] writer prose", name="writer"))
+    assert adapter.has_agent_ai_message(child, "writer") is True
+    assert adapter.has_agent_ai_message(child, "researcher") is False
 
 
 # -- what it cost ----------------------------------------------------------
@@ -250,53 +271,6 @@ def test_object_messages_take_the_same_path():
         ]
     )
     assert adapter.last_ai_text(result) == '{"verdict": "current"}'
-
-
-# -- the custom read tool is not covered by harness permissions -------------
-
-
-def test_read_file_refuses_a_path_outside_the_repo(fake_langchain, tmp_path):
-    """`virtual_mode` fences the built-in filesystem tools. It does not fence a
-    tool this folder wrote. Without a check here, `..` walks off the repo."""
-    import roles  # noqa: PLC0415
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (tmp_path / "outside.txt").write_text("SECRET")
-
-    out = roles.read_tool(repo)("../outside.txt")
-    assert "SECRET" not in out
-    assert out.startswith("REFUSED")
-
-
-def test_read_file_refuses_an_absolute_path(fake_langchain, tmp_path):
-    import roles  # noqa: PLC0415  (sys.path is set by conftest first)
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (tmp_path / "outside.txt").write_text("SECRET")
-
-    out = roles.read_tool(repo)(str(tmp_path / "outside.txt"))
-    assert "SECRET" not in out
-
-
-def test_read_file_still_reads_a_nested_path(fake_langchain, tmp_path):
-    """The containment check must not break the tool it protects."""
-    import roles  # noqa: PLC0415
-
-    repo = tmp_path / "repo"
-    (repo / "app" / "deep").mkdir(parents=True)
-    (repo / "app" / "deep" / "x.py").write_text("kept")
-
-    assert roles.read_tool(repo)("app/deep/x.py") == "kept"
-
-
-def test_read_file_still_reports_a_missing_file(fake_langchain, tmp_path):
-    import roles  # noqa: PLC0415
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    assert roles.read_tool(repo)("nope.md").startswith("no such file")
 
 
 def test_write_refuses_a_path_outside_the_repo(fake_langchain, tmp_path):

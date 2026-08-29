@@ -318,6 +318,13 @@ def test_diagram_gate_is_quiet_when_nothing_was_planned():
     stages.diagram_gate([], [], [])
 
 
+def test_diagram_gate_requires_every_planned_figure():
+    figure = type("F", (), {"name": "first", "alt": "first"})()
+    with pytest.raises(stages.GateFailed) as raised:
+        stages.diagram_gate([figure], ["second.mmd: renderer failed"], [{"name": "first"}, {"name": "second"}])
+    assert raised.value.signature == ("missing_figures",)
+
+
 def test_a_figure_with_no_alt_text_blocks():
     figure = type("F", (), {"name": "x", "alt": ""})()
     with pytest.raises(GateFailed) as exc:

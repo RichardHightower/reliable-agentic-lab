@@ -47,6 +47,18 @@ def test_cost_survives_a_reload(tmp_path):
     assert again.topic == "t"
 
 
+def test_search_reservation_survives_a_reload(tmp_path):
+    st = pstate.PaperState.load_or_create(tmp_path)
+    st.reserve_search(0.006)
+    st.save()
+
+    again = pstate.PaperState.load_or_create(tmp_path)
+    assert again.search_calls == 1
+    assert again.search_cost_usd == 0.006
+    assert again.total_calls == 1
+    assert again.total_cost_usd == 0.006
+
+
 def test_only_spend_moves_the_total(tmp_path):
     """Both `spend` and `mark_complete` used to add, so every call was counted
     twice. A run whose calls came to $2.25 reported $4.45, which fired the cap

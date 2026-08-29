@@ -466,7 +466,7 @@ def render_figures(src_dir: Path, out_dir: Path, topic: str, **kwargs) -> tuple[
             + " ".join(unrenderable[:2])
             + " Install mermaid-cli for .mmd and plantuml for .puml."
         )
-    complaints.extend(f"could not render {item}" for item in unrenderable)
+    complaints.extend(unrenderable)
     return figures, complaints
 
 
@@ -478,6 +478,15 @@ def diagram_gate(figures: list, complaints: list[str], planned: list[dict]) -> N
             f"the plan asked for {len(planned)} figures and none rendered. "
             + " ".join(complaints[:3]),
             ("no_figures",),
+        )
+    expected = {evidence.slug(str(item.get("name", ""))) for item in planned}
+    actual = {figure.name for figure in figures}
+    missing = sorted(expected - actual)
+    if missing:
+        raise GateFailed(
+            f"the plan asked for figures that did not render: {', '.join(missing)}. "
+            + " ".join(complaints[:3]),
+            ("missing_figures",),
         )
     missing_alt = [figure.name for figure in figures if not figure.alt.strip()]
     if missing_alt:

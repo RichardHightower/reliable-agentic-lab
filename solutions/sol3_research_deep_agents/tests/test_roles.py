@@ -40,9 +40,9 @@ class Boundary:
         )
 
 
-def test_reviewer_holds_only_a_reader(fake_langchain):
+def test_reviewer_holds_no_custom_tools(fake_langchain):
     spec = by_name(roles.subagents_for(None, "paper", repo=Path(".")))["reviewer"]
-    assert names(spec) == ["read_file"]
+    assert names(spec) == []
 
 
 def test_only_the_researcher_gets_search(fake_langchain):
@@ -50,6 +50,15 @@ def test_only_the_researcher_gets_search(fake_langchain):
     assert "search" in names(specs["researcher"])
     for role in ("planner", "diagrammer", "writer", "reviewer"):
         assert "search" not in names(specs[role]), role
+
+
+def test_researcher_must_return_a_structured_evidence_report(fake_langchain):
+    spec = by_name(roles.subagents_for(None, "paper", backend=Boundary(), repo=Path(".")))[
+        "researcher"
+    ]
+    assert spec["response_format"]["required"] == ["answer", "sources", "claims"]
+    source = spec["response_format"]["properties"]["sources"]["items"]
+    assert source["required"] == ["title", "url", "vendor", "quote"]
 
 
 def test_only_the_verifier_gets_docs(fake_langchain):
@@ -99,8 +108,17 @@ def test_search_tool_reports_an_empty_answer(fake_langchain):
     assert tool("anything").startswith("NO ANSWER")
 
 
-def test_reader_does_not_raise_on_a_missing_file(fake_langchain, tmp_path):
-    assert roles.read_tool(tmp_path)("nope.md").startswith("no such file")
+def test_search_tool_stops_a_second_provider_call_in_one_request(fake_langchain):
+    import research  # noqa: PLC0415  (sys.path is set by conftest first)
+
+    boundary = Boundary()
+    budget = research.Budget(max_calls=4, max_usd=1)
+    budget.begin_request(max_calls=1)
+    tool = roles.search_tool(boundary, budget)
+
+    assert "CITATIONS:" in tool("first")
+    assert tool("second").startswith("NO ANSWER. request search budget")
+    assert boundary.asked == ["first"]
 
 
 def test_recall_is_honest_when_there_is_no_brain(fake_langchain):
@@ -117,7 +135,7 @@ def test_permissions_deny_a_reader_everything():
     import roleplan  # noqa: PLC0415  (sys.path is set by conftest first)
 
     rules = roles.permission_rules(roleplan.plan(None, "paper")["reviewer"])
-    assert rules == [{"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"}]
+    assert rules == [{"operations": ["write"], "paths": ["/**"], "mode": "deny"}]
 
 
 def test_permissions_put_deny_before_allow():
@@ -127,9 +145,9 @@ def test_permissions_put_deny_before_allow():
 
     rules = roles.permission_rules(roleplan.plan(None, "paper")["writer"])
     assert rules[0]["mode"] == "deny"
-    assert "evidence/**" in rules[0]["paths"]
+    assert "/evidence/**" in rules[0]["paths"]
     assert rules[1]["mode"] == "allow"
-    assert rules[-1] == {"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"}
+    assert rules[-1] == {"operations": ["write"], "paths": ["/**"], "mode": "deny"}
 
 
 def test_verifier_response_cannot_state_a_truth_state():
@@ -146,10 +164,18 @@ def test_reviewer_response_cannot_state_a_verdict():
     assert "ship" not in props and "verdict" not in props
 
 
-def test_skills_reach_the_prompt(fake_langchain):
+def test_paper_writer_mounts_its_skill_and_cannot_browse_the_run(fake_langchain):
     spec = by_name(roles.subagents_for(None, "paper", repo=Path(".")))["writer"]
-    assert "white paper" in spec["system_prompt"].lower()
+    body = (roles.SKILLS_DIR / "writer" / "SKILL.md").read_text(encoding="utf-8")
+    assert "technical white paper" in body.lower()
+    assert "technical white paper" not in spec["system_prompt"].lower()
+    assert "/skills/writer/SKILL.md" in spec["system_prompt"]
     assert spec["skills"] == ["/skills/writer/"]
+    assert names(spec) == []
+    assert spec["permissions"] == [
+        {"operations": ["read"], "paths": ["/skills/writer/**"], "mode": "allow"},
+        {"operations": ["read", "write"], "paths": ["/**"], "mode": "deny"},
+    ]
 
 
 def test_build_agent_fences_the_harness(fake_langchain, fake_deepagents, tmp_path):
@@ -174,3 +200,39 @@ def test_build_agent_passes_every_subagent_permission(fake_langchain, fake_deepa
     for spec in fake_deepagents["subagents"]:
         assert spec["permissions"], spec["name"]
         assert spec["permissions"][-1].mode == "deny"
+        for permission in spec["permissions"]:
+            assert all(path.startswith("/") for path in permission.paths)
+
+
+def test_build_agent_binds_the_bounded_model_to_writer_only(
+    fake_langchain, fake_deepagents, tmp_path, monkeypatch
+):
+    graph_model = object()
+    writer_model = object()
+    monkeypatch.setattr(roles, "bounded_model", lambda _model, **_kwargs: graph_model)
+    monkeypatch.setattr(roles, "bounded_writer_model", lambda _model: writer_model)
+
+    roles.build_agent(None, loop="paper", repo=tmp_path)
+
+    specs = by_name(fake_deepagents["subagents"])
+    assert fake_deepagents["model"] is graph_model
+    assert specs["writer"]["model"] is writer_model
+    assert all("model" not in specs[name] for name in specs if name != "writer")
+
+
+def test_build_paper_agents_compiles_one_direct_graph_per_role(fake_langchain, fake_deepagents, tmp_path):
+    agents = roles.build_paper_agents(None, loop="paper", repo=tmp_path)
+
+    assert set(agents) == {"planner", "researcher", "verifier", "diagrammer", "writer", "reviewer"}
+
+
+def test_build_agent_leaves_parent_debug_off_by_default(fake_langchain, fake_deepagents, tmp_path):
+    roles.build_agent(None, loop="paper", repo=tmp_path)
+    assert fake_deepagents["debug"] is False
+
+
+def test_build_agent_can_turn_on_parent_debug(fake_langchain, fake_deepagents, tmp_path):
+    """Subagent dict specs have no debug field; the compiled parent owns it."""
+    roles.build_agent(None, loop="paper", repo=tmp_path, debug=True)
+    assert fake_deepagents["debug"] is True
+    assert all("debug" not in spec for spec in fake_deepagents["subagents"])

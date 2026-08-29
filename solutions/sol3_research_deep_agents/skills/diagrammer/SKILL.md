@@ -40,4 +40,4 @@ the failure modes shows none of them.
 ## Output
 
 One file per concept in the plan, named for the concept in kebab-case. Write
-only the diagram source. No fences, no commentary, no title comment.
+only the diagram source. No fences, no commentary, and no title comment.

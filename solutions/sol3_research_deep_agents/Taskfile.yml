@@ -1,13 +1,13 @@
 version: '3'
 
-# Task loads these for every task below. The repo root `.env` is the normal
-# place for a key. The folder file is optional and fills in only what the root
-# does not set, because Task lets the FIRST file that defines a variable win.
-# A missing file is fine, and nothing under `task test` needs one.
-dotenv: ['../../.env', '.env']
+# Task loads these for every task below. These are the only `.env` locations
+# this standalone lab inspects: this folder and its next three parents. The
+# nearest value wins (Task uses the first definition); an exported shell value
+# still takes precedence. A missing file is fine, and `task test` needs none.
+dotenv: ['.env', '../.env', '../../.env', '../../../.env']
 
 # Standalone. No includes, no shared vars, nothing outside this folder.
-# `python3` here means the venv you activated. See SPEC.md.
+# `task setup` puts the optional live runtime in this folder's `.venv`.
 
 vars:
   # TASKFILE_DIR is Task's own absolute path to this file's directory. Every
@@ -16,6 +16,9 @@ vars:
   # writes its run into a different checkout that also has a work/ directory.
   TOPIC: '{{.TOPIC | default "Exit conditions in production agent loops"}}'
   BACKEND: '{{.BACKEND | default "fixture"}}'
+  VENV: '{{.TASKFILE_DIR}}/.venv'
+  PY: '{{.PY | default "python3"}}'
+  RUN_PY: '{{.RUN_PY | default (printf "%s/bin/python" .VENV)}}'
 
 tasks:
   default:
@@ -27,29 +30,34 @@ tasks:
     desc: Run this folder's tests. No SDK, no key, no network, no clone.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 -m pytest tests -q
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" -m pytest tests -q
+        else
+          {{.PY}} -m pytest tests -q
+        fi
 
   table:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py --table-only --paper
+      - '{{.PY}} loop.py --table-only --paper'
 
   checks:
     desc: Run every deterministic check script against its own assertions.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 evidence.py --demo
-      - python3 paper_check.py --demo
-      - python3 diagrams.py --demo
-      - python3 publish.py --demo
-      - python3 mcp_tools.py --demo
+      - '{{.PY}} evidence.py --demo'
+      - '{{.PY}} paper_check.py --demo'
+      - '{{.PY}} diagrams.py --demo'
+      - '{{.PY}} publish.py --demo'
+      - '{{.PY}} mcp_tools.py --demo'
 
   brief:
     desc: The Saturday artifact. A question in, a cited brief out.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py --backend fixture {{.CLI_ARGS}}
+      - '{{.PY}} loop.py --backend fixture {{.CLI_ARGS}}'
 
   # -- the pipeline ---------------------------------------------------------
 
@@ -57,31 +65,37 @@ tasks:
     desc: Render diagram sources to SVG, then polish with imagen when it is there.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 diagrams.py --src fixtures/paper/diagrams --out work/figures {{.CLI_ARGS}}
+      - '{{.PY}} diagrams.py --src fixtures/paper/diagrams --out work/figures {{.CLI_ARGS}}'
 
   paper:
     desc: The nine stage pipeline. Offline on the fixture backend, live on auto.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py --paper --topic "{{.TOPIC}}" --backend {{.BACKEND}} {{.CLI_ARGS}}
+      - '{{.PY}} loop.py --paper --topic "{{.TOPIC}}" --backend {{.BACKEND}} {{.CLI_ARGS}}'
 
   live:
-    desc: A real run. Needs ANTHROPIC_API_KEY and PERPLEXITY_API_KEY, plus setup.
+    desc: A real run. Needs ANTHROPIC_API_KEY; uses Perplexity when configured, otherwise web search. Add -- --debug for subgraph traces.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 loop.py --paper --topic "{{.TOPIC}}" --backend auto {{.CLI_ARGS}}
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates .venv in this folder and installs Deep Agents."
+          exit 1
+        fi
+        "{{.RUN_PY}}" loop.py --paper --topic "{{.TOPIC}}" --backend auto {{.CLI_ARGS}}
 
   publish:
     desc: Push a finished paper to its stable secret gist. Never runs on its own.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 publish.py {{.CLI_ARGS}}
+      - '{{.PY}} publish.py {{.CLI_ARGS}}'
 
   # -- setup ----------------------------------------------------------------
 
   setup:
-    desc: Install what a live run needs. `task test` does not need any of it.
+    desc: Create .venv in this folder and install the optional live runtime.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - python3 -m pip install --quiet pytest
-      - python3 -m pip install --quiet -r ../../requirements-takehome.txt
+      - test -x "{{.RUN_PY}}" || "{{.PY}}" -m venv "{{.VENV}}"
+      - '"{{.RUN_PY}}" -m pip install --quiet --upgrade pip'
+      - '"{{.RUN_PY}}" -m pip install --quiet pytest "deepagents>=0.7.0" "langchain>=1.0.0" "langchain-mcp-adapters>=0.1.0" httpx'

@@ -5,9 +5,11 @@ never see `flowchart TB` in a published figure.
 
 Four steps, and every one of them fails closed to the step before it.
 
-    1. Deterministic render. mmdc for .mmd, plantuml for .puml, both to SVG.
-       This always runs, and its output is what ships when everything else is
-       unavailable. A correct plain diagram beats a missing pretty one.
+    1. Deterministic render. mmdc for .mmd and plantuml for .puml, both to SVG.
+       Mermaid also emits a three-times-scale PNG because its current SVG uses
+       browser-only HTML labels. The PNG is the print artifact; the SVG stays
+       with it as the accessible, inspectable intermediate. A correct plain
+       diagram beats a missing pretty one.
     2. Polish. The imagen-diagrams plugin when it is installed, otherwise the
        same six-block prompt contract built here against a theme YAML, sent to
        the `imagen` CLI.
@@ -37,6 +39,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -57,6 +60,13 @@ IMAGEN_TIMEOUT = 300
 
 MERMAID_SUFFIXES = (".mmd", ".mermaid")
 PLANTUML_SUFFIXES = (".puml", ".plantuml")
+
+# mmdc starts Chromium to render a local, model-produced diagram. The secure
+# Chromium sandbox is the normal path. A few nested CI/dev sandboxes cannot
+# launch it; those environments may opt in with SOL3_MERMAID_NO_SANDBOX=1.
+# Never make that weaker mode the default for model-produced input.
+UNSAFE_PUPPETEER_CONFIG = {"args": ["--no-sandbox", "--disable-setuid-sandbox"]}
+MERMAID_PRINT_SCALE = "3"
 
 # Where an installed imagen-diagrams plugin puts its renderer.
 PLUGIN_RENDER = (
@@ -157,27 +167,8 @@ def simplify_instruction(inv: Inventory) -> str:
 # -- step 1, the deterministic render -------------------------------------
 
 
-def render_svg(src: Path, out_dir: Path) -> Path:
-    """mmdc or plantuml to SVG. This is the artifact that always exists."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    kind = kind_of(src)
-    target = out_dir / f"{src.stem}.svg"
-    if kind == "mermaid":
-        binary = shutil.which("mmdc")
-        argv = ([binary] if binary else ["npx", "--yes", "@mermaid-js/mermaid-cli"]) + [
-            "-i",
-            str(src),
-            "-o",
-            str(target),
-            "-b",
-            "transparent",
-        ]
-        if MERMAID_CONFIG.exists():
-            argv += ["-c", str(MERMAID_CONFIG)]
-        timeout = MMDC_TIMEOUT
-    else:
-        argv = ["plantuml", "-tsvg", "-Playout=smetana", "-o", str(out_dir.resolve()), str(src)]
-        timeout = PLANTUML_TIMEOUT
+def _run_renderer(argv: list[str], src: Path, target: Path, timeout: int) -> Path:
+    """Run one deterministic renderer and make its useful failure explicit."""
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -185,6 +176,91 @@ def render_svg(src: Path, out_dir: Path) -> Path:
     if proc.returncode != 0 or not target.exists():
         raise RuntimeError(f"{argv[0]} exited {proc.returncode} on {src.name}: {proc.stderr[:300]}")
     return target
+
+
+def plantuml_style_args(theme_name: str) -> list[str]:
+    """Map the shared white-paper palette to PlantUML's SVG skin settings."""
+    palette = load_theme(theme_name).get("palette", {})
+    background = palette.get("background", "#eef2f7")
+    surface = palette.get("surface", "#ffffff")
+    primary = palette.get("primary", "#1a365d")
+    ink = palette.get("ink", "#1b2437")
+    muted = palette.get("muted", "#4a5b70")
+    return [
+        f"-SbackgroundColor={background}",
+        "-SdefaultFontName=Helvetica",
+        "-SdefaultFontSize=18",
+        f"-SdefaultFontColor={ink}",
+        f"-SsequenceParticipantBackgroundColor={surface}",
+        f"-SsequenceParticipantBorderColor={primary}",
+        f"-SsequenceArrowColor={primary}",
+        f"-SsequenceLifeLineBorderColor={muted}",
+        "-SsequenceMessageAlign=center",
+        "-Sroundcorner=12",
+    ]
+
+
+def _puppeteer_config(temp_dir: str) -> Path | None:
+    """Return an opt-in workaround for nested CI/dev sandboxes only."""
+    if os.environ.get("SOL3_MERMAID_NO_SANDBOX") != "1":
+        return None
+    config = Path(temp_dir) / "puppeteer.json"
+    config.write_text(json.dumps(UNSAFE_PUPPETEER_CONFIG), encoding="utf-8")
+    return config
+
+
+def _mmdc_argv(
+    src: Path, target: Path, puppeteer: Path | None, *, background: str, scale: str = "1"
+) -> list[str]:
+    binary = shutil.which("mmdc")
+    argv = ([binary] if binary else ["npx", "--yes", "@mermaid-js/mermaid-cli"]) + [
+        "-i",
+        str(src),
+        "-o",
+        str(target),
+        "-b",
+        background,
+        "-s",
+        scale,
+    ]
+    if MERMAID_CONFIG.exists():
+        argv += ["-c", str(MERMAID_CONFIG)]
+    return argv + (["--puppeteerConfigFile", str(puppeteer)] if puppeteer else [])
+
+
+def render_svg(src: Path, out_dir: Path, *, theme_name: str = DEFAULT_THEME) -> Path:
+    """mmdc or plantuml to SVG. This is the artifact that always exists."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    kind = kind_of(src)
+    target = out_dir / f"{src.stem}.svg"
+    if kind == "mermaid":
+        # Keep an opt-in Puppeteer configuration outside the paper artifact.
+        with tempfile.TemporaryDirectory(prefix="sol3-mmdc-") as temp_dir:
+            puppeteer = _puppeteer_config(temp_dir)
+            return _run_renderer(
+                _mmdc_argv(src, target, puppeteer, background="transparent"),
+                src,
+                target,
+                MMDC_TIMEOUT,
+            )
+    else:
+        argv = ["plantuml", "-tsvg", "-Playout=smetana", *plantuml_style_args(theme_name)]
+        argv += ["-o", str(out_dir.resolve()), str(src)]
+        return _run_renderer(argv, src, target, PLANTUML_TIMEOUT)
+
+
+def render_mermaid_png(src: Path, out_dir: Path, *, theme_name: str = DEFAULT_THEME) -> Path:
+    """Render a print-scale PNG when Mermaid's SVG labels require a browser."""
+    target = out_dir / f"{src.stem}.png"
+    background = load_theme(theme_name).get("palette", {}).get("background", "#eef2f7")
+    with tempfile.TemporaryDirectory(prefix="sol3-mmdc-") as temp_dir:
+        puppeteer = _puppeteer_config(temp_dir)
+        return _run_renderer(
+            _mmdc_argv(src, target, puppeteer, background=background, scale=MERMAID_PRINT_SCALE),
+            src,
+            target,
+            MMDC_TIMEOUT,
+        )
 
 
 # -- step 2, the polish ---------------------------------------------------
@@ -353,14 +429,15 @@ class Figure:
     alt: str = ""
     theme: str = DEFAULT_THEME
     polished: bool = False
+    rasterized: bool = False
     score: float = 0.0
     hash: str = ""
     note: str = ""
 
     @property
     def best(self) -> Path | None:
-        """What the paper embeds. The polished raster when it earned its place."""
-        return self.png if self.polished and self.png else self.svg
+        """The audited PNG when it exists; otherwise the deterministic SVG."""
+        return self.png if self.png and (self.polished or self.rasterized) else self.svg
 
     def sidecar(self) -> dict:
         return {
@@ -372,6 +449,7 @@ class Figure:
             "png": self.png.name if self.png else None,
             "alt": self.alt,
             "polished": self.polished,
+            "rasterized": self.rasterized,
             "score": self.score,
             "note": self.note,
         }
@@ -422,6 +500,7 @@ def render(  # noqa: PLR0913  (every knob here is a real caller option)
                     alt=cached.get("alt", ""),
                     theme=cached.get("theme", theme_name),
                     polished=bool(cached.get("polished")),
+                    rasterized=bool(cached.get("rasterized")),
                     score=float(cached.get("score", 0.0)),
                     hash=stamp,
                     note="unchanged, reused",
@@ -434,12 +513,18 @@ def render(  # noqa: PLR0913  (every knob here is a real caller option)
         hash=stamp,
         alt=alt_text(inv, topic),
     )
-    figure.svg = render_svg(src, out_dir)
+    figure.svg = render_svg(src, out_dir, theme_name=theme_name)
+    if kind_of(src) == "mermaid":
+        try:
+            figure.png = render_mermaid_png(src, out_dir, theme_name=theme_name)
+            figure.rasterized = True
+        except RuntimeError as exc:
+            figure.note = f"local PNG render failed, kept the SVG: {exc}"
 
     if polish:
         _polish(figure, source, inv, topic, out_dir, describe)
     else:
-        figure.note = "polish not requested"
+        figure.note = "polish not requested; embedded print PNG" if figure.rasterized else "polish not requested"
 
     side.write_text(json.dumps(figure.sidecar(), indent=2), encoding="utf-8")
     return figure
@@ -460,7 +545,8 @@ def _polish(  # noqa: PLR0913, PLR0917  (one private step of `render`, not an AP
             figure.note = f"plugin render failed, used the local prompt: {exc}"
 
     if not imagen_available():
-        figure.note = figure.note or "imagen is not on PATH or no GEMINI_API_KEY, kept the SVG"
+        fallback = "embedded print PNG" if figure.rasterized else "kept the SVG"
+        figure.note = figure.note or f"imagen is not on PATH or no GEMINI_API_KEY, {fallback}"
         return
 
     theme = load_theme(figure.theme)

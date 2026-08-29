@@ -82,6 +82,7 @@ def run_paper(args) -> int:
         theme=args.theme,
         polish=not args.no_polish,
         publish=args.publish,
+        debug=args.debug,
     )
     return run.run()
 
@@ -110,6 +111,11 @@ def main(argv: list[str] | None = None) -> int:
     paper_args.add_argument("--theme", default="spillwave-light")
     paper_args.add_argument("--no-polish", action="store_true", help="SVG figures only")
     paper_args.add_argument("--publish", action="store_true", help="push to a secret gist")
+    paper_args.add_argument(
+        "--debug",
+        action="store_true",
+        help="stream parent-graph and delegated-subgraph diagnostics to stderr (live runs only)",
+    )
     args = parser.parse_args(argv)
 
     loop = PAPER_LOOP if (args.paper or args.topic) else LOOP

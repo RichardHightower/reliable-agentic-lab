@@ -140,6 +140,14 @@ def test_cost_carries_forward_across_a_resume(offline, run_dir):
     assert _rebuild(run_dir).state.total_cost_usd == 1.25
 
 
+def test_search_reservation_checkpoints_before_a_provider_call(offline, run_dir):
+    offline.budget.charge(0.006)
+
+    saved = pstate.PaperState.load_or_create(run_dir)
+    assert saved.search_calls == 1
+    assert saved.search_cost_usd == 0.006
+
+
 def _rebuild(run_dir):
     import research  # noqa: PLC0415  (sys.path is set by conftest first)
     from conftest import FIXTURES  # noqa: PLC0415  (sys.path is set by conftest first)
@@ -194,6 +202,42 @@ def test_a_retry_keeps_the_sections_that_passed(offline, run_dir):
     assert offline.state.total_calls == calls
 
 
+def test_a_review_retry_sends_failed_rows_to_the_writer(offline, monkeypatch):
+    offline.run()
+    offline.state.mark_failed("review", "rerun")
+    calls = {"review": 0, "revise": []}
+
+    def review(_extra=""):
+        calls["review"] += 1
+        if calls["review"] == 1:
+            raise GateFailed("name a tradeoff", ("names_tradeoff",))
+        return paper.StageResult("review", summary="fixed")
+
+    def revise(feedback):
+        calls["revise"].append(feedback)
+        return paper.StageResult("revise", summary="one section")
+
+    monkeypatch.setattr(offline, "stage_review", review)
+    monkeypatch.setattr(offline, "stage_revise", revise)
+
+    assert offline.run() == 0
+    assert calls["review"] == 2
+    assert calls["revise"] and "names_tradeoff" in calls["revise"][0]
+
+
+def test_a_new_process_reloads_checkpointed_sections_before_writing(offline, run_dir):
+    """A process restart happens between sections in a live run, not just retries."""
+    offline.run()
+    before = json.loads((run_dir / "sections.json").read_text())
+    calls = offline.state.total_calls
+
+    resumed = _rebuild(run_dir)
+    resumed.stage_write("")
+
+    assert resumed.written == before
+    assert resumed.state.total_calls == calls
+
+
 # -- the fixture runner ----------------------------------------------------
 
 
@@ -213,6 +257,92 @@ def test_the_fixture_runner_says_when_nothing_matches(offline):
 def test_an_unknown_role_is_a_gate_failure_not_a_crash(offline):
     with pytest.raises(GateFailed):
         offline.runner.ask("nobody", "anything")
+
+
+class StreamingAgent:
+    """A v2 LangGraph stream: nested debug events, then final parent state."""
+
+    def __init__(self):
+        self.payload = None
+        self.options = None
+
+    def stream(self, payload, **options):
+        self.payload = payload
+        self.options = options
+        yield {
+            "type": "debug",
+            "ns": ("researcher:abc",),
+            "data": {"type": "task", "name": "researcher"},
+        }
+        yield {
+            "type": "values",
+            "ns": ("tools:opaque-task-id",),
+            "data": {
+                "messages": [
+                    {"role": "assistant", "name": "researcher", "content": "[1] delegated answer"}
+                ]
+            },
+        }
+        yield {
+            "type": "values",
+            "ns": (),
+            "data": {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "parent tool receipt",
+                        "usage_metadata": {"cost": 0.25},
+                    }
+                ]
+            },
+        }
+
+    def invoke(self, _payload):  # pragma: no cover - the test proves this stays unused
+        raise AssertionError("debug mode must stream instead of invoking a second model call")
+
+
+def test_debug_runner_streams_subgraphs_and_keeps_the_final_parent_state(capsys):
+    agent = StreamingAgent()
+    runner = paper.DeepAgentsRunner(agent, debug=True)
+
+    reply = runner.ask("researcher", "return JSON")
+
+    assert reply.text == "[1] delegated answer"
+    assert reply.usd == 0.25
+    assert agent.options == {
+        "stream_mode": ["debug", "values"],
+        "subgraphs": True,
+        "version": "v2",
+    }
+    assert "Delegate this to the researcher subagent" in agent.payload["messages"][0]["content"]
+    out = capsys.readouterr().err
+    assert "role=researcher" in out
+    assert "namespace=researcher:abc" in out
+
+
+def test_debug_runner_fails_clearly_without_a_final_parent_state():
+    class NoResult:
+        def stream(self, *_args, **_kwargs):
+            return iter(())
+
+    with pytest.raises(RuntimeError, match="without a final parent values event"):
+        paper.DeepAgentsRunner(NoResult(), debug=True).ask("reviewer", "grade")
+
+
+def test_direct_role_runner_receives_the_unwrapped_stage_prompt():
+    class DirectRole:
+        def __init__(self):
+            self.payload = None
+
+        def invoke(self, payload):
+            self.payload = payload
+            return {"messages": [{"role": "assistant", "content": "[1] cited body"}]}
+
+    writer = DirectRole()
+    reply = paper.DeepAgentsRunner({"writer": writer}).ask("writer", "Write with [1].")
+
+    assert reply.text == "[1] cited body"
+    assert writer.payload["messages"][0]["content"] == "Write with [1]."
 
 
 def test_a_fenced_diagram_reply_is_unfenced():

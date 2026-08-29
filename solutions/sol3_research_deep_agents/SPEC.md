@@ -55,8 +55,10 @@ translation is wrong and the tests say so.
 
 Deep Agents scopes three ways, and this folder uses all three.
 
-1. **A tool list per subagent.** The reviewer is handed `read_file` and nothing
-   else. "Do not edit the paper" is not an instruction it can reinterpret.
+1. **A tool list per subagent.** Deep Agents supplies backend-aware read tools
+   from the mounted filesystem. The reviewer receives no custom write tool;
+   the writer and verifier receive only their scoped custom write tools. "Do
+   not edit the paper" is not an instruction it can reinterpret.
 2. **A path check inside the write tool.** The writer may write `paper/**`, the
    verifier may write `evidence/**`, and neither can reach the other. The tool
    returns a refusal sentence rather than raising, because a raw traceback in an
@@ -66,6 +68,10 @@ Deep Agents scopes three ways, and this folder uses all three.
    built-in write tools from the orchestrator, mounts the working directory as
    `FilesystemBackend(virtual_mode=True)` so `..` cannot walk out, and turns the
    general-purpose subagent off.
+
+The custom tools must not reimplement `read_file`. Deep Agents' own reader is
+what resolves `/skills/**` and `/memory/**`; a duplicate custom tool shadows
+those mounts and quietly makes the mounted role skill unreachable.
 
 Layer 3 is the one people skip. The default general-purpose subagent ships with
 the harness filesystem tools, so leaving it enabled is how a carefully scoped
@@ -150,10 +156,10 @@ The loop never learns which one answered.
 
 | Backend | When it is available |
 | --- | --- |
-| `perplexity` | `PERPLEXITY_API_KEY` is set. MCP first, then the REST API |
+| `perplexity` | `PERPLEXITY_API_KEY` is set. MCP first, then the REST API. The key may live in `.env`, `../.env`, `../../.env`, or `../../../.env` relative to this solution. |
 | `context7` | `ctx7` is on PATH, or the MCP server answers. Verification only |
-| `websearch` | The coding agent answers through an inbox file |
-| `fixture` | Always. A recording, for a room with no network |
+| `websearch` | No Perplexity key. The research tool queries the web; an optional inbox can provide a recorded response for a classroom demo |
+| `fixture` | Explicit offline mode. A recording, for a room with no network |
 
 ## Build it step by step
 
@@ -206,7 +212,8 @@ task brief -- --question "sqlalchemy nullable datetime column"
 # offline, from a recording
 task paper
 
-# live, needs ANTHROPIC_API_KEY and PERPLEXITY_API_KEY in the root .env
+# live, needs ANTHROPIC_API_KEY. It uses Perplexity when its key is available,
+# otherwise the research tool queries the web.
 task setup
 task live TOPIC="context management in multi-agent research loops"
 
@@ -217,6 +224,26 @@ task live TOPIC="context management in multi-agent research loops"
 task publish -- --slug context-management-in-multi-agent-research-loops --dry-run --out /tmp/staged
 task publish -- --slug context-management-in-multi-agent-research-loops
 ```
+
+## Debug one live paper run
+
+Normal runs use `.invoke()` and stay quiet. Add `--debug` to stream the parent
+graph's debug events and each delegated subgraph namespace while preserving the
+final parent state as the stage reply:
+
+```bash
+task live TOPIC="loop engineering best practices" -- --debug
+```
+
+The switch is deliberately on the parent graph. Deep Agents accepts
+`debug=True` in `create_deep_agent`, but a dict subagent specification has no
+per-role `debug` field. The printed `namespace=` tells which subgraph spoke:
+`parent` is the orchestrator, and a non-empty namespace is the delegated role.
+The trace can include prompts, tool arguments, and source excerpts, so use it
+for a short probe and do not paste it into a ticket or commit it to the paper.
+
+This does not enable `langchain.globals.set_debug(True)`. That is process-wide
+and floods a paper run with unrelated model and tool events.
 
 ## What one run leaves behind
 
