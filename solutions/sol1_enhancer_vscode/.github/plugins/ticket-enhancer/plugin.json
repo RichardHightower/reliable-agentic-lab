@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "ticket-enhancer",
+  "description": "One poll-and-act step that grooms draft tickets.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "keywords": ["enhancer", "tickets", "loop-engineering"],
+  "extensions": {
+    "com.github.copilot": {
+      "metadata": {
+        "displayName": "Ticket Enhancer"
+      }
+    }
+  }
+}

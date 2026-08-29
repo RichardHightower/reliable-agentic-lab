@@ -115,6 +115,41 @@ and
 [IMPLEMENTATION_NOTES.md](../../solutions/sol1_enhancer_opencode/IMPLEMENTATION_NOTES.md)
 explains loading and the judge jail.
 
+## Visual Studio Code
+
+```bash
+cp -R ../../solutions/sol1_enhancer_vscode/.github .
+cp -R ../../solutions/sol1_enhancer_vscode/.vscode .
+cp ../../solutions/sol1_enhancer_vscode/AGENTS.md .
+cp ../../solutions/sol1_enhancer_vscode/config.json.example .
+mkdir -p bin
+cp ../../solutions/sol1_enhancer_vscode/bin/fence_check.py bin/
+```
+
+`cp -R` copies the three symlinks under `.github/agents/` and `.github/skills/`
+as symlinks, which is what you want. They point at
+`../plugins/ticket-enhancer/`, so they keep working after the copy.
+
+Two things VS Code needs before this runs at all:
+
+1. Open **this folder** as the workspace, or run Copilot CLI from here.
+   Skills are discovered from the workspace root.
+2. Confirm the names:
+
+   ```bash
+   python3 bin/fence_check.py
+   copilot skill list
+   ```
+
+   `enhancer-loop` must be listed. If it is not, the symlinks did not survive
+   the copy, or Copilot started at the repo root.
+
+The design is
+[solutions/sol1_enhancer_vscode/SPEC.md](../../solutions/sol1_enhancer_vscode/SPEC.md),
+and
+[IMPLEMENTATION_NOTES.md](../../solutions/sol1_enhancer_vscode/IMPLEMENTATION_NOTES.md)
+explains plugin loading.
+
 ## Claude Agent SDK (take-home)
 
 Do not copy these fences into this lab folder. Run the answer:

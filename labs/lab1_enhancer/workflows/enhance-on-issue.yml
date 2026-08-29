@@ -115,6 +115,7 @@ jobs:
           case "$ENHANCER_BACKEND" in
             claude) npm install -g @anthropic-ai/claude-code || true ;;
             opencode) npm install -g opencode-ai || true ;;
+            vscode) npm install -g @github/copilot || true ;;
           esac
 
       - name: Run one poll
@@ -136,6 +137,10 @@ jobs:
               ;;
             opencode)
               cd solutions/sol1_enhancer_opencode
+              task run -- --ticket "$TICKET" --repo "$TARGET"
+              ;;
+            vscode)
+              cd solutions/sol1_enhancer_vscode
               task run -- --ticket "$TICKET" --repo "$TARGET"
               ;;
             agent-sdk)
