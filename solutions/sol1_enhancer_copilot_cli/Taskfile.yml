@@ -1,0 +1,76 @@
+# Standalone. No dependency on the root Taskfile. Every command here runs
+# from this folder, start to finish: inspect the plugin tree, clone your
+# fork, seed test tickets, run a poll.
+version: '3'
+
+vars:
+  LAB_ROOT:
+    sh: cd "{{.TASKFILE_DIR}}/../.." && pwd
+  TARGET: '{{.TARGET | default (printf "%s/../../work/northwind-field-crm" .TASKFILE_DIR)}}'
+
+tasks:
+  default:
+    cmds: [task --list]
+
+  test:
+    desc: Run deterministic rubric, exit-check, and fence regression tests.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 .github/plugins/ticket-enhancer/skills/enhancer-loop/scripts/check_fields.py --demo
+      - python3 .github/plugins/ticket-enhancer/skills/enhancer-loop/scripts/check_stop.py --demo
+      - python3 bin/fence_check.py
+
+  checks:
+    desc: Alias for the deterministic standalone checks.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - task test
+
+  inspect:
+    desc: Confirm the three names exist on disk. Copilot CLI loads them from .github/.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 bin/fence_check.py
+      - echo ""
+      - echo "Run Copilot CLI from this folder."
+      - echo "You want /enhancer-loop, enhancer-judge, and enhancer-doer."
+      - echo "Headless: copilot skill list  (must name enhancer-loop)"
+
+  clone:
+    desc: Clone your fork (from config.json) into work/. Skips if it is already there.
+    status:
+      - test -d {{.TARGET}}/.git
+    cmds:
+      - test -f {{.TASKFILE_DIR}}/config.json || (echo "copy config.json.example to config.json first, and fill in your GitHub username" && exit 1)
+      - mkdir -p {{.TASKFILE_DIR}}/../../work
+      - git clone --quiet https://github.com/$(jq -r .fork_owner {{.TASKFILE_DIR}}/config.json)/$(jq -r .repo_name {{.TASKFILE_DIR}}/config.json).git {{.TARGET}}
+
+  create-test-tickets:
+    desc: Create GitHub issues for every draft ticket. task run never opens issues.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/setup_test_tickets.sh {{.TARGET}}
+
+  reset-test-tickets:
+    desc: Close and rename GitHub test issues so create-test-tickets makes new ones.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/reset_test_tickets.sh {{.TARGET}}
+
+  run:
+    desc: One poll-and-act step over every open ticket, using this plugin.
+    # dir is pinned, not just TARGET. Copilot CLI discovers .github/skills
+    # and .github/agents from its own cwd, so the subprocess has to start in
+    # this exact folder or the skill does not exist. SKILL.md reads
+    # ./config.json from its cwd too.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - >-
+        copilot --allow-all
+        --prompt "/enhancer-loop --repo {{.TARGET}} {{.CLI_ARGS}}"
+
+  poll-forever:
+    desc: Poll forever until killed (Ctrl-C). Seminar-only stand-in for a real scheduler, see SPEC.md.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - bin/poll_forever.sh {{.CLI_ARGS}}

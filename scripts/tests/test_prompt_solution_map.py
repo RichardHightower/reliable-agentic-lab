@@ -24,6 +24,8 @@ VARIANT_PROMPT = {
     "grok_build": "grok-build.md",
     "opencode": "opencode.md",
     "vscode": "vscode.md",
+    "copilot_cli": "copilot-cli.md",
+    "antigravity": "antigravity.md",
 }
 
 

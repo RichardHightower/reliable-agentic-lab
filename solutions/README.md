@@ -4,8 +4,8 @@ The answer to every lab. `sol<n>` matches `lab<n>`. The suffix names the tool or
 the runtime, so a folder is `sol<n>_<name>_<product>`.
 
 Labs 2 to 4 no longer ship four coding-tool copies of the same Python file.
-Saturday fills the stub in `labs/`. The solutions tree keeps Lab 1 (seven real
-shapes: five products plus two runtimes) and the two runtime ports of labs
+Saturday fills the stub in `labs/`. The solutions tree keeps Lab 1 (nine real
+shapes: seven products plus two runtimes) and the two runtime ports of labs
 2 to 4.
 
 Each of those folders has one prompt in the matching lab. The table lives in
@@ -24,6 +24,8 @@ one file. Read each folder's own `README.md` and `SPEC.md`.
 | `sol1_enhancer_grok_build` | Grok Build project plugin under `.grok/plugins/ticket-enhancer/`, plus three registration symlinks. On grok 1.0.5 a project plugin registers nothing on its own. |
 | `sol1_enhancer_opencode` | OpenCode skill set under `.opencode/`. Isolation is per-agent `edit: deny`. |
 | `sol1_enhancer_vscode` | VS Code agent plugin under `.github/plugins/ticket-enhancer/`, plus three registration symlinks. Isolation is a per-agent `tools:` allowlist with no `edit`. |
+| `sol1_enhancer_copilot_cli` | Copilot CLI agent plugin under `.github/plugins/ticket-enhancer/`, plus three registration symlinks. Isolation is a per-agent `tools:` allowlist (`read`, `search`) with no `edit`. |
+| `sol1_enhancer_antigravity` | Antigravity plugin under `.agents/plugins/ticket-enhancer/`, plus three registration symlinks. Isolation is a per-agent `tools:` allowlist (`view_file`, `grep_search`) with no `replace_file_content`. |
 
 Both runtime ports of Lab 1 run the same poll. `enhancer.py` is the same
 orchestrator in `sol1_enhancer_agent_sdk` and `sol1_enhancer_deep_agents`, it

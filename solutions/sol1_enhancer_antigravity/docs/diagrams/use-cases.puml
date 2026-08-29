@@ -1,0 +1,20 @@
+@startuml
+left to right direction
+actor Operator
+actor "Human reviewer" as Human
+actor GitHub
+rectangle "VS Code Ticket Enhancer plugin" {
+  usecase "Poll candidate ticket" as Poll
+  usecase "Draft ticket improvements" as Draft
+  usecase "Assess ticket fields" as Judge
+  usecase "Evaluate stop condition" as Stop
+  usecase "Write lifecycle status" as Status
+}
+Operator --> Poll
+Poll .> Draft : includes
+Poll .> Judge : includes
+Poll .> Stop : includes
+Poll --> Status
+Human --> Status : LGTM
+GitHub --> Status
+@enduml

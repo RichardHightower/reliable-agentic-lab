@@ -6,7 +6,7 @@
 # grade the ticket, merge, or deploy.
 #
 # Set repository variable ENHANCER_BACKEND to one of:
-#   claude | codex | opencode | agent-sdk | deep-agents
+#   claude | codex | opencode | vscode | copilot-cli | antigravity | agent-sdk | deep-agents
 # Optional secret: ANTHROPIC_API_KEY (required for agent-sdk and deep-agents).
 
 name: Enhance tickets on issue events
@@ -141,6 +141,14 @@ jobs:
               ;;
             vscode)
               cd solutions/sol1_enhancer_vscode
+              task run -- --ticket "$TICKET" --repo "$TARGET"
+              ;;
+            copilot-cli)
+              cd solutions/sol1_enhancer_copilot_cli
+              task run -- --ticket "$TICKET" --repo "$TARGET"
+              ;;
+            antigravity)
+              cd solutions/sol1_enhancer_antigravity
               task run -- --ticket "$TICKET" --repo "$TARGET"
               ;;
             agent-sdk)

@@ -1,0 +1,15 @@
+flowchart TD
+    Start([One plugin poll]) --> Open["Read an open issue"]
+    Open --> Judge["Judge returns field JSON"]
+    Judge --> Fields["Check required fields"]
+    Fields --> Ready{"Ready?"}
+    Ready -- No --> Draft["Doer returns candidate text"]
+    Draft --> Judge
+    Ready -- Yes --> Approval{"Human LGTM?"}
+    Approval -- Yes --> ReadyLabel["Apply ready label"]
+    Approval -- No --> Stop["Check budget and stall"]
+    Stop --> Again{"Retry?"}
+    Again -- Yes --> Draft
+    Again -- No --> Escalate["Apply needs-human label"]
+    ReadyLabel --> End([Outcome])
+    Escalate --> End
