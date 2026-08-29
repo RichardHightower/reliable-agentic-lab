@@ -274,6 +274,16 @@ def unresolved_images(body: str, base_dir: Path | str | None) -> list[str]:
     return missing
 
 
+def non_publication_images(body: str) -> list[str]:
+    """Diagram publication accepts only imagen-diagrams' named PNG output."""
+    return [
+        target
+        for target in IMAGE.findall(body)
+        if not target.startswith(("http://", "https://", "data:"))
+        and not target.endswith("_imagen.png")
+    ]
+
+
 def doctrine_failure(body: str) -> str | None:
     """Return the first reason the paper teaches the wrong exit doctrine.
 
@@ -331,6 +341,16 @@ def check(
     if enforce_loop_doctrine:
         failure = doctrine_failure(body)
         checks.append(Check("doctrine", failure is None, "exit order and Figure 1 agree" if failure is None else failure))
+        wrong_assets = non_publication_images(body)
+        checks.append(
+            Check(
+                "figure_assets",
+                not wrong_assets,
+                "every diagram is a judged *_imagen.png"
+                if not wrong_assets
+                else f"non-publication figures: {wrong_assets[:3]}",
+            )
+        )
 
     absent = missing_sections(body, headings or [])
     checks.append(

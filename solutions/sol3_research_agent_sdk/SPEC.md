@@ -350,9 +350,10 @@ v2.1.0 under this folder's `.cache/`; the Agent SDK loads both local plugin
 manifests and exposes only their two plugin-qualified image skills, without
 depending on `~/.claude` or project-level skill discovery.
 `diagrams.py` invokes the plugin's `render.py` and `judge.py` directly. The
-plugin owns its `imagen`, `grok`, then `codex` backend selection and the brace
-policy for each backend. It writes a themed prompt sidecar before it fails
-closed with exit 2 when no image backend is installed.
+`imagen-diagrams` plugin alone turns `.mmd` and `.puml` into the paper's
+`*_imagen.png` diagrams. `image-gen` is reserved for cover and non-diagram art.
+The renderer writes a themed prompt sidecar before it fails closed with exit 2
+when no image backend is installed; it never substitutes SVG or a plain PNG.
 
 An accepted E2E figure must retain the plugin render sidecar and judge sidecar,
 be rendered at article density, and pass the plugin's source-inventory check.

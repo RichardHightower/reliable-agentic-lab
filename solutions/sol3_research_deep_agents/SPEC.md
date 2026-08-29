@@ -86,7 +86,7 @@ agent writes anywhere it likes.
 | 2 | search | yes | Every claim names a source that resolves |
 | 3 | verify | yes | Every important claim has a decided truth state, and anything past the cap says it was skipped |
 | 4 | outline | yes | Every body section names claim ids that exist and may be used |
-| 5 | diagram | yes | At most twelve nodes per figure, and every figure has alt text. No renderer on the machine skips the stage rather than retrying |
+| 5 | diagram | yes | At most twelve nodes, alt text present, and the pinned plugin judge accepts a `*_imagen.png` |
 | 6 | write | yes | A section cites only the numbers its claims support |
 | 7 | review | yes | Every rubric row passes |
 | 8 | assemble | no | Every hard gate in `paper_check`, including that the paper has a body |
@@ -123,18 +123,25 @@ circuits the one case worth catching early: the same rows failing twice, which
 means the loop is not converging. Spending the rest of the budget to watch it
 fail identically buys a bill, not a fix.
 
-## A missing renderer is not a retry
+## Publication figures fail closed
 
-`mmdc is not installed` is not something the diagrammer can fix. Asking it to
-redraw is asking it to solve a problem it cannot see or reach, and three
-attempts buy three times the bill and the same result.
+Mermaid and PlantUML are source languages here, not publication formats. The
+diagrammer writes `.mmd` or `.puml`; local Python inventories the labels and
+rejects more than twelve nodes before spending an image call. The pinned
+`imagen-diagrams` v0.2.0 plugin then renders `*_imagen.png`, and its own fidelity
+judge checks the PNG against the source. A judge miss can trigger a bounded
+redraw because the diagrammer can simplify or restore a missing label.
 
-The stage tells the two apart. A figure with too many nodes comes back as a
-retry instruction, because a better attempt can fix it. A renderer that is not
-on the machine raises `RendererMissing`, the stage records `renderer: missing`,
-and the run continues. The paper ships without figures rather than not at all,
-because nothing in `paper_check` requires one and blocking every attendee
-without Java is a worse answer than saying so out loud.
+`task setup` clones `imagen-diagrams` v0.2.0 and `image-gen` v2.1.0 into this
+folder's disposable `.cache/`. Only `imagen-diagrams` handles `.mmd` and
+`.puml`. `image-gen` is reserved for cover and non-diagram art. Deep Agents no
+longer shells out to mermaid-cli or the PlantUML JAR, and neither an SVG nor a
+plain PNG can enter the assembled paper, PDF, or publication gate.
+
+A missing plugin or image backend is not a redraw. The renderer keeps
+`<stem>_imagen.prompt.txt`, raises `ImageBackendUnavailable`, and the command
+exits 2. The paper does not substitute a lower-fidelity artifact. An accepted
+figure keeps the renderer sidecar, judge sidecar, and local audit record.
 
 ## Verification is bounded
 
@@ -183,10 +190,10 @@ exactly and must be grounded in this repository.
 
 ## Build it step by step
 
-1. Make a virtualenv and install pytest.
+1. Install the runtime and both pinned image plugins.
 
    ```bash
-   python3 -m venv .venv && source .venv/bin/activate && pip install pytest
+   task setup
    ```
 
 2. Print the cast with nothing else installed.
@@ -202,7 +209,8 @@ exactly and must be grounded in this repository.
    task checks
    ```
 
-4. Run the whole pipeline offline, against a recording.
+4. Run the whole pipeline against recorded research and a configured image
+   backend.
 
    ```bash
    task paper
@@ -211,16 +219,12 @@ exactly and must be grounded in this repository.
 5. Read `work/paper/<slug>/`. The paper is one file. The evidence behind it is a
    directory of records you can grep, extend, or feed to the second brain.
 
-6. Only for a live run, install the SDK.
-
-   ```bash
-   task setup
-   ```
+6. Use `--backend auto` only when live research is intentional.
 
 ## Verify
 
 ```bash
-task test      # 226 tests, no SDK, no key, no network, no renderer
+task test      # no SDK, key, network, or plugin clone; image calls are stubbed
 task table     # the reviewer prints no in the writes column
 task checks    # every module's own assertions
 task brief -- --question "sqlalchemy nullable datetime column"
@@ -229,7 +233,7 @@ task brief -- --question "sqlalchemy nullable datetime column"
 ## Run the pipeline
 
 ```bash
-# offline, from a recording
+# recorded research; publication figures still require an image backend
 task paper
 
 # live, needs a model key. Research falls through filtered Perplexity,
@@ -274,7 +278,7 @@ work/paper/<slug>/
   outline.json           each section bound to the claims it may use
   evidence/              SourceDocument, Claim, and Finding records
   diagrams/              the mermaid and plantuml sources
-  figures/               rendered SVG, polished PNG, and a sidecar each
+  figures/               judged *_imagen.png plus render, judge, and audit sidecars
   gates.json             which hard gates passed
   .paper-state.json      the checkpoint a resume reads
 ```
@@ -290,14 +294,11 @@ It is not a shared library. Nothing here is imported by another solution folder,
 and nothing here imports one. It is not a generic research engine. Copy this
 folder somewhere else and it runs.
 
-The check that runs without any of it is `task test`. No SDK, no key, no
-network, and no diagram renderer. That last one is load bearing: the suite used
-to shell out to mermaid-cli and plantuml, so it could not run in continuous
-integration, and a cost-cap test passed only because the developer's machine
-happened to have plantuml. With no renderer the run died at the diagram stage
-and still returned the exit code the test asserted. A test that cannot fail is
-not a test, so the suite is hermetic and `.github/workflows/tests.yml` runs it
-on a bare runner with nothing but `pytest`.
+The check that runs without any of it is `task test`: no SDK, key, network, or
+plugin clone. Tests stub the one `imagen-diagrams` subprocess boundary and
+assert that missing backends retain their prompt and exit 2. A test also scans
+the implementation for the removed mmdc and PlantUML renderer arguments, while
+the paper and PDF gates reject SVG and plain-PNG diagram links.
 
 If your reviewer ends up holding a write tool, the translation is wrong, and
 `task test` says so.

@@ -19,6 +19,10 @@ vars:
   VENV: '{{.TASKFILE_DIR}}/.venv'
   PY: '{{.PY | default "python3"}}'
   RUN_PY: '{{.RUN_PY | default (printf "%s/bin/python" .VENV)}}'
+  RENDERER: 'https://github.com/SpillwaveSolutions/imagen-diagrams'
+  RENDERER_TAG: 'v0.2.0'
+  IMAGE_GEN: 'https://github.com/SpillwaveSolutions/image_gen'
+  IMAGE_GEN_TAG: 'v2.1.0'
 
 tasks:
   default:
@@ -62,13 +66,13 @@ tasks:
   # -- the pipeline ---------------------------------------------------------
 
   diagrams:
-    desc: Render diagram sources to SVG, then polish with imagen when it is there.
+    desc: Render source-only diagrams to judged *_imagen.png publication figures.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - '{{.PY}} diagrams.py --src fixtures/paper/diagrams --out work/figures {{.CLI_ARGS}}'
 
   paper:
-    desc: The nine stage pipeline. Offline on the fixture backend, live on auto.
+    desc: The nine stage pipeline. Fixture research is offline; figures require one image backend.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - '{{.PY}} loop.py --paper --topic "{{.TOPIC}}" --backend {{.BACKEND}} {{.CLI_ARGS}}'
@@ -93,9 +97,41 @@ tasks:
   # -- setup ----------------------------------------------------------------
 
   setup:
-    desc: Create .venv in this folder and install the optional live runtime.
+    desc: Create .venv, install Deep Agents, and clone both pinned image plugins.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - test -x "{{.RUN_PY}}" || "{{.PY}}" -m venv "{{.VENV}}"
       - '"{{.RUN_PY}}" -m pip install --quiet --upgrade pip'
       - '"{{.RUN_PY}}" -m pip install --quiet pytest "deepagents>=0.7.0" "langchain>=1.0.0" "langchain-mcp-adapters>=0.1.0" httpx'
+      - task: renderer
+      - task: image-gen
+
+  renderer:
+    desc: Install imagen-diagrams v0.2.0 locally at its pinned tag.
+    dir: '{{.TASKFILE_DIR}}'
+    status:
+      - test "$(git -C .cache/imagen-diagrams describe --tags --exact-match 2>/dev/null)" = "{{.RENDERER_TAG}}"
+    cmds:
+      - |
+        mkdir -p .cache
+        if [ -d .cache/imagen-diagrams/.git ]; then
+          git -C .cache/imagen-diagrams fetch --quiet --force --depth 1 origin "refs/tags/{{.RENDERER_TAG}}:refs/tags/{{.RENDERER_TAG}}"
+          git -C .cache/imagen-diagrams checkout --quiet --detach "{{.RENDERER_TAG}}"
+        else
+          git clone --quiet --depth 1 --branch "{{.RENDERER_TAG}}" "{{.RENDERER}}" .cache/imagen-diagrams
+        fi
+
+  image-gen:
+    desc: Install image-gen v2.1.0 for cover and non-diagram art only.
+    dir: '{{.TASKFILE_DIR}}'
+    status:
+      - test "$(git -C .cache/image-gen describe --tags --exact-match 2>/dev/null)" = "{{.IMAGE_GEN_TAG}}"
+    cmds:
+      - |
+        mkdir -p .cache
+        if [ -d .cache/image-gen/.git ]; then
+          git -C .cache/image-gen fetch --quiet --force --depth 1 origin "refs/tags/{{.IMAGE_GEN_TAG}}:refs/tags/{{.IMAGE_GEN_TAG}}"
+          git -C .cache/image-gen checkout --quiet --detach "{{.IMAGE_GEN_TAG}}"
+        else
+          git clone --quiet --depth 1 --branch "{{.IMAGE_GEN_TAG}}" "{{.IMAGE_GEN}}" .cache/image-gen
+        fi

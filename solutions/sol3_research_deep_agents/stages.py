@@ -62,16 +62,6 @@ class GateFailed(Exception):
         self.signature = signature or (message.split(".", maxsplit=1)[0][:40],)
 
 
-class RendererMissing(RuntimeError):
-    """No diagram renderer on this machine. Not a gate failure, so never a retry.
-
-    A gate failure means the model produced something a better attempt could
-    fix. `mmdc is not installed` is not that. Asking the diagrammer to redraw is
-    asking it to solve a problem it cannot see and cannot reach, and the only
-    thing three attempts buy is three times the bill.
-    """
-
-
 @dataclass
 class StageResult:
     name: str
@@ -448,34 +438,29 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
 
 
 def render_figures(src_dir: Path, out_dir: Path, topic: str, **kwargs) -> tuple[list, list[str]]:
-    """Render every diagram source. Too-complex ones come back as instructions.
+    """Render every source through imagen-diagrams and its fidelity judge.
 
     A complexity failure is not an exception here. It is a message for the
     diagrammer, and the caller feeds it straight back as the retry prompt.
 
-    A renderer that is not on this machine is the opposite. Nothing the
-    diagrammer writes will fix it, so it raises `RendererMissing` and the stage
-    stops rather than paying for two more identical attempts.
+    A missing plugin or image backend propagates immediately. Redrawing source
+    cannot install a backend, and publication has no SVG fallback.
     """
-    figures, complaints, unrenderable = [], [], []
+    figures, complaints = [], []
     if not src_dir.is_dir():
         return figures, ["no diagram sources were written."]
     for path in sorted(src_dir.iterdir()):
         if path.suffix.lower() not in diagrams.MERMAID_SUFFIXES + diagrams.PLANTUML_SUFFIXES:
             continue
         try:
-            figures.append(diagrams.render(path, out_dir, topic=topic, **kwargs))
+            figure = diagrams.render(path, out_dir, topic=topic, **kwargs)
+            figures.append(figure)
+            if figure.misses:
+                complaints.append(
+                    f"{path.name}: imagen-diagrams fidelity miss: {'; '.join(figure.misses)}"
+                )
         except diagrams.DiagramTooComplex as exc:
             complaints.append(f"{path.name}: {exc}")
-        except RuntimeError as exc:
-            unrenderable.append(f"{path.name}: {exc}")
-    if unrenderable and not figures:
-        raise RendererMissing(
-            "no diagram source could be rendered on this machine. "
-            + " ".join(unrenderable[:2])
-            + " Install mermaid-cli for .mmd and plantuml for .puml."
-        )
-    complaints.extend(unrenderable)
     return figures, complaints
 
 
@@ -500,6 +485,13 @@ def diagram_gate(figures: list, complaints: list[str], planned: list[dict]) -> N
     missing_alt = [figure.name for figure in figures if not figure.alt.strip()]
     if missing_alt:
         raise GateFailed(f"these figures have no alt text: {missing_alt}.", ("no_alt",))
+    rejected = [figure.name for figure in figures if figure.best is None]
+    if rejected:
+        raise GateFailed(
+            f"imagen-diagrams did not approve these publication PNGs: {rejected}. "
+            + " ".join(complaints[:3]),
+            ("figure_fidelity",),
+        )
 
 
 # -- 6. write -------------------------------------------------------------
@@ -576,8 +568,12 @@ def review_gate(verdict: dict) -> None:
 
 def figure_block(figure, figures_dir: str = "figures") -> str:
     target = figure.best
-    name = target.name if target else f"{figure.name}.svg"
-    return f"![{figure.alt}]({figures_dir}/{name})"
+    if target is None or not target.name.endswith("_imagen.png"):
+        raise GateFailed(
+            f"figure {figure.name!r} has no judged imagen-diagrams PNG.",
+            ("figure_asset",),
+        )
+    return f"![{figure.alt}]({figures_dir}/{target.name})"
 
 
 def references_block(urls: list[str], sources: list) -> str:

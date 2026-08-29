@@ -20,6 +20,7 @@ render.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -102,6 +103,9 @@ def ensure_theme() -> None:
 def _run(script: str, args: list[str]) -> subprocess.CompletedProcess:
     # Running the script by path puts its own directory on sys.path, which is
     # how its sibling imports resolve.
+    environment = os.environ.copy()
+    if not environment.get("GOOGLE_API_KEY") and environment.get("GEMINI_API_KEY"):
+        environment["GOOGLE_API_KEY"] = environment["GEMINI_API_KEY"]
     return subprocess.run(
         ["python3", str(SCRIPTS / script), *args],
         cwd=str(FOLDER),
@@ -109,6 +113,7 @@ def _run(script: str, args: list[str]) -> subprocess.CompletedProcess:
         capture_output=True,
         check=False,
         timeout=TIMEOUT,
+        env=environment,
     )
 
 
@@ -143,6 +148,8 @@ def render(source: Path, topic: str, out_dir: Path, theme: str = DEFAULT_THEME) 
         # the prompt to `imagen` anyway produces a picture of a form, which is
         # worse than no figure because it looks like a rendering.
         return None
+    if proc.returncode != 0 and prompt_file.is_file():
+        raise ImageBackendUnavailable(prompt_file)
     return None
 
 

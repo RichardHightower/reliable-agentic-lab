@@ -11,7 +11,7 @@ GOOD = (
     "# Exit conditions\n\n"
     "## Abstract\n\nA loop without an exit spends until someone notices. [1]\n\n"
     "## Introduction\n\nThree exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
-    "![A flowchart of the three exits](figures/exits.svg)\n\n"
+    "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
     "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
     "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
 )
@@ -72,6 +72,12 @@ def test_diagram_source_in_the_body_blocks():
     """The figure is the artifact. A reader never sees `flowchart TB`."""
     leaked = GOOD.replace("![A", "```mermaid\nflowchart TB\n  A --> B\n```\n\n![A")
     assert "no_diagram_source" in paper_check.check(leaked, URLS).signature()
+
+
+def test_svg_and_plain_png_figure_fallbacks_block_publication():
+    for target in ("figures/exits.svg", "figures/exits.png"):
+        body = GOOD.replace("figures/exits_imagen.png", target)
+        assert "figure_assets" in paper_check.check(body, URLS).signature()
 
 
 def test_a_figure_is_not_an_uncited_claim():
@@ -187,8 +193,8 @@ def test_a_section_of_only_a_figure_is_blocked():
     """A figure still owes the reader an explanation."""
     figure_only = GOOD.replace(
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
-        "![A flowchart of the three exits](figures/exits.svg)",
-        "![A flowchart of the three exits](figures/exits.svg)",
+        "![A flowchart of the three exits](figures/exits_imagen.png)",
+        "![A flowchart of the three exits](figures/exits_imagen.png)",
     )
     assert "has_body" in paper_check.check(figure_only, URLS).signature()
 
@@ -196,7 +202,7 @@ def test_a_section_of_only_a_figure_is_blocked():
 def test_references_and_figures_owe_no_prose():
     appendix = GOOD.replace(
         "## References",
-        "## Figures\n\n![A sequence of the roles](figures/roles.svg)\n\n## References",
+        "## Figures\n\n![A sequence of the roles](figures/roles_imagen.png)\n\n## References",
     )
     assert "has_body" not in paper_check.check(appendix, URLS).signature()
 

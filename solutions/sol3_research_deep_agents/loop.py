@@ -69,6 +69,7 @@ def second_brain() -> Path | None:
 
 
 def run_paper(args) -> int:
+    import diagrams  # noqa: PLC0415  (keeps --table-only free of image setup)
     import paper  # noqa: PLC0415  (keeps --table-only free of it)
 
     run = paper.build(
@@ -80,11 +81,14 @@ def run_paper(args) -> int:
         max_verify=args.max_verify,
         attempts=args.attempts,
         theme=args.theme,
-        polish=not args.no_polish,
         publish=args.publish,
         debug=args.debug,
     )
-    return run.run()
+    try:
+        return run.run()
+    except diagrams.ImageBackendUnavailable as exc:
+        print(f"\nimage backend unavailable: {exc}")
+        return exc.exit_code
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -109,7 +113,6 @@ def main(argv: list[str] | None = None) -> int:
         "searches once per claim, so this is the size of the work.",
     )
     paper_args.add_argument("--theme", default="spillwave-light")
-    paper_args.add_argument("--no-polish", action="store_true", help="SVG figures only")
     paper_args.add_argument("--publish", action="store_true", help="push to a secret gist")
     paper_args.add_argument(
         "--debug",

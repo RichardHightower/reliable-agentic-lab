@@ -291,7 +291,6 @@ class Paper:
     max_verify: int = stages.MAX_VERIFY_CLAIMS
     attempts: int = DEFAULT_STAGE_ATTEMPTS
     theme: str = "spillwave-light"
-    polish: bool = True
     publish: bool = False
     quiet: bool = False
 
@@ -640,36 +639,22 @@ class Paper:
             usd += reply.usd
             target.write_text(_strip_fence(reply.text), encoding="utf-8")
 
-        try:
-            self.figures, complaints = stages.render_figures(
-                self.diagram_src,
-                self.figure_dir,
-                self.topic,
-                theme_name=self.theme,
-                polish=self.polish,
-            )
-        except stages.RendererMissing as missing:
-            # The paper ships without figures rather than not at all. Nothing in
-            # `paper_check` requires a figure, and blocking every attendee who
-            # has no Java would be a worse answer than saying so out loud.
-            self.figures = []
-            self.say(f"    {missing}")
-            return StageResult(
-                "diagram",
-                usd=usd,
-                artifacts={"figures": 0, "renderer": "missing"},
-                summary=f"no renderer on this machine, {len(planned)} figures skipped",
-            )
+        self.figures, complaints = stages.render_figures(
+            self.diagram_src,
+            self.figure_dir,
+            self.topic,
+            theme_name=self.theme,
+        )
         self._redraw = {Path(c.split(":", 1)[0]).stem for c in complaints}
         stages.diagram_gate(self.figures, complaints, planned)
         for complaint in complaints:
             self.say(f"    note: {complaint}")
-        polished = sum(1 for figure in self.figures if figure.polished)
+        accepted = sum(1 for figure in self.figures if figure.best is not None)
         return StageResult(
             "diagram",
             usd=usd,
-            artifacts={"figures": len(self.figures), "polished": polished},
-            summary=f"{len(self.figures)} figures, {polished} polished",
+            artifacts={"figures": len(self.figures), "accepted": accepted},
+            summary=f"{accepted} judged imagen-diagrams PNGs",
         )
 
     # -- 6. write ----------------------------------------------------------
@@ -930,7 +915,7 @@ class Paper:
             raise GateFailed("no section was written.", ("no_sections",))
         if not self.figures and self.figure_dir.is_dir():
             self.figures, _ = stages.render_figures(
-                self.diagram_src, self.figure_dir, self.topic, theme_name=self.theme, polish=False
+                self.diagram_src, self.figure_dir, self.topic, theme_name=self.theme
             )
 
 

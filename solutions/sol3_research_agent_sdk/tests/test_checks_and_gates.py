@@ -86,7 +86,7 @@ def test_the_paper_gate_requires_done_then_cost_then_max_turns_in_figure_one():
     body = (
         "# T\n\n## Control\n\n"
         "The paper exits on done, then cost, then max turns [1].\n\n"
-        "![Figure 1: done, then cost, then max turns](exits.png)\n\n"
+        "![Figure 1: done, then cost, then max turns](exits_imagen.png)\n\n"
         "Figure 1 shows done, then cost, then max turns."
     )
     score = checks.check(
@@ -102,7 +102,7 @@ def test_the_paper_gate_rejects_whichever_fires_first_and_blog_references():
     body = (
         "# T\n\n## Control\n\n"
         "The loop has five exits and stops whichever fires first [1].\n\n"
-        "![Figure 1: budget and attempt cap](exits.png)\n\n"
+        "![Figure 1: budget and attempt cap](exits_imagen.png)\n\n"
         "Figure 1 shows budget and an attempt cap."
     )
     score = checks.check(
@@ -112,6 +112,23 @@ def test_the_paper_gate_rejects_whichever_fires_first_and_blog_references():
         enforce_loop_doctrine=True,
     )
     assert score.signature() == ("doctrine", "hosts")
+
+
+def test_the_paper_gate_rejects_svg_and_plain_png_diagrams():
+    body = (
+        "# T\n\n## Control\n\n"
+        "The paper exits on done, then cost, then max turns [1].\n\n"
+        "![Figure 1: done, then cost, then max turns](exits_imagen.png)\n\n"
+        "Figure 1 shows done, then cost, then max turns."
+    )
+    for target in ("exits.svg", "exits.png"):
+        score = checks.check(
+            body.replace("exits_imagen.png", target),
+            ["https://docs.langchain.com/oss/python/langchain/overview"],
+            enforce_source_policy=True,
+            enforce_loop_doctrine=True,
+        )
+        assert "figure_assets" in score.signature()
 
 
 def test_heading_case_and_depth_are_noise():

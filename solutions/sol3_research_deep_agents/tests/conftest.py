@@ -1,10 +1,7 @@
 """Shared fixtures. Nothing here imports deepagents or langchain for real.
 
-The whole suite must run with no SDK, no API key, no network, no clone, and no
-diagram renderer. That last one was missing, and it cost a real bug: thirteen
-tests shelled out to mermaid-cli and plantuml, so the suite could not run on a
-clean runner, and one cost-cap test was a false green. With no renderer the run
-died at the diagram stage and still returned the exit code the test asserted.
+The whole suite must run with no SDK, no API key, no network, and no plugin
+clone. Unit tests stub the pinned imagen-diagrams boundary; none shells out.
 
 `test_diagrams.py` is the one place that exercises the renderers, and it stubs
 the calls that shell out.
@@ -109,17 +106,19 @@ def fake_deepagents(monkeypatch: pytest.MonkeyPatch):
 
 
 def stub_figure(name: str, out_dir: Path):
-    """A rendered figure, without mermaid-cli, plantuml, java, or a network."""
+    """A judged plugin figure, without a clone, image backend, or network."""
     import diagrams  # noqa: PLC0415  (sys.path is set above)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    svg = out_dir / f"{name}.svg"
-    svg.write_text("<svg/>", encoding="utf-8")
+    png = out_dir / f"{name}_imagen.png"
+    png.write_bytes(b"x" * 5000)
     return diagrams.Figure(
         name=name,
         source=Path(f"{name}.mmd"),
-        svg=svg,
+        png=png,
         alt=f"A diagram of {name}",
+        polished=True,
+        score=1.0,
         hash="stub",
     )
 
@@ -136,7 +135,7 @@ def _render_stub(src_dir, out_dir, topic, **kwargs):
 
 @pytest.fixture
 def stub_renderer(monkeypatch: pytest.MonkeyPatch):
-    """Render every diagram source to a placeholder SVG, in process."""
+    """Render every diagram source to an accepted *_imagen.png in process."""
     import stages  # noqa: PLC0415  (sys.path is set above)
 
     monkeypatch.setattr(stages, "render_figures", _render_stub)
@@ -145,11 +144,15 @@ def stub_renderer(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def no_renderer(monkeypatch: pytest.MonkeyPatch):
-    """No mermaid-cli, no plantuml, no java. What a clean CI runner looks like."""
+    """No image backend. The prompt survives and the paper fails closed."""
+    import diagrams  # noqa: PLC0415
     import stages  # noqa: PLC0415  (sys.path is set above)
 
     def missing(src_dir, out_dir, topic, **kwargs):
-        raise stages.RendererMissing("no diagram source could be rendered on this machine.")
+        prompt = Path(out_dir) / "three-exits_imagen.prompt.txt"
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("plugin-built prompt", encoding="utf-8")
+        raise diagrams.ImageBackendUnavailable(prompt)
 
     monkeypatch.setattr(stages, "render_figures", missing)
     return missing
@@ -172,7 +175,6 @@ def build_run(work_dir: Path, **kwargs):
         runner=kwargs.pop("runner", None) or paper.FixtureRunner(FIXTURES / "replies.json"),
         backend=research.FixtureBackend(FIXTURES / "research.json"),
         work_dir=work_dir,
-        polish=False,
         quiet=True,
         **kwargs,
     )
