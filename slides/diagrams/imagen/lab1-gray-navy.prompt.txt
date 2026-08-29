@@ -1,0 +1,6 @@
+Light technical architecture diagram. Landscape 16:9. Background #eef2f7.
+Legend: gray pill already exist, navy pill you create.
+GRAY boxes #94a3b8: GitHub issue, ticket file, labels enhanced / ready / needs-human.
+NAVY boxes #1a365d white text: orchestrator skill, doer draft text, judge JSON only, check_fields.py, check_stop.py.
+Arrows: poll, writes, labels back to GitHub issue.
+No teal, no gold, no dark page background. The colors are the lesson.

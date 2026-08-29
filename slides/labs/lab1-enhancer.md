@@ -36,6 +36,17 @@ The finished answer is `solutions/sol1_enhancer/`. Read `HOW_TO_RUN.md` there af
 
 ---
 
+# Starting architecture
+
+Components that already exist **(gray)**. Components you create **(navy)**.
+
+![h:360](images/lab1-gray-navy.jpg)
+
+Trigger lives **outside**: `task run`, `task poll-forever`, `/enhancer-loop`, or Actions. The skill runs **one step and exits**.
+
+
+---
+
 # Why this lab exists
 
 A prompt that grooms a ticket once is a demo. A loop that polls GitHub, drafts, judges, and stops is a product.
