@@ -115,6 +115,11 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    not exist, this is the ticket's first poll: `round` starts at 0 and both
    `previous_signature` and `last_comment_id` are null.
 
+   Read its optional `kind:` frontmatter too. Once set, it must be exactly
+   `bug`, `feature`, or `ui`; it is the durable rubric kind for this ticket.
+   Never rewrite it from a later body edit. New seed tickets do not have it
+   yet; step 5 records their first judged kind before any draft is copied.
+
    Then check the ticket's own frontmatter before you go any further. Unless
    it reads `state: draft` **and** `loop: enhancer`, this ticket is not this
    loop's work. Print one line naming the ticket and the state you found, for
@@ -169,13 +174,30 @@ expects a reply: this skill runs headlessly and cannot wait for one.
    for a human.
 
 5. Spawn the `enhancer-judge` agent on the real ticket file, and parse its
-   JSON. Run
-   `python3 .grok/plugins/ticket-enhancer/skills/enhancer-loop/scripts/check_fields.py '<judge json>'`
-   to get the authoritative `{kind, missing_fields, ready}`. Do this before
+   JSON. If the ticket has no `kind:` yet, run
+   `python3 .grok/plugins/ticket-enhancer/skills/enhancer-loop/scripts/check_fields.py '<judge json>'`.
+   Take the returned `kind`, write it once into the ticket frontmatter as
+   `kind: <kind>`, and retain it for every later poll and candidate.
+
+   If the ticket already has `kind: <kind>`, run
+   `python3 .grok/plugins/ticket-enhancer/skills/enhancer-loop/scripts/check_fields.py --kind <kind> '<judge json>'`.
+   The declared kind overrides a newly inferred kind, but the Judge's list of
+   present fields still decides readiness. A feature that mentions a form or
+   page must not acquire the UI wireframe requirement on a later poll.
+
+   Use the checker result as the authoritative `{kind, missing_fields,
+   source_status, blocked, ready}`. Do this before
    looking at `LGTM`: a human's `LGTM` is not a substitute for the rubric,
       it can only confirm a ticket the rubric already accepts.
 
    Do not add the `enhanced` label here.
+
+   If `blocked` is true, the Judge found that the target source contradicts a
+   claimed bug. Do not call the Doer and do not rewrite the ticket. Add the
+   `needs-human` label, post one comment saying the reported behavior was not
+   supported by the inspected source, ending with the loop marker, then stop
+   this ticket. A structural rubric must not turn a disproved bug into an
+   enhanced issue.
 
 6. Decide what happens next from step 5's `ready` and this round's comment
    (if any), trimmed:
@@ -195,14 +217,15 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      are stubs. They are not ready. Do not look at comments. Do not stop
      because the issue already has `enhanced`.
 
-7. Spawn the `enhancer-doer` agent with the ticket's current body, its kind,
-   its `missing_fields`, and tell it there is no comment to follow. It investigates the target app. Write its returned
+7. Spawn the `enhancer-doer` agent with the ticket's current body, its stored
+   kind, its `missing_fields`, and tell it there is no comment to follow. It investigates the target app. Write its returned
    text to `<repo>/tickets/<id>.enhancer-candidate.md`. Spawn
    `enhancer-judge` again on that candidate file, and run it through
-   `check_fields.py` the same way. Compare candidate `missing_fields` to the
+   `check_fields.py --kind <stored kind>` the same way. Compare candidate `missing_fields` to the
    current ticket's `missing_fields` from step 5:
 
-   - Strict improvement (candidate's missing set is a proper subset):
+   - Strict improvement (candidate's missing set is a proper subset and its
+     checker result is not `blocked`):
      copy the candidate over the real ticket file, then update the issue
      body to match it, with the frontmatter stripped (GitHub would render
      the raw `---` YAML block as a stray horizontal rule otherwise):
@@ -210,8 +233,10 @@ expects a reply: this skill runs headlessly and cannot wait for one.
      Then, and only then:
      `gh issue edit <issue> --repo <owner>/<repo> --add-label enhanced`.
      A reviewer needs to see the actual current ticket to judge it.
-   - Not an improvement: leave the real ticket file, and the issue body,
-     untouched. Do not add `enhanced` for a no-op.
+   - Not an improvement, or a candidate whose result is `blocked`: leave the
+     real ticket file, and the issue body, untouched. Do not add `enhanced`
+     for a no-op or a source-disproved bug. For a blocked candidate, add
+     `needs-human` and say the source check contradicted the claim.
 
    Either way, delete the candidate file, then post one issue comment,
    ending its body with the marker line: on improvement, what changed and

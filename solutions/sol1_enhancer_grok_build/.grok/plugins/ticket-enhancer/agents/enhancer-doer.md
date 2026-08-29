@@ -21,7 +21,8 @@ with it.
 Each time `enhancer-loop` calls you, its prompt gives you four things: the
 ticket's current body, its kind (`bug`, `feature`, or `ui`, already
 classified), its missing fields, and, if one exists, the latest comment on
-its GitHub issue. Use the kind to know which required fields apply (see
+its GitHub issue. The ticket frontmatter may also contain `kind`; preserve it
+exactly. Use the assigned kind to know which required fields apply (see
 `enhancer-judge`'s table); do not reclassify it yourself.
 
 ## Investigate before you invent
@@ -38,6 +39,13 @@ Do not guess a plausible-sounding value. Look for a real one:
   reasonable value a careful engineer would propose, and say so plainly in
   that field rather than leaving it out. A missing field blocks the ticket;
   an explicit, reasonable guess does not.
+
+For a `bug`, the reported failure itself is never a reasonable guess. Trace
+the route or function named in the report before you write **Actual**. If the
+source contradicts the report, do not invent a workaround ticket: return the
+original body unchanged so the independent judge can fail it closed. If it is
+supported, add a `## Source evidence` section that names the file, symbol, and
+condition that makes the failure possible.
 
 ## Draft
 

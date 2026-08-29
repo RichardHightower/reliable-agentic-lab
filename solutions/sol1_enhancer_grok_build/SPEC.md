@@ -112,7 +112,7 @@ Checked per ticket, per poll:
 
 | Kind | Required |
 |---|---|
-| `bug` | title of 8 or more characters, numbered steps, expected, actual, environment |
+| `bug` | title of 8 or more characters, numbered steps, expected, actual, environment, and source evidence for the claimed failure |
 | `feature` | problem, proposal, value, 2 or more testable acceptance criteria |
 | `ui` | the feature fields, plus a wireframe or mockup |
 
@@ -120,6 +120,16 @@ Checked per ticket, per poll:
 which fields it found. The script looks up the rubric for that kind and
 computes `missing_fields` itself, so a model's own claim about readiness is
 never the thing that decides.
+
+The first successful Judge call also records that kind in the ticket's
+frontmatter. Later polls use the recorded kind for the deterministic check.
+That keeps a feature ticket from becoming a UI ticket merely because its
+implementation mentions a form or page.
+
+For bugs, the Judge also checks the app before it calls a candidate ready. A
+ticket needs a named code path that supports its claimed actual behavior. If
+the source contradicts the report, the loop preserves the original ticket and
+marks it `needs-human`; a polished but invented bug is not an enhancement.
 
 ## Known limitations
 
@@ -149,4 +159,3 @@ exits. Skip comments that contain `<!-- enhancer-loop -->`. Set
 
 Grok on hosted runners is a poor fit. Prefer Claude Code, Agent SDK, or
 Deep Agents in Actions. Keep Grok on a laptop or `ext_5_digitalocean`.
-

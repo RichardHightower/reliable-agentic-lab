@@ -19,6 +19,19 @@ tasks:
   default:
     cmds: [task --list]
 
+  test:
+    desc: Run deterministic rubric and exit-check regression tests.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 .grok/plugins/ticket-enhancer/skills/enhancer-loop/scripts/check_fields.py --demo
+      - python3 .grok/plugins/ticket-enhancer/skills/enhancer-loop/scripts/check_stop.py --demo
+
+  checks:
+    desc: Alias for the deterministic standalone checks.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - task test
+
   trust:
     desc: Step zero. Check that grok sees the local plugin, and trust the checkout if not.
     # Grok only loads a project plugin from a trusted checkout, and it records
