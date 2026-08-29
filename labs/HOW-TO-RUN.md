@@ -53,7 +53,8 @@ task create-test-tickets && task run --
 ```
 
 The Claude Code answer still lives at `solutions/sol1_enhancer/` if you
-want to run that copy instead.
+want to run that copy instead. That folder always calls `claude`. Do not
+use it as the verification path for Grok, Codex, or OpenCode.
 
 ## Four rules, whichever tool you picked
 

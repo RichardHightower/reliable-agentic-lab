@@ -105,6 +105,12 @@ See [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md).
 
 ## Troubleshooting
 
+**`"claude": executable file not found in $PATH`.** You ran Lab 1 from
+`solutions/sol1_enhancer`. That folder always calls `claude`. Grok Build
+and OpenCode do not need Claude Code. From `labs/lab1_enhancer` run
+`task detect`, then `task run --`. Or `cd` into
+`solutions/sol1_enhancer_grok_build` / `solutions/sol1_enhancer_opencode`.
+
 **`task: command not found`.** Task is not installed. See above.
 
 **`python: command not found`.** Use `python3`. Every command in this repo goes

@@ -72,7 +72,7 @@ tasks:
     desc: One poll of the Claude Code enhancer plugin. Module 1. Needs an LLM.
     dir: solutions/sol1_enhancer
     cmds:
-      - claude -p "/enhancer-loop --repo {{.ROOT_DIR}}/{{.TARGET}} {{.CLI_ARGS}}"
+      - task run -- {{.CLI_ARGS}}
 
   # --- the class ---------------------------------------------------------
   slides:
