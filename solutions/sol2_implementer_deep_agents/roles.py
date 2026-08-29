@@ -43,7 +43,7 @@ ORCHESTRATOR_EXCLUDED_TOOLS = frozenset({"write_file", "edit_file", "delete", "e
 
 # The last rule every role gets. First match wins, so anything not allowed above
 # this line lands here.
-DENY_EVERY_WRITE = {"operations": ["write"], "paths": ["/**", "**"], "mode": "deny"}
+DENY_EVERY_WRITE = {"operations": ["write"], "paths": ["/**"], "mode": "deny"}
 
 
 # The judge answers one question and names no gate.
@@ -178,22 +178,15 @@ def permission_rules(role: RolePlan) -> list[dict]:
     if role.deny:
         # Deny first. A role's own deny list beats its own allow list, the same
         # rule WriteScope enforces, so the two layers cannot disagree.
-        rules.append({"operations": ["write"], "paths": _both_forms(role.deny), "mode": "deny"})
-    rules.append({"operations": ["write"], "paths": _both_forms(role.allow), "mode": "allow"})
+        rules.append({"operations": ["write"], "paths": _rooted_patterns(role.deny), "mode": "deny"})
+    rules.append({"operations": ["write"], "paths": _rooted_patterns(role.allow), "mode": "allow"})
     rules.append(DENY_EVERY_WRITE)
     return rules
 
 
-def _both_forms(patterns) -> list[str]:
-    """Each pattern rooted and unrooted. The backend sees `/app/x`, the role
-    table says `app/**`, and a rule that spells only one of them matches
-    nothing."""
-    out = []
-    for pattern in patterns:
-        out.append(pattern)
-        if not pattern.startswith("/"):
-            out.append("/" + pattern)
-    return out
+def _rooted_patterns(patterns) -> list[str]:
+    """Normalize readable role patterns for the current Deep Agents SDK."""
+    return [pattern if pattern.startswith("/") else "/" + pattern for pattern in patterns]
 
 
 def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
@@ -232,7 +225,12 @@ def _as_permissions(rules: list[dict]):
     return [FilesystemPermission(**rule) for rule in rules]
 
 
-def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
+def build_agent(
+    contract,
+    loop: str = DEFAULT_LOOP,
+    model: str = DEFAULT_MODEL,
+    subagent_names: frozenset[str] | None = None,
+):
     """The orchestrator. Holds `run_tests`. Holds nothing that writes.
 
     Needs `deepagents>=0.7`. The default general-purpose subagent is turned off.
@@ -256,8 +254,16 @@ def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
             general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
         ),
     )
+    specs = subagents_for(contract, loop)
+    if subagent_names is not None:
+        available = {spec["name"] for spec in specs}
+        unknown = subagent_names - available
+        if unknown:
+            raise ValueError(f"unknown Deep Agents subagent(s): {sorted(unknown)}")
+        specs = [spec for spec in specs if spec["name"] in subagent_names]
+
     subagents = []
-    for spec in subagents_for(contract, loop):
+    for spec in specs:
         item = dict(spec)
         item["permissions"] = _as_permissions(spec["permissions"])
         subagents.append(item)
@@ -265,8 +271,7 @@ def build_agent(contract, loop: str = DEFAULT_LOOP, model: str = DEFAULT_MODEL):
         model=model,
         system_prompt=(
             "You are the orchestrator. You own the budget and the order. "
-            "You write nothing. Delegate planning, tests, and code to the "
-            "named subagents. Delegate grading to the judge subagent. "
+            "You write nothing. Delegate only to the subagents available in this graph. "
             "Never edit a test to make the suite green."
         ),
         tools=[run_tests_tool(repo)],

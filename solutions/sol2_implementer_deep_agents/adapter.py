@@ -1,10 +1,9 @@
 """A `doers.Backend` for this runtime port, copied flat into this folder.
 
-`implementer.run()` in the reference loop takes any object shaped like
-`Backend`: a `.name` and a `.run(*, repo, prompt, allow) -> DoerResult`. This
-folder is standalone, so it does not import a shared engine for that shape, it
-restates the two small pieces it needs and wraps the Deep Agents graph
-behind them.
+`implementer.run()` in this standalone folder takes a `doers.Backend`: a
+`.name` and a `.run(*, repo, prompt, allow) -> DoerResult`. Import that local
+contract so `doers.build()` recognizes this runtime adapter and passes it
+through unchanged.
 
 `deepagents` is not installed in this environment. The import stays inside
 `build_agent()` (already true in `roles.py`), so `harness.py --table-only`
@@ -14,25 +13,10 @@ keeps working without it.
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
 
+from doers import Backend, DoerResult
 from write_scope import WriteScope
-
-
-@dataclass
-class DoerResult:
-    wrote: list[str] = field(default_factory=list)
-    output: str = ""
-    usd: float = 0.0
-    ok: bool = True
-
-
-class Backend:
-    name = "backend"
-
-    def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
-        raise NotImplementedError
 
 
 def _changed_files(repo: Path) -> set[str]:
@@ -198,13 +182,28 @@ class DeepAgentsBackend(Backend):
 
     name = "deep_agents"
 
-    def __init__(self, agent):
+    def __init__(self, agent=None, *, phase_agents=None):
+        if agent is None and not phase_agents:
+            raise ValueError("provide an agent or one agent for each implementation phase")
         self.agent = agent
+        self.phase_agents = phase_agents
+
+    def _agent_for(self, allow: list[str]):
+        """Choose the graph whose cast matches the driver's current phase."""
+        if self.phase_agents is None:
+            return self.agent
+        if any(pattern.startswith("tests/") for pattern in allow):
+            phase = "test"
+        elif any(pattern.startswith(("app/", "src/")) for pattern in allow):
+            phase = "code"
+        else:
+            raise ValueError(f"no Deep Agents graph is configured for scope {allow!r}")
+        return self.phase_agents[phase]
 
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
         try:
             before = _changed_files(repo)
-            result = self.agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+            result = self._agent_for(allow).invoke({"messages": [{"role": "user", "content": prompt}]})
             after = _changed_files(repo)
             scope = WriteScope(allow=allow)
             wrote = sorted(path for path in (after - before) if scope.permits(path))

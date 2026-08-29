@@ -163,6 +163,15 @@ def run(  # noqa: PLR0915
     }
 
     # Step 4. The red gate.
+    if scope_violations:
+        trace["test_phase_scope_violations"] = sorted(scope_violations)
+        trace["gate"] = gates.ESCALATE
+        trace["reason"] = (
+            "test phase wrote outside its scope: " + ", ".join(sorted(scope_violations))
+        )
+        trace["red_ids"] = sorted(red_ids)
+        return _finish(contract, trace, write_trace)
+
     if contract.rubric.get("require_red", True) and not red_ids:
         trace["gate"] = gates.ESCALATE
         trace["reason"] = (

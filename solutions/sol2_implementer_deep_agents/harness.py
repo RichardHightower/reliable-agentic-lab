@@ -28,7 +28,19 @@ def build(contract):
 def backend(contract):
     from adapter import DeepAgentsBackend  # noqa: PLC0415
 
-    return DeepAgentsBackend(deep.build_agent(contract, loop=LOOP))
+    # One graph per implementation phase. A test-phase graph has no code
+    # implementer to delegate to, so the role split is structural rather than
+    # a request the parent model can ignore.
+    return DeepAgentsBackend(
+        phase_agents={
+            "test": deep.build_agent(
+                contract, loop=LOOP, subagent_names=frozenset({"test-implementer"})
+            ),
+            "code": deep.build_agent(
+                contract, loop=LOOP, subagent_names=frozenset({"code-implementer"})
+            ),
+        }
+    )
 
 
 def red_gate(before, after) -> set[str]:
