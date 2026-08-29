@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import loop
 import research
 import researcher
+import pytest
 import roles
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +51,98 @@ def test_budget_hard_cap():
     raise AssertionError("expected BudgetExceeded")
 
 
+def test_budget_limits_one_research_request_and_persists_its_charge():
+    charges = []
+    budget = research.Budget(max_calls=3, max_usd=1, on_charge=charges.append)
+    budget.begin_request(max_calls=1)
+    budget.charge(0.01)
+    with pytest.raises(research.BudgetExceeded, match="request search budget"):
+        budget.charge(0.01)
+    budget.end_request()
+
+    assert charges == [0.01]
+    assert budget.calls == 1
+    assert budget.spent_usd == 0.01
+
+
+@pytest.mark.parametrize("location", range(4))
+def test_load_dotenv_finds_a_key_in_each_supported_parent(tmp_path, monkeypatch, location):
+    anchor = tmp_path / "one" / "two" / "three" / "solution"
+    paths = research.dotenv_paths(anchor)
+    paths[location].parent.mkdir(parents=True, exist_ok=True)
+    paths[location].write_text("PERPLEXITY_API_KEY=from-dotenv\n", encoding="utf-8")
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+
+    research.load_dotenv(paths)
+
+    assert os.environ["PERPLEXITY_API_KEY"] == "from-dotenv"
+
+
+def test_load_dotenv_keeps_an_exported_key_and_prefers_nearest_file(tmp_path, monkeypatch):
+    anchor = tmp_path / "one" / "two" / "three" / "solution"
+    local, _, root, _ = research.dotenv_paths(anchor)
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text("PERPLEXITY_API_KEY=local\n", encoding="utf-8")
+    root.parent.mkdir(parents=True, exist_ok=True)
+    root.write_text("PERPLEXITY_API_KEY=root\n", encoding="utf-8")
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+
+    research.load_dotenv(research.dotenv_paths(anchor))
+    assert os.environ["PERPLEXITY_API_KEY"] == "local"
+
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "exported")
+    research.load_dotenv(research.dotenv_paths(anchor))
+    assert os.environ["PERPLEXITY_API_KEY"] == "exported"
+
+
+def test_websearch_reads_a_recorded_answer_before_using_the_network(tmp_path):
+    question = "How does a production agent loop stop?"
+    inbox = tmp_path / "answers.json"
+    inbox.write_text(
+        '{"How does a production agent loop stop?": {"answer": "With explicit exits.", '
+        '"citations": ["https://example.com/exits"]}}',
+        encoding="utf-8",
+    )
+
+    finding = research.WebSearchBackend(inbox).search(question)
+
+    assert finding.answer == "With explicit exits."
+    assert finding.citations == ["https://example.com/exits"]
+    assert finding.note == "recorded web-search answer"
+
+
+def test_websearch_returns_result_urls_without_a_key(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return (
+                b'<li class="b_algo"><h2><a href="https://example.com/one">'
+                b"Primary source</a></h2>"
+                b"<p>An evidence-bearing result.</p></li>"
+            )
+
+    monkeypatch.setattr(research, "urlopen", lambda *_args, **_kwargs: Response())
+
+    finding = research.WebSearchBackend().search("production agent loop exits")
+
+    assert finding.backend == "websearch"
+    assert finding.citations == ["https://example.com/one"]
+    assert "Primary source" in finding.answer
+
+
+def test_websearch_unwraps_bing_result_redirects():
+    target = research._result_url(
+        "https://www.bing.com/ck/a?u=a1aHR0cHM6Ly9leGFtcGxlLmNvbS9vbmU"
+    )
+
+    assert target == "https://example.com/one"
+
+
 def test_researcher_has_search_not_write(fake_langchain, tmp_path):
     backend = research.FixtureBackend(FIXTURE)
     agents = _by_name(roles.subagents_for(None, backend=backend))
@@ -57,7 +151,7 @@ def test_researcher_has_search_not_write(fake_langchain, tmp_path):
     assert "search" in names
     assert "write" not in names
     judge = agents["judge"]
-    assert [t.__name__ for t in judge["tools"]] == ["read_file"]
+    assert judge["tools"] == []
 
 
 def test_run_fixture_writes_brief(tmp_path):

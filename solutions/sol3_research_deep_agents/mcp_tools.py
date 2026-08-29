@@ -21,8 +21,9 @@ hop, and both fail in a hotel conference room. A research loop that dies because
 
 What this module never does: read a key out of `~/.claude.json`. Claude Code
 stores one there, and quietly borrowing it would make this folder work on one
-laptop and nowhere else. Put `PERPLEXITY_API_KEY` in the repo root `.env`, which
-the Taskfile already loads.
+laptop and nowhere else. Put `PERPLEXITY_API_KEY` in this solution's `.env` or
+one of its next three parent `.env` files; `research.py` loads those explicit
+locations for both Task and direct Python entry points.
 """
 
 from __future__ import annotations
@@ -127,12 +128,28 @@ def mcp_tools(server: str, config: dict | None = None):
         raise TransportUnavailable(f"{server} did not answer: {exc}") from exc
 
 
+def _tool_text(value) -> str:
+    """Flatten MCP content blocks instead of stringifying their Python repr."""
+    content = getattr(value, "content", value)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(_tool_text(block) for block in content)
+    if isinstance(content, dict):
+        if "text" in content:
+            return str(content["text"])
+        if "content" in content:
+            return _tool_text(content["content"])
+    text = getattr(content, "text", None)
+    return str(text if text is not None else content)
+
+
 def _call_mcp_tool(tools, name_fragment: str, args: dict) -> str:
     import asyncio  # noqa: PLC0415
 
     for tool in tools:
         if name_fragment in getattr(tool, "name", ""):
-            return str(asyncio.run(tool.ainvoke(args)))
+            return _tool_text(asyncio.run(tool.ainvoke(args)))
     raise TransportUnavailable(f"no tool matching {name_fragment!r} on that server")
 
 

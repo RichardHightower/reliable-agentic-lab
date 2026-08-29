@@ -71,6 +71,12 @@ def _content_of(message):
     return getattr(message, "content", "")
 
 
+def _name_of(message) -> str:
+    if isinstance(message, dict):
+        return str(message.get("name") or "")
+    return str(getattr(message, "name", "") or "")
+
+
 def _content_text(content) -> str:
     """Flatten message content into the text the model meant to send.
 
@@ -143,6 +149,42 @@ def last_ai_text(result) -> str:
     # Nothing carried content. The last message is the best answer left, and
     # returning "" here would look like a successful empty run.
     return _content_text(_content_of(messages[-1]))
+
+
+def last_agent_ai_text(result, agent_name: str) -> str:
+    """Return a delegated agent's final text, never the parent's tool receipt.
+
+    A Deep Agents parent ends a delegation with a `ToolMessage` containing the
+    child's transcript or a permission refusal. That is useful state for the
+    parent, but it is not the role reply the paper stage asked for. Subagent
+    messages carry their configured `name`; select that final assistant message
+    first, then retain the generic extractor as a compatibility fallback for
+    older graph result shapes.
+    """
+    messages = _messages(result)
+    expected = agent_name.replace("_", "-")
+    if messages:
+        for message in reversed(messages):
+            if _role_of(message) not in ("ai", "assistant") or _name_of(message) != expected:
+                continue
+            text = _content_text(_content_of(message)).strip()
+            if text:
+                return text
+    return last_ai_text(result)
+
+
+def has_agent_ai_message(result, agent_name: str) -> bool:
+    """Whether a state belongs to a named delegated role.
+
+    LangGraph subgraph namespaces are opaque task IDs in some release lines.
+    The assistant message name is stable across those versions, so it is the
+    right discriminator when selecting a values event for a role.
+    """
+    expected = agent_name.replace("_", "-")
+    return any(
+        _role_of(message) in ("ai", "assistant") and _name_of(message) == expected
+        for message in _messages(result) or []
+    )
 
 
 def last_usd(result) -> float:

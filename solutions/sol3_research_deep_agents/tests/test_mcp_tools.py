@@ -66,6 +66,12 @@ def test_citations_are_deduplicated_in_order():
     assert mcp_tools.citations_from(text) == ["https://b.example/2", "https://a.example/1"]
 
 
+def test_mcp_content_blocks_are_flattened_before_being_given_to_a_role():
+    assert mcp_tools._tool_text([{"type": "text", "text": "one"}, {"text": " two"}]) == (
+        "one two"
+    )
+
+
 def test_a_missing_key_makes_perplexity_unavailable(monkeypatch):
     """Unavailable, not raising. The caller falls through to the fixture."""
     monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
@@ -119,11 +125,9 @@ def test_choose_prefers_a_real_search_over_a_recording(monkeypatch, tmp_path):
     monkeypatch.setenv("PERPLEXITY_API_KEY", "k")
     assert research.choose(fixture=fixture).name == "perplexity"
     monkeypatch.delenv("PERPLEXITY_API_KEY")
-    assert research.choose(fixture=fixture).name == "fixture"
+    assert research.choose(fixture=fixture).name == "websearch"
 
 
-def test_nothing_is_never_a_backend(tmp_path):
-    """A research loop that silently returns no evidence is worse than one that
-    refuses."""
-    with pytest.raises(RuntimeError):
-        research.choose()
+def test_auto_selection_has_a_no_key_websearch_fallback(monkeypatch):
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    assert research.choose().name == "websearch"

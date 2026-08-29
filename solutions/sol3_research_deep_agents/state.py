@@ -86,6 +86,8 @@ class PaperState:
     current_stage: str = ""
     total_cost_usd: float = 0.0
     total_calls: int = 0
+    search_cost_usd: float = 0.0
+    search_calls: int = 0
     total_retries: int = 0
     backend: str = ""
     stages: dict[str, StageStatus] = field(default_factory=dict)
@@ -172,6 +174,12 @@ class PaperState:
         self.total_cost_usd += usd
         self.total_calls += calls
 
+    def reserve_search(self, usd: float) -> None:
+        """Persist one external search reservation before the request starts."""
+        self.search_cost_usd += usd
+        self.search_calls += 1
+        self.spend(usd)
+
     # -- persistence -------------------------------------------------------
 
     def to_dict(self) -> dict:
@@ -183,6 +191,8 @@ class PaperState:
             "current_stage": self.current_stage,
             "total_cost_usd": round(self.total_cost_usd, 4),
             "total_calls": self.total_calls,
+            "search_cost_usd": round(self.search_cost_usd, 4),
+            "search_calls": self.search_calls,
             "total_retries": self.total_retries,
             "backend": self.backend,
             "stages": {name: entry.to_dict() for name, entry in self.stages.items()},
@@ -220,6 +230,8 @@ class PaperState:
             current_stage=data.get("current_stage", ""),
             total_cost_usd=float(data.get("total_cost_usd", 0.0)),
             total_calls=int(data.get("total_calls", 0)),
+            search_cost_usd=float(data.get("search_cost_usd", 0.0)),
+            search_calls=int(data.get("search_calls", 0)),
             total_retries=int(data.get("total_retries", 0)),
             backend=data.get("backend", ""),
             artifacts=dict(data.get("artifacts", {})),

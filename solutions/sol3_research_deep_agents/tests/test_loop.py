@@ -73,6 +73,21 @@ def test_paper_needs_a_topic():
         loop.main(["--paper"])
 
 
+def test_paper_debug_flag_reaches_the_paper_builder(monkeypatch):
+    seen = {}
+
+    class Run:
+        def run(self):
+            return 0
+
+    monkeypatch.setattr(loop, "second_brain", lambda: None)
+    monkeypatch.setattr("paper.build", lambda topic, **kwargs: (seen.update(topic=topic, **kwargs), Run())[1])
+
+    assert loop.main(["--paper", "--topic", "loop engineering", "--debug"]) == 0
+    assert seen["topic"] == "loop engineering"
+    assert seen["debug"] is True
+
+
 def test_the_second_brain_is_never_required(monkeypatch):
     monkeypatch.setenv("SECOND_BRAIN", "/definitely/not/here")
     assert loop.second_brain() is None

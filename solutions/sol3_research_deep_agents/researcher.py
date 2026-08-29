@@ -148,7 +148,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Research Assistant")
     parser.add_argument("--question", required=True)
     parser.add_argument("--backend", default="auto", choices=["auto", "fixture", "websearch"])
-    parser.add_argument("--inbox", default=None, help="websearch answers file")
+    parser.add_argument(
+        "--inbox",
+        default=None,
+        help="optional recorded web-search answers; missing questions use live web search",
+    )
     parser.add_argument("--out", default=None)
     parser.add_argument("--budget", type=int, default=3)
     args = parser.parse_args(argv)
@@ -156,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.backend == "fixture":
         backend = research.FixtureBackend(FIXTURE)
     elif args.backend == "websearch":
-        backend = research.WebSearchBackend(args.inbox or "work/research/websearch.json")
+        backend = research.WebSearchBackend(args.inbox)
     else:
         backend = research.choose(fixture=FIXTURE, inbox=args.inbox)
 

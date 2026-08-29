@@ -36,6 +36,12 @@ Ask one narrow question per call. "How does X work" returns a summary of a
 summary. "What is the default timeout for X, and in which file is it set"
 returns a fact.
 
+For one orchestrator request, call `search` exactly once. Its response is a
+source bundle, not a suggestion to expand into follow-up searches. Select the
+primary sources from that bundle and return the requested JSON. If the bundle
+does not contain suitable evidence, report that shortfall; do not spend extra
+calls trying to repair it.
+
 ## Report
 
 For each question, return:

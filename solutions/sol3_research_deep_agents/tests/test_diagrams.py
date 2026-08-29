@@ -69,6 +69,29 @@ def test_braces_are_doubled_for_the_imagen_cli():
     assert "{Decision?}" not in prompt
 
 
+def test_imagen_argv_matches_the_installed_cli_help(monkeypatch, tmp_path):
+    """Imagen accepts a prompt argument, -o, and --aspect-ratio.
+
+    Do not cargo-cult the imagen-diagrams v0.1.0 adapter here. Its
+    --prompt-file, --aspect, and --output flags are not accepted by the CLI
+    installed for this course.
+    """
+    target = tmp_path / "figure.png"
+    seen = []
+
+    def run(argv, **_kwargs):
+        seen.append(argv)
+        target.write_bytes(b"png")
+        return type("Result", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr(diagrams.subprocess, "run", run)
+
+    assert diagrams.run_imagen("draw {{Decision?}}", target, "4:3") == target
+    assert seen == [
+        ["imagen", "generate", "draw {{Decision?}}", "-o", str(target), "--aspect-ratio", "4:3"]
+    ]
+
+
 def test_the_closer_is_the_last_thing_in_the_prompt():
     """Final tokens weigh most, and the failure this guards is a picture of code."""
     prompt = diagrams.build_prompt(
@@ -85,8 +108,30 @@ def test_the_prompt_carries_the_theme_palette():
     assert "mermaid or plantuml source syntax" in prompt
 
 
+def test_mermaid_theme_keeps_html_labels_for_the_browser_rendered_print_png():
+    config = json.loads(diagrams.MERMAID_CONFIG.read_text())
+    assert config["flowchart"]["htmlLabels"] is True
+
+
+def test_mermaid_keeps_chromium_sandboxed_unless_the_environment_opted_out(tmp_path, monkeypatch):
+    monkeypatch.delenv("SOL3_MERMAID_NO_SANDBOX", raising=False)
+    assert diagrams._puppeteer_config(str(tmp_path)) is None
+
+    monkeypatch.setenv("SOL3_MERMAID_NO_SANDBOX", "1")
+    config = diagrams._puppeteer_config(str(tmp_path))
+    assert config is not None
+    assert json.loads(config.read_text())["args"] == ["--no-sandbox", "--disable-setuid-sandbox"]
+
+
 def test_a_missing_theme_does_not_raise():
     assert diagrams.load_theme("no-such-theme")["palette"] == {}
+
+
+def test_plantuml_uses_the_selected_white_paper_palette():
+    args = diagrams.plantuml_style_args("spillwave-light")
+    assert "-SbackgroundColor=#eef2f7" in args
+    assert "-SsequenceArrowColor=#1a365d" in args
+    assert "-SdefaultFontSize=18" in args
 
 
 class FakePng:
@@ -129,22 +174,28 @@ def test_a_figure_ships_its_svg_until_a_png_is_judged_good():
     assert figure.best == Path("x.svg")
     figure.png = Path("x.png")
     assert figure.best == Path("x.svg"), "an unjudged png does not ship"
+    figure.rasterized = True
+    assert figure.best == Path("x.png"), "the deterministic print PNG is safe to ship"
+    figure.rasterized = False
     figure.polished = True
     assert figure.best == Path("x.png")
 
 
-def test_missing_imagen_keeps_the_svg(tmp_path, monkeypatch):
+def test_missing_imagen_keeps_the_deterministic_figure(tmp_path, monkeypatch):
     """No CLI and no key is a fact about the laptop, not a failed run."""
     monkeypatch.setattr(diagrams, "imagen_available", lambda: False)
     monkeypatch.setattr(diagrams, "PLUGIN_RENDER", tmp_path / "absent.py")
     src = tmp_path / "d.mmd"
     src.write_text(SIMPLE)
-    monkeypatch.setattr(diagrams, "render_svg", lambda s, o: _stub_svg(o, s))
+    monkeypatch.setattr(diagrams, "render_svg", lambda s, o, **_: _stub_svg(o, s))
+    monkeypatch.setattr(diagrams, "render_mermaid_png", lambda s, o, **_: _stub_png(o, s))
 
     figure = diagrams.render(src, tmp_path / "out", polish=True)
     assert figure.polished is False
     assert figure.svg.exists()
-    assert "kept the SVG" in figure.note
+    assert figure.rasterized is True
+    assert figure.best == figure.png
+    assert "embedded print PNG" in figure.note
 
 
 def _stub_svg(out_dir: Path, src: Path) -> Path:
@@ -154,12 +205,22 @@ def _stub_svg(out_dir: Path, src: Path) -> Path:
     return target
 
 
+def _stub_png(out_dir: Path, src: Path) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / f"{src.stem}.png"
+    target.write_bytes(b"\x89PNG\r\n\x1a\n")
+    return target
+
+
 def test_a_matching_hash_skips_the_render(tmp_path, monkeypatch):
     """This is what makes a resumed run cheap. A rerender costs an image call."""
     calls = []
     monkeypatch.setattr(diagrams, "imagen_available", lambda: False)
     monkeypatch.setattr(diagrams, "PLUGIN_RENDER", tmp_path / "absent.py")
-    monkeypatch.setattr(diagrams, "render_svg", lambda s, o: (calls.append(s), _stub_svg(o, s))[1])
+    monkeypatch.setattr(
+        diagrams, "render_svg", lambda s, o, **_: (calls.append(s), _stub_svg(o, s))[1]
+    )
+    monkeypatch.setattr(diagrams, "render_mermaid_png", lambda s, o, **_: _stub_png(o, s))
 
     src = tmp_path / "d.mmd"
     src.write_text(SIMPLE)
@@ -179,12 +240,14 @@ def test_a_matching_hash_skips_the_render(tmp_path, monkeypatch):
 def test_the_sidecar_records_what_happened(tmp_path, monkeypatch):
     monkeypatch.setattr(diagrams, "imagen_available", lambda: False)
     monkeypatch.setattr(diagrams, "PLUGIN_RENDER", tmp_path / "absent.py")
-    monkeypatch.setattr(diagrams, "render_svg", lambda s, o: _stub_svg(o, s))
+    monkeypatch.setattr(diagrams, "render_svg", lambda s, o, **_: _stub_svg(o, s))
+    monkeypatch.setattr(diagrams, "render_mermaid_png", lambda s, o, **_: _stub_png(o, s))
     src = tmp_path / "d.mmd"
     src.write_text(SIMPLE)
     diagrams.render(src, tmp_path / "out", polish=True, topic="loops")
 
     sidecar = json.loads((tmp_path / "out" / "d.imagen.json").read_text())
     assert sidecar["polished"] is False
+    assert sidecar["rasterized"] is True
     assert sidecar["source_hash"]
     assert "Plan" in sidecar["alt"]

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -161,8 +162,10 @@ class DeepAgentsRunner(Runner):
 
     name = "deep_agents"
 
-    def __init__(self, agent):
+    def __init__(self, agent, *, debug: bool = False, debug_stream=None):
         self.agent = agent
+        self.debug = debug
+        self.debug_stream = debug_stream or sys.stderr
 
     def ask(self, role: str, prompt: str) -> Reply:
         import adapter  # noqa: PLC0415
@@ -171,8 +174,94 @@ class DeepAgentsRunner(Runner):
             f"Delegate this to the {role.replace('_', '-')} subagent. "
             f"Return its answer and nothing else.\n\n{prompt}"
         )
-        result = self.agent.invoke({"messages": [{"role": "user", "content": instruction}]})
-        return Reply(text=adapter.last_ai_text(result), usd=adapter.last_usd(result))
+        payload = {"messages": [{"role": "user", "content": instruction}]}
+        if isinstance(self.agent, dict):
+            role_agent = self.agent.get(role)
+            if role_agent is None:
+                raise KeyError(f"no compiled Deep Agent for role {role!r}")
+            # Direct role graphs receive the original stage prompt, not the
+            # parent-only delegation wrapper. That makes the evidence contract
+            # visible to the writer and verifier whose output Python gates.
+            direct_payload = {"messages": [{"role": "user", "content": prompt}]}
+            result = self._run_direct(role, role_agent, direct_payload) if self.debug else role_agent.invoke(direct_payload)
+            return Reply(text=adapter.last_ai_text(result), usd=adapter.last_usd(result))
+        parent, delegated = self._run_subgraphs(role, payload, debug=self.debug)
+        text = adapter.last_ai_text(delegated) if delegated is not None else adapter.last_agent_ai_text(parent, role)
+        return Reply(text=text, usd=adapter.last_usd(parent))
+
+    def _run_direct(self, role: str, agent, payload: dict):
+        """Debug a compiled role graph without the parent-task event flood."""
+        result = None
+        for chunk in agent.stream(
+            payload,
+            stream_mode=["debug", "values"],
+            subgraphs=True,
+            version="v2",
+        ):
+            if not isinstance(chunk, dict):
+                continue
+            if chunk.get("type") == "debug":
+                namespace = "/".join(str(part) for part in chunk.get("ns", ()) or ()) or role
+                print(
+                    f"[deepagents debug] role={role} namespace={namespace}",
+                    file=self.debug_stream,
+                )
+                print(chunk.get("data"), file=self.debug_stream, flush=True)
+            elif chunk.get("type") == "values" and not chunk.get("ns"):
+                result = chunk.get("data")
+        if result is None:
+            raise RuntimeError(f"Deep Agents role stream ended without final values for {role!r}.")
+        return result
+
+    def _run_subgraphs(self, role: str, payload: dict, *, debug: bool):
+        """Capture the parent state and the named subagent's final state.
+
+        `.invoke()` returns the parent's messages. After a `task` call, its
+        last payload is often a tool receipt, not the delegated writer's prose.
+        LangGraph v2 values events keep the two states separate. The parent
+        stays the cost source; the matching child namespace supplies the role
+        answer. Debug mode only adds the event flood, it does not change this
+        extraction rule.
+
+        This is intentionally local to the run. Do not call LangChain's
+        process-wide debug switch: a paper can make many model and tool calls,
+        and an all-process trace obscures the one delegated role being probed.
+        """
+        import adapter  # noqa: PLC0415
+
+        parent = None
+        delegated = None
+        modes = ["values"]
+        if debug:
+            modes.insert(0, "debug")
+        expected = role.replace("_", "-")
+        for chunk in self.agent.stream(
+            payload,
+            stream_mode=modes,
+            subgraphs=True,
+            version="v2",
+        ):
+            if not isinstance(chunk, dict):
+                continue
+            if debug and chunk.get("type") == "debug":
+                namespace = "/".join(str(part) for part in chunk.get("ns", ()) or ()) or "parent"
+                print(
+                    f"[deepagents debug] role={role} namespace={namespace}",
+                    file=self.debug_stream,
+                )
+                print(chunk.get("data"), file=self.debug_stream, flush=True)
+            elif chunk.get("type") == "values":
+                namespace = "/".join(str(part) for part in chunk.get("ns", ()) or ())
+                if not namespace:
+                    parent = chunk.get("data")
+                elif expected in namespace or adapter.has_agent_ai_message(chunk.get("data"), role):
+                    delegated = chunk.get("data")
+        if parent is None:
+            raise RuntimeError(
+                "Deep Agents stream ended without a final parent values event. "
+                "Inspect the streamed debug events or retry the stage."
+            )
+        return parent, delegated
 
 
 @dataclass
@@ -184,6 +273,7 @@ class Paper:
     backend: research.Backend
     work_dir: Path
     docs_backend: research.Backend | None = None
+    search_budget: research.Budget | None = None
     max_usd: float = DEFAULT_MAX_USD
     max_verify: int = stages.MAX_VERIFY_CLAIMS
     attempts: int = DEFAULT_STAGE_ATTEMPTS
@@ -213,14 +303,33 @@ class Paper:
         )
         self.state.backend = self.backend.name
         self.ledger = evidence.Ledger(self.work_dir / "evidence").load()
-        self.budget = research.Budget(max_usd=self.max_usd, max_calls=DEFAULT_SEARCH_CALLS)
-        self.budget.spent_usd = self.state.total_cost_usd
+        self.budget = self.search_budget or research.Budget(
+            max_usd=self.max_usd, max_calls=DEFAULT_SEARCH_CALLS
+        )
+        self.budget.spent_usd = self.state.search_cost_usd
+        self.budget.calls = self.state.search_calls
+        self.budget.on_charge = self._reserve_search
 
     # -- plumbing ----------------------------------------------------------
 
     def say(self, line: str) -> None:
         if not self.quiet:
             print(line)
+
+    def _reserve_search(self, usd: float) -> None:
+        """Checkpoint a provider call before the search tool makes it."""
+        self.state.reserve_search(usd)
+        self.state.save()
+
+    def _json_reply(self, role: str, reply: Reply) -> dict:
+        """Parse a structured reply and retain its raw form if the gate rejects it."""
+        try:
+            return reply.json()
+        except GateFailed:
+            diagnostics = self.work_dir / "diagnostics"
+            diagnostics.mkdir(parents=True, exist_ok=True)
+            (diagnostics / f"last-{role}-reply.txt").write_text(reply.text, encoding="utf-8")
+            raise
 
     @property
     def diagram_src(self) -> Path:
@@ -261,7 +370,6 @@ class Paper:
         reply = self.runner.ask(role, prompt)
         self.state.spend(reply.usd)
         self._worst[role] = max(self._worst.get(role, 0.0), reply.usd)
-        self.budget.spent_usd = self.state.total_cost_usd
         return reply
 
     # -- the loop ----------------------------------------------------------
@@ -327,6 +435,9 @@ class Paper:
                     return self._escalate(name, decision.reason, str(failure))
                 previous = signature
                 extra = gates.retry_instruction(decision, list(signature)) + "\n" + str(failure)
+                if name == "review":
+                    revised = self.stage_revise(extra)
+                    self.say(f"  revise     {revised.summary}")
                 continue
 
             self.state.mark_complete(name, cost_usd=result.usd, **result.artifacts)
@@ -379,21 +490,21 @@ class Paper:
         for question in self.plan["questions"]:
             if any(f.subject == question["subject"] for f in self.ledger.findings.values()):
                 continue
+            self.budget.begin_request(max_calls=1)
             try:
-                self.budget.charge(self.backend.cost_per_call)
-            except research.BudgetExceeded as exc:
-                raise GateFailed(f"the search budget is spent. {exc}", ("search_budget",)) from exc
-            reply = self._ask(
-                "researcher",
-                f"Question: {question['question']}\n"
-                f"What answers it: {question['check']}\n{extra}\n\n"
-                "Search, then return JSON: "
-                '{"answer": "...", "sources": [{"title": "...", "url": "...", '
-                '"vendor": "...", "quote": "..."}], '
-                '"claims": [{"text": "...", "confidence": 0.8, "source_urls": ["..."]}]}',
-            )
+                reply = self._ask(
+                    "researcher",
+                    f"Question: {question['question']}\n"
+                    f"What answers it: {question['check']}\n{extra}\n\n"
+                    "Search once, then return JSON: "
+                    '{"answer": "...", "sources": [{"title": "...", "url": "...", '
+                    '"vendor": "...", "quote": "..."}], '
+                    '"claims": [{"text": "...", "confidence": 0.8, "source_urls": ["..."]}]}',
+                )
+            finally:
+                self.budget.end_request()
             usd += reply.usd
-            stages.record_findings(self.ledger, question, reply.json())
+            stages.record_findings(self.ledger, question, self._json_reply("researcher", reply))
             # Persist per question. A stop between questions must not discard
             # the answers this run already paid for.
             self.ledger.write()
@@ -541,6 +652,13 @@ class Paper:
 
     def stage_write(self, extra: str = "") -> StageResult:
         self._need_outline()
+        # `write` can be interrupted between sections. Load its artifact before
+        # deciding what remains so a resumed process preserves every accepted
+        # section instead of spending another turn to replace it.
+        if not self.written:
+            path = self.work_dir / "sections.json"
+            if path.exists():
+                self.written = json.loads(path.read_text(encoding="utf-8"))
         index, _ = stages.numbering(self.ledger)
         usd = 0.0
         for section in self.outline["sections"]:
@@ -573,11 +691,24 @@ class Paper:
                 f"Purpose: {section.get('purpose', '')}\n"
                 f"Audience: {self.plan['audience']}\n{extra}\n\n"
                 f"Use only these claims and their citation markers:\n{briefs}\n\n"
-                "Return the section body as markdown. No heading line, the "
-                "assembler adds it. No references section.",
+                "Return 180 to 300 words of section body as markdown. No heading "
+                "line, the assembler adds it. No references section. The word "
+                "limit is part of the contract: prefer concise, cited mechanisms "
+                "over an exhaustive survey.",
             )
             usd += reply.usd
             body = reply.text.strip()
+            # A live subagent can return a parent tool receipt, an empty
+            # completion, or malformed prose. Preserve the exact pre-gate body
+            # locally so a failed citation gate is diagnosable without another
+            # provider call. The next successful section overwrites only its
+            # own filename.
+            if self.runner.name == "deep_agents":
+                diagnostics = self.work_dir / "diagnostics"
+                diagnostics.mkdir(parents=True, exist_ok=True)
+                (diagnostics / f"last-writer-{evidence.slug(heading)}.md").write_text(
+                    body, encoding="utf-8"
+                )
             # Store first, then gate. A failure drops this section only, so the
             # retry re-asks for it and leaves its neighbours alone.
             stages.write_gate(heading, body, allowed)
@@ -602,6 +733,63 @@ class Paper:
         path = self.work_dir / "sections.json"
         path.write_text(json.dumps(self.written, indent=2), encoding="utf-8")
         return path
+
+    def stage_revise(self, feedback: str) -> StageResult:
+        """Rewrite only the sections named by a failed reviewer row.
+
+        Re-running a reviewer after it finds prose defects cannot change the
+        draft. Keep that maker-checker separation intact: the reviewer names
+        the defect, the writer revises bounded prose, and the reviewer grades
+        the new text on the next attempt.
+        """
+        self._need_written()
+        index, _ = stages.numbering(self.ledger)
+        lowered = feedback.lower()
+        targets: list[str] = []
+        hints = {
+            "introduction": ("introduction", "no_filler"),
+            "exit conditions and budgets": ("exit-condition", "exit condition"),
+            "idempotent tool design": ("idempotency", "idempotent"),
+            "verification: maker-checker splits": ("maker-checker", "maker checker"),
+        }
+        for heading in self.written:
+            if any(token in lowered for token in hints.get(heading.lower(), ())):
+                targets.append(heading)
+        if not targets:
+            targets = [heading for heading in self.written if heading.lower() not in stages.UNBOUND_SECTIONS]
+
+        usd = 0.0
+        for heading in targets:
+            section = next(item for item in self.outline["sections"] if item["heading"] == heading)
+            claim_ids = section.get("claim_ids") or []
+            if heading.lower() in stages.UNBOUND_SECTIONS:
+                claim_ids = [claim.id for claim in self.ledger.claims.values() if claim.usable]
+            allowed = sorted(
+                {
+                    index[source_id]
+                    for claim_id in claim_ids
+                    if self.ledger.claim(claim_id)
+                    for source_id in self.ledger.claim(claim_id).source_ids
+                    if source_id in index
+                }
+            )
+            briefs = "\n".join(stages.claim_brief(self.ledger, claim_id, index) for claim_id in claim_ids)
+            reply = self._ask(
+                "writer",
+                f"Revise the existing {heading!r} section of {self.plan['title']!r}.\n\n"
+                f"Reviewer feedback to fix:\n{feedback}\n\n"
+                f"Current section:\n{self.written[heading]}\n\n"
+                f"Use only these claims and their citation markers:\n{briefs}\n\n"
+                "Return 180 to 300 words of replacement markdown body. No heading or references. "
+                "Preserve factual grounding and citation markers. Where the reviewer asks for a "
+                "tradeoff, name a credible alternative and its cost without inventing evidence.",
+            )
+            usd += reply.usd
+            body = reply.text.strip()
+            stages.write_gate(heading, body, allowed)
+            self.written[heading] = body
+            self._save_sections()
+        return StageResult("revise", usd=usd, artifacts={"sections": len(targets)}, summary=f"{len(targets)} sections")
 
     # -- 7. review ---------------------------------------------------------
 
@@ -715,6 +903,7 @@ def build(
     work_root: Path | str | None = None,
     fixture_dir: Path | str | None = None,
     brain: Path | None = None,
+    debug: bool = False,
     **kwargs,
 ) -> Paper:
     """Wire a run from the environment the attendee actually has."""
@@ -726,26 +915,50 @@ def build(
         backend: research.Backend = research.FixtureBackend(fixtures / "research.json")
         docs: research.Backend | None = None
         runner: Runner = FixtureRunner(fixtures / "replies.json")
+        search_budget = None
     else:
         backend = research.choose(fixture=fixtures / "research.json")
         docs = research.Context7Backend()
-        runner = DeepAgentsRunner(_agent(brain, work_dir))
+        search_budget = research.Budget(
+            max_usd=float(kwargs.get("max_usd", DEFAULT_MAX_USD)), max_calls=DEFAULT_SEARCH_CALLS
+        )
+        runner = DeepAgentsRunner(
+            _agents(
+                brain, work_dir, backend=backend, docs_backend=docs, budget=search_budget, debug=debug
+            ),
+            debug=debug,
+        )
 
     return Paper(
-        topic=topic, runner=runner, backend=backend, docs_backend=docs, work_dir=work_dir, **kwargs
+        topic=topic,
+        runner=runner,
+        backend=backend,
+        docs_backend=docs,
+        search_budget=search_budget,
+        work_dir=work_dir,
+        **kwargs,
     )
 
 
-def _agent(brain: Path | None, work_dir: Path):
-    """The live graph. Needs `deepagents`, which nothing else in this file does."""
+def _agents(
+    brain: Path | None,
+    work_dir: Path,
+    *,
+    backend: research.Backend,
+    docs_backend: research.Backend | None,
+    budget: research.Budget,
+    debug: bool = False,
+):
+    """The live role graphs. Needs `deepagents`, which nothing else here does."""
     import roles as deep  # noqa: PLC0415
 
-    fixtures = HERE / "fixtures" / "paper" / "research.json"
-    return deep.build_agent(
+    return deep.build_paper_agents(
         None,
         loop="paper",
-        backend=research.choose(fixture=fixtures),
-        docs_backend=research.Context7Backend(),
+        backend=backend,
+        docs_backend=docs_backend,
+        budget=budget,
         repo=work_dir,
         brain=brain if brain and Path(brain).is_dir() else None,
+        debug=debug,
     )
