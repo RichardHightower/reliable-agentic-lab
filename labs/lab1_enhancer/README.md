@@ -55,6 +55,7 @@ One prompt per solution variant. Paste into the tool named in the prompt.
 | [prompts/codex.md](prompts/codex.md) | `solutions/sol1_enhancer_codex/` |
 | [prompts/grok-build.md](prompts/grok-build.md) | `solutions/sol1_enhancer_grok_build/` |
 | [prompts/opencode.md](prompts/opencode.md) | `solutions/sol1_enhancer_opencode/` |
+| [prompts/vscode.md](prompts/vscode.md) | `solutions/sol1_enhancer_vscode/` |
 | [prompts/agent-sdk.md](prompts/agent-sdk.md) | `solutions/sol1_enhancer_agent_sdk/` |
 | [prompts/deep-agents.md](prompts/deep-agents.md) | `solutions/sol1_enhancer_deep_agents/` |
 

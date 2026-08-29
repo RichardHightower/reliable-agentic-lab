@@ -23,6 +23,7 @@ VARIANT_PROMPT = {
     "codex": "codex.md",
     "grok_build": "grok-build.md",
     "opencode": "opencode.md",
+    "vscode": "vscode.md",
 }
 
 

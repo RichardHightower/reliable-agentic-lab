@@ -1,0 +1,4 @@
+{
+  "github.copilot.chat.skillTool.enabled": true,
+  "chat.useCustomAgentHooks": true
+}

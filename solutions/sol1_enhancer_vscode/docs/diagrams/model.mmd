@@ -1,0 +1,23 @@
+classDiagram
+    class PluginSkill {
+        +orchestrate_poll()
+    }
+    class DoerRole {
+        +draft(gaps): str
+    }
+    class JudgeRole {
+        +assess(ticket): JSON
+    }
+    class GateScripts {
+        +check_fields(): dict
+        +check_stop(): dict
+    }
+    class Issue {
+        +body: str
+        +labels: str[]
+        +comments: str[]
+    }
+    PluginSkill --> DoerRole
+    PluginSkill --> JudgeRole
+    PluginSkill --> GateScripts
+    PluginSkill --> Issue

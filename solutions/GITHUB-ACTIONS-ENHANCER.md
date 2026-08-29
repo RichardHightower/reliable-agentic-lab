@@ -54,15 +54,16 @@ Then vendor or check out the enhancer you actually run:
 | Codex | `solutions/sol1_enhancer_codex` | same, after `task` sees that Taskfile |
 | OpenCode | `solutions/sol1_enhancer_opencode` | same |
 | Grok Build | `solutions/sol1_enhancer_grok_build` | same, plus `task trust` is a local step that does not exist on Actions. Prefer Claude/SDK on GHA. |
+| VS Code | `solutions/sol1_enhancer_vscode` | same, plus Copilot CLI. Needs a Copilot token. Prefer Claude/SDK on GHA. |
 | Agent SDK | `solutions/sol1_enhancer_agent_sdk` | `python3 loop.py --once --repo "$GITHUB_WORKSPACE" --ticket "$TICKET"` |
 | Deep Agents | `solutions/sol1_enhancer_deep_agents` | `python3 loop.py --once --repo "$GITHUB_WORKSPACE" --ticket "$TICKET"` |
 
 Set repository variable `ENHANCER_BACKEND` to one of:
-`claude`, `codex`, `opencode`, `agent-sdk`, `deep-agents`.
+`claude`, `codex`, `opencode`, `vscode`, `agent-sdk`, `deep-agents`.
 
-Grok on hosted runners is a poor fit (trust prompt, local plugin shims).
-Use Claude Code, Agent SDK, or Deep Agents in Actions. Keep Grok for a
-laptop or a Droplet (`ext_5`).
+Grok and VS Code Copilot CLI on hosted runners are a poor fit (trust prompt,
+local plugin shims, Copilot token). Use Claude Code, Agent SDK, or Deep
+Agents in Actions. Keep Grok and VS Code for a laptop or a Droplet (`ext_5`).
 
 ## Ticket id from the issue title
 
