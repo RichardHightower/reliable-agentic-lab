@@ -1,0 +1,7 @@
+This is a slide diagram for a technical presentation about a ticket enhancer poll.
+Clean minimalist technical illustration. Boxes, arrows, labels. Landscape 16:9.
+Palette: background #07141f, surface #0d1e2c, primary #2dd4bf, accent #d4a84b, ink #eef4f6.
+No source syntax, no ASCII, no tiny labels, no watermarks, no logos, no em dash characters.
+Diagram type: flowchart.
+task create-test-tickets T900 T901 T902, task run one poll, Judge then Python, Human LGTM, ready loop implementer, state file deleted.
+Convert the visual boxes, arrows, and labels. The image must show a finished diagram, not Mermaid or PlantUML code.

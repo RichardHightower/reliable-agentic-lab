@@ -6,61 +6,51 @@ footer: Spillwave Solutions | spillwave.com
 ---
 # sol3_research_agent_sdk. White paper
 
-<!-- _class: lead -->
-
 A topic in. An evidence-backed technical white paper out.
 
 Claude Agent SDK. Seven roles. Python owns the phases.
 
-This is **not** the old config-only port. PRs #157 / #158 grew it into a
-report generator. Saturday Lab 3 still fills two functions. This folder
-writes `paper.md`.
+This is not the old config-only port. Saturday Lab 3 still fills two functions. This folder writes `paper.md`.
+
+Read `HOW_TO_RUN.md` and `DESIGN_DOC.md`.
 
 
 ---
 
-# What you will build (already filled)
+# Setup. Folder-local venv
 
-| Artifact | Path |
-|---|---|
-| the paper | `work/<slug>/paper.md` |
-| figures | `work/<slug>/diagrams/*.png` |
-| knowledge bundle | `work/<slug>/knowledge/research/` |
-| checkpoint | `work/<slug>/.harness/state.json` |
+```bash
+cd solutions/sol3_research_agent_sdk
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
+task setup
+```
 
-Cast lives in `roleplan.py`. Pipeline lives in `paper.py`. One PreToolUse hook
-in `roles.py`. Checks in `checks.py`. Exits in `gates.py`.
+`.venv` plus the Agent SDK. Also pins `imagen-diagrams` v0.2.0 and `image-gen` v2.1.0 in `.cache/`.
 
-
----
-
-# Why this folder exists
-
-The same loop, in a different runtime. The rubric, the red gate, the write
-scope, and the exits did not have to change to make it run.
-
-A searcher that can write can edit the evidence to fit the paper. A verifier
-shown the researcher's answer is not a second opinion. A model handed Bash
-widens the blast radius from "a wrong paper" to "anything this machine can run".
+Do not install into Homebrew Python. Do not discover user or parent-project skills. The allowlist is those two plugins only.
 
 
 ---
 
-# Learning objectives
+# Scripts with no model
 
-- Print the seven-role table with no SDK installed
-- Explain why `allowed_tools` is a session-wide allowlist
-- Declare MCP in Python, not via a gitignored `.mcp.json`
-- Cap questions, claims, and dollars as three separate budgets
-- Check cost **inside** research and verify, not only at the gate
-- Refuse to publish a paper that did not pass
+```bash
+task table          # one writer. Everyone else prints no
+task checks
+task test
+task demo           # recorded fixture. No key, no network.
+```
+
+If judge, researcher, or verifier prints `yes`, stop.
 
 
 ---
 
 # Starting architecture
 
-![w:880](images/sdk-paper-pipeline.jpg)
+![h:360](images/sdk-paper-pipeline.jpg)
+
+See also `docs/diagrams/architecture.svg`.
 
 
 ---
@@ -77,27 +67,18 @@ writer         Read + Write         sections/** only. Cannot reach paper.md
 judge          Read, Glob, Grep     writes nothing
 ```
 
-`task table`. Judge, researcher, verifier must print `no` in the writes column.
-If any prints `yes`, stop.
-
 
 ---
 
 # Two places enforce scope. You need both.
 
-```
-tools=[...]        decides whether a role can write at all
-PreToolUse hook    decides which paths it may write
-```
+`tools=[...]` decides whether a role can write at all.
 
-One hook serves the whole cast. It reads `agent_type` off the tool call.
+One `PreToolUse` hook decides which paths. It reads `agent_type`.
 
-sol1 registered one hook per writing role. That does not generalize: several
-hooks on `Write` all run, an empty dict means "no opinion", and the first role
-that shrugs lets another role's write through.
+A write with no `agent_type` is denied. So is a write from anyone but the writer. So is a write to `paper.md` or `claims.json`.
 
-A write with no `agent_type` is denied. So is a write from anyone but the
-writer. So is a write to `paper.md`, `claims.json`, or outside the work dir.
+sol1 registered one hook per writing role. Several hooks on `Write` all run. An empty dict means no opinion. The first role that shrugs lets another role's write through.
 
 
 ---
@@ -106,38 +87,22 @@ writer. So is a write to `paper.md`, `claims.json`, or outside the work dir.
 
 It is a session-wide permission allowlist. It gates subagents too.
 
-First live run: options said `allowed_tools=["Agent"]` with
-`permission_mode="dontAsk"`. Researcher held Perplexity, Context7, WebSearch.
-Every call came back denied.
+First live run: `allowed_tools=["Agent"]` with `dontAsk`. Every search came back denied.
 
-What the researcher then did is the part worth keeping. It did **not** answer
-from memory. It reported "NO RESEARCH WAS PERFORMED", named each denied tool,
-and returned an empty claim list. The run escalated with "no source produced a
-single claim" rather than shipping four fabricated sections.
+The researcher did **not** answer from memory. It reported `NO RESEARCH WAS PERFORMED` and returned an empty claim list. The run escalated.
 
-`options_for` now allows the union of what the cast holds. `Bash` is denied at
-the top. The parent is kept from writing by the hook, not the allowlist.
+`options_for` now allows the union of what the cast holds. `Bash` is denied at the top.
 
 
 ---
 
 # MCP is declared in Python
 
-```python
-def mcp_servers() -> dict:
-    servers = {"context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}}
-    key = os.environ.get("PERPLEXITY_API_KEY")
-    if key:
-        servers["perplexity-ask"] = {...}
-    return servers
-```
+Context7 is always configured. Perplexity is included only when `PERPLEXITY_API_KEY` is set.
 
-`strict_mcp_config=True`. `.mcp.json` holds a key, so it is gitignored. A fresh
-clone has no such file. The researcher then loses both servers with **no error**,
-and a topic it cannot search reads as a topic nobody has written about.
+`.mcp.json` holds a key, so it is gitignored. A fresh clone has no such file. Declare servers in Python or a missing file silently cannot search.
 
-Perplexity is included only when the key is set. An empty key is an auth error
-on every question, which is the same failure wearing a different hat.
+This port has no OpenAI or Bing fallback. A missing root `.mcp.json` must not change the tool boundary.
 
 
 ---
@@ -145,196 +110,94 @@ on every question, which is the same failure wearing a different hat.
 # Ten phases. Python owns the order.
 
 ```
-0 prior_art   second brain, skip if missing     -> prior-art.md
-1 plan        sections and questions            -> plan.json
-2 research    claims from primary sources       -> sources.json, claims.json
-3 verify      independent second look           -> verdicts.json
-4 diagram     source in, Python renders         -> diagrams.json
-5 write       one section at a time             -> sections/*.md
-6 assemble    stitch + references, in Python    -> paper.md
-7 check       seven deterministic rows          -> check.json
-8 review      judge on what a script cannot     -> review.json
-9 publish     private gist, on request          -> gist.json
+0 prior_art   skip if missing              -> prior-art.md
+1 plan        sections and questions       -> plan.json
+2 research    claims from primary sources  -> sources.json, claims.json
+3 verify      independent second look      -> verdicts.json
+4 diagram     source in, Python renders    -> diagrams.json
+5 write       one section at a time        -> sections/*.md
+6 assemble    stitch + references          -> paper.md
+7 check       seven deterministic rows     -> check.json
+8 review      judge on what a script cannot -> review.json
+9 publish     secret gist, on request      -> gist.json
 ```
 
-Phases 0 to 4 run once. 5 to 8 are the retry cycle. Re-running research because
-a paragraph lost its citation marker buys a bill, not a better paper.
-
-
----
-
-# The planner is told the budget
-
-`--max-questions` default 12. `--max-diagrams` default 4.
-
-A live planner returned seven sections and twenty-eight questions. Truncating
-to four questions left a paper with two sections and five orphaned headings.
-
-A planner that knows the ceiling writes a whole paper under it. Python still
-enforces the cap afterwards.
-
-
----
-
-# Verify is independent. Claims are capped.
-
-The verifier is given the claim text and nothing else. A claim the two disagree
-on is `disputed`. One the verifier cannot reach is `unverified`, never silently
-dropped.
-
-Four questions produced 111 claims on one live run. Every claim is a
-verification turn.
-
-`--max-claims` default 24. Claims with a number, a version, or a date are
-checked first. The rest stay `unverified`. The writer states them qualitatively.
-The knowledge bundle records that nobody checked them.
+Phases 0 to 4 run once. 5 to 8 are the retry cycle.
 
 
 ---
 
 # Cost is checked inside the phases
 
-`--max-usd` default 5.00. Checked inside research, inside verification, and at
-the gate.
+`--max-usd` default 5.00. Checked inside research, inside verification, and at the gate.
 
-Checking only at the gate is a bug this port had: the gate runs once per
-attempt, and a twenty-four question research phase can spend the whole budget
-several times over before the gate ever sees it.
+Checking only at the gate is a bug this port had. A twenty-four question research phase can spend the whole budget several times over before the gate ever sees it.
 
-Running out mid-verification leaves remaining claims `unverified`. Marking them
-verified because the money ran out is the lie.
-
-
----
-
-# Seven deterministic rows. No model vote.
-
-| Row | Pass when |
-|---|---|
-| `complete` | every section the plan named is in the paper |
-| `grounded` | every `[n]` resolves to a retrieved source |
-| `cited` | every claim paragraph names a source |
-| `sourced` | every arXiv / DOI / author-year appears in retrieved text |
-| `images` | every figure the paper references is a file on disk |
-| `style` | zero em dashes outside code spans |
-| (plus sources) | the reference list is intact |
-
-`complete` looks redundant. A run that spent its budget in verification wrote
-no sections at all: title, abstract, 25-entry reference list. Every other row
-passed. The judge caught it. The row is there so the first backstop does not
-have to.
+Running out mid-verification leaves remaining claims `unverified`. Marking them verified because the money ran out is the lie.
 
 
 ---
 
 # The check that matters most: `sourced`
 
-A web search cannot refute a citation that was never published. Asking a model
-whether a reference is real gets you a confident yes.
+A web search cannot refute a citation that was never published. Asking a model whether a reference is real gets you a confident yes.
 
-The only thing that catches a fabricated arXiv id or DOI is looking for it in
-the text that was actually retrieved. `checks.ungrounded_identifiers`.
+The only thing that catches a fabricated arXiv id or DOI is looking for it in the text that was actually retrieved. `checks.ungrounded_identifiers`.
 
 
 ---
 
-# Three exits. Stall is the one people miss.
-
-`gates.py`: pass, retry, escalate. No fourth.
-
-When an attempt fails in exactly the same way as the last one, the loop is not
-converging. The signature is **what** failed, not how it was worded. A model
-rephrasing its own complaint does not read as progress.
-
-A paper that did not pass is never published.
-
-
----
-
-# Commands. Offline first.
+# White-paper acceptance runs
 
 ```bash
-cd solutions/sol3_research_agent_sdk
-task table          # no SDK, no key, no network
-task checks         # checks / gates / publish / rkc --demo
-task test           # unit tests, same constraints
-task setup          # SDK + imagen-diagrams clone into .cache/
-task demo           # full offline run over the fixture
-task run TOPIC="how MCP servers authenticate"
-task publish TOPIC="..."     # also pushes a private gist
+task e2e-fixture
+LIVE_E2E_MAX_USD=10 task e2e-live
+REPORT_DIR=work/e2e-loop-engineering-live task pdf
+REPORT_DIR=work/e2e-loop-engineering-live task publish-report
 ```
+
+Fixture uses recorded research plus real `imagen-diagrams` figures. Live needs both keys and never publishes a gist by itself.
+
+PDF uses Arctic Fox. `publish-report` is a secret gist. The URL is the credential.
+
+`task clean` deletes `work/`. The `.cache/` plugins stay.
 
 
 ---
 
-# Expected output
+# Testing skill
 
-```
-work/<slug>/
-  paper.md
-  diagrams/*.png
-  knowledge/research/     RKC: sources, claims, evidence, findings
-  .harness/state.json     per-phase status and cost
-```
+`.agents/skills/e2e-test-research-report/`
 
-Deleting one phase output re-runs that phase and no other. Resume needs no
-bookkeeping: a phase whose file exists already ran.
+Default folder is this one.
 
-`--private` on a gist means unlisted, not access controlled. Anyone holding
-the URL can read the paper and fetch every figure. Treat the URL as the
-credential.
-
-
----
-
-# Plugin files vs Python
-
-```
-plugin/agents/research-{planner,researcher,verifier,diagrammer,writer,judge}.md
-plugin/skills/research-loop/SKILL.md
+```bash
+task setup && task test && task checks
+LIVE_E2E_MAX_USD=10 task e2e-live
 ```
 
-The skill is the readable specification of what `paper.py` implements. Do **not**
-run the skill from this port. Python owns the phases. Running the skill would
-give you two orchestrators disagreeing about whose turn it is.
-
-When an agent markdown file and the role table disagree, `options_for` raises.
+Use the fixture lane when credentials are absent. Do not describe a fixture lane as live.
 
 
 ---
 
 # Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Subagent tools denied | `allowed_tools` too narrow | union of the cast, plus hook |
-| Silent empty research | inherited missing `.mcp.json` | `mcp_servers()` in Python |
-| Fabricated sections | researcher answered from memory | empty claims must escalate |
-| Bill before a gate | cost only at the gate | check inside research and verify |
-| Title plus references, no body | spent budget in verify | `complete` row, then judge |
-| Writer rewrote `paper.md` | hook not looking at agent_type | deny anyone but writer, deny that path |
-
-
----
-
-# Validation checklist
-
-- [ ] `task table`: one writer, everyone else `no`
-- [ ] `task test` needs no SDK, no key, no network
-- [ ] Verifier is never handed the researcher's source
-- [ ] Writer cannot reach `paper.md` or `claims.json`
-- [ ] A write with no `agent_type` is denied
-- [ ] `maxTurns` not `max_turns` (TypeError on the real SDK)
-- [ ] A paper that did not pass is never published
+| Symptom | Fix |
+|---|---|
+| Subagent tools denied | union of the cast, plus hook |
+| Silent empty research | `mcp_servers()` in Python |
+| Fabricated sections | empty claims must escalate |
+| Bill before a gate | check cost inside research and verify |
+| Writer rewrote `paper.md` | deny anyone but writer, deny that path |
+| SVG in the paper | renderer must exit 2, not substitute |
 
 
 ---
 
 # Recap
 
-**What we built.** A topic in, a paper plus a knowledge bundle out.
-
-**Takeaways**
+A topic in. A paper plus a knowledge bundle out.
 
 1. Trigger and runtime change. Exits do not.
 2. `allowed_tools` gates the children.
@@ -342,4 +205,4 @@ When an agent markdown file and the role table disagree, `options_for` raises.
 4. Three budgets, and cost inside the phases.
 5. `sourced` catches a citation a model will bless.
 
-Closing line. The grounding contract has to hold while the wiring is wrong.
+The grounding contract has to hold while the wiring is wrong.

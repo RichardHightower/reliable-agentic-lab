@@ -12,8 +12,6 @@ A question in. A cited brief out. Same graph, different object.
 
 Work from `labs/lab3_research`.
 
-![w:640](../session-3-research-loops-mcp/images/diagram-s3-03.jpg)
-
 
 ---
 
@@ -57,15 +55,9 @@ Saturday uses the fixture backend. No signup form.
 
 # Starting architecture
 
-```
-orchestrator  owns budget + exits. Writes nothing. Sees summaries.
-     +-- researcher   search tools only. Isolated context. No write.
-     +-- writer       brief.md + work/research/** only.
-     +-- judge        brief.check. Citations are arithmetic.
-```
+![h:360](images/lab3-research-roles.jpg)
 
-Allowed: search, write this loop's own output folder.
-Denied: merge, deploy, ticket state, CRM edits.
+Allowed: search and this loop's output. Denied: merge, deploy, ticket state, CRM edits.
 
 
 ---
@@ -149,22 +141,24 @@ House style forbids em dashes. A model will argue. Python will not.
 
 # Commands. Live first.
 
-`task loop:research` is gone with `loops/`.
-
 Saturday self-check:
 
 ```bash
 task test    # import loop; print('ok')
 ```
 
-Runnable filled loop, after class or as the instructor demo:
+Instructor demo of the cited brief, Deep Agents port:
 
 ```bash
 cd ../../solutions/sol3_research_deep_agents
-python3 loop.py --question "sqlalchemy nullable datetime column" --backend fixture
+task test
+task table
+task brief -- --question "sqlalchemy nullable datetime column" --backend fixture
 ```
 
 The question is boring on purpose. It matches `fixtures/research.json`.
+
+After class the Agent SDK port grows this into a white paper, Arctic Fox PDF, and a secret gist. See `HOW_TO_RUN.md` and `.agents/skills/e2e-test-research-report/`.
 
 
 ---
@@ -203,7 +197,7 @@ Four stops: call budget, dollar budget, stable failure, no-source escalates.
 |---|---|---|
 | Reaching for a model in `check_brief` | stall | `return brief.check(...)` |
 | Over-designed planner | stall | three strings |
-| `task loop:research` missing | engine deleted | `sol3_research_deep_agents/loop.py` |
+| `task loop:research` missing | engine deleted | `task brief` in `sol3_research_deep_agents` |
 | Uncited brief shipped | skipped `has_sources` | empty findings escalate |
 | Em dashes in the brief | model argued | `brief.strip_em_dashes` |
 

@@ -14,8 +14,6 @@ A ready ticket in. A green rubric out.
 
 Work from `labs/lab2_implementer`.
 
-![w:640](../session-2-harness-engineering/images/diagram-s2-07.jpg)
-
 
 ---
 
@@ -46,26 +44,9 @@ A check that reports success while measuring the wrong thing is worse than no ch
 
 # Starting architecture
 
-Already in this folder: `contract.py`, `rubric.py`, `gates.py`, the stub, prompts.
+![h:340](images/lab2-harness-flow.jpg)
 
-You create: three function bodies in `harness.py`.
-
-```
-orchestrator  (writes nothing, owns budget)
-  planner            writes steps.jsonl
-  test_implementer   writes tests/**
-  code_implementer   writes app/**, denied tests/**
-  judge              no write method
-           │
-           ▼
-     red gate  →  ten-row rubric  →  gates.decide
-           │
-           ▼
-     .harness/last-implementer.json
-     .harness/receipt.json
-```
-
-This is Graph Engineering: each acceptance criterion becomes two nodes in `steps.jsonl`, a test step and a code step. Derived, not generated.
+You fill three function bodies in `harness.py`. Graph Engineering: each criterion becomes a test step and a code step in `steps.jsonl`.
 
 There is no `loops/` package. Do not recreate it.
 
@@ -213,23 +194,27 @@ The code implementer cannot weaken a test, not because it was told not to, but b
 
 # Commands. Live first.
 
-`task loop:implementer` is gone from the root Taskfile. `loops/` was deleted on purpose.
-
-Saturday self-check:
+Saturday self-check, from `labs/lab2_implementer`:
 
 ```bash
 task test    # python3 -c "import harness; print('ok')"
 ```
 
-To actually run the eight-step loop, use the Deep Agents port (after class, or as the instructor demo):
+Instructor demo, from the Deep Agents driver. Skills are mounted. Python owns the red gate.
 
 ```bash
 cd ../../solutions/sol2_implementer_deep_agents
-python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
-python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer none
+task test-setup
+task test
+task e2e
+task table          # judge writes must print no
+task run -- --ticket T001 --doer none
+task run -- --ticket T001 --doer reference
 ```
 
-The lab README verify is `task test`. Demo from the Deep Agents port.
+`--doer none` and `--doer reference` need no key. `--doer deep` needs `task setup` and `ANTHROPIC_API_KEY`.
+
+After class: `.agents/skills/test-ticket-implementer/` plus `HOW_TO_RUN.md` in that folder.
 
 
 ---
@@ -272,7 +257,7 @@ The push-gate refusal you hit live lives on the CRM clone as a Claude Code hook,
 | Computing ten rows by hand | stall on `score_attempt` | `return rubric.score(contract=contract, **evidence)` |
 | Returning all failed ids | `red_gate` used `after.failed` | subtract `before` ids |
 | Edited `loops/` or `rubric.py` | ignored the prompt | fill only `harness.py` |
-| `task loop:implementer` missing | engine deleted | demo via `sol2_implementer_deep_agents/harness.py` |
+| `task loop:implementer` missing | engine deleted | `task run` from `sol2_implementer_deep_agents` |
 | `--doer none` is green | red gate not stopping | empty new-ids must escalate |
 | `import _root` fails | leftover TROUBLESHOOTING | lab stub does not import it |
 

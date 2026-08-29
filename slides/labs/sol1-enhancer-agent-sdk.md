@@ -6,156 +6,37 @@ footer: Spillwave Solutions | spillwave.com
 ---
 # sol1_enhancer_agent_sdk
 
-Take-home. Python owns the loop. The model only drafts and grades.
+Take-home. Python owns the loop. The model drafts and grades. It does not write files. It does not run `/enhancer-loop`.
 
-Stop conditions cannot be talked past.
+Saturday live path is `solutions/sol1_enhancer`. Do not copy these fences into that folder.
 
-Needs `claude-agent-sdk` and an API key for a live poll. `task test` does not.
-
-
----
-
-# What you will build
-
-| File | Job |
-|---|---|
-| `enhancer.py` | one poll-and-act step in Python |
-| `loop.py` | CLI `--once`, `--table-only` |
-| `roles.py` | `ClaudeAgentOptions` plus `scope_hook` |
-| `plugin/` | same agents as Saturday, loaded with `plugins=` |
-| `check_fields.py` | ready is arithmetic |
-| `check_stop.py` | done, cost, max turns |
-| `tests/` | pytest, stubs the SDK |
-
-The point is not that it runs. The point is that the rubric, the write scope, and the exits did not have to change.
+Read `HOW_TO_RUN.md` and `DESIGN_DOC.md`.
 
 
 ---
 
-# Why Python holds the loop
-
-A skill is a model following steps. A model can skip a step.
-
-Here the parent session may only use the `Agent` tool. Python writes the candidate from the doer's text. Python calls `check_fields.py`. Python calls `check_stop.py`.
-
-
----
-
-# Learning objectives
-
-- Configure `tools=[...]` so judge and doer hold no Write
-- Implement `scope_hook` with the full deny envelope
-- Validate `--table-only` prints judge writes = `no`
-- Troubleshoot a hook that fails **open** because of a typo
-- Name the marker gap vs Deep Agents
-- Deploy `loop.py --once` on issue events
-
-
----
-
-# Starting architecture
-
-```
-python loop.py --once --repo TARGET --ticket T900
-  └── enhancer.py
-         Agent tool
-            ├── enhancer-judge  Read, Grep, Glob   output_format JSON
-            └── enhancer-doer   Read, Grep, Glob   text draft
-         Python writes tickets/<id>.enhancer-candidate.md
-         check_fields.py / check_stop.py
-         gh labels + .harness/last-enhancer-<id>.json
-```
-
-
----
-
-# Scope. Two places, both required
-
-1. `tools=[...]`. `NO_WRITE` strips Edit, Write, Bash.
-2. `PreToolUse` hook `roles.scope_hook`.
-
-Empty `{}` = allow. Deny must be:
-
-```python
-{
-  "hookSpecificOutput": {
-    "hookEventName": "PreToolUse",
-    "permissionDecision": "deny",
-    "permissionDecisionReason": "...",
-  }
-}
-```
-
-A typo fails **open**. Tests assert this shape key by key.
-
-
----
-
-# Parent session
-
-```
-allowed_tools=["Agent"]
-disallowed_tools=NO_WRITE
-CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1
-maxTurns=12
-background=False
-```
-
-System prompt: "Python already owns the loop. Do not invoke the enhancer-loop skill."
-
-Judge uses structured `output_format` (`JUDGE_SCHEMA`). The hook still fires if a Write leaks.
-
-
----
-
-# Cast. `roleplan.py`
-
-```
-enhancer: orchestrator, doer, judge
-orchestrator  tools: Task                              writes: no
-doer          tools: Read,Glob,Grep,Edit,Write,Bash    allow: tickets/**
-judge         tools: Read,Glob,Grep,Bash               writes: no
-```
-
-Doer tools include Write in the table. Python still writes the candidate. The hook is the fail-closed belt.
-
-
----
-
-# Extra exits. Marker gap
-
-`check_stop.py` also fires on `usd >= max_usd` and `turns >= max_turns`.
-
-Known gap vs the plugin and Deep Agents: `Gh.latest_comment` does not filter `<!-- enhancer-loop -->`, and `comment()` does not append it. Do not copy that gap into a new port.
-
-
----
-
-# Commands
+# Setup. Folder-local venv
 
 ```bash
 cd solutions/sol1_enhancer_agent_sdk
-pip install -r ../../requirements-takehome.txt
 cp config.json.example config.json
-task table          # python loop.py --table-only
-task test           # pytest, no key, no clone
-task checks
-task clone && task create-test-tickets
-task run            # python loop.py --once --repo TARGET
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
+task setup          # .venv + claude-agent-sdk. PEP 668.
+task clone
+task create-test-tickets
 ```
 
-Outcome line: `T900    waiting     round 1, still missing value, criteria`
+Do not `pip install -r ../../requirements-takehome.txt`. Homebrew Python will refuse.
 
 
 ---
 
-# Expected `--table-only`
+# Scripts with no model
 
-```
-role           writes  scope
-orchestrator   no      nothing
-doer           yes     tickets/**
-judge          no      nothing
+```bash
+task table          # judge writes must print no
+task checks
+task test           # pytest. No key, no clone, no SDK.
 ```
 
 If judge prints `yes`, stop. The port is wrong.
@@ -163,44 +44,71 @@ If judge prints `yes`, stop. The port is wrong.
 
 ---
 
-# Troubleshooting
+# Architecture
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Judge writes `yes` | tools list leaked Write | strip with `NO_WRITE` |
-| Writes to `app/` | deny envelope typo | tests assert `hookSpecificOutput` |
-| Duplicate comments | marker gap | copy Deep Agents filter |
-| SDK import error in pytest | imported at module top | lazy import, tests stub |
+![h:340](images/sdk-two-fences.jpg)
 
+Python writes the candidate and runs the checks. A typo in the deny envelope fails **open**.
 
----
-
-# Validation
-
-- [ ] `task test` green without a key
-- [ ] table: judge writes `no`
-- [ ] deny shape matches tests key by key
-- [ ] live poll grooms T900
-- [ ] you know the marker gap exists
+See `docs/diagrams/architecture.svg`.
 
 
 ---
 
-# GitHub Actions
-
-`ENHANCER_BACKEND=agent-sdk`
+# One poll
 
 ```bash
-python3 loop.py --once --repo "$GITHUB_WORKSPACE" --ticket "$TICKET"
+timeout 420 task run --
+task run -- --quiet
+task poll-forever --
 ```
 
-Secret `ANTHROPIC_API_KEY`. Copy `labs/lab1_enhancer/workflows/enhance-on-issue.yml` onto your CRM fork.
+A first poll is three model calls: judge, doer, judge again. Cap it while you develop.
+
+Hung queries dump to `.harness/last-doer-T<id>.md`. Cap is 180 seconds.
+
+
+---
+
+# Scope. Two places, both required
+
+1. `tools=[...]`. `NO_WRITE` strips Edit, Write, Bash.
+2. `PreToolUse` hook `roles.scope_hook`. Empty `{}` = allow. Deny must be `hookSpecificOutput` with `permissionDecision: deny`.
+
+Parent session: `allowed_tools=["Agent"]`. `permission_mode` is not chatting. Python already owns the loop.
+
+
+---
+
+# Testing skill. Same ritual as Claude Code
+
+`.agents/skills/test-sol1-ticket-enhancer/`
+
+```bash
+task reset-test-tickets
+task create-test-tickets
+task run --
+```
+
+Review live issues. Post exact `LGTM`. Next poll: `state: ready`, `loop: implementer`.
+
+
+---
+
+# Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Judge writes `yes` | strip Write with `NO_WRITE` |
+| `externally-managed-environment` | `task setup`, not system pip |
+| Hang, no output | read `.harness/last-doer-T<id>.md` |
+| Closed issue | `task reset-test-tickets` |
 
 
 ---
 
 # Recap
 
-The harness is the product. The framework is not.
+Python holds the loop. The model only drafts and grades.
 
-If a port imports a shared engine, the design leaked. This folder copies `roleplan.py` and `write_scope.py` on purpose.
+`task setup`, `task table`, `task test`, `task run`. Read `HOW_TO_RUN.md`.
