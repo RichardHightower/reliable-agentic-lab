@@ -224,3 +224,46 @@ def test_build_agent_passes_only_absolute_permission_paths(contract, monkeypatch
     for subagent in seen["subagents"]:
         for _, permission in subagent["permissions"]:
             assert all(path.startswith("/") for path in permission["paths"])
+
+
+def test_the_write_tool_refuses_a_traversal_that_matches_the_glob(
+    contract, target_repo, fake_langchain
+):
+    """`tickets/../app/x.py` matches `tickets/**` as text but lands in `app/`.
+
+    `WriteScope` globs a string and does not resolve `..`, so checking the path
+    as written accepts an escape the disk then honors. The tool canonicalizes
+    first and scope-checks the path the write will actually use.
+    """
+    doer = _by_name(roles.subagents_for(contract, loop="enhancer"))["doer"]
+    write = doer["tools"][0]
+    (target_repo / "app").mkdir(parents=True, exist_ok=True)
+    (target_repo / "app" / "models.py").write_text("real code", encoding="utf-8")
+
+    answer = write("tickets/../app/models.py", "print()")
+
+    assert answer.startswith("REFUSED")
+    assert (target_repo / "app" / "models.py").read_text(encoding="utf-8") == "real code"
+
+
+def test_the_write_tool_refuses_a_traversal_out_of_the_repo(
+    contract, target_repo, fake_langchain
+):
+    doer = _by_name(roles.subagents_for(contract, loop="enhancer"))["doer"]
+    write = doer["tools"][0]
+
+    answer = write("tickets/../../escaped.md", "x")
+
+    assert answer.startswith("REFUSED")
+    assert not (target_repo.parent / "escaped.md").exists()
+
+
+def test_the_write_tool_reports_the_canonical_path_it_wrote(
+    contract, target_repo, fake_langchain
+):
+    """A confirmation naming the path as written would hide a normalization."""
+    doer = _by_name(roles.subagents_for(contract, loop="enhancer"))["doer"]
+    write = doer["tools"][0]
+
+    assert write("tickets/sub/../7.md", "body") == "wrote tickets/7.md"
+    assert (target_repo / "tickets" / "7.md").read_text(encoding="utf-8") == "body"

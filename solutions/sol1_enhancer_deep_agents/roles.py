@@ -19,10 +19,43 @@ Nothing here calls a model. `subagents_for` returns configuration.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 from pathlib import Path
 
 from roleplan import DEFAULT_LOOP, RolePlan, plan
 from write_scope import ScopeViolation, WriteScope
+
+# The scope for the call in flight, narrower than the role's declared scope.
+#
+# A role's row says where it may EVER write. One turn wants less than that. The
+# doer's row allows `tickets/**`, which includes the real ticket the judge is
+# grading and every other ticket in the repo. A doer that writes the real ticket
+# directly has gone around the proper-subset gate, and the gate is the only
+# reason a draft has to be an improvement before it counts.
+#
+# The orchestrator already computes the one path it wants per turn, so the turn
+# carries it. A ContextVar rather than a constructor argument because the agent
+# is built once and invoked many times.
+CURRENT_ALLOW: contextvars.ContextVar[tuple[str, ...] | None] = contextvars.ContextVar(
+    "current_allow", default=None
+)
+
+
+@contextlib.contextmanager
+def write_allow(allow):
+    """Narrow every write tool to `allow` for the duration of one call.
+
+    An empty or absent list leaves each role at its declared scope, which is
+    what the judge turn wants: it holds no write tool, so there is nothing to
+    narrow.
+    """
+    token = CURRENT_ALLOW.set(tuple(allow) if allow else None)
+    try:
+        yield
+    finally:
+        CURRENT_ALLOW.reset(token)
+
 
 HERE = Path(__file__).resolve().parent
 SKILLS_DIR = HERE / "skills"
@@ -76,22 +109,35 @@ def scoped_write_tool(repo: Path, role: RolePlan):
     """
     from langchain.tools import tool  # noqa: PLC0415  (optional dependency)
 
-    scope = WriteScope(allow=list(role.allow), deny=list(role.deny))
-    allowed = ", ".join(role.allow) or "nothing"
+    root = Path(repo).resolve()
 
     @tool(f"write_{role.name}")
     def write(path: str, content: str) -> str:
-        """Write a file inside this role's declared scope."""
-        try:
-            scope.check(path)
-        except ScopeViolation:
-            return f"REFUSED. {role.name} may write {allowed}. {path} is outside that scope."
+        """Write a file inside the scope this turn allows."""
+        # The turn's scope, or the role's when the turn did not narrow it.
+        # Deny always comes from the row: a turn may shrink what a role can
+        # write, never widen it.
+        turn = CURRENT_ALLOW.get()
+        allow = list(turn) if turn else list(role.allow)
+        scope = WriteScope(allow=allow, deny=list(role.deny))
+        allowed = ", ".join(allow) or "nothing"
+
+        # Canonicalize first, then scope-check the canonical relative path.
+        # The glob in `WriteScope` does not resolve `..`, so `tickets/../app/x.py`
+        # matches `tickets/**` as text while landing in `app/`. Checking the
+        # path the write will actually use removes the difference between what
+        # the scope reads and what the disk receives.
         target = _inside(repo, path)
         if target is None:
             return f"REFUSED. {path} is outside the target repo."
+        relative = target.relative_to(root).as_posix()
+        try:
+            scope.check(relative)
+        except ScopeViolation:
+            return f"REFUSED. {role.name} may write {allowed} this turn. {relative} is not that."
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-        return f"wrote {path}"
+        return f"wrote {relative}"
 
     return write
 
