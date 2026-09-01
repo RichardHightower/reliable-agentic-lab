@@ -380,13 +380,20 @@ def test_the_candidate_is_cleaned_up_even_when_judging_it_fails(target):
     assert not (target / "tickets" / f"T001{enhancer.CANDIDATE_SUFFIX}").exists()
 
 
-def test_the_doer_is_scoped_to_tickets_and_the_judge_to_nothing(target):
-    """The hook reads this allow list. A doer handed `**` is an unscoped doer."""
+def test_the_doer_turn_is_scoped_to_one_candidate_and_the_judge_to_nothing(target):
+    """The write tool reads this allow list. One turn gets one path.
+
+    `tickets/**` is the doer's row, and it holds the real ticket the judge is
+    grading plus every other ticket in the repo. A doer that writes the real
+    ticket directly has gone around the proper-subset gate, so the turn grants
+    the candidate path and nothing else.
+    """
     backend = FakeBackend([judged(), judged(present=FEATURE)], draft=DRAFT)
     engine(target, backend, FakeGh()).poll()
     judge_allow, doer_allow = backend.allows[0], backend.allows[1]
     assert judge_allow == [], "the judge holds no write tool, so it gets no scope"
-    assert doer_allow == ["tickets/**"]
+    assert doer_allow == [f"tickets/T001{enhancer.CANDIDATE_SUFFIX}"]
+    assert "tickets/**" not in doer_allow, "the row is the outer bound, not the grant"
 
 
 def test_a_doer_that_writes_nothing_is_an_error_not_a_silent_pass(target):

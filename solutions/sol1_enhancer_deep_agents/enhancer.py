@@ -46,8 +46,9 @@ LGTM = "LGTM"
 # attendee's `LGTM`, which is the one comment it must never miss.
 MARKER = "<!-- enhancer-loop -->"
 
-# The doer writes here and nowhere else. It sits under `tickets/**`, which is
-# the doer's declared scope, so the write tool lets it through and nothing else.
+# The doer's declared scope, from `roleplan.FALLBACK_SCOPE`. It is where the
+# doer may EVER write. Each doer turn narrows it further to the one candidate
+# path that turn is for, so this constant is the outer bound, not the grant.
 DOER_ALLOW = ["tickets/**"]
 
 
@@ -476,7 +477,11 @@ class Enhancer:
             f"missing {', '.join(missing) or 'nothing'}. {told} "
             f"Keep the front matter exactly as it is. Write the full rewritten ticket "
             f"to {relative} and write nothing else.",
-            allow=DOER_ALLOW,
+            # This turn, and not the doer's whole row. The row says `tickets/**`,
+            # which includes the very ticket the judge is about to grade. A doer
+            # that writes that file directly has stepped around the proper-subset
+            # gate below, which is the only thing making a draft earn its place.
+            allow=[relative.as_posix()],
         )
         if not result.ok:
             if getattr(result, "timed_out", False):

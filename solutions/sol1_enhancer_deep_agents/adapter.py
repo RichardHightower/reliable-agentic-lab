@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import roles
 from write_scope import WriteScope
 
 
@@ -258,7 +259,10 @@ class DeepAgentsBackend(Backend):
             scope = WriteScope(allow=list(allow))
             before = _changed_files(repo)
             started = time.monotonic()
-            with _wall_clock_timeout(self.timeout_s):
+            # `roles.write_allow` narrows every write tool to this turn's paths.
+            # Without it the tool falls back to the role's row, which is where a
+            # doer can reach the real ticket instead of its candidate.
+            with roles.write_allow(allow), _wall_clock_timeout(self.timeout_s):
                 result = self.agent.invoke({"messages": [{"role": "user", "content": prompt}]})
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]
             output = last_ai_text(result)
