@@ -35,6 +35,17 @@ tasks:
           {{.PY}} -m pytest tests -q
         fi
 
+  test-integration:
+    desc: Layer two. Assert the installed deepagents applies this folder's config. No model call.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. Layer two needs deepagents installed."
+          exit 1
+        fi
+        "{{.RUN_PY}}" -m pytest tests/test_integration_runtime.py -q
+
   table:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
