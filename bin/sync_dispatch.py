@@ -171,10 +171,11 @@ class Dispatcher:
     # that a bad project setting cannot walk the whole log (ADR-0004).
     GONE_ABORT = 3
 
-    def __init__(self, adapter, retry_base_delay=0.5, dry_run=False):
+    def __init__(self, adapter, retry_base_delay=0.5, dry_run=False, actor="sync"):
         self.adapter = adapter
         self.base_delay = retry_base_delay
         self.dry_run = dry_run
+        self.actor = actor
         self.counts = dict.fromkeys(self.COUNT_KEYS, 0)
         self.drift = []
         self.collisions = {}
@@ -192,6 +193,10 @@ class Dispatcher:
         # abort can leave nothing behind.
         self.adapter_ok = False
         self.pending_gone = {}
+        # #385: first-class drift, reported even on --push-only.
+        self.unmarked = []          # (key, title, system)
+        self.remote_closed = []     # (iid, key, title)
+        self.skip_push_ids = set()  # do not push; would rewrite a closed remote
 
     # --- state (.work/sync-state.json, per-clone) ---
 
@@ -215,6 +220,21 @@ class Dispatcher:
 
     def last_pushed(self, iid):
         return self.state.get("items", {}).get(iid, {}).get("last_pushed_hash")
+
+    def remembered_key(self, iid, ext=None):
+        """The remote key this item should update against.
+
+        Folded `external.key` wins. When a checkout has thrown the link
+        event away (#382), fall back to last_pushed_key in the gitignored
+        state file so the next run updates the ticket that already exists
+        instead of minting a second one.
+        """
+        if ext is None:
+            ext = {}
+        if ext.get("key"):
+            return str(ext["key"])
+        prev = self.state.get("items", {}).get(iid, {}).get("last_pushed_key")
+        return str(prev) if prev else None
 
     def is_dirty(self, iid, h, ext):
         """Content changed, OR the ticket this item points at changed.
@@ -248,7 +268,7 @@ class Dispatcher:
 
     def worklog(self, *args, fatal=True):
         p = subprocess.run([sys.executable, os.path.join(BIN, "worklog"),
-                            "--actor", "sync", *args],
+                            "--actor", self.actor, *args],
                            capture_output=True, text=True)
         if p.returncode != 0:
             if fatal:
@@ -261,12 +281,14 @@ class Dispatcher:
     def record_link(self, iid, system, key, resp):
         """Record the key the tracker just minted. Must never abort the run.
 
-        The ticket already exists remotely at this point, and create-vs-update
-        is decided purely by `external.key` presence — so exiting here leaves a
-        live ticket with no local link, and the NEXT run files a second one.
-        Hence --force (the one-owner check cannot apply to a key the remote
-        just handed us) and fatal=False (no link failure may kill a run
-        mid-create). A failure is real drift, not a reason to stop.
+        The ticket already exists remotely at this point. Create-vs-update
+        is decided by remembered_key (folded `external.key`, else
+        last_pushed_key) — so exiting here leaves a live ticket with no
+        local link, and a clone that has also forgotten last_pushed_key
+        files a second one. Hence --force (the one-owner check cannot apply
+        to a key the remote just handed us) and fatal=False (no link
+        failure may kill a run mid-create). A failure is real drift, not a
+        reason to stop.
         """
         link = ["link", iid, "--system", system, "--key", str(key), "--force"]
         if resp.get("url"):
@@ -360,6 +382,8 @@ class Dispatcher:
             # instead of popping last_pushed_hash and hammering the same
             # dead key forever.
             key = (item.get("external") or {}).get("key")
+            if not key:
+                key = self.remembered_key(iid)
             self.pending_gone[iid] = key
             if not self.adapter_ok and len(self.pending_gone) >= self.GONE_ABORT:
                 self._save_state()   # deliberately WITHOUT the pending marks
@@ -561,12 +585,14 @@ class Dispatcher:
             # set removes it entirely; the rest of the run proceeds.
             if iid in blocked:
                 continue
+            if iid in self.skip_push_ids:
+                continue
             # A ticket reported gone (rc 3) on a prior run: don't retry it
             # every run (worklog#241) -- surface the remedy again so it isn't
             # forgotten. `worklog unlink` clears `external`, so ext["key"]
             # then mismatches gone_key and the item re-enters scope normally.
             gone_key = self.state.get("items", {}).get(iid, {}).get("gone_key")
-            if gone_key is not None and gone_key == ext.get("key"):
+            if gone_key is not None and gone_key == self.remembered_key(iid, ext):
                 self.note("%s: ticket %s reported gone remotely — not "
                           "retried automatically; run `worklog unlink %s` "
                           "to clear the link and file a fresh one"
@@ -575,12 +601,16 @@ class Dispatcher:
             closed = item.get("status") in CLOSED_STATUSES
             payload_item = self.outbound(item, caps)
             h = canonical_hash(payload_item)
-            forced = bool(keys) and (iid in keys or ext.get("key") in keys)
+            key = self.remembered_key(iid, ext)
+            relink = bool(key) and not ext.get("key")
+            forced = bool(keys) and (iid in keys or ext.get("key") in keys
+                                     or (key in keys if key else False))
             dirty = self.is_dirty(iid, h, ext)
             # Scope (spec §10.5): open ∪ hash-dirty ∪ --keys. A closed item
             # that never went remote is inert — pushing it would file tickets
-            # for long-dead work.
-            if closed and not ext.get("key") and not forced:
+            # for long-dead work. last_pushed_key counts as "went remote"
+            # even when the log lost the link (#382).
+            if closed and not key and not forced:
                 continue
             if not (dirty or forced):
                 if not closed:
@@ -596,7 +626,6 @@ class Dispatcher:
                              local_type, caps["system"]))
 
             if closed:
-                key = ext.get("key")
                 if not key:
                     # Forced into scope (--keys) but never went remote: no
                     # key to update-then-close against, so create first,
@@ -653,24 +682,38 @@ class Dispatcher:
                         # This is the path that marked the reported ticket
                         # Done -- the one most worth naming out loud.
                         self.note_overwrite(iid, key, payload_item)
+                        if relink:
+                            try:
+                                resp = json.loads(p.stdout)
+                            except json.JSONDecodeError:
+                                resp = {}
+                            self.record_link(iid, caps["system"], key, resp)
                 p = self.run_adapter("close", str(key),
                                      item.get("resolution") or item["status"])
                 if self.handle_exit(item, p):
+                    if relink and ext.get("key") != key:
+                        # Lost-link close of an already-pushed ticket: restore
+                        # the folded key so the next run does not create (#382).
+                        try:
+                            resp = json.loads(p.stdout)
+                        except json.JSONDecodeError:
+                            resp = {}
+                        self.record_link(iid, caps["system"], key, resp)
                     self.record_push(iid, h, key)
                     self.counts["closed"] += 1
                 continue
 
-            op = "update" if ext.get("key") else "create"
-            payload = {"op": op, "key": ext.get("key"),
+            op = "update" if key else "create"
+            payload = {"op": op, "key": key,
                        "marker": caps["marker"]["template"].replace("{ulid}", iid),
                        "item": payload_item}
             if self.dry_run:
                 print("would %s %s%s" % (op, iid[:8],
-                                         " -> %s" % ext["key"] if ext.get("key") else ""))
+                                         " -> %s" % key if key else ""))
                 # The most useful place for this: see what would be replaced
                 # while it is still hypothetical.
                 if op == "update":
-                    self.note_overwrite(iid, ext["key"], payload_item)
+                    self.note_overwrite(iid, key, payload_item)
                 continue
             p = self.call_push(payload)
             if not self.handle_exit(item, p):
@@ -680,7 +723,7 @@ class Dispatcher:
             except json.JSONDecodeError:
                 self.note("push %s: adapter returned non-JSON; not recorded" % iid[:8])
                 continue
-            pushed_key = ext.get("key")
+            pushed_key = key
             if op == "create":
                 if not resp.get("key"):
                     self.note("push %s: response missing key; not linked" % iid[:8])
@@ -691,6 +734,8 @@ class Dispatcher:
             else:
                 self.counts["updated"] += 1
                 self.note_overwrite(iid, pushed_key, payload_item)
+                if relink:
+                    self.record_link(iid, caps["system"], pushed_key, resp)
             self.record_push(iid, h, pushed_key)
         # The push loop is over, so the abort can no longer fire: whatever is
         # still buffered is what this run really means to record.
@@ -733,10 +778,14 @@ class Dispatcher:
                 max_rev = rev
             iid = line.get("id")
             if not iid:
-                # Creating local items from remote-origin tickets is future
-                # work — report, don't act, keep this run read-safe.
-                self.note("remote-origin ticket %s: no local item created"
-                          % ext.get("key"))
+                # Unmarked tickets are not "new work arriving" — they are
+                # tracker-only orphans (#385). Observe already classified
+                # them when it could; this is the backstop for a pull that
+                # sees one observe missed.
+                key = ext.get("key")
+                if key and not any(k == str(key) for k, _, _ in self.unmarked):
+                    self.unmarked.append(
+                        (str(key), line.get("title") or "", system))
                 continue
             local = by_id.get(iid)
             if local is None:
@@ -793,6 +842,415 @@ class Dispatcher:
             self.item_state(iid)["gone_key"] = key
         self.pending_gone.clear()
 
+    # --- dedupe (#383): inverse of github#226, one item many remote keys ---
+
+    def fetch_remote_tickets(self, caps, fatal=True):
+        """Every ticket the adapter will name. Cursor-less on purpose.
+
+        GitHub's pull requires --since or --keys; the fake does not. EPOCH
+        satisfies both and is the whole board, not the delta since last sync.
+
+        `fatal=False` (observe on push-only, #385) reports and returns None
+        instead of aborting the run — a listing failure must not block a
+        push that can still proceed.
+        """
+        if "pull" not in caps.get("supports", []):
+            if not fatal:
+                return None
+            raise ContractError("adapter does not support pull; cannot dedupe")
+        p = self.run_adapter("pull", "--since", EPOCH)
+        if p.returncode == 2:
+            if not fatal:
+                self.note("could not list remote tickets (auth); "
+                          "unmarked and closed-on-remote drift not reported")
+                return None
+            sys.exit("worklog dedupe: adapter auth failure on pull — "
+                     "re-authenticate with the tracker and re-run.")
+        if p.returncode != 0:
+            if not fatal:
+                self.note("could not list remote tickets (exit %d); "
+                          "unmarked and closed-on-remote drift not reported"
+                          % p.returncode)
+                return None
+            sys.exit("worklog dedupe: pull failed (exit %d)" % p.returncode)
+        tickets = []
+        for raw in p.stdout.splitlines():
+            if not raw.strip():
+                continue
+            try:
+                tickets.append(json.loads(raw))
+            except json.JSONDecodeError:
+                self.note("dedupe: unparseable NDJSON line skipped")
+        # A clean board listing proves the project is reachable (ADR-0004),
+        # including on --push-only where pull() never runs.
+        self.adapter_ok = True
+        return tickets
+
+    def historical_keys_by_item(self):
+        """item ULID -> keys that a `link` event ever recorded.
+
+        Compaction drops these, so the join decays. Marker grouping is the
+        durable one; this only fills gaps when a copy lost its marker but
+        the log still remembers the key.
+        """
+        found = {}
+        for path in LOG_PATHS:
+            try:
+                fh = open(path, encoding="utf-8")
+            except FileNotFoundError:
+                continue
+            with fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if ev.get("op") != "link":
+                        continue
+                    iid = ev.get("item")
+                    key = ((ev.get("set") or {}).get("external") or {}).get("key")
+                    if iid and key:
+                        found.setdefault(iid, []).append(str(key))
+        return found
+
+    @staticmethod
+    def _ticket_key(ticket):
+        key = (ticket.get("external") or {}).get("key")
+        return str(key) if key is not None else None
+
+    @staticmethod
+    def _ticket_closed(ticket):
+        return ticket.get("status") in CLOSED_STATUSES
+
+    @staticmethod
+    def _key_sort(key):
+        """Earliest-wins: numeric suffix if present, else the string."""
+        digits = []
+        for ch in reversed(str(key)):
+            if ch.isdigit():
+                digits.append(ch)
+            else:
+                break
+        n = int("".join(reversed(digits))) if digits else 0
+        return (n, str(key))
+
+    def group_duplicates(self, tickets, items):
+        """Split remote tickets into marker groups and low-confidence titles.
+
+        Marker ULID is the join that #382 extras share. Historical link
+        events attach extra keys to an already-known item (they do not
+        start a collapse on their own — an intentional unlink would look
+        the same). Same title, different markers: low-confidence, never
+        auto-collapsed.
+        """
+        by_marker = {}
+        for t in tickets:
+            iid = t.get("id")
+            if iid:
+                by_marker.setdefault(iid, []).append(t)
+        by_key = {}
+        for t in tickets:
+            k = self._ticket_key(t)
+            if k is not None:
+                by_key[k] = t
+        hist = self.historical_keys_by_item()
+        for iid, keys in hist.items():
+            # History may attach a marker-stripped extra to a group that
+            # already has two copies. It must not start a collapse on its
+            # own: an intentional unlink + re-file looks the same.
+            if iid not in by_marker or len(by_marker[iid]) < 2:
+                continue
+            group = list(by_marker[iid])
+            have = {self._ticket_key(t) for t in group}
+            for k in keys:
+                if k in have or k not in by_key:
+                    continue
+                group.append(by_key[k])
+                have.add(k)
+            by_marker[iid] = group
+        marker_dupes = {k: v for k, v in by_marker.items() if len(v) > 1}
+
+        in_marker = {id(t) for group in marker_dupes.values() for t in group}
+        by_title = {}
+        for t in tickets:
+            if id(t) in in_marker:
+                continue
+            title = (t.get("title") or "").strip()
+            if not title:
+                continue
+            by_title.setdefault(title, []).append(t)
+        title_dupes = {k: v for k, v in by_title.items() if len(v) > 1}
+        return marker_dupes, title_dupes
+
+    def pick_survivor(self, iid, group, items):
+        """Fold key, else last_pushed_key, else earliest key."""
+        keys = [k for k in (self._ticket_key(t) for t in group) if k]
+        if not keys:
+            return None, []
+        item = items.get(iid) or {}
+        ext = item.get("external") or {}
+        if ext.get("key") and str(ext["key"]) in keys:
+            survivor = str(ext["key"])
+        else:
+            remembered = self.remembered_key(iid, ext)
+            if remembered and remembered in keys:
+                survivor = remembered
+            else:
+                survivor = sorted(keys, key=self._key_sort)[0]
+        losers = [k for k in keys if k != survivor]
+        return survivor, losers
+
+    def collapse_group(self, iid, group, items, caps):
+        survivor, losers = self.pick_survivor(iid, group, items)
+        if not survivor:
+            self.note("%s: duplicate group has no keys; skipped" % iid[:8])
+            return
+        pointer = "duplicate of %s (worklog dedupe of %s)" % (survivor, iid)
+        for key in losers:
+            p = self.run_adapter("close", str(key), pointer)
+            if p.returncode != 0:
+                self.note("%s: could not close extra %s (exit %d)"
+                          % (iid[:8], key, p.returncode))
+                continue
+            print("closed extra %s -> %s" % (key, survivor))
+        resp = {}
+        for t in group:
+            if self._ticket_key(t) == survivor:
+                ext = t.get("external") or {}
+                resp = {"url": ext.get("url"), "rev": ext.get("rev")}
+                break
+        item = items.get(iid) or {}
+        if (item.get("external") or {}).get("key") != survivor:
+            self.record_link(iid, caps["system"], survivor, resp)
+        # Keep the last content hash if we have one; only the key changes.
+        h = self.last_pushed(iid)
+        self.record_push(iid, h, survivor)
+
+    def dedupe(self, collapse_agreed=False, show_conflicts=False, dry_run=True):
+        caps = self.capabilities()
+        tickets = self.fetch_remote_tickets(caps)
+        items = {i["id"]: i for i in self.fold_items()}
+        marker_dupes, title_dupes = self.group_duplicates(tickets, items)
+
+        agreed, conflicts = [], []
+        for iid, group in sorted(marker_dupes.items()):
+            flags = [self._ticket_closed(t) for t in group]
+            entry = (iid, group)
+            if flags and (all(flags) or not any(flags)):
+                agreed.append(entry)
+            else:
+                conflicts.append(entry)
+
+        if agreed:
+            print("%d agreed duplicate group(s):" % len(agreed))
+            for iid, group in agreed:
+                keys = " ".join(self._ticket_key(t) or "?" for t in group)
+                print("  agreed  %s  %s" % (iid, keys))
+        if conflicts:
+            print("%d conflict group(s):" % len(conflicts))
+            for iid, group in conflicts:
+                bits = []
+                for t in group:
+                    k = self._ticket_key(t) or "?"
+                    bits.append("%s:%s" % (k, t.get("status") or "open"))
+                print("  conflict  %s  %s" % (iid, " ".join(bits)))
+        elif show_conflicts:
+            print("no conflict groups")
+        if title_dupes:
+            print("%d low-confidence title group(s) (never auto-collapsed):"
+                  % len(title_dupes))
+            for title, group in sorted(title_dupes.items()):
+                keys = " ".join(self._ticket_key(t) or "?" for t in group)
+                print("  low-confidence  %r  %s" % (title, keys))
+        if not (agreed or conflicts or title_dupes):
+            print("dedupe: no duplicate groups")
+
+        if collapse_agreed and not dry_run:
+            for iid, group in agreed:
+                self.collapse_group(iid, group, items, caps)
+            self._save_state()
+        elif collapse_agreed and dry_run:
+            for iid, group in agreed:
+                survivor, losers = self.pick_survivor(iid, group, items)
+                print("would collapse %s keep %s close %s"
+                      % (iid, survivor, " ".join(losers)))
+        return 0
+
+    # --- observe (#385): unmarked remotes + closed-on-remote, even push-only ---
+
+    def observe_remote(self, caps, items):
+        """Classify tracker-only orphans and closed-on-remote linked items.
+
+        Push-only treats the log as source of truth, so these two drifts are
+        otherwise invisible: an issue filed with `gh issue create` never
+        carries a marker, and a GitHub close never writes a log event.
+        This is not full pull-sync — title/body are not ingested.
+        """
+        tickets = self.fetch_remote_tickets(caps, fatal=False)
+        if not tickets:
+            return
+        owned = {}
+        for item in items:
+            key = self.remembered_key(item["id"], item.get("external") or {})
+            if key:
+                owned[str(key)] = item
+        system = caps["system"]
+        for t in tickets:
+            key = self._ticket_key(t)
+            if key is None:
+                continue
+            owner = owned.get(key)
+            iid = t.get("id")
+            if owner is None and not iid:
+                self.unmarked.append((key, t.get("title") or "", system))
+                continue
+            if owner is None:
+                continue
+            if (self._ticket_closed(t)
+                    and owner.get("status") not in CLOSED_STATUSES):
+                self.remote_closed.append(
+                    (owner["id"], key, owner.get("title") or ""))
+                self.skip_push_ids.add(owner["id"])
+
+    def apply_remote_closes(self, caps):
+        """Close local items whose linked ticket is already closed remotely.
+
+        Skip the subsequent push of those items (skip_push_ids): an update
+        would rewrite a closed ticket from stale open-log state. After the
+        close, record last_pushed_hash against the closed shape so the next
+        run does not treat the status change as dirty.
+        """
+        if not self.remote_closed:
+            return
+        if self.dry_run:
+            return
+        closed = []
+        for iid, key, title in self.remote_closed:
+            if self.worklog("close", iid, "--resolution",
+                            "closed remotely (%s)" % key, fatal=False) is None:
+                self.note("%s: remote %s is closed but could not close "
+                          "locally — run `worklog close %s`"
+                          % (iid[:8], key, iid))
+                continue
+            closed.append((iid, key, title))
+        self.remote_closed = closed
+        by_id = {i["id"]: i for i in self.fold_items()}
+        for iid, key, title in closed:
+            item = by_id.get(iid)
+            if not item:
+                continue
+            h = canonical_hash(self.outbound(item, caps))
+            self.record_push(iid, h, key)
+
+    def adopt(self, key, system=None, dry_run=False):
+        """Create a log item from an existing remote ticket and stamp the
+        ULID marker so the next push updates instead of ignoring (#385).
+        """
+        caps = self.capabilities()
+        system = system or caps["system"]
+        if system != caps["system"]:
+            print("worklog adopt: --system %s does not match adapter %s"
+                  % (system, caps["system"]), file=sys.stderr)
+            return 1
+        if "get" not in caps.get("supports", []):
+            print("worklog adopt: adapter does not support get", file=sys.stderr)
+            return 1
+        p = self.run_adapter("get", str(key))
+        if p.returncode == 2:
+            print("worklog adopt: adapter auth failure — re-authenticate "
+                  "with the tracker and re-run.", file=sys.stderr)
+            return 2
+        if p.returncode == 3:
+            print("worklog adopt: no ticket %s:%s" % (system, key),
+                  file=sys.stderr)
+            return 1
+        if p.returncode != 0:
+            print("worklog adopt: get failed (exit %d)" % p.returncode,
+                  file=sys.stderr)
+            return 1
+        try:
+            ticket = json.loads(p.stdout)
+        except json.JSONDecodeError:
+            print("worklog adopt: adapter returned non-JSON", file=sys.stderr)
+            return 1
+        items = self.fold_items()
+        owners = [i for i in items
+                  if str((i.get("external") or {}).get("key") or "") == str(key)]
+        if owners:
+            print("worklog adopt: %s:%s already belongs to %s"
+                  % (system, key, owners[0]["id"]), file=sys.stderr)
+            return 1
+        existing = ticket.get("id")
+        by_id = {i["id"]: i for i in items}
+        title = ticket.get("title") or "(untitled)"
+        if existing and existing in by_id:
+            iid = existing
+            if dry_run:
+                print("would link %s -> %s:%s" % (iid, system, key))
+                return 0
+            ext = ticket.get("external") or {}
+            self.record_link(iid, system, key,
+                             {"url": ext.get("url"), "rev": ext.get("rev")})
+            print(iid)
+            return 0
+        if dry_run:
+            print("would create item from %s:%s (%r)" % (system, key, title))
+            print("would link and stamp the worklog marker")
+            return 0
+        add = ["add", title]
+        level = ticket.get("level") or "task"
+        kind = ticket.get("kind")
+        if level == "epic" and kind not in ("feature", "ops"):
+            kind = "feature"
+        add += ["--level", level]
+        if kind:
+            add += ["--kind", kind]
+        if ticket.get("priority") in ("P0", "P1", "P2", "P3"):
+            add += ["--priority", ticket["priority"]]
+        if ticket.get("milestone"):
+            add += ["--milestone", str(ticket["milestone"])]
+        body = ticket.get("body") or ""
+        if body:
+            add += ["--body", body[:2048]]
+        out = self.worklog(*add, fatal=False)
+        if out is None:
+            print("worklog adopt: could not create local item", file=sys.stderr)
+            return 1
+        iid = out.strip().splitlines()[-1].strip()
+        if self._ticket_closed(ticket):
+            self.worklog("close", iid, "--resolution",
+                         "adopted already-closed ticket", fatal=False)
+        ext = ticket.get("external") or {}
+        self.record_link(iid, system, key,
+                         {"url": ext.get("url"), "rev": ext.get("rev")})
+        # Stamp the marker so the next sync updates this ticket.
+        item = next((i for i in self.fold_items() if i["id"] == iid), None)
+        if item is None:
+            print("worklog adopt: created %s but could not re-fold it"
+                  % iid, file=sys.stderr)
+            return 1
+        payload_item = self.outbound(item, caps)
+        marker = caps["marker"]["template"].replace("{ulid}", iid)
+        p = self.call_push({"op": "update", "key": str(key),
+                            "marker": marker, "item": payload_item})
+        if p.returncode != 0:
+            self.note("%s: adopted locally but could not stamp marker on "
+                      "%s:%s (exit %d) — next sync still updates by key"
+                      % (iid[:8], system, key, p.returncode))
+        else:
+            try:
+                resp = json.loads(p.stdout)
+            except json.JSONDecodeError:
+                resp = {}
+            if resp.get("url") or resp.get("rev"):
+                self.record_link(iid, system, key, resp)
+        self.record_push(iid, canonical_hash(payload_item), key)
+        self._save_state()
+        print(iid)
+        return 0
+
     # --- the run ---
 
     def sync(self, keys=None, push=True, pull=True):
@@ -802,8 +1260,15 @@ class Dispatcher:
         if unsupported:
             self.note("fields not synced on %s: %s"
                       % (caps["system"], ", ".join(unsupported)))
+        items = self.fold_items()
+        # Observe even on --push-only: unmarked remotes and closed-on-remote
+        # linked items are the gaps push-only cannot see (#385).
+        self.observe_remote(caps, items)
+        self.apply_remote_closes(caps)
+        if self.remote_closed and not self.dry_run:
+            items = self.fold_items()
         if push:
-            self.push_items(self.fold_items(), caps, keys or [])
+            self.push_items(items, caps, keys or [])
         if pull:
             self.pull(caps, self.fold_items(), keys or [])
         self._save_state()
@@ -825,6 +1290,21 @@ class Dispatcher:
             n, secs = self.snapshot_cost
             print("  (read %d ticket%s in %.2fs to report the above)"
                   % (n, "" if n == 1 else "s", secs))
+        if self.unmarked:
+            print("unmarked remote tickets (no worklog marker):")
+            for key, title, system in self.unmarked:
+                print("  - %s:%s  %s" % (system, key, title))
+                print("    adopt with: worklog adopt --system %s --key %s"
+                      % (system, key))
+        if self.remote_closed:
+            print("closed on remote, still open in the log:")
+            for iid, key, title in self.remote_closed:
+                if self.dry_run:
+                    print("  - %s (%s)  %s — run `worklog close %s`"
+                          % (iid[:8], key, title, iid))
+                else:
+                    print("  - %s (%s)  %s — closed locally"
+                          % (iid[:8], key, title))
         if self.drift:
             print("drift:")
             for line in self.drift:

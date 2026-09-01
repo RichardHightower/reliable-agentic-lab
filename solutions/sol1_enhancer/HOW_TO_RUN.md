@@ -225,3 +225,11 @@ Two messages send you back to this section:
 - `task run` runs one poll and exits; nothing polls in the background on
   its own. A comment you add on GitHub (including `LGTM`) sits there until
   the next `task run`, manual or `/loop`-wrapped, notices it.
+
+## First run
+
+- Binary on PATH: `claude`.
+- Auth: `claude` login, or `ANTHROPIC_API_KEY`.
+- Click: none for `claude -p`.
+- Prove the gates before a live poll: `task checks`.
+- Deploy: `task poll-forever`, [cron](../../labs/lab1_enhancer/cron/), Actions `ENHANCER_BACKEND=claude`, webhook `AGENT_BACKEND=claude`.

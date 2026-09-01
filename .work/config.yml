@@ -32,4 +32,4 @@ paths:
 # work_item_fields:
 #   severity: on
 #   risk: off
-installed: 0.24.6
+installed: 0.24.9

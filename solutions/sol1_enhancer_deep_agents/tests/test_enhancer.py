@@ -555,16 +555,17 @@ def test_a_ticket_already_escalated_waits_for_a_human(target):
 # -- the exits --------------------------------------------------------------
 
 
-def test_the_same_gaps_two_rounds_running_does_not_stop(target):
-    """Stuck work burns turns or dollars. A repeated signature is not an exit."""
+def test_the_same_gaps_two_rounds_running_stops(target):
+    """Stuck work is the failure-hash exit. Stop on round two with a readable reason."""
     State(github_issue=7, last_comment_id="1", round=1, previous_signature=sorted(FEATURE)).save(
         target, "T001"
     )
     gh = FakeGh(comments=[("2", "still here")])
     backend = FakeBackend([judged(), judged()], draft=DRAFT)
     [outcome] = engine(target, backend, gh).poll()
-    assert outcome.status == "waiting"
-    assert "needs-human" not in gh.added
+    assert outcome.status == "escalated"
+    assert outcome.detail == "same signature two rounds running"
+    assert "needs-human" in gh.added
 
 
 def test_max_turns_escalates(target):

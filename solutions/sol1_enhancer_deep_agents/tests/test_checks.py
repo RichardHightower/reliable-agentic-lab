@@ -20,7 +20,10 @@ import pytest
 
 @pytest.mark.parametrize("kind", sorted(check_fields.REQUIRED))
 def test_a_kind_with_every_required_field_is_ready(kind):
-    result = check_fields.check(kind, check_fields.REQUIRED[kind])
+    kwargs = {}
+    if kind == "bug":
+        kwargs["source_status"] = "supported"
+    result = check_fields.check(kind, check_fields.REQUIRED[kind], **kwargs)
     assert result["ready"] is True
     assert result["missing_fields"] == []
 
@@ -43,7 +46,11 @@ def test_missing_fields_keep_the_rubric_order():
 
 def test_a_field_the_model_invents_is_dropped_rather_than_trusted():
     """An invented field is not evidence of readiness."""
-    result = check_fields.check("bug", [*check_fields.REQUIRED["bug"], "made_up"])
+    result = check_fields.check(
+        "bug",
+        [*check_fields.REQUIRED["bug"], "made_up"],
+        "supported",
+    )
     assert "made_up" not in result["present_fields"]
     assert result["ready"] is True
 
@@ -76,7 +83,7 @@ def test_check_fields_reads_its_payload_from_the_command_line(monkeypatch, capsy
 
 
 def test_check_fields_reads_its_payload_from_stdin(monkeypatch, capsys):
-    payload = json.dumps({"kind": "bug", "present_fields": check_fields.REQUIRED["bug"]})
+    payload = json.dumps({"kind": "bug", "present_fields": check_fields.REQUIRED["bug"], "source_status": "supported"})
     monkeypatch.setattr("sys.argv", ["check_fields.py"])
     monkeypatch.setattr("sys.stdin", io.StringIO(payload))
     check_fields.main()
@@ -114,6 +121,14 @@ def test_a_changed_round_inside_the_caps_does_not_stop():
 def test_done_stops_even_when_the_caps_are_spent():
     """The rubric is green. Cost and turns do not override that."""
     assert _stop(done=True, turns=2, spent_usd=9.0) == {"stop": True, "reason": "done"}
+
+
+def test_a_repeated_signature_stops_before_cost():
+    """Stuck work is an exit. Do not burn the turn budget on the same gaps."""
+    assert _stop(signature=["value"], previous_signature=["value"]) == {
+        "stop": True,
+        "reason": "same signature two rounds running",
+    }
 
 
 def test_cost_stops_before_max_turns():

@@ -1,14 +1,11 @@
 """Deterministic exit check for the ticket enhancer.
 
 `check_fields.py` decides whether a ticket is ready, a fact computed from the
-Judge's report. This script decides the three loop exits: done, cost, and max
-turns. A repeated missing-field signature is stuck work. It is not an exit.
-Stuck work burns turns or dollars until one of those three fires.
+Judge's report. This script decides the four loop exits: done, a repeated
+missing-field signature, cost, and max turns.
 
-Given {done, turns, max_turns, spent_usd, max_usd}, it computes {stop, reason}
-itself. The skill must not decide these by prose, the same reason
-check_fields.py exists: a stop condition trusted to a model's own judgment is
-a stop condition a model can talk itself past.
+Given {done, turns, max_turns, spent_usd, max_usd, signature,
+previous_signature}, it computes {stop, reason} itself.
 
 Usage:
     python3 check_stop.py '{"done": false, "turns": 2, "max_turns": 3, "spent_usd": 0.4, "max_usd": 2.0}'
@@ -28,10 +25,14 @@ def check(
     max_turns: int,
     spent_usd: float = 0.0,
     max_usd: float = 2.0,
+    signature: list[str] | None = None,
+    previous_signature: list[str] | None = None,
 ) -> dict:
-    """Three exits, and no fourth. Done first, then cost, then max turns."""
+    """Done first, then the failure hash, then cost, then max turns."""
     if done:
         return {"stop": True, "reason": "done"}
+    if previous_signature is not None and signature == previous_signature:
+        return {"stop": True, "reason": "same signature two rounds running"}
     if spent_usd >= max_usd:
         return {"stop": True, "reason": "cost"}
     if turns + 1 >= max_turns:
@@ -48,6 +49,8 @@ def main() -> None:
         max_turns=int(payload["max_turns"]),
         spent_usd=float(payload.get("spent_usd", 0.0)),
         max_usd=float(payload.get("max_usd", 2.0)),
+        signature=payload.get("signature"),
+        previous_signature=payload.get("previous_signature"),
     )
     print(json.dumps(result))
 
@@ -59,21 +62,25 @@ def demo() -> None:
         "reason": None,
     }
     assert check(done=True, turns=0, max_turns=3) == {"stop": True, "reason": "done"}
-    # Done beats a spent cost cap and a spent turn cap.
     assert check(done=True, turns=2, max_turns=3, spent_usd=9.0, max_usd=2.0) == {
         "stop": True,
         "reason": "done",
     }
+    assert check(
+        done=False,
+        turns=0,
+        max_turns=3,
+        signature=["value"],
+        previous_signature=["value"],
+    ) == {"stop": True, "reason": "same signature two rounds running"}
     assert check(done=False, turns=0, max_turns=3, spent_usd=2.0, max_usd=2.0) == {
         "stop": True,
         "reason": "cost",
     }
-    # Cost beats max turns when both would fire.
     assert check(done=False, turns=2, max_turns=3, spent_usd=2.0, max_usd=2.0) == {
         "stop": True,
         "reason": "cost",
     }
-    # round 2 is the third round (0-indexed); turns + 1 == max_turns spends it
     assert check(done=False, turns=2, max_turns=3, spent_usd=0.1, max_usd=2.0) == {
         "stop": True,
         "reason": "max turns",

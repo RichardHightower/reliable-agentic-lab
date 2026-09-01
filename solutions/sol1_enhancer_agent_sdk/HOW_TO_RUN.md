@@ -187,3 +187,12 @@ Two messages send you back to this section:
   open one.
 - `T901: already ready / implementer, skipping`. The ticket is finished.
   Reset it if you meant to run it again.
+
+## First run
+
+- Binary: Python 3.11+ in this folder. No coding-agent CLI.
+- Auth: `ANTHROPIC_API_KEY`.
+- Click: none.
+- Prove the gates: `task checks` (or `task test`).
+- Cost exit: yes. This port can stop on dollars.
+- Deploy: `task poll-forever`, [cron](../../labs/lab1_enhancer/cron/), Actions `ENHANCER_BACKEND=agent-sdk`, webhook `AGENT_BACKEND=agent-sdk`.

@@ -5,9 +5,12 @@
 # The trigger starts one poll. The enhancer exits. The workflow does not
 # grade the ticket, merge, or deploy.
 #
-# Set repository variable ENHANCER_BACKEND to one of:
-#   claude | codex | opencode | vscode | copilot-cli | antigravity | agent-sdk | deep-agents
-# Optional secret: ANTHROPIC_API_KEY (required for agent-sdk and deep-agents).
+# Set repository variable ENHANCER_BACKEND (alias: AGENT_BACKEND) to one of:
+#   claude | python | grok | opencode | codex | vscode | copilot-cli |
+#   antigravity | agent-sdk | deep-agents | langgraph
+# Same key set as solutions/extra_credit/s_ext_1_webhook/call_sol1.py.
+# Optional secrets: ANTHROPIC_API_KEY (agent-sdk, deep-agents),
+# XAI_API_KEY (grok). Prefer XAI_API_KEY over copying ~/.grok/auth.json.
 
 name: Enhance tickets on issue events
 
@@ -43,6 +46,8 @@ jobs:
       ENHANCER_BACKEND: ${{ vars.ENHANCER_BACKEND || 'claude' }}
       AGENT_MAX_ATTEMPTS: ${{ vars.AGENT_MAX_ATTEMPTS || '3' }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      AGENT_BACKEND: ${{ vars.ENHANCER_BACKEND || vars.AGENT_BACKEND || 'claude' }}
     steps:
       - name: Checkout the CRM fork
         uses: actions/checkout@v4
@@ -113,10 +118,17 @@ jobs:
           fi
           npm install -g @go-task/cli
           case "$ENHANCER_BACKEND" in
-            claude) npm install -g @anthropic-ai/claude-code || true ;;
+            claude|python) npm install -g @anthropic-ai/claude-code || true ;;
             opencode) npm install -g opencode-ai || true ;;
-            vscode) npm install -g @github/copilot || true ;;
+            vscode|copilot-cli) npm install -g @github/copilot || true ;;
+            grok)
+              curl -fsSL https://x.ai/cli/install.sh | bash
+              echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+              echo "$HOME/.grok/bin" >> "$GITHUB_PATH"
+              ;;
           esac
+        env:
+          GROK_DISABLE_AUTOUPDATER: "1"
 
       - name: Run one poll
         working-directory: .enhancer
@@ -127,8 +139,16 @@ jobs:
         run: |
           set -euo pipefail
           case "$ENHANCER_BACKEND" in
-            claude)
+            claude|python)
               cd solutions/sol1_enhancer
+              task run -- --ticket "$TICKET" --repo "$TARGET"
+              ;;
+            grok)
+              # Headless grok -p never prompts. task trust is a local TUI
+              # click and is not available on the runner. --always-approve
+              # is the same class of flag as claude --dangerously-skip-permissions:
+              # only on a checkout you trust. The runner is the sandbox.
+              cd solutions/sol1_enhancer_grok_build
               task run -- --ticket "$TICKET" --repo "$TARGET"
               ;;
             codex)
@@ -155,12 +175,13 @@ jobs:
               cd solutions/sol1_enhancer_agent_sdk
               python3 loop.py --once --repo "$TARGET" --ticket "$TICKET"
               ;;
-            deep-agents)
+            deep-agents|langgraph)
               cd solutions/sol1_enhancer_deep_agents
               python3 loop.py --once --repo "$TARGET" --ticket "$TICKET"
               ;;
             *)
               echo "Unknown ENHANCER_BACKEND=$ENHANCER_BACKEND"
+              echo "Known: claude python grok opencode codex vscode copilot-cli antigravity agent-sdk deep-agents langgraph"
               exit 1
               ;;
           esac

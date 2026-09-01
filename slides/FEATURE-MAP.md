@@ -29,8 +29,8 @@ Do not survey seven production loops as labs. Name them in Module 4. Build one g
 | The red gate | 2 | New tests must fail before the code implementer starts |
 | The ten-row rubric | 2 | "The tests passed" is one row of ten |
 | Deterministic judge | 2 | Arithmetic over `junit.xml`, `coverage.xml`, and the diff |
-| Model final judge | 2 | One question only: is the ticket actually done? |
-| Unparseable verdict is a fail | 2 | A synthetic failing verdict, never a pass |
+| Model final judge | 2 | Session 2 teaches the question: is the ticket actually done? The Deep Agents port demonstrates the deterministic judge (`judge_done=None`); a green rubric is enough there |
+| Unparseable verdict is a fail | 2 | Session 2: a synthetic failing verdict, never a pass. Not wired in `sol2_implementer_deep_agents` |
 | The push gate | 2 | A `PreToolUse` hook refuses `git push` without a green receipt |
 | The receipt | 2 | Green, this tree, and newer than the last edit. All three. |
 | Defense at two layers | 2 | In-process scope catches the loop. `write_scope` catches the subprocess. |

@@ -29,7 +29,7 @@ Read the title and body. Classify as one of:
 
 | Kind | Required fields |
 |---|---|
-| `bug` | `title`, `steps`, `expected`, `actual`, `environment` |
+| `bug` | `title`, `steps`, `expected`, `actual`, `environment`, `source_evidence` |
 | `feature` | `problem`, `proposal`, `value`, `criteria` |
 | `ui` | `problem`, `proposal`, `value`, `criteria`, `wireframe` |
 
@@ -47,6 +47,24 @@ A field counts as present only with real content, not a bare heading:
   test could fail it. One criterion is not acceptance criteria.
 - `wireframe`: a fenced diagram, ASCII mockup, or image reference. A simple
   box diagram is enough.
+- `source_evidence` (bugs only): a named file, symbol, and code path you read
+  that makes the claimed **Actual** behavior possible. The issue's report is
+  not evidence by itself.
+
+
+### Source check for bugs
+
+Before counting bug fields, inspect the relevant code under `app/`. Set
+`source_status` as follows:
+
+- `supported` only when the source contains a concrete path that can produce
+  the stated Actual behavior; then count `source_evidence` if the ticket names
+  that path.
+- `contradicted` when the source shows the claimed failure cannot happen.
+- `unknown` when the available source cannot establish the claim. Do not count
+  `source_evidence` in that case.
+
+For features and UI tickets use `not_applicable`.
 
 ## Step 3: report
 
@@ -54,7 +72,7 @@ Your entire final message is one JSON object and nothing else, no
 explanation before or after it:
 
 ```json
-{"kind": "feature", "present_fields": ["problem", "proposal"]}
+{"kind": "feature", "present_fields": ["problem", "proposal"], "source_status": "not_applicable"}
 ```
 
 List only the fields you found genuinely present. Leave out any field you

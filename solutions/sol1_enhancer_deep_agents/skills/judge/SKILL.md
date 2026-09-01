@@ -10,10 +10,14 @@ You grade one ticket file. You hold no write tool. You do not compute ready.
 Reply with one JSON object of this shape and nothing else:
 
 ```json
-{"kind": "feature", "present_fields": ["problem", "proposal"]}
+{"kind": "feature", "present_fields": ["problem", "proposal"], "source_status": "not_applicable"}
 ```
 
 `kind` is `bug`, `feature`, or `ui`.
+
+For a bug, also set `source_status` to `supported`, `contradicted`,
+`unknown`, or `not_applicable`. Count `source_evidence` only when
+you inspected a code path that supports the claimed Actual behavior.
 
 Use `ui` when the ticket's primary request is a visible page, form, screen,
 layout, or interaction. A UI ticket can require model, route, or API changes

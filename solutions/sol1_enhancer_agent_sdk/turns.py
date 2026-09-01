@@ -42,7 +42,11 @@ def judge(enhancer, path: Path) -> dict:
         verdict.setdefault("present_fields", [])
     else:
         verdict = parse_judge(result.output)
-    return check_fields.check(verdict["kind"], verdict.get("present_fields", []))
+    return check_fields.check(
+        verdict["kind"],
+        verdict.get("present_fields", []),
+        verdict.get("source_status", "not_applicable"),
+    )
 
 
 def draft(enhancer, tkt, kind: str, missing: list[str], comment: str | None) -> Path:
