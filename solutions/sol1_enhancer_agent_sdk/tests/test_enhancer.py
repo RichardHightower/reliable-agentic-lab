@@ -13,6 +13,8 @@ way the real backend routes to a subagent by name.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import enhancer
@@ -879,6 +881,76 @@ def test_the_newest_comment_comes_back_as_an_id_and_a_body(gh_calls):
 
 def test_an_issue_with_no_comments_comes_back_as_none(gh_calls):
     assert Gh("me", "crm").latest_comment(7) is None
+
+
+def test_the_comment_query_asks_for_more_than_one_default_page(gh_calls):
+    """`gh api` defaults to 30 per page, and the marker filter only sees a page.
+
+    Once the loop's own comments fill that page the filter returns nothing and
+    the ticket sits at "no new comment" for good.
+    """
+    calls, _ = gh_calls
+    Gh("me", "crm").latest_comment(7)
+
+    assert "per_page=100" in calls[0][2]
+
+
+def test_every_comment_the_loop_posts_carries_the_marker(gh_calls):
+    """Step 3 finds this comment next poll. Unmarked, it reads as a new one."""
+    calls, _ = gh_calls
+    Gh("me", "crm").comment(7, "Still missing value.")
+
+    body = calls[0][calls[0].index("--body") + 1]
+    assert body.startswith("Still missing value.")
+    assert body.endswith(enhancer.MARKER)
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is not installed")
+def test_the_newest_comment_query_skips_the_loops_own_comments(monkeypatch):
+    """The loop must never read its own reply as a comment to answer.
+
+    The filter runs inside `gh`, so the only honest check is to take the very
+    expression `latest_comment` sends and put it through the real jq. Asserting
+    that the string contains the marker would pass on an expression jq rejects.
+    """
+    seen = []
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(
+        enhancer.subprocess, "run", lambda argv, **kw: (seen.append(argv), _Proc())[1]
+    )
+    Gh("me", "crm").latest_comment(7)
+    monkeypatch.undo()  # the fake run() is this module's subprocess.run too
+
+    expression = seen[0][seen[0].index("--jq") + 1]
+    mine = f"Filled value.\n\n{enhancer.MARKER}"
+
+    def newest(comments):
+        done = subprocess.run(
+            ["jq", "-c", expression],
+            input=json.dumps(comments),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return json.loads(done.stdout) if done.stdout.strip() else None
+
+    # The loop's own reply is the newest. The human's LGTM is what it must read.
+    assert newest(
+        [
+            {"id": 1, "body": "make it optional"},
+            {"id": 3, "body": "LGTM"},
+            {"id": 4, "body": mine},
+        ]
+    ) == {"id": 3, "body": "LGTM"}
+
+    # Nothing but the loop's own comments is the same as no comment at all.
+    assert newest([{"id": 4, "body": mine}]) is None
+    assert newest([]) is None
 
 
 def test_labels_come_back_as_plain_names(gh_calls):
