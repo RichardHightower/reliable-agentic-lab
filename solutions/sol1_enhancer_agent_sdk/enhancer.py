@@ -34,6 +34,16 @@ BUDGET = 3
 CANDIDATE_SUFFIX = ".enhancer-candidate.md"
 LGTM = "LGTM"
 
+# Every comment this loop posts carries it, and step 3 skips any comment that
+# does. Without it the loop reads its own last reply as the newest comment and
+# answers itself on every poll, forever. The test for this is the one that
+# catches it, because a live poll only looks slow, never wrong.
+#
+# A marker rather than an author filter on purpose. The loop runs as the
+# attendee's own `gh` account, so filtering by author would also drop the
+# attendee's `LGTM`, which is the one comment it must never miss.
+MARKER = "<!-- enhancer-loop -->"
+
 
 class EnhancerError(RuntimeError):
     """The loop cannot continue for a reason a human has to fix."""
@@ -237,11 +247,23 @@ class Gh:
         return int(url.rstrip("/").rsplit("/", 1)[-1])
 
     def latest_comment(self, issue: int) -> tuple[str, str] | None:
+        """The newest comment this loop did not write itself. See `MARKER`.
+
+        ponytail: one page of 100. `gh api` defaults to 30, and the marker
+        filter runs on whatever page it gets, so a thread past the page size
+        reads a stale id, and once the loop's own comments fill the page the
+        filter returns nothing and the ticket sits at "no new comment" for
+        good. 100 is past any ticket a three-round budget can produce. For an
+        unbounded thread this needs `--paginate`, which cannot keep `--jq`
+        (gh applies the filter per page and emits one object each), so it would
+        also need the newest-of-all pick moved into Python.
+        """
         out = self._run(
             "api",
-            f"repos/{self.slug}/issues/{issue}/comments",
+            f"repos/{self.slug}/issues/{issue}/comments?per_page=100",
             "--jq",
-            "sort_by(.id) | .[-1] | {id, body}",
+            f'[.[] | select((.body // "") | contains("{MARKER}") | not)] '
+            "| sort_by(.id) | .[-1] // empty | {id, body}",
         )
         if not out:
             return None
@@ -249,7 +271,10 @@ class Gh:
         return str(payload["id"]), payload.get("body", "")
 
     def comment(self, issue: int, body: str) -> None:
-        self._run("issue", "comment", str(issue), "--repo", self.slug, "--body", body)
+        """Post a comment, marked so the next poll knows the loop wrote it."""
+        self._run(
+            "issue", "comment", str(issue), "--repo", self.slug, "--body", f"{body}\n\n{MARKER}"
+        )
 
     def add_label(self, issue: int, label: str) -> None:
         self._run("issue", "edit", str(issue), "--repo", self.slug, "--add-label", label)
