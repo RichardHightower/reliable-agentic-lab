@@ -191,3 +191,10 @@ are the two ways a poll loop quietly stops being a loop.
 
 A third poll on the same simulated comment is the test for the first bug. It
 must report "no new comment" and not count as a round.
+
+## First run
+
+- Binary on PATH: `copilot`.
+- Auth: GitHub Copilot.
+- Prove the gates: `task checks`.
+- Deploy: `task poll-forever`, [cron](../../labs/lab1_enhancer/cron/), Actions `ENHANCER_BACKEND=copilot-cli`, webhook `AGENT_BACKEND=copilot-cli`.

@@ -36,6 +36,20 @@ tasks:
     cmds:
       - bin/reset_test_tickets.sh {{.TARGET}}
 
+  checks:
+    desc: Run the two deterministic check scripts against their own assertions.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 .opencode/skills/enhancer-loop/scripts/check_fields.py --demo
+      - python3 .opencode/skills/enhancer-loop/scripts/check_stop.py --demo
+
+  test:
+    desc: Run this folder's unit tests. No CLI and no target repo needed.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - python3 .opencode/skills/enhancer-loop/scripts/check_fields.py --demo
+      - python3 .opencode/skills/enhancer-loop/scripts/check_stop.py --demo
+
   run:
     desc: One poll-and-act step over every open ticket, using this plugin.
     # Pinning dir here, not just TARGET, means the opencode run subprocess

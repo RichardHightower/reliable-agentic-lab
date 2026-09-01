@@ -38,3 +38,20 @@ def test_ticket_id_from_title():
     assert ticket_id_from_issue({"title": "[T001] Add due dates"}) == "T001"
     assert ticket_id_from_issue({"title": "nope", "body": "id: T042\n\nHi"}) == "T042"
     assert ticket_id_from_issue({"title": "nothing"}) is None
+
+
+def test_vscode_and_grok_are_first_class_keys():
+    assert call_sol1.folder_for("vscode") == "sol1_enhancer_vscode"
+    assert call_sol1.folder_for("grok") == "sol1_enhancer_grok_build"
+    assert call_sol1.folder_for("antigravity") == "sol1_enhancer_antigravity"
+    assert call_sol1.folder_for("copilot-cli") == "sol1_enhancer_copilot_cli"
+
+
+def test_unknown_backend_fails_loudly():
+    try:
+        call_sol1.folder_for("not-a-port")
+    except SystemExit as exc:
+        assert "unknown backend" in str(exc)
+        assert "claude" in str(exc)
+    else:
+        raise AssertionError("unknown backend must not fall back to Claude")

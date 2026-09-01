@@ -182,3 +182,11 @@ new issue.
 | A leftover `*.enhancer-candidate.md` | A run was interrupted mid-round. Delete it. Ticket discovery already skips it. |
 | `issue N is closed; reopen it` | Somebody closed the issue for a ticket that is still a draft. Reopen it, or reset the ticket properly. See the reset section above. |
 | `already ready / implementer, skipping` | The ticket is finished. `--ticket` names a ticket, it does not override that. Reset it if you meant to run it again. |
+
+## First run
+
+- Binary on PATH: `codex`.
+- Auth: Codex login / `CODEX` credentials.
+- Before a demo: `task fence-check`. A user's own `~/.codex/config.toml` can leave the orchestrator unfenced.
+- Prove the gates: `task checks`.
+- Deploy: `task poll-forever`, [cron](../../labs/lab1_enhancer/cron/), Actions `ENHANCER_BACKEND=codex`, webhook `AGENT_BACKEND=codex`.

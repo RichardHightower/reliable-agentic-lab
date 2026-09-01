@@ -128,3 +128,24 @@ The demo application lives in its own repository,
 - [labs/HOW-TO-RUN.md](labs/HOW-TO-RUN.md), pick your coding agent
 - [MCP.md](MCP.md), the two servers and what they may not do
 - [slides/FEATURE-MAP.md](slides/FEATURE-MAP.md), which module proves which idea
+
+
+## Deployment coverage (Lab 1)
+
+The loop travels. The wiring changes. This table is the honest record of
+which wiring exists, not a claim that every cell has been run live.
+
+| Port | `task poll-forever` | cron example | Actions `ENHANCER_BACKEND` | webhook `AGENT_BACKEND` | Live run of cron/Actions/webhook |
+|---|---|---|---|---|---|
+| `sol1_enhancer` | shipped | [shared](labs/lab1_enhancer/cron/) | `claude`, `python` | `claude`, `python` | poll-forever tried. Others: not tried |
+| `sol1_enhancer_codex` | shipped | shared | `codex` | `codex` | not tried |
+| `sol1_enhancer_opencode` | shipped | shared | `opencode` | `opencode` | not tried |
+| `sol1_enhancer_grok_build` | shipped | shared | `grok` | `grok` | not tried |
+| `sol1_enhancer_vscode` | shipped | shared | `vscode` | `vscode` | not tried |
+| `sol1_enhancer_copilot_cli` | shipped | shared | `copilot-cli` | `copilot-cli` | not tried |
+| `sol1_enhancer_antigravity` | shipped | shared | `antigravity` | `antigravity` | not tried |
+| `sol1_enhancer_agent_sdk` | shipped | shared | `agent-sdk` | `agent-sdk` | not tried |
+| `sol1_enhancer_deep_agents` | shipped | shared | `deep-agents`, `langgraph` | `deep-agents`, `langgraph` | not tried |
+
+Cron is one file, referenced from every port. GitHub Actions and the webhook
+now share one key set. An unknown key fails loudly instead of running Claude.

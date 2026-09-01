@@ -1,0 +1,18 @@
+# One shared cron example. Point DIR at the sol1 port you actually run.
+# flock: a poll that runs longer than the interval must not start another.
+# logger: a cron job with nowhere to write is a cron job whose failures
+# reach you from a confused colleague.
+#
+# Install:
+#   crontab -e
+# then paste, after editing DIR and the interval.
+#
+# Live run of this file against every port: not tried. The wiring is the
+# example. See the coverage table in the lab README.
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+DIR=/opt/agents/solutions/sol1_enhancer
+LOG=/var/log/enhancer-poll.log
+
+*/10 * * * * flock -n /tmp/enhancer-poll.lock -c "cd $DIR && task run" >> $LOG 2>&1

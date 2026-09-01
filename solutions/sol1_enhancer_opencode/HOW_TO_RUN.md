@@ -105,3 +105,11 @@ production shape, see `SPEC.md`.
 python3 .opencode/skills/enhancer-loop/scripts/check_fields.py --demo
 python3 .opencode/skills/enhancer-loop/scripts/check_stop.py --demo
 ```
+
+## First run
+
+- Binary on PATH: `opencode`.
+- Auth: `opencode` login for that product.
+- Click: none for `opencode run --auto`.
+- Prove the gates: `task checks`.
+- Deploy: `task poll-forever`, [cron](../../labs/lab1_enhancer/cron/), Actions `ENHANCER_BACKEND=opencode`, webhook `AGENT_BACKEND=opencode`.

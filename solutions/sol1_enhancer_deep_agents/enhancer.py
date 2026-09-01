@@ -446,7 +446,11 @@ class Enhancer:
             raise EnhancerError(f"the judge failed: {result.output}")
         verdict = parse_judge(result.output)
         try:
-            return check_fields.check(verdict["kind"], verdict.get("present_fields", []))
+            return check_fields.check(
+                verdict["kind"],
+                verdict.get("present_fields", []),
+                verdict.get("source_status", "not_applicable"),
+            )
         except ValueError as exc:
             # The rubric knows three kinds. A model that invents a fourth is the
             # judge answering badly, which is what `EnhancerError` is for. Left
@@ -619,8 +623,8 @@ class Enhancer:
             self.gh.add_label(issue, "needs-human")
             return Outcome(tkt.id, "escalated", str(blocked))
 
-        # 8. the exits, computed rather than judged. Three of them: cost, max
-        # turns, or done. A repeated signature is stuck work, not an exit.
+        # 8. the exits, computed rather than judged. Four of them: done,
+        # the failure hash, cost, and max turns.
         state.spent_usd += self._round_usd
         stop = check_stop.check(
             done=not signature,
@@ -628,6 +632,8 @@ class Enhancer:
             max_turns=self.budget,
             spent_usd=state.spent_usd,
             max_usd=self.max_usd,
+            signature=signature,
+            previous_signature=state.previous_signature,
         )
         if stop["reason"] == "done":
             # `_improve` already told the issue the draft is ready for LGTM.

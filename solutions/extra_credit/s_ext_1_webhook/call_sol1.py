@@ -15,12 +15,18 @@ from solutions.extra_credit import ROOT
 
 # AGENT_BACKEND -> folder under solutions/. Default is the Claude Code plugin
 # the Droplet is meant to call: solutions/sol1_enhancer.
+# Canonical backend keys. The Actions workflow uses the same names via
+# ENHANCER_BACKEND (accepted as an alias of AGENT_BACKEND). Keep these
+# lists equal: scripts/tests/test_sol1_backend_dispatch.py pins it.
 BACKEND_FOLDERS = {
     "claude": "sol1_enhancer",
     "python": "sol1_enhancer",
     "grok": "sol1_enhancer_grok_build",
     "opencode": "sol1_enhancer_opencode",
     "codex": "sol1_enhancer_codex",
+    "vscode": "sol1_enhancer_vscode",
+    "copilot-cli": "sol1_enhancer_copilot_cli",
+    "antigravity": "sol1_enhancer_antigravity",
     "agent-sdk": "sol1_enhancer_agent_sdk",
     "deep-agents": "sol1_enhancer_deep_agents",
     "langgraph": "sol1_enhancer_deep_agents",
@@ -32,13 +38,21 @@ class Runner(Protocol):
 
 
 def backend_name() -> str:
-    return (os.environ.get("AGENT_BACKEND") or "claude").strip().lower()
+    raw = os.environ.get("AGENT_BACKEND") or os.environ.get("ENHANCER_BACKEND") or "claude"
+    return raw.strip().lower()
+
+
+def folder_for(backend: str) -> str:
+    name = BACKEND_FOLDERS.get(backend)
+    if name is None:
+        known = ", ".join(sorted(BACKEND_FOLDERS))
+        raise SystemExit(f"unknown backend {backend!r}. Known: {known}")
+    return name
 
 
 def sol1_dir(root: Path | None = None, backend: str | None = None) -> Path:
     root = root or ROOT
-    name = BACKEND_FOLDERS.get(backend or backend_name(), "sol1_enhancer")
-    return root / "solutions" / name
+    return root / "solutions" / folder_for(backend or backend_name())
 
 
 def command_for(ticket_id: str) -> list[str]:
