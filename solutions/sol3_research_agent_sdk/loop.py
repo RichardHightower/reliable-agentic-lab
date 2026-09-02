@@ -120,14 +120,14 @@ def main(argv: list[str] | None = None) -> int:
         help="a commissioning brief the planner must follow",
     )
     parser.add_argument("--area", default=None, help="RKC research area for the knowledge bundle")
-    parser.add_argument("--max-usd", type=float, default=5.0, help="hard cost ceiling")
+    parser.add_argument("--max-usd", type=float, default=12.0, help="hard cost ceiling")
     parser.add_argument("--max-iterations", type=int, default=3, help="write and check attempts")
     parser.add_argument(
         "--max-questions", type=int, default=12, help="cap on the planner's question list"
     )
     parser.add_argument("--max-diagrams", type=int, default=4, help="cap on the figure list")
     parser.add_argument(
-        "--max-claims", type=int, default=24, help="cap on how many claims get a second opinion"
+        "--max-claims", type=int, default=40, help="cap on how many claims get a second opinion"
     )
     parser.add_argument("--publish", action="store_true", help="push the paper to a private gist")
     parser.add_argument("--fresh", action="store_true", help="delete the work directory first")

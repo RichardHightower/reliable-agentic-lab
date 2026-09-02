@@ -10,7 +10,8 @@ goal, the claims that survived verification, and the figures that belong to it.
 ## Write like a specification, not like a blog post
 
 This is a white paper. The register is an engineering report: precise, defined,
-and evidence-led.
+and evidence-led. Saturday Lab 3 already produces a cited brief. You produce a
+document a colleague can use.
 
 - Lead with the finding. Put the reasoning after it. Never build to a reveal.
 - Define a term the first time you use it, then use that same term every time.
@@ -22,6 +23,31 @@ and evidence-led.
   writers break most, and it is checked.
 - No metaphor, no analogy, no rhetorical question, no "in this article we will".
 - No em dash characters. A period or a comma does the work.
+
+## Length is part of the contract
+
+A section that restates its claims in two sentences is a brief, not a paper.
+
+Unpack every bound claim, in this order:
+
+1. State the finding.
+2. Name the mechanism. Which component does the work, in what order, and what
+   happens if that component is missing.
+3. Name the alternative and the cost of choosing this design instead.
+4. State the limit of the evidence. Single source, vendor documentation, or no
+   production measurement. Do not quietly upgrade it.
+
+Targets:
+
+- abstract: 120 to 180 words
+- limitations: 150 to 250 words
+- any other section with one or two claims: 400 to 800 words
+- any other section with three or more claims: 700 to 1200 words
+
+Do not invent facts to hit the count. Do not repeat a paragraph. Do not add
+background, framing, forecasts, or generalizations the claims do not support.
+Expand by unpacking mechanism, tradeoff, and limit. Short sentences stay the
+unit of prose.
 
 ## Cite every claim
 
@@ -72,7 +98,7 @@ Do not write the paper's title or an abstract. You are writing one section.
 
 ## Place the figures
 
-Reference a figure with a markdown image and then explain it in one or two
+Reference a figure with a markdown image and then explain it in three to five
 sentences. An unexplained figure is decoration. Use the exact relative path you
 were given.
 

@@ -392,6 +392,32 @@ def test_the_offline_writer_never_invents_a_citation_marker():
     assert checks.uncited_claims(body) == []
 
 
+def test_the_offline_writer_unpacks_a_claim_into_a_section():
+    """A one-sentence echo of the claim is a brief, not a paper."""
+    import checks  # noqa: PLC0415
+
+    turn = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
+    claim = {
+        "text": "The paper loop checks three exits: done, then cost, then max turns.",
+        "number": 1,
+        "status": "verified",
+    }
+    body = turn.write({"id": "s", "heading": "The approach", "goal": "g"}, [claim], [], "")
+    assert checks.word_count(body) >= 400
+    assert "—" not in body
+    assert "[1]" in body
+
+
+def test_three_developed_claims_clear_the_paper_floor():
+    import checks  # noqa: PLC0415
+
+    claim = "The paper loop checks three exits in this order: done, then cost, then max turns."
+    parts = []
+    for index in range(1, 4):
+        parts += t.develop_claim(claim, f"[{index}]")
+    assert checks.word_count("\n".join(parts)) >= checks.MIN_WORDS
+
+
 def test_the_offline_writer_marks_a_weaker_claim_as_weaker():
     turn = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
     section = {"id": "s", "heading": "H", "goal": "g"}

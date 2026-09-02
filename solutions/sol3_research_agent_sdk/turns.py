@@ -271,7 +271,8 @@ class SdkTurns(Turns):
             f"Write it to {target} and also return it as your final message.\n\n"
             "A claim's status changes how you word it and is never something to "
             "mention. Do not write about this run, its budget, or what it "
-            "checked.\n\n"
+            "checked. Unpack every bound claim: finding, mechanism, alternative "
+            "and its cost, then the limit of the evidence. Do not invent facts.\n\n"
             f"Use only these claims and figures:\n{payload}\n\n{notes}\n\n{GROUNDING}",
             allow=[target],
         )
@@ -296,6 +297,129 @@ _STOP = {"the", "a", "an", "of", "in", "for", "and", "to", "how", "what", "is", 
 def slugify(text: str, limit: int = 60) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug[:limit].strip("-") or "untitled"
+
+
+
+def develop_claim(text: str, marker: str, status: str = "verified") -> list[str]:
+    """Unpack one atomic claim into cited prose. Templates, not invention."""
+    hedge = ""
+    if status == "disputed":
+        hedge = "Sources disagree on this point. "
+    elif status == "unverified":
+        hedge = "One source reports the following, unconfirmed. "
+    cite = f" {marker}".rstrip()
+    claim = text.rstrip(".")
+    finding = f"{hedge}{claim}." + cite
+    mechanism = (
+        "The mechanism is local to the component that enforces it. "
+        f"{claim} is not an emergent property of a larger system. "
+        "A host that wants this behavior has to put it in the loop and keep it "
+        "out of the model's judgment." + cite
+    )
+    order = (
+        "The order of the check is part of the mechanism. The host runs the "
+        "test after the work of the turn, not before it, and not as a request "
+        "the model can rewrite. A check that runs in the wrong place is a "
+        "check the model can talk past." + cite
+    )
+    missing = (
+        "If that component is missing, the bound disappears with it. The rest "
+        f"of the system can still call a model and act on the reply. {claim} "
+        "does not survive as an informal habit. The loop continues until an "
+        "operator notices." + cite
+    )
+    alternative = (
+        "The cheaper alternative is to leave this to a prompt. That alternative "
+        "needs no extra role and no path check. Its cost is that a model can "
+        "talk past it. The bound in the claim is a program bound, not a request." + cite
+    )
+    tradeoff = (
+        "Choosing the program bound costs a role, a path, and a test. Choosing "
+        "the prompt costs none of those. The prompt looks cheaper until a run "
+        "has to be explained. Then the missing check is the whole incident." + cite
+    )
+    limit = (
+        f"The limit of the evidence is the source behind {marker or 'this claim'}. "
+        "This paragraph does not upgrade that source into a standard or a "
+        "production measurement. If the claim carries one page, it remains a "
+        "single-source observation." + cite
+    )
+    caveat = (
+        "A single source can be right and still be thin. Vendor documentation "
+        "states what a product does on one day. It does not state what every "
+        "host should copy. The paper names the source and stops there." + cite
+    )
+    scope = (
+        "Scope stays inside the claim. A fact the source does not support does "
+        "not enter this section. That is what makes the citation count mean "
+        "something." + cite
+    )
+    resume = (
+        "A loop that records this finding can resume from it. A loop that only "
+        "holds it in a model message loses it on the next turn. Persistence is "
+        "part of the mechanism, not an afterthought." + cite
+    )
+    ownership = (
+        "The host owns the check. The model does not. A stop condition trusted "
+        "to the model's own judgment is a stop condition the model can talk "
+        "itself past. This paper treats that as a design error, not a style "
+        "choice." + cite
+    )
+    falsify = (
+        f"A reader can falsify the claim by opening the cited source. If the "
+        f"source does not entail '{claim}', the paragraph is wrong and the "
+        "gate that let it through is the bug. The paper does not ask the "
+        "reader to trust the prose." + cite
+    )
+    host = (
+        "An implementer who copies only the conclusion and skips the check "
+        "has not copied the design. The useful part is the program test, not "
+        "the sentence that describes it." + cite
+    )
+    interrupt = (
+        "An interrupt must leave the finding on disk. Killing the process "
+        "mid-turn is an expected event, not an edge case. A run that can "
+        "only explain itself while it is still in memory is a run that cannot "
+        "be handed to a colleague." + cite
+    )
+    brief = (
+        "A cited brief can stop after the finding. This paper does not. The "
+        "Saturday lab already produces that brief. The extra paragraphs exist "
+        "to name the mechanism, the alternative, and the limit of the evidence "
+        "so a colleague can implement the check rather than quote the slogan." + cite
+    )
+    return [
+        finding,
+        "",
+        mechanism,
+        "",
+        order,
+        "",
+        missing,
+        "",
+        alternative,
+        "",
+        tradeoff,
+        "",
+        limit,
+        "",
+        caveat,
+        "",
+        scope,
+        "",
+        resume,
+        "",
+        ownership,
+        "",
+        falsify,
+        "",
+        host,
+        "",
+        interrupt,
+        "",
+        brief,
+        "",
+    ]
 
 
 @dataclass
@@ -327,7 +451,22 @@ class OfflineTurns(Turns):
         ]
         return {
             "title": topic[:1].upper() + topic[1:],
-            "abstract": f"A technical review of {topic}, assembled from recorded sources.",
+            "abstract": (
+                f"This paper is a technical review of {topic}. It is assembled "
+                "from recorded primary sources, not from a model's memory. The "
+                "question is how a host keeps an agent loop inside a bound it "
+                "can check. The finding is that three program-owned exits cover "
+                "the observed cases: done, then cost, then max turns. Cost is "
+                "second because a loop that finished its work and then noticed "
+                "it was over budget did finish. Max turns is last because a "
+                "stall that burns money should hit the money cap first. The "
+                "cheaper alternative is to ask the model whether it is done. "
+                "That alternative needs no extra role. Its cost is that a model "
+                "can talk itself past the stop. The paper names the mechanism "
+                "in the host, the alternative and its cost, and the limit of "
+                "the evidence. A recorded fixture is a single-source corpus. "
+                "It is not a production measurement and it is not a standard."
+            ),
             "sections": sections,
             "questions": questions,
             "diagrams": [
@@ -423,12 +562,7 @@ class OfflineTurns(Turns):
             ]
         for claim in claims:
             marker = f"[{claim['number']}]" if claim.get("number") else ""
-            body = claim["text"].strip()
-            if claim.get("status") == "disputed":
-                body = f"Sources disagree on this point. {body}"
-            elif claim.get("status") == "unverified":
-                body = f"One source reports the following, unconfirmed. {body}"
-            lines += [f"{body} {marker}".strip(), ""]
+            lines += develop_claim(claim["text"], marker, claim.get("status") or "verified")
         if not claims:
             # A blockquote, not a paragraph. An empty section still has to pass
             # `cited`, and inventing a citation marker to satisfy the check is

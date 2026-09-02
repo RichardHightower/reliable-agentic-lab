@@ -24,8 +24,10 @@ list.
 
 ## Shape the paper
 
-Between four and eight sections. A white paper earns its length with evidence,
-not with headings. Every section gets:
+Six to ten sections. A white paper earns its length with evidence under those
+headings, not with extra headings. Include Abstract, Introduction, a mechanism
+or architecture section, tradeoffs, Limitations, and whatever body the topic
+needs. Every section gets:
 
 - `id`, a short slug used as a filename
 - `heading`, in sentence case
@@ -39,6 +41,10 @@ limitations come before the conclusion, never after it.
 
 One question per thing the paper asserts and cannot assert from first
 principles. Each question names the section it serves.
+
+Aim for six to twelve questions. Three is the floor the harness will accept.
+Twelve is the ceiling. A two-question plan produces a brief, and this pipeline
+is supposed to produce a paper.
 
 The first question is binding. Write it exactly as follows, before every other
 question:
@@ -79,7 +85,7 @@ No prose before it, no fence around it.
 ```json
 {
   "title": "...",
-  "abstract": "one paragraph, no citations",
+  "abstract": "120 to 180 words, no citations",
   "sections": [{"id": "problem", "heading": "The problem", "goal": "..."}],
   "questions": [{"id": "q1", "text": "...", "section": "problem"}],
   "diagrams": [{"name": "pipeline", "concept": "...", "section": "architecture"}]

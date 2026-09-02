@@ -23,6 +23,13 @@ def make_run(work, turns, **kwargs):
     )
 
 
+def test_section_word_range_grows_with_claim_count():
+    assert paper._section_word_range("Abstract", 0) == "120 to 180"
+    assert paper._section_word_range("Limitations", 4) == "150 to 250"
+    assert paper._section_word_range("The approach", 2) == "400 to 800"
+    assert paper._section_word_range("The approach", 3) == "700 to 1200"
+
+
 @pytest.fixture
 def no_renderer(monkeypatch):
     """A run must survive a machine with no diagram renderer."""
@@ -218,7 +225,8 @@ def test_the_retry_hands_the_writer_only_the_current_issues(work, turns, no_rend
     run.turns = Noisy(done=False)
     paper.run_paper(run)
     notes = [args[2] for args in run.turns.asked if args[0] == "write"]
-    assert notes[0] == "", "the first attempt has nothing to react to"
+    assert "fix the thing" not in notes[0], "the first attempt has no judge issues yet"
+    assert "words of section body" in notes[0]
     assert "fix the thing" in notes[1]
     assert "FINAL ATTEMPT" in notes[1], "the last attempt narrows the ask"
 

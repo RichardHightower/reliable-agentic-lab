@@ -218,12 +218,15 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
 6. **Write.** One section at a time, from surviving claims only. A verified
    claim is stated. A disputed one names the disagreement. An unverified one is
    stated qualitatively or left out. A contradicted one never reaches the
-   writer.
+   writer. Length is part of the contract: unpack finding, mechanism,
+   alternative, and evidence limit. A section that restates its claims in two
+   sentences is a brief, and this pipeline is supposed to produce a paper.
 7. **Assemble.** Stitch the sections and append the reference list, in Python.
    Asking a model to re-emit the whole paper to join it is how a paper loses a
    section between two calls.
-8. **Check.** Seven deterministic rows: sources, complete, grounded, cited,
-   sourced, images, style. No model votes here.
+8. **Check.** Deterministic rows: sources, complete, grounded, cited, sourced,
+   images, style, and, on a paper run, has_body and length. Length is hard at
+   1800 words. No model votes here.
 9. **Review.** The judge scores the rows a script cannot, and its verdict is a
    row in the failure signature rather than a separate veto.
 10. **Publish.** On request, and only after the paper passes.
@@ -287,8 +290,8 @@ a live run needed it.
 | --- | --- | --- |
 | `--max-questions` | 12 | research turns, and therefore the paper's width |
 | `--max-diagrams` | 4 | figures |
-| `--max-claims` | 24 | how many claims get a second opinion |
-| `--max-usd` | 5.00 | the whole run, checked inside phases and at the gate |
+| `--max-claims` | 40 | how many claims get a second opinion |
+| `--max-usd` | 12.00 | the whole run, checked inside phases and at the gate |
 
 Four questions produced a hundred and eleven claims on one live run. Every claim
 is a verification turn, so without `--max-claims` the verify phase spent the

@@ -101,7 +101,7 @@ def test_a_plan_with_nothing_important_would_verify_nothing():
     assert "important" in str(exc.value)
 
 
-def test_a_plan_cannot_make_more_than_three_questions_block_the_paper():
+def test_a_plan_cannot_make_more_than_six_questions_block_the_paper():
     bad = plan()
     bad["questions"].extend(
         {
@@ -111,7 +111,7 @@ def test_a_plan_cannot_make_more_than_three_questions_block_the_paper():
             "check": "an official URL",
             "important": True,
         }
-        for i in range(4, 7)
+        for i in range(4, 10)
     )
     for question in bad["questions"]:
         question["important"] = True
@@ -119,7 +119,7 @@ def test_a_plan_cannot_make_more_than_three_questions_block_the_paper():
     with pytest.raises(GateFailed) as exc:
         stages.plan_gate(bad)
 
-    assert "at most 3" in str(exc.value)
+    assert "at most 6" in str(exc.value)
 
 
 def test_normalize_adds_the_sections_every_paper_has():

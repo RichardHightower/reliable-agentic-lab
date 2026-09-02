@@ -67,12 +67,24 @@ MAX_DIAGRAMS = 4
 # a hundred and eleven claims on one live run, and every claim is a turn. The
 # cap decides how many get a second opinion; the rest stay `unverified`, which
 # the writer states qualitatively.
-MAX_CLAIMS = 24
+MAX_CLAIMS = 40
 
 # Which claims get the budget when there is not enough for all of them. A claim
 # with a number, a version, or a date is the one most worth a second look: it is
 # the kind that goes stale, and the kind a reader can check and find wrong.
 NUMERIC = re.compile(r"\d")
+
+
+def _section_word_range(heading: str, claim_count: int) -> str:
+    """How long a section should be. The Saturday brief is already short."""
+    name = heading.strip().lower()
+    if name == "abstract":
+        return "120 to 180"
+    if name == "limitations":
+        return "150 to 250"
+    if claim_count < 3:
+        return "400 to 800"
+    return "700 to 1200"
 
 
 class RunFailed(RuntimeError):
@@ -590,22 +602,41 @@ def write_sections(run: Run) -> dict:
     for section in planned["sections"]:
         if run.exhausted():
             break
-        target = out / f"{section['id']}.md"
-        target.unlink(missing_ok=True)
-        body = run.turns.write(
-            section,
-            [c for c in usable if c["section"] == section["id"]],
-            [f for f in figures if f["section"] == section["id"] and f["path"]],
-            notes,
-            f"sections/{section['id']}.md",
+        path = out / f"{section['id']}.md"
+        path.unlink(missing_ok=True)
+        bound = [c for c in usable if c["section"] == section["id"]]
+        word_range = _section_word_range(section.get("heading", ""), len(bound))
+        length_note = (
+            f"Return {word_range} words of section body. Unpack every bound claim: "
+            "finding, mechanism, alternative and its cost, then the limit of the "
+            "evidence. Do not invent facts. Do not repeat a paragraph."
         )
+        instruction = f"{length_note}\n\n{notes}".strip() if notes else length_note
+        relative = f"sections/{section['id']}.md"
+        figures_here = [f for f in figures if f["section"] == section["id"] and f["path"]]
+        body = run.turns.write(section, bound, figures_here, instruction, relative)
         # The writer holds `Write` scoped to `sections/**` and is told to use
         # it. Prefer the file, because a long section that round-trips through
         # a message is the one that comes back truncated. Fall back to the
         # message so a writer that only answered still produces a section.
-        if not target.exists() or not target.read_text(encoding="utf-8").strip():
-            target.write_text((body or "").rstrip() + "\n", encoding="utf-8")
+        if not path.exists() or not path.read_text(encoding="utf-8").strip():
+            path.write_text((body or "").rstrip() + "\n", encoding="utf-8")
             from_message += 1
+        if run.enforce_research_policy and not run.exhausted():
+            words = checks.word_count(path.read_text(encoding="utf-8"))
+            if words < checks.MIN_SECTION_WORDS:
+                extra = (
+                    f"{length_note}\n\nThe last draft was {words} words. Unpack the "
+                    "bound claims into mechanism, tradeoff, and evidence limit until "
+                    f"the section reaches {word_range} words. Do not invent facts."
+                )
+                if notes:
+                    extra = f"{extra}\n\n{notes}"
+                path.unlink(missing_ok=True)
+                body = run.turns.write(section, bound, figures_here, extra, relative)
+                if not path.exists() or not path.read_text(encoding="utf-8").strip():
+                    path.write_text((body or "").rstrip() + "\n", encoding="utf-8")
+                    from_message += 1
         written += 1
     if not written:
         raise RunFailed("the budget ran out before any section was written")
@@ -680,6 +711,8 @@ def check(run: Run) -> dict:
         headings=[section["heading"] for section in planned["sections"]],
         enforce_source_policy=run.enforce_research_policy,
         enforce_loop_doctrine=run.enforce_research_policy,
+        min_words=checks.MIN_WORDS if run.enforce_research_policy else 0,
+        min_section_words=checks.MIN_SECTION_WORDS if run.enforce_research_policy else 0,
     )
     run.write_json("check.json", score.to_dict())
     return score.to_dict()
