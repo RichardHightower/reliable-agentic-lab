@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import roleplan
 
-READS_ONLY = ("orchestrator", "researcher", "reviewer", "outline_judge")
+READS_ONLY = (
+    "orchestrator",
+    "researcher",
+    "reviewer",
+    "outline_judge",
+    "section_judge",
+    "ledger",
+)
 WRITES = ("planner", "verifier", "diagrammer", "writer")
 
 
-def test_paper_cast_is_eight_roles():
+def test_paper_cast_is_ten_roles():
     roles = roleplan.plan(None, "paper")
     assert list(roles) == [
         "orchestrator",
@@ -16,6 +23,8 @@ def test_paper_cast_is_eight_roles():
         "outline_judge",
         "researcher",
         "verifier",
+        "section_judge",
+        "ledger",
         "diagrammer",
         "writer",
         "reviewer",

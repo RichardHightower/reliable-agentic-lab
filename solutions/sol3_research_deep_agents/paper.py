@@ -34,6 +34,7 @@ import evidence
 import gates
 import outline as outlines
 import research
+import sections
 import stages
 import state as pstate
 from stages import GateFailed, StageResult
@@ -905,6 +906,12 @@ class Paper:
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body
             self._save_sections()
+            try:
+                usd += sections.close_section(self, section, body)
+            except GateFailed:
+                self.written.pop(heading, None)
+                self._save_sections()
+                raise
         self._save_sections()
         words = sum(len(body.split()) for body in self.written.values())
         return StageResult(
@@ -999,6 +1006,7 @@ class Paper:
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body
             self._save_sections()
+            usd += sections.close_section(self, section, body, force=True)
         return StageResult("revise", usd=usd, artifacts={"sections": len(targets)}, summary=f"{len(targets)} sections")
 
     # -- 7. review ---------------------------------------------------------

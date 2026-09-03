@@ -25,6 +25,8 @@ def test_table_only_prints_the_paper_cast(capsys):
     out = capsys.readouterr().out
     assert "reviewer          no" in out
     assert "outline_judge     no" in out
+    assert "section_judge     no" in out
+    assert "ledger            no" in out
     assert "diagrammer        yes" in out
 
 
