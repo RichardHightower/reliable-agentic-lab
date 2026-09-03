@@ -86,12 +86,16 @@ search and write can adjust the evidence to fit the paper.
    logged and skipped in this phase.
 4. **Assemble.** Stitch the sections and append the reference list.
 5. **Check.** Run the deterministic rows: sources, hosts, doctrine, complete,
-   outline_coverage, grounded, cited, sourced, images, style, and, on a paper
-   run, has_body and length. Length is hard at 1800 words. Doctrine is
+   outline_coverage, grounded, cited, sourced, images, style, ledger_consistency,
+   corpus_marked, gaps_stated, and, on a paper run, has_body and length. Length
+   is hard at 2000 words. Doctrine is
    scoped to the E2E lane. `outline_coverage` requires every approved section
    and every key question on the page. No model votes here.
-6. **Review.** The judge scores what a script cannot.
-7. **Publish.** Push the paper and its figures to a secret gist, on request,
+6. **Review.** The judge scores what a script cannot. It reads the ledger.
+7. **Edit.** Once, after the first green check. The writer rewrites for flow
+   only. Python diffs for new specifics and reverts any the evidence does not
+   contain. Then assemble, check, and review run again.
+8. **Publish.** Push the paper and its figures to a secret gist, on request,
    and only after the paper passes.
 
 ## The verdicts

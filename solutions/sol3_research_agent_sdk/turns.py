@@ -44,7 +44,7 @@ from load_agents import (
 # the turns it drives.
 MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
-MAX_WORDS = 1800
+MAX_WORDS = 2000
 EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
 
@@ -151,7 +151,7 @@ class Turns:
     ) -> str:
         raise NotImplementedError
 
-    def review(self, paper: str, report: str) -> dict:
+    def review(self, paper: str, report: str, ledger=None) -> dict:
         raise NotImplementedError
 
     def research_section(self, section: dict, questions: list, note: str = "") -> dict:
@@ -198,6 +198,10 @@ class Turns:
             + "\n".join(verdict.get("notes") or [])
         )
         return self.write(section, [], [], notes, path)
+
+    def edit_paper(self, section: dict, body: str, path: str = "") -> str:
+        """Flow and transitions only. Add no facts."""
+        return body
 
 
 @dataclass
@@ -357,12 +361,18 @@ class SdkTurns(Turns):
         )
         return result.output or ""
 
-    def review(self, paper: str, report: str) -> dict:
+    def review(self, paper: str, report: str, ledger=None) -> dict:
+        payload = ""
+        if ledger:
+            payload = "\nThe paper ledger:\n" + json.dumps(ledger, indent=2)[:6000]
         return self._json(
             "research-judge",
             "Score the paper at paper.md. Python already ran the deterministic "
             f"checks and they reported:\n{report}\n"
-            "Do not re-litigate those rows. Score only what a script cannot.",
+            "Do not re-litigate those rows. Score only what a script cannot. "
+            "Read the ledger for a number with two values, a term defined twice, "
+            "or a forward reference never resolved. Fail `repetition` when a later "
+            f"section restates an earlier one without adding a mechanism.{payload}",
             REVIEW_SCHEMA,
         )
 
@@ -415,6 +425,18 @@ class SdkTurns(Turns):
             "Add no facts. Write the result to "
             f"{target} and also return it as your final message.\n"
             f"Notes: {json.dumps(verdict.get('notes') or [])}\n\nCurrent body:\n{body[:8000]}",
+            allow=[target],
+        )
+        return result.output or ""
+
+    def edit_paper(self, section: dict, body: str, path: str = "") -> str:
+        target = path or f"sections/{section['id']}.md"
+        result = self._ask(
+            "research-writer",
+            f"Edit mode for '{section.get('heading')}'. Rewrite only for flow, "
+            "transitions, and definitions. Do not add new facts. Write the "
+            f"result to {target} and also return it as your final message.\n\n"
+            f"Current body:\n{body[:8000]}",
             allow=[target],
         )
         return result.output or ""
@@ -851,7 +873,16 @@ class OfflineTurns(Turns):
             "forward_refs": [],
         }
 
-    def review(self, paper: str, report: str) -> dict:
+    def edit_paper(self, section: dict, body: str, path: str = "") -> str:
+        """The offline twin adds no facts. Flow-only means the body stands."""
+        root = getattr(self, "root", None)
+        if root is not None and path:
+            target = Path(root) / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
+        return body
+
+    def review(self, paper: str, report: str, ledger=None) -> dict:
         """Agree with the deterministic report and add nothing.
 
         An offline judge that invented rubric opinions would be the one part of

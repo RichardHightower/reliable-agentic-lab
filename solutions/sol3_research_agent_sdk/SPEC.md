@@ -212,7 +212,7 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
    objectives, abstracts, key questions, claims to support, required evidence,
    word targets, and planned figures. Python validates it, an outline judge
    scores it, and a stamp writes `outline.approved.json`. Later phases read
-   that file and nothing else. `--profile demo` commissions 1800 words.
+   that file and nothing else. `--profile demo` commissions 2000 words.
    `--profile paper` commissions 4000. `--approve` stops after the outline
    judge (exit 3) with a readable `outline.md`. `--resume` continues from the
    stamped `outline.approved.json`, and re-judges if `outline.json` changed.
@@ -240,7 +240,7 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
    section between two calls.
 6. **Check.** Deterministic rows: sources, complete, outline_coverage, grounded,
    cited, sourced, images, style, and, on a paper run, has_body and length.
-   Length is hard at 1800 words. No model votes here.
+   Length is hard at 2000 words. No model votes here.
 7. **Review.** The judge scores the rows a script cannot, including `depth`,
    and its verdict is a row in the failure signature rather than a separate veto.
 8. **Publish.** On request, and only after the paper passes.

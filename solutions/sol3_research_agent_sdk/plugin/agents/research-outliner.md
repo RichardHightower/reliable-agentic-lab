@@ -29,7 +29,7 @@ validation.
 
 ## Shape the paper
 
-Four to ten sections. A 1800-word paper is four to six. A 4000-word paper is
+Four to ten sections. A 2000-word paper is four to six. A 4000-word paper is
 six to ten. A white paper earns its length with evidence under those headings,
 not with extra headings. Include a mechanism or architecture section,
 tradeoffs, and Limitations. A paper with no limitations section is marketing.
@@ -106,7 +106,7 @@ No prose before it, no fence around it.
   "title": "...",
   "audience": "who this paper is for",
   "thesis": "one paragraph, no citations",
-  "word_target_total": 1800,
+  "word_target_total": 2000,
   "sections": [
     {
       "id": "problem",
