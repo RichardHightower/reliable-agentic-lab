@@ -44,7 +44,7 @@ PROFILES = {
         "max_claims": 40,
         "max_usd": 12.0,
         "max_iterations": 3,
-        "word_target_total": 1800,
+        "word_target_total": 2000,
     },
     "paper": {
         "max_questions": 20,
@@ -53,6 +53,14 @@ PROFILES = {
         "max_usd": 40.0,
         "max_iterations": 3,
         "word_target_total": 4000,
+    },
+    "whitepaper": {
+        "max_questions": 32,
+        "max_diagrams": 6,
+        "max_claims": 100,
+        "max_usd": 80.0,
+        "max_iterations": 3,
+        "word_target_total": 6000,
     },
 }
 
@@ -132,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         "--profile",
         choices=sorted(PROFILES),
         default="demo",
-        help="demo is the 1800-word paper; paper raises the word, question, and cost budgets",
+        help="demo is the 2000-word paper; paper is 4000; whitepaper is 6000",
     )
     parser.add_argument("--out", help="work directory (default: work/<slug>)")
     parser.add_argument(

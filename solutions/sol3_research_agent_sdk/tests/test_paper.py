@@ -389,7 +389,7 @@ def test_the_plan_is_held_to_a_question_budget(work, turns):
     paper.prior_art(run)
     paper.plan(run)
     asked = next(args for args in run.turns.asked if args[0] == "outline")
-    assert asked[3] == {"questions": 3, "diagrams": 2, "words": 1800}
+    assert asked[3] == {"questions": 3, "diagrams": 2, "words": 2000}
 
 
 def test_truncation_never_leaves_a_heading_with_nothing_under_it(work, turns):
@@ -488,7 +488,7 @@ def test_the_planner_is_told_what_it_can_afford(work, turns, no_renderer):
     paper.prior_art(run)
     paper.plan(run)
     budget = next(args[3] for args in recorder.asked if args[0] == "outline")
-    assert budget == {"questions": 5, "diagrams": 2, "words": 1800}
+    assert budget == {"questions": 5, "diagrams": 2, "words": 2000}
 
 
 # -- the verification budget ------------------------------------------------

@@ -451,12 +451,12 @@ def test_the_offline_writer_unpacks_a_claim_into_a_section():
     assert "[1]" in body
 
 
-def test_three_developed_claims_clear_the_paper_floor():
+def test_developed_claims_clear_the_paper_floor():
     import checks  # noqa: PLC0415
 
     claim = "The paper loop checks three exits in this order: done, then cost, then max turns."
     parts = []
-    for index in range(1, 4):
+    for index in range(1, 5):
         parts += t.develop_claim(claim, f"[{index}]")
     assert checks.word_count("\n".join(parts)) >= checks.MIN_WORDS
 

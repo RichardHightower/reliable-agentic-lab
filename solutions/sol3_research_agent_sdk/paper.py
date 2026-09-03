@@ -12,11 +12,13 @@ renumbering the run records that already exist on disk.
     6 assemble    stitch and reference      -> paper.md
     7 check       deterministic rows        -> check.json
     8 review      the judge, on what is left-> review.json
+    8b edit       flow only, add no facts   -> sections/*.md (once)
     9 publish     a private gist, on request-> gist.json
 
 Phases 0 to 4 run once. Phases 5 to 8 are the retry cycle, because the only
 thing worth redoing on a failed check is the writing. Re-running the research
 because a paragraph lost its citation marker buys a bill, not a better paper.
+The edit pass runs once after the first green check and re-enters the cycle.
 
 Every phase writes a new named file and no phase mutates another's output. That
 one rule is what makes `--resume` need no bookkeeping: a phase whose file exists
@@ -65,7 +67,7 @@ MAX_PRIOR_ART_HITS = 12
 MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
 MAX_CLAIMS = 40
-MAX_WORDS = 1800
+MAX_WORDS = 2000
 OUTLINE_JUDGE_ROUNDS = 3
 
 # A ceiling on verification, for the same reason. Four good questions produced
@@ -749,6 +751,14 @@ def do_sections(run: Run) -> dict:
                         "section": sid,
                         "status": status,
                         "number": number,
+                        "origin": finding.get("origin")
+                        or (finding.get("source") or {}).get("kind")
+                        or "",
+                        "source_kind": (finding.get("source") or {}).get("source_kind")
+                        or finding.get("source_kind")
+                        or "",
+                        "vendor": (finding.get("source") or {}).get("vendor") or "",
+                        "epistemic": finding.get("epistemic") or "",
                     }
                 )
             if url and url not in seen:
@@ -810,12 +820,31 @@ def _numbered(claims: list[dict], planned: dict) -> tuple[list[dict], list[dict]
     usable.sort(key=lambda c: order.index(c["section"]) if c["section"] in order else len(order))
 
     sources: list[str] = []
+    extra: dict[str, dict] = {}
     for claim in usable:
         url = claim.get("source_url") or claim.get("verifier_url") or ""
         if url and url not in sources:
             sources.append(url)
+            extra[url] = {
+                "origin": claim.get("origin") or "",
+                "source_kind": claim.get("source_kind") or "",
+                "epistemic": claim.get("epistemic") or "",
+            }
         claim["number"] = sources.index(url) + 1 if url else 0
-    return usable, [{"url": url, "number": index + 1} for index, url in enumerate(sources)]
+    refs = []
+    for index, url in enumerate(sources):
+        meta = extra.get(url) or {}
+        refs.append(
+            {
+                "url": url,
+                "number": index + 1,
+                "origin": meta.get("origin") or "",
+                "source_kind": meta.get("source_kind") or "",
+                "epistemic": meta.get("epistemic") or "",
+                "model_brief": checks.is_model_brief(meta),
+            }
+        )
+    return usable, refs
 
 
 def write_sections(run: Run) -> dict:
@@ -918,7 +947,11 @@ def assemble(run: Run) -> dict:
         parts += [text.strip(), ""]
     if references:
         parts += ["## References", ""]
-        parts += [f"{ref['number']}. {ref['url']}" for ref in references]
+        parts += [
+            f"{ref['number']}. {ref['url']}"
+            + (" (model-written brief)" if ref.get("model_brief") else "")
+            for ref in references
+        ]
         parts.append("")
 
     body = checks.strip_em_dashes("\n".join(parts))
@@ -948,12 +981,35 @@ def corpus_for(run: Run) -> str:
     return "\n".join(parts)
 
 
+def _ledger(run: Run):
+    path = run.file("paper_ledger.json")
+    if not path.exists():
+        return {"entries": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"entries": []}
+    if isinstance(payload, list):
+        return {"entries": payload}
+    return payload
+
+
+def _coverage_gaps(run: Run) -> list:
+    path = run.file("sources.json")
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return list(payload.get("failed") or [])
+
+
 def check(run: Run) -> dict:
     body = run.file("paper.md").read_text(encoding="utf-8")
     planned = outlines.plan_view(approved_outline(run))
-    references = [
-        ref["url"] for ref in _numbered(run.read_json("claims.json")["claims"], planned)[1]
-    ]
+    claims = run.read_json("claims.json")["claims"]
+    references = [ref["url"] for ref in _numbered(claims, planned)[1]]
     score = checks.check(
         body,
         references,
@@ -965,6 +1021,9 @@ def check(run: Run) -> dict:
         enforce_loop_doctrine=run.enforce_loop_doctrine,
         min_words=checks.MIN_WORDS if run.enforce_research_policy else 0,
         min_section_words=checks.MIN_SECTION_WORDS if run.enforce_research_policy else 0,
+        ledger=_ledger(run) if run.enforce_research_policy else None,
+        gaps=_coverage_gaps(run) if run.enforce_research_policy else None,
+        claims=claims if run.enforce_research_policy else None,
     )
     run.write_json("check.json", score.to_dict())
     return score.to_dict()
@@ -975,13 +1034,68 @@ def review(run: Run) -> dict:
     report = checks.Score(
         checks=[checks.Check(**c) for c in run.read_json("check.json")["checks"]]
     ).report()
+    ledger = _ledger(run)
     try:
-        verdict = run.turns.review(body, report)
+        if hasattr(run.turns, "review"):
+            try:
+                verdict = run.turns.review(body, report, ledger=ledger)
+            except TypeError:
+                verdict = run.turns.review(body, report)
+        else:
+            verdict = {"done": True, "summary": "no judge", "issues": []}
     except TurnFailed as exc:
         # A judge that did not answer is not a judge that agreed.
         verdict = {"done": False, "summary": f"the judge failed: {exc}", "issues": []}
     run.write_json("review.json", verdict)
     return verdict
+
+
+def edit_paper(run: Run) -> dict:
+    """One flow-only pass after the first green check. Add no facts.
+
+    Python diffs each section for new specifics. A specific the evidence pack
+    does not contain is reverted, so a writer that invented a number cannot
+    keep it by talking past `sourced`.
+    """
+    sentinel = run.file("edit.done.json")
+    if sentinel.exists():
+        return {"skipped": True}
+    planned = outlines.plan_view(approved_outline(run))
+    evidence = corpus_for(run)
+    reverted: list[str] = []
+    edited = 0
+    for section in planned["sections"]:
+        path = run.file("sections") / f"{section['id']}.md"
+        if not path.exists():
+            continue
+        before = path.read_text(encoding="utf-8")
+        relative = f"sections/{section['id']}.md"
+        if hasattr(run.turns, "edit_paper"):
+            after = run.turns.edit_paper(section, before, relative)
+        elif hasattr(run.turns, "edit_section"):
+            after = run.turns.edit_section(
+                section,
+                before,
+                {
+                    "failed_rows": ["flow"],
+                    "notes": ["Do not add new facts. Fix transitions and definitions only."],
+                },
+                relative,
+            )
+        else:
+            after = before
+        if not path.exists() or not path.read_text(encoding="utf-8").strip():
+            path.write_text((after or before).rstrip() + "\n", encoding="utf-8")
+        after = path.read_text(encoding="utf-8")
+        novel = checks.new_claims(before, after)
+        invented = [token for token in novel if token.lower() not in evidence.lower()]
+        if invented:
+            path.write_text(before, encoding="utf-8")
+            reverted.extend(invented)
+        else:
+            edited += 1
+    run.write_json("edit.done.json", {"edited": edited, "reverted": reverted})
+    return {"edited": edited, "reverted": reverted}
 
 
 # ---------------------------------------------------------------------------
@@ -1090,6 +1204,41 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         )
         run.state.previous_signature = list(signature)
         run.state.save(work)
+
+        # The edit pass runs once after the first green check, then the cycle
+        # re-enters at assemble. A new specific the evidence does not contain
+        # is reverted in edit_paper; if anything else broke, write retries.
+        if (
+            decision.gate == gates.PASS
+            and not run.file("edit.done.json").exists()
+            and not run.exhausted()
+        ):
+            run.log("  8 edit      ...")
+            before = run.state.total_usd
+            meta = edit_paper(run)
+            run.state.mark("edit", "complete", usd=round(run.state.total_usd - before, 4), **meta)
+            run.state.save(work)
+            run.log(f"  8 edit      {meta}")
+            assemble(run)
+            check_meta = check(run)
+            review(run)
+            run.log(f"  6 assemble  after edit")
+            run.log(f"  7 check     {check_meta['signature']}")
+            score = run.read_json("check.json")
+            verdict = run.read_json("review.json")
+            judge_done = bool(verdict.get("done"))
+            signature = tuple(score["signature"]) + (() if judge_done else ("judge",))
+            decision = gates.decide(
+                passed=score["passed"] and judge_done,
+                iteration=iteration,
+                budget=run.max_iterations,
+                signature=signature,
+                previous_signature=previous,
+                usd_left=0.0 if run.exhausted() else 1.0,
+            )
+            run.state.previous_signature = list(signature)
+            run.state.save(work)
+
         if decision.stop:
             break
         for name in CYCLE_OUTPUT:
