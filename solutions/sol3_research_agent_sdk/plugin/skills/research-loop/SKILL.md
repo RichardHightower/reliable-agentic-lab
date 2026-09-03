@@ -37,8 +37,8 @@ Plus the research record that produced them, as an RKC knowledge bundle under
 | orchestrator | `Task` | nothing |
 | outliner | read tools | nothing |
 | outline_judge | read tools | nothing |
-| researcher | read tools, `WebSearch`, filtered Perplexity, Context7 | nothing |
-| verifier | `Read`, `WebSearch`, filtered Perplexity, Context7 | nothing |
+| researcher | read tools, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
+| verifier | `Read`, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
 | diagrammer | read tools | nothing |
 | writer | read tools, `Write` | `sections/**` |
 | judge | read tools | nothing |
@@ -63,14 +63,16 @@ search and write can adjust the evidence to fit the paper.
 
 ## The phases
 
-0. **Prior art.** Read the second brain for established terminology and earlier
-   conclusions on this topic. Skip when it is not there. Never treat it as
-   verified.
+0. **Corpus pack.** Read the configured brains for established terminology and
+   earlier conclusions on this topic. Write `corpus/brain-pack.md` and
+   `corpus/brain-pack.json`. Skip when no brain is there. Never treat the pack
+   as verified. A topic with fewer than ten hits is noted `corpus_thin`.
 1. **Outline.** Turn the topic into a two-level outline: sections with
    objectives, abstracts, key questions, claims to support, required evidence,
-   word targets, and planned figures. Python validates the outline, an Opus
-   judge scores it, and a stamp writes `outline.approved.json`. Later phases
-   read that file and nothing else.
+   word targets, planned figures, and `corpus_refs` from the pack. Python
+   validates the outline, an Opus judge scores it (including `corpus_fit`),
+   and a stamp writes `outline.approved.json`. Later phases read that file
+   and nothing else.
 2. **Research.** Answer each approved key question from primary sources, in
    outline order. Return atomic claims, each with a source URL and a verbatim
    quote.

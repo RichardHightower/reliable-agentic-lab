@@ -50,6 +50,7 @@ def test_the_outline_schema_is_closed_and_non_recursive():
     section = schema["properties"]["sections"]["items"]
     assert section["additionalProperties"] is False
     assert "sections" not in section["properties"]
+    assert "corpus_refs" in section["properties"]
     figure = section["properties"]["figures"]["items"]
     assert set(figure["properties"]["kind"]["enum"]) == {"diagram", "chart"}
 

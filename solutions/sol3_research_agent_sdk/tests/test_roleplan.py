@@ -56,8 +56,9 @@ def test_no_role_in_this_cast_holds_a_shell():
     assert [name for name, role in roles.items() if "Bash" in role.tools] == []
 
 
-def test_the_verifier_reaches_both_mcp_servers():
+def test_the_verifier_reaches_the_corpus_and_both_live_servers():
     tools = roleplan.plan(None, "research")["verifier"].tools
+    assert "mcp__corpus__corpus_search" in tools
     assert "mcp__perplexity__perplexity_search" in tools
     assert "mcp__perplexity__perplexity_ask" in tools
     assert "mcp__context7__query-docs" in tools

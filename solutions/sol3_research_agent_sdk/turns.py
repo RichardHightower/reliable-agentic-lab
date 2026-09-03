@@ -190,9 +190,12 @@ class SdkTurns(Turns):
         self, topic: str, prior_art: str, budget: dict | None = None, note: str = "", brief: str = ""
     ) -> dict:
         known = (
-            f"Prior art on this topic is in prior-art.md. Read it first.\n{prior_art[:2000]}"
+            f"The corpus pack for this topic is in corpus/brain-pack.md. Read it first.\n"
+            f"Per key question, name whether the pack already answers it and which "
+            f"corpus reference key does. Put those keys on corpus_refs[]. Only keys "
+            f"from the pack are valid.\n{prior_art[:2000]}"
             if prior_art
-            else "There is no prior art for this topic. Outline from the topic alone."
+            else "There is no corpus pack for this topic. Outline from the topic alone."
         )
         # Tell the outliner what it can afford. Asked without a budget it returns
         # a good outline the run cannot pay for.

@@ -42,20 +42,18 @@ def no_renderer(monkeypatch):
 
 def test_prior_art_is_skipped_when_the_brain_is_absent(work, turns):
     run = make_run(work, turns())
-    assert paper.prior_art(run) == {"hits": 0, "brain": ""}
-    assert "No second brain" in (Path(work) / "prior-art.md").read_text()
+    meta = paper.prior_art(run)
+    assert meta["hits"] == 0
+    assert meta["corpus_thin"] is True
+    assert "No second brain" in (Path(work) / "corpus" / "brain-pack.md").read_text()
 
 
-def test_prior_art_reads_the_brain_when_it_is_there(work, turns, tmp_path):
-    brain = tmp_path / "brain"
-    (brain / "research" / "claims").mkdir(parents=True)
-    (brain / "research" / "claims" / "c1.md").write_text(
-        '---\ntitle: "A topic claim"\n---\n\nSomething about a topic that matters.\n'
-    )
-    run = make_run(work, turns(), brain=brain)
-    assert paper.prior_art(run)["hits"] == 1
-    text = (Path(work) / "prior-art.md").read_text()
-    assert "A topic claim" in text
+def test_prior_art_reads_the_brain_when_it_is_there(work, turns):
+    brain = Path(__file__).resolve().parent / "fixtures" / "brain"
+    run = make_run(work, turns(), brain=brain, brains=[brain])
+    meta = paper.prior_art(run)
+    assert meta["hits"] >= 1
+    text = (Path(work) / "corpus" / "brain-pack.md").read_text()
     assert "Not verified" in text, "prior art is context, never evidence"
 
 

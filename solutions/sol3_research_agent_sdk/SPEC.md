@@ -181,6 +181,10 @@ REPORT_DIR=work/e2e-loop-engineering-live task publish-report
 Output lands in `work/<slug>/`:
 
 ```
+corpus/brain-pack.md     what the brains already said (not verified)
+corpus/brain-pack.json   the same data, for Python
+outline.json             the outliner's last draft
+outline.approved.json    the stamped contract every later phase reads
 paper.md                 the deliverable
 paper.pdf                Arctic Fox publication export
 paper.pdf.json           PDF theme, page, figure, and byte receipt
@@ -194,9 +198,11 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
 
 ## What one run does
 
-1. **Prior art.** Read the second brain at `../../loop_eng_2nd_brain` for
-   terminology and earlier conclusions. Skip when it is not there. Never treat
-   it as verified.
+1. **Corpus pack.** Read the configured brains (`--brain`, `RESEARCH_BRAINS`,
+   or the sibling `loop_eng_2nd_brain/knowledge`) for terminology and earlier
+   conclusions. Write `corpus/brain-pack.md` and `corpus/brain-pack.json`.
+   Skip when no brain is there. Never treat the pack as verified. A topic
+   with fewer than ten hits is `corpus_thin`.
 2. **Outline.** Turn the topic into a two-level outline: sections with
    objectives, abstracts, key questions, claims to support, required evidence,
    word targets, and planned figures. Python validates it, an outline judge

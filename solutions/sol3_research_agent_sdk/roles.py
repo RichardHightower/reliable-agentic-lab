@@ -95,7 +95,7 @@ def environment_value(name: str) -> str | None:
     return None
 
 
-def mcp_servers() -> dict:
+def mcp_servers(brains=None) -> dict:
     """The research boundary, declared here rather than inherited.
 
     The obvious wiring is `setting_sources=["project"]` plus a `.mcp.json` at
@@ -112,8 +112,14 @@ def mcp_servers() -> dict:
     Perplexity appears only when its key is set. A server started with an empty
     key answers every question with an auth error, which reads downstream as a
     topic nobody has written about.
+
+    The corpus server is always present. It is in-process and read-only. An
+    empty root list returns no hits; it does not fail the session.
     """
-    servers: dict = {"context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}}
+    servers: dict = {
+        "context7": {"type": "http", "url": "https://mcp.context7.com/mcp"},
+        "corpus": corpus_mcp_server(brains or []),
+    }
     key = environment_value("PERPLEXITY_API_KEY")
     if key:
         servers["perplexity"] = {
@@ -127,6 +133,30 @@ def mcp_servers() -> dict:
             "env": {"PERPLEXITY_API_KEY": key},
         }
     return servers
+
+
+def corpus_mcp_server(brains) -> object:
+    """In-process MCP server. Search only. No write path on purpose."""
+    from claude_agent_sdk import create_sdk_mcp_server, tool  # noqa: PLC0415
+
+    import corpus as corpus_mod  # noqa: PLC0415
+
+    roots = [Path(path) for path in (brains or [])]
+
+    @tool(
+        "corpus_search",
+        "Search the configured research corpus. Read-only. Call this before live search.",
+        {"query": str, "limit": int},
+    )
+    async def corpus_search(args):
+        hits = corpus_mod.search(
+            args.get("query") or "",
+            roots,
+            limit=int(args.get("limit") or 20),
+        )
+        return {"content": [{"type": "text", "text": corpus_mod.format_hits(hits)}]}
+
+    return create_sdk_mcp_server(name="corpus", version="1.0.0", tools=[corpus_search])
 
 
 def local_plugins() -> list[dict[str, str]]:
@@ -268,7 +298,7 @@ def agent_definitions(roles: dict[str, RolePlan]):
     return agents
 
 
-def options_for(work_dir: Path | str, *, max_usd: float | None = None, loop: str = LOOP):
+def options_for(work_dir: Path | str, *, max_usd: float | None = None, loop: str = LOOP, brains=None):
     """Build `ClaudeAgentOptions` with one subagent per role in the cast.
 
     `work_dir` is the run's own directory, not a repo clone. A research run has
@@ -309,7 +339,7 @@ def options_for(work_dir: Path | str, *, max_usd: float | None = None, loop: str
         # tools. `strict_mcp_config` means these are the only servers in the
         # run, so a machine with a broken or extra server in its own config
         # cannot change what this folder can reach.
-        mcp_servers=mcp_servers(),
+        mcp_servers=mcp_servers(brains),
         strict_mcp_config=True,
         # The plugin is what makes the agent markdown visible, because `cwd`
         # is the work directory and not this folder. Enable only the two image

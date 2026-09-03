@@ -28,6 +28,7 @@ READ_TOOLS = ("Read", "Glob", "Grep")
 # says it should do.
 SEARCH_TOOLS = (
     "WebSearch",
+    "mcp__corpus__corpus_search",
     "mcp__perplexity__perplexity_search",
     "mcp__perplexity__perplexity_ask",
     "mcp__context7__resolve-library-id",
@@ -67,8 +68,8 @@ PURPOSE = {
     "outline_judge": "Scores the outline. Reads it and returns a verdict. Holds no write path.",
     "test_implementer": "Writes the failing tests. Nothing else.",
     "code_implementer": "Writes the code until the tests pass. Cannot touch tests.",
-    "researcher": "Calls the tool boundary and returns findings. Writes nothing.",
-    "verifier": "Checks a claim against a second source. Writes nothing.",
+    "researcher": "Calls the corpus first, then the live tool boundary, and returns findings. Writes nothing.",
+    "verifier": "Checks a claim against the corpus and a second live source. Writes nothing.",
     "diagrammer": "Draws the figures and runs the renderer. Writes diagrams only.",
     "writer": "Assembles the paper from verified claims. Writes prose only.",
     "judge": "Scores the attempt. Reads reports and the diff. Holds no write path.",
