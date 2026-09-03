@@ -38,7 +38,7 @@ DEFAULT_MODEL = "anthropic:claude-sonnet-5"
 GRAPH_MAX_TOKENS = 4_096
 # The writer also binds the evidence ledger into a multi-section JSON outline.
 # A 2,048-token prose ceiling truncated that outline mid-string on the live
-# E2E. Section prompts still enforce 180 to 300 words; the transport ceiling
+# E2E. Section prompts ask for 400 to 1200 words; the transport ceiling
 # must accommodate the writer's larger structured turn as well.
 WRITER_MAX_TOKENS = 4_096
 MODEL_TIMEOUT_SECONDS = 120

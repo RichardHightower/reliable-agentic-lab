@@ -23,7 +23,7 @@ This Deep Agents solution produces a cited research brief or an evidence-backed 
 
 ### Functional requirements
 
-- Plan three to eight research questions and limited figures.
+- Plan three to twelve research questions and limited figures.
 - Search approved sources, record claims, and cross-check prioritized claims.
 - Build Mermaid or PlantUML source diagrams and accept only judged publication figures.
 - Write scoped paper sections, review them, assemble the final artifact, and gate publication.
@@ -97,7 +97,7 @@ sol3_research_deep_agents/
 
 ```mermaid
 flowchart TD
-    Start([Topic]) --> Plan["Plan three to eight questions"]
+    Start([Topic]) --> Plan["Plan three to twelve questions"]
     Plan --> Search["Filtered search"]
     Search --> Verify["Cross-check selected claims"]
     Verify --> Outline["Build supported outline"]

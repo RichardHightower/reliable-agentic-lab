@@ -41,11 +41,23 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_WORK = HERE / "work" / "paper"
 DEFAULT_BRAIN = HERE / ".." / ".." / ".." / "loop_eng_2nd_brain" / "knowledge"
 
-DEFAULT_MAX_USD = 5.0
+DEFAULT_MAX_USD = 12.0
 DEFAULT_STAGE_ATTEMPTS = 3
-DEFAULT_SEARCH_CALLS = 24
+DEFAULT_SEARCH_CALLS = 36
 
 DONE, COST, MAX_TURNS = "done", "cost", "max turns"
+
+
+def _section_word_range(heading: str, claim_count: int) -> str:
+    """How long a section should be. The Saturday brief is already short."""
+    name = heading.strip().lower()
+    if name == "abstract":
+        return "120 to 180"
+    if name == "limitations":
+        return "150 to 250"
+    if claim_count < 3:
+        return "400 to 800"
+    return "700 to 1200"
 
 
 def section_body(text: str, heading: str) -> str:
@@ -776,7 +788,7 @@ class Paper:
                 }
             )
             briefs = "\n".join(stages.claim_brief(self.ledger, cid, index) for cid in claim_ids)
-            word_range = "90 to 180" if len(claim_ids) < 3 else "180 to 300"
+            word_range = _section_word_range(heading, len(claim_ids))
             reply = self._ask(
                 "writer",
                 f"Write the {heading!r} section of {self.plan['title']!r}.\n"
@@ -784,12 +796,13 @@ class Paper:
                 f"Audience: {self.plan['audience']}\n{extra}\n\n"
                 f"Use only these claims and their citation markers:\n{briefs}\n\n"
                 f"Return {word_range} words of section body as markdown. No heading "
-                "line, the assembler adds it. No references section. The word "
-                "limit is part of the contract: prefer concise, cited mechanisms "
-                "over an exhaustive survey. Every prose paragraph that makes a "
+                "line, the assembler adds it. No references section. Unpack every "
+                "bound claim: finding, mechanism, alternative and its cost, then the "
+                "limit of the evidence. Do not invent facts. Do not repeat a paragraph. "
+                "Every prose paragraph that makes a "
                 "factual claim must include one or more of its allowed citation markers. "
                 "Every sentence must be entailed by a listed claim. Omit unsupported "
-                "background, framing, forecasts, and generalizations instead of padding. "
+                "background, framing, forecasts, and generalizations. "
                 "The gate treats scope, transition, recommendation, and limitation paragraphs "
                 "as prose claims too, so every prose paragraph must carry at least one allowed "
                 "marker; do not leave an editorial paragraph uncited.",
@@ -871,7 +884,7 @@ class Paper:
                 }
             )
             briefs = "\n".join(stages.claim_brief(self.ledger, claim_id, index) for claim_id in claim_ids)
-            word_range = "90 to 180" if len(claim_ids) < 3 else "180 to 300"
+            word_range = _section_word_range(heading, len(claim_ids))
             earlier = []
             for prior_heading, prior_body in self.written.items():
                 if prior_heading == heading:
@@ -893,8 +906,8 @@ class Paper:
                 "body sections introduce later. Do not reuse a citation for a distinct claim unless the "
                 "provided claim brief explicitly supports both claims. Every prose paragraph that makes "
                 "a factual claim must include one or more of its allowed citation markers. "
-                "Every sentence must be entailed by a listed claim. Omit unsupported background, "
-                "framing, forecasts, and generalizations instead of padding. "
+                "Every sentence must be entailed by a listed claim. Unpack mechanism, alternative, "
+                "and evidence limit instead of restating the claims. "
                 "Do not restate a mechanism already explained in an earlier section. Build on it "
                 "with a new implication supported by this section's claims, or omit it. "
                 "The gate treats scope, transition, recommendation, and limitation paragraphs "

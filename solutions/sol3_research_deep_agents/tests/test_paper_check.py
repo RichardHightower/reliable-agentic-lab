@@ -17,15 +17,24 @@ GOOD = (
 )
 
 
+def gate(body, urls=URLS, **kwargs):
+    """Structural checks keep the old short-paper floor."""
+    kwargs.setdefault("min_words", 0)
+    kwargs.setdefault("min_section_words", 5)
+    return paper_check.check(body, urls, **kwargs)
+
+
 def test_demo_assertions_hold():
     paper_check.demo()
 
 
 def test_a_clean_paper_passes():
-    assert paper_check.check(GOOD, URLS).passed
+    assert gate(GOOD, URLS).passed
 
 
-def test_cli_uses_the_evidence_bibliography_when_sources_are_not_separate(tmp_path, capsys):
+def test_cli_uses_the_evidence_bibliography_when_sources_are_not_separate(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(paper_check, "MIN_WORDS", 0)
+    monkeypatch.setattr(paper_check, "MIN_SECTION_WORDS", 5)
     ledger = evidence.Ledger(tmp_path / "evidence")
     for url in URLS:
         source = ledger.add_source(evidence.SourceDocument(title=url, url=url, subject="exits"))
@@ -45,17 +54,17 @@ def test_cli_uses_the_evidence_bibliography_when_sources_are_not_separate(tmp_pa
 
 def test_a_deepwiki_reference_blocks_the_paper_but_docs_passes():
     rejected = GOOD.replace("https://docs.langchain.com/one", "https://deepwiki.com/langchain")
-    score = paper_check.check(rejected, ["https://deepwiki.com/langchain", URLS[1]])
+    score = gate(rejected, ["https://deepwiki.com/langchain", URLS[1]])
     assert "reference_hosts" in score.signature()
-    assert paper_check.check(GOOD, URLS).passed
+    assert gate(GOOD, URLS).passed
 
 
 def test_exit_doctrine_requires_done_then_cost_then_max_turns():
     wrong = GOOD.replace(
         "done, then cost, then max turns", "cost, then done, then max turns"
     )
-    assert "exit_doctrine" in paper_check.check(wrong, URLS).signature()
-    assert "exit_doctrine" not in paper_check.check(GOOD, URLS).signature()
+    assert "exit_doctrine" in gate(wrong, URLS).signature()
+    assert "exit_doctrine" not in gate(GOOD, URLS).signature()
 
 
 def test_exit_doctrine_is_local_not_the_first_terms_in_the_whole_paper():
@@ -64,7 +73,7 @@ def test_exit_doctrine_is_local_not_the_first_terms_in_the_whole_paper():
         "Cost appears in the abstract before the ordered doctrine. [1]",
     )
 
-    assert "exit_doctrine" not in paper_check.check(body, URLS).signature()
+    assert "exit_doctrine" not in gate(body, URLS).signature()
 
 
 def test_limitations_cannot_deny_a_cited_official_langgraph_page():
@@ -72,7 +81,7 @@ def test_limitations_cannot_deny_a_cited_official_langgraph_page():
         "This paper measures two runtimes only.",
         "There is no official LangGraph page for this topic.",
     )
-    assert "langgraph_limitations" in paper_check.check(contradiction, URLS).signature()
+    assert "langgraph_limitations" in gate(contradiction, URLS).signature()
 
 
 @pytest.mark.parametrize(
@@ -85,32 +94,32 @@ def test_limitations_cannot_deny_a_cited_official_langgraph_page():
     ],
 )
 def test_each_hard_gate_blocks(body, row):
-    score = paper_check.check(body, URLS)
+    score = gate(body, URLS)
     assert not score.passed
     assert row in score.signature()
 
 
 def test_an_em_dash_is_replaced_not_argued_about():
-    score = paper_check.check(GOOD.replace("spends until", "spends — until"), URLS)
+    score = gate(GOOD.replace("spends until", "spends — until"), URLS)
     assert "style" in score.signature()
 
 
 def test_diagram_source_in_the_body_blocks():
     """The figure is the artifact. A reader never sees `flowchart TB`."""
     leaked = GOOD.replace("![A", "```mermaid\nflowchart TB\n  A --> B\n```\n\n![A")
-    assert "no_diagram_source" in paper_check.check(leaked, URLS).signature()
+    assert "no_diagram_source" in gate(leaked, URLS).signature()
 
 
 def test_svg_and_plain_png_figure_fallbacks_block_publication():
     for target in ("figures/exits.svg", "figures/exits.png"):
         body = GOOD.replace("figures/exits_imagen.png", target)
-        assert "figure_assets" in paper_check.check(body, URLS).signature()
+        assert "figure_assets" in gate(body, URLS).signature()
 
 
 def test_a_figure_is_not_an_uncited_claim():
     """An image paragraph asserts nothing, so demanding a citation on it would
     fail every paper that has a figure."""
-    assert "cited" not in paper_check.check(GOOD, URLS).signature()
+    assert "cited" not in gate(GOOD, URLS).signature()
 
 
 def test_a_numbered_procedure_is_not_a_reference_list():
@@ -120,7 +129,7 @@ def test_a_numbered_procedure_is_not_a_reference_list():
 
 def test_missing_limitations_warns_but_ships():
     trimmed = GOOD.replace("## Limitations\n\nThis paper measures two runtimes only. [2]\n\n", "")
-    score = paper_check.check(trimmed, URLS)
+    score = gate(trimmed, URLS)
     assert score.passed, score.report()
     assert "limitations" in score.warnings()
     assert "limitations" not in score.signature(), "a warning must not drive a retry"
@@ -143,14 +152,14 @@ def ledger_with_single_source():
 
 def test_a_single_source_claim_must_admit_it_in_its_own_section():
     ledger, _ = ledger_with_single_source()
-    assert "single_source_caveat" in paper_check.check(GOOD, URLS, ledger=ledger).signature()
+    assert "single_source_caveat" in gate(GOOD, URLS, ledger=ledger).signature()
 
     caveated = GOOD.replace(
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]",
         "Three exits cover the observed cases: done, then cost, then max turns, on a single source. [1][2]",
     )
     assert (
-        "single_source_caveat" not in paper_check.check(caveated, URLS, ledger=ledger).signature()
+        "single_source_caveat" not in gate(caveated, URLS, ledger=ledger).signature()
     )
 
 
@@ -161,7 +170,7 @@ def test_the_caveat_must_be_local_to_the_claim():
         "A loop without an exit spends until someone notices. [1]",
         "A loop without an exit spends until someone notices, on a single source. [1]",
     )
-    assert "single_source_caveat" in paper_check.check(elsewhere, URLS, ledger=ledger).signature()
+    assert "single_source_caveat" in gate(elsewhere, URLS, ledger=ledger).signature()
 
 
 def test_the_reference_list_is_not_searched_for_a_caveat():
@@ -174,14 +183,14 @@ def test_a_contradicted_claim_never_reaches_the_paper():
     ledger, claim = ledger_with_single_source()
     evidence.corroborate(claim, contradicted=True)
     body = GOOD.replace("Three exits cover", f"{claim.id} Three exits cover")
-    assert "no_contradicted" in paper_check.check(body, URLS, ledger=ledger).signature()
+    assert "no_contradicted" in gate(body, URLS, ledger=ledger).signature()
 
 
 def test_the_signature_is_what_failed_not_how_it_was_worded():
     """`gates.decide` compares two signatures to spot a loop that is not
     converging, so the signature must be stable across retries."""
-    first = paper_check.check(GOOD.replace("[2]", "[9]"), URLS).signature()
-    second = paper_check.check(GOOD.replace("[2]", "[8]"), URLS).signature()
+    first = gate(GOOD.replace("[2]", "[9]"), URLS).signature()
+    second = gate(GOOD.replace("[2]", "[8]"), URLS).signature()
     assert first == second == ("grounded",)
 
 
@@ -197,14 +206,14 @@ def test_a_paper_with_no_body_is_blocked():
     """Every other gate checks content that is not there. Grounding passes with
     no citations to dangle, `cited` passes with no claim paragraphs, and style
     passes with no text to hold an em dash. Only the soft word count noticed."""
-    score = paper_check.check(HOLLOW, URLS)
+    score = gate(HOLLOW, URLS)
     assert not score.passed
     assert score.signature() == ("has_body",)
 
 
 def test_every_other_hard_gate_passes_on_the_hollow_paper():
     """This is why `has_body` had to be added rather than tightened."""
-    score = paper_check.check(HOLLOW, URLS)
+    score = gate(HOLLOW, URLS)
     green = {c.name for c in score.checks if c.passed}
     assert {"grounded", "cited", "style", "sections", "references"} <= green
 
@@ -213,7 +222,7 @@ def test_a_stub_section_is_blocked():
     thin = GOOD.replace(
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]", "Yes. [1]"
     )
-    assert "has_body" in paper_check.check(thin, URLS).signature()
+    assert "has_body" in gate(thin, URLS).signature()
 
 
 def test_a_section_of_only_a_figure_is_blocked():
@@ -223,7 +232,7 @@ def test_a_section_of_only_a_figure_is_blocked():
         "![A flowchart of the three exits](figures/exits_imagen.png)",
         "![A flowchart of the three exits](figures/exits_imagen.png)",
     )
-    assert "has_body" in paper_check.check(figure_only, URLS).signature()
+    assert "has_body" in gate(figure_only, URLS).signature()
 
 
 def test_references_and_figures_owe_no_prose():
@@ -231,8 +240,16 @@ def test_references_and_figures_owe_no_prose():
         "## References",
         "## Figures\n\n![A sequence of the roles](figures/roles_imagen.png)\n\n## References",
     )
-    assert "has_body" not in paper_check.check(appendix, URLS).signature()
+    assert "has_body" not in gate(appendix, URLS).signature()
 
 
 def test_a_real_paper_still_passes():
-    assert paper_check.check(GOOD, URLS).passed
+    assert gate(GOOD, URLS).passed
+
+
+def test_a_short_paper_fails_the_hard_length_gate():
+    """A structurally green brief is not a paper. Length ships as a hard row."""
+    score = paper_check.check(GOOD, URLS)
+    assert not score.passed
+    assert "length" in score.signature()
+    assert "length" not in score.warnings()

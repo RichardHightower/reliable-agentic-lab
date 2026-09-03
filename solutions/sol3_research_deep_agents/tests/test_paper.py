@@ -69,13 +69,21 @@ def test_the_paper_passes_its_own_gates(finished_paper):
     assert report["failures"] == []
 
 
+def test_the_finished_paper_clears_the_word_floor(finished_paper):
+    import paper_check  # noqa: PLC0415
+
+    body = (finished_paper / "whitepaper.md").read_text()
+    assert paper_check.word_count(body) >= paper_check.MIN_WORDS
+
+
 def test_a_warning_is_not_filed_as_a_failure(finished_paper):
     """`publish` reads this file to decide whether the paper may ship, so a soft
-    word count must not look like a blocked gate."""
+    limitations warning must not look like a blocked gate. Length is now hard."""
     report = json.loads((finished_paper / "gates.json").read_text())
     assert "warnings" in report
-    assert set(report["warnings"]) & {"length", "limitations"} or report["warnings"] == []
-    assert not set(report["failures"]) & {"length", "limitations"}
+    assert "length" not in report["warnings"]
+    assert "length" not in report["failures"]
+    assert not set(report["failures"]) & {"limitations"}
 
 
 def test_every_citation_in_the_paper_resolves(finished_paper):
