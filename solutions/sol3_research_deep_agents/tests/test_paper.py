@@ -459,6 +459,8 @@ class Priced(paper.FixtureRunner):
     PRICE: ClassVar[dict] = {
         "planner": 0.05,
         "outline_judge": 0.05,
+        "section_judge": 0.05,
+        "ledger": 0.05,
         "researcher": 0.05,
         "verifier": 0.05,
         "diagrammer": 0.05,
@@ -468,7 +470,7 @@ class Priced(paper.FixtureRunner):
 
     def ask(self, role, prompt):
         reply = super().ask(role, prompt)
-        reply.usd = self.PRICE[role]
+        reply.usd = self.PRICE.get(role, 0.05)
         return reply
 
 

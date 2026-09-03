@@ -30,6 +30,7 @@ This folder imports no shared engine. Every module below is a copy, and
 | `mcp_tools.py` | `.mcp.json`, and the fallbacks under it |
 | `corpus.py` | Second-brain search, pack, and opt-in ingest |
 | `outline.py` | Outline validator, stamp, and plan lift |
+| `sections.py` | Per-section check, judge, and ledger |
 | `evidence.py` | `SourceDocument`, `Claim`, `Finding`, and corroboration |
 | `paper.py` | The nine stage pipeline and the three exits |
 | `stages.py` | Each stage's gate |
@@ -47,8 +48,10 @@ planner           yes     plan.json
 outline_judge     no      nothing
 researcher        no      nothing
 verifier          yes     evidence/**   (denied: paper/**)
+section_judge     no      nothing
+ledger            no      nothing
 diagrammer        yes     diagrams/*.mmd, diagrams/*.puml   (denied: paper/**, evidence/**)
-writer            yes     brief.md, paper/**, work/research/**   (denied: evidence/**)
+writer            yes     brief.md, paper/**, work/research/**, sections/**   (denied: evidence/**)
 reviewer          no      nothing
 ```
 

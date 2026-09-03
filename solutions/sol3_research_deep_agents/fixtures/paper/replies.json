@@ -289,6 +289,27 @@
       "text": "This paper combines one reference implementation, two runtime documents, and one paper on self-correction. [1][2][3][5]\n\nIt measures no production loops and reports no cost figures of its own. The three-exit order is the local doctrine. It is not a standard, and it is not a claim that other runtimes should copy it. [1]\n\nThe runtime limits are each single source observations. Treat them as documented behavior for those runtimes, not as a universal property of agent systems. [2][3]\n\nThe maker and checker split is motivated by CRITIC. It is not proven here. A host that wants the split still has to put it in the role table, not in the prompt. [5]\n\nA live run against a different topic will retrieve different pages. The gates in this paper check citations, section shape, figure assets, and length. They do not check whether the argument is the one a specialist would have written. That judgment stays with the reviewer, and the reviewer can be wrong without corrupting the evidence bundle. [1][5]\n"
     }
   },
+  "section_judge": {
+    "Grade this section": {
+      "data": {
+        "passed": true,
+        "failed_rows": [],
+        "notes": ["offline section judge: check already ran"]
+      }
+    }
+  },
+  "ledger": {
+    "Extract the ledger": {
+      "data": {
+        "claims": [],
+        "numbers": [],
+        "decisions": [],
+        "terms_defined": [],
+        "open_questions": [],
+        "forward_refs": []
+      }
+    }
+  },
   "reviewer": {
     "Grade this draft": {
       "data": {
