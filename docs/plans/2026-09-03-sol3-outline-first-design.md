@@ -45,7 +45,7 @@ one broke on.
 | Memory between chapters | none | first N sentences as bullets, depends on parallel timing | 4 to 8 sentence synopsis of the last two chapters, often truncated away |
 | Sections | parallel, blind to siblings | sequential per call, blind to siblings | parallel, six threads, blind to siblings |
 | Review loops | evaluate then rewrite, twice, then proofread, no score | weighted rubric 0 to 1, threshold 0.7, at most 3 iterations | book-gen's loops capped at 2 and 1, voice-first rubric |
-| Research | "pretend you have access to the web search" | agent MCP tools inside the review loop, findings never applied | Perplexity recency rewrite after drafting |
+| Research | Perplexity `sonar-pro` as a recency reviewer of the TOC and of each drafted section, feedback drives a rewrite; no corpus before drafting | agent MCP tools inside the review loop, findings never applied | Perplexity recency rewrite after drafting |
 | Figures | prose placeholder | Mermaid and PlantUML rendered and validated, keyword-planned | three-tag contract, spec to text-safe SVG, image model with judge |
 | Data charts | none | none | none |
 | Cost tracking | thread-local tokens, stale prices | none | per-job tokens and cents |
@@ -60,8 +60,13 @@ exercises generated just before writing. The whole TOC goes into every
 downstream prompt as the coherence anchor. Every artifact is versioned on
 disk. Evaluate and rewrite are separate prompts. What did not work: no
 approval gate, no memory between chapters, sibling sections drafted in
-parallel and blind to each other, no research at all, and a lock-based
-status manager that was ripped out and never replaced.
+parallel and blind to each other, and a lock-based status manager that was
+ripped out and never replaced. Its research is real but late: Perplexity
+`sonar-pro` reviews the TOC for recency and reviews each drafted section for
+deprecated APIs, and the main model rewrites from that feedback. Nothing is
+retrieved before drafting, no evidence is stored, and nothing is cited. The
+Anthropic provider's search path is the one that says "pretend you have
+access to the web search"; the Perplexity path is a live online model.
 
 **book-gen2 proved a negative.** Every model step ran as a coding-agent
 subprocess, and the plan documents record what that produced: "7 empty
@@ -358,8 +363,8 @@ Each of these is a failure one of the three repos shipped.
   (all three; booksurf's proofread changed zero words).
 - A summarizer that keeps the first N sentences (book-gen2 watcher).
 - A summarizer on the heavy model by provider default (booksurf).
-- Research as a post-draft rewrite (booksurf recency pass) or research
-  findings never applied (book-gen2's 65 reports).
+- Research as a post-draft rewrite (book-gen and booksurf recency passes)
+  or research findings never applied (book-gen2's 65 reports).
 - Agents running procedures: validation, assembly, file naming, state
   (book-gen2's empty files and misnamed sections).
 - Length limits that log and never enforce (booksurf, 36 percent over).
