@@ -6,42 +6,38 @@ footer: Spillwave Solutions | spillwave.com
 ---
 # sol2_implementer_agent_sdk
 
-Take-home **configuration port**. It does not run the eight-step loop.
+The Lab 2 take-home driver on Claude Agent SDK. A ready ticket in. A green rubric out.
 
-This is the role graph. The live harness is `sol2_implementer_deep_agents`.
+Python holds Pass, Retry, and Escalate. The Agent SDK is the maker. The red gate is `junit.xml`.
 
-`task run` prints `ClaudeAgentOptions`. It does not implement T001.
+Saturday fills three stubs in `labs/lab2_implementer`. Demo T001 from here with `--doer reference` or `--doer sdk`.
 
-Read `HOW_TO_RUN.md`, `DESIGN_DOC.md`, `TEST_PLAN.md`, and `E2E_PLAN.md`.
+Read `HOW_TO_RUN.md` and `DESIGN_DOC.md`. Skills are listed on `AgentDefinition`, not pasted.
 
 
 ---
 
-# Cast, not the driver
+# Two drivers, two fences
 
 ![h:420](images/driver-versus-cast.jpg)
 
-`task run` prints `ClaudeAgentOptions`. It does not implement T001.
+Same eight-step loop as the Deep Agents twin. Enforcement here is one PreToolUse hook keyed by `agent_type`.
 
 
 ---
 
-# What it proves
+# What this folder is
 
-The role table survived the runtime swap.
+| File | Role |
+|---|---|
+| `harness.py` | CLI, table, `--doer reference\|sdk\|none` |
+| `implementer.py` | eight-step loop |
+| `doers.py` | `none` / `reference` / Agent SDK |
+| `rubric.py` / `gates.py` / `contract.py` | copies, not a library |
+| `roles.py` | `ClaudeAgentOptions`, `skills=`, one hook |
+| `plugin/skills/` | listed per writing role |
 
-```
-role                writes  scope
-orchestrator        no      nothing
-planner             yes     steps.jsonl
-test_implementer    yes     tests/**
-code_implementer    yes     app/**, src/**   denied tests/**
-judge               no      nothing
-```
-
-Missing on purpose: `implementer.py`, `gates.py`, `rubric.py`, `doers.py`.
-
-Do not copy this folder into `labs/lab2_implementer/harness.py`. Saturday wants `red_gate` / `score_attempt` / `run_loop`.
+`task loop:implementer` is gone from the root Taskfile. Run `task run` here.
 
 
 ---
@@ -52,10 +48,10 @@ Do not copy this folder into `labs/lab2_implementer/harness.py`. Saturday wants 
 cd solutions/sol2_implementer_agent_sdk
 echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
 task setup          # .venv + claude-agent-sdk. PEP 668.
-task clone          # only if you want live options against a real repo
+task clone
 ```
 
-Do not `pip install` into Homebrew Python.
+Do not `pip install` into Homebrew Python. Do not activate the venv. Task uses it.
 
 
 ---
@@ -65,6 +61,7 @@ Do not `pip install` into Homebrew Python.
 ```bash
 task table          # judge writes must print no
 task test           # pytest. No key, no SDK, no clone.
+task e2e            # offline loop against a disposable fixture
 ```
 
 If judge prints `yes`, stop. The port is wrong.
@@ -76,7 +73,7 @@ If judge prints `yes`, stop. The port is wrong.
 
 ![h:360](images/sdk-two-fences.jpg)
 
-`task run --` prints options with `dontAsk` and one PreToolUse hook. No call to `implementer.run`.
+`tools=[...]` decides whether a role can write. One PreToolUse hook decides which paths. Python still owns `implementer.run`.
 
 
 ---
@@ -101,39 +98,50 @@ A typo fails **open**. The field is `maxTurns`, camelCase.
 
 ---
 
-# `task run` is configuration
+# Eight steps in `implementer.run`
+
+1. Read the ticket. Refuse if it is still a draft.
+2. `plan_for`: one test step and one code step per criterion. Derived, not generated.
+3. `test_implementer` writes under `tests/**`.
+4. Red gate. Empty new-ids → escalate. Stop. Do not write app code.
+5. `code_implementer` writes `app/**` until green. Denied `tests/**`.
+6. Ten-row rubric. No model.
+7. Final judge. JSON `{done, summary, issues}`. Unparseable is `done=False`.
+8. `gates.decide`. A retry carries the failed rows and the failing test ids. Receipt to `.harness/receipt.json`.
+
+`query()` does not count retries.
+
+
+---
+
+# Three doers
+
+| Spec | Needs | Behavior |
+|---|---|---|
+| `none` | nothing | writes nothing. Honesty check. |
+| `reference` | clone | copies `known-good` inside WriteScope |
+| `sdk` | `task setup` + key | Agent SDK makers |
 
 ```bash
-task run --
+task run -- --ticket T001 --doer none
+task run -- --ticket T001 --doer reference
+task run -- --ticket T001 --doer sdk
 ```
 
-Needs `task setup`. Prints options. Stops.
-
-That is not a ticket run. A test that expects `task run -- --ticket T001` to implement a ticket is testing a product this folder refused to be.
+`task run` is `harness.py --repo <target>`. Extra flags after `--` go to `harness.py`.
 
 
 ---
 
-# Live T001. Glue, not a second loop
+# Live T001
 
-`e2e_t001.py` hands `AgentSdkBackend` to the Deep Agents driver.
+`e2e_t001.py` is the operator path for `--doer sdk`. It builds
+`AgentSdkPhaseBackend` in this folder and calls this folder's
+`implementer.run`. `E2E_MAX_TURNS` is 12.
 
-Both folders ship `adapter.py` and `roles.py`. Putting both on `sys.path` shadows one of them. The glue loads each folder in an isolated import scope.
-
-Do not invent a shared `loops/` package. Do not copy `implementer.py` into this folder.
+Do not invent a shared `loops/` package. Do not import the Deep Agents folder.
 
 Read `E2E_PLAN.md` before spending a token.
-
-
----
-
-# Testing skill
-
-`.agents/skills/test-ticket-implementer/`
-
-Track A is `sol2_implementer_deep_agents`. Track B is this backend plugged into that driver.
-
-Run `task test` here first. Do not spend a token to diagnose a failing offline suite.
 
 
 ---
@@ -142,10 +150,12 @@ Run `task test` here first. Do not spend a token to diagnose a failing offline s
 
 ```
 plugin/agents/...
-plugin/skills/...
+plugin/skills/<role>/SKILL.md
 ```
 
-The plugin is the readable specification. Python owns the options. When an agent markdown file and the role table disagree, `options_for` raises.
+The plugin is the readable specification. Python owns the options.
+`AgentDefinition.skills` lists the role when the skill directory exists.
+When an agent markdown file and the role table disagree, `options_for` raises.
 
 
 ---
@@ -154,19 +164,20 @@ The plugin is the readable specification. Python owns the options. When an agent
 
 | Symptom | Fix |
 |---|---|
-| Thought this ran T001 | config port. Use Deep Agents `task run` |
 | Judge writes `yes` | strip Write from judge tools |
 | Fail-open writes | full `hookSpecificOutput` deny |
 | `externally-managed-environment` | `task setup`, not system pip |
+| `--doer sdk` refuses | `task setup` first |
 | Copied into lab2 stub | Saturday wants three functions |
+| `from loops` in a file | standalone test fails the build |
 
 
 ---
 
 # Recap
 
-Config port, not a filled loop. Same table, different enforcement knob.
+Python owns the red gate and the three exits. The Agent SDK writes tests, then code.
 
-The eight steps live in `sol2_implementer_deep_agents`. This folder proves the table survived.
+Same table as Saturday. Enforcement is a tool list, plus one hook, plus Python on the outside.
 
-`task setup`, `task table`, `task test`, `task run`. Read `HOW_TO_RUN.md`.
+If a port imports `loops`, the design leaked.

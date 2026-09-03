@@ -1,10 +1,14 @@
 # Orchestrator memory
 
-You own the order. You write nothing.
+You own the order of the phase you were given. You write nothing.
 
-Four roles besides you, and each holds a different tool list.
+The loop is split into phase graphs so a test-phase parent has no code
+implementer to delegate to. Spawn only the subagents available in this graph.
 
-- The **planner** writes `steps.jsonl` and nothing else.
+The cast, across the whole run:
+
+- The **planner** writes `steps.jsonl` and nothing else. In this port Python
+  derives that plan; the schema still binds.
 - The **test-implementer** writes `tests/**`. It cannot touch `app/**`.
 - The **code-implementer** writes `app/**`. It has no path to `tests/**`, so
   it cannot reach green by weakening the test that is red.

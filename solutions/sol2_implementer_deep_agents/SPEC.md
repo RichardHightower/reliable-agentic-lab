@@ -17,7 +17,13 @@ orchestrator, planner, test_implementer, code_implementer, judge.
 2. Plan schema in `steps.jsonl`.
 3. Red gate over `reports/junit.xml`.
 4. Ten-row rubric. No model.
-5. `gates.decide`. Pass, retry, escalate. Same signature twice means stop.
+5. The final judge's JSON. Unparseable is `done=False`.
+6. `gates.decide`. Pass, retry, escalate. Same signature twice means stop.
+   A retry carries the failed rows and the failing test ids.
+
+LangChain `usage_metadata` has token counts, not dollars. This port prices
+those tokens at Sonnet-class rates so the money exit can fire. That number is
+an estimate, not a bill.
 
 ## Run
 

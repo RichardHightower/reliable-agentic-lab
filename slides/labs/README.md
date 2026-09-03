@@ -30,7 +30,7 @@ npx @marp-team/marp-cli slides/labs/lab1-enhancer.md \
 | `sol1-enhancer-deep-agents.md` | Deep Agents, scoped write tool | `solutions/sol1_enhancer_deep_agents` |
 | `lab2-implementer.md` | Fill `harness.py` | `labs/lab2_implementer` |
 | `sol2-implementer-deep-agents.md` | Working eight-step loop. Driver of T001. | `solutions/sol2_implementer_deep_agents` |
-| `sol2-implementer-agent-sdk.md` | Role-table config port. Cast, not driver. | `solutions/sol2_implementer_agent_sdk` |
+| `sol2-implementer-agent-sdk.md` | Working eight-step loop. PreToolUse fence. | `solutions/sol2_implementer_agent_sdk` |
 | `lab3-research.md` | Fill `plan_questions` and `check_brief` | `labs/lab3_research` |
 | `sol3-research-deep-agents.md` | White paper pipeline, nine stages, three fences | `solutions/sol3_research_deep_agents` |
 | `sol3-research-agent-sdk.md` | White paper pipeline, ten phases, one PreToolUse hook | `solutions/sol3_research_agent_sdk` |

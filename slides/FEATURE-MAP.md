@@ -29,10 +29,10 @@ Do not survey seven production loops as labs. Name them in Module 4. Build one g
 | The red gate | 2 | New tests must fail before the code implementer starts |
 | The ten-row rubric | 2 | "The tests passed" is one row of ten |
 | Deterministic judge | 2 | Arithmetic over `junit.xml`, `coverage.xml`, and the diff |
-| Model final judge | 2 | Session 2 teaches the question: is the ticket actually done? The Deep Agents port demonstrates the deterministic judge (`judge_done=None`); a green rubric is enough there |
-| Unparseable verdict is a fail | 2 | Session 2: a synthetic failing verdict, never a pass. Not wired in `sol2_implementer_deep_agents` |
+| Model final judge | 2 | After a green rubric the judge subagent answers `done`. Green plus `judge_done=False` is escalate |
+| Unparseable verdict is a fail | 2 | A synthetic failing verdict, never a pass. Both sol2 ports parse JSON and treat garbage as `done=False` |
 | The push gate | 2 | A `PreToolUse` hook refuses `git push` without a green receipt |
-| The receipt | 2 | Green, this tree, and newer than the last edit. All three. |
+| The receipt | 2 | Green, this tree, and newer than the last edit. All three. Both sol2 ports write `.harness/receipt.json` |
 | Defense at two layers | 2 | In-process scope catches the loop. `write_scope` catches the subprocess. |
 | Reading harness output | 2 | Walk one trace. Name the row that blocked. |
 | MCP tool contract | 3 | One narrow tool. Search. No merge, no deploy. |

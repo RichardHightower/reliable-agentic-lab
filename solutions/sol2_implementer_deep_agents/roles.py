@@ -9,8 +9,9 @@ Deep Agents scopes three ways, and this port uses all three.
    test, because `tests/**` is not in its allow list.
 3. The harness itself is fenced: no general-purpose subagent, no built-in
    `write_file` on the orchestrator, `FilesystemBackend(virtual_mode=True)` so
-   `..` cannot walk off the repo, and declarative `permissions=` underneath
-   everything.
+   the built-in tools are *routed* at the repo root (routing, not a security
+   boundary — custom tools still call `_inside`), and declarative
+   `permissions=` underneath everything.
 
 Layer 3 is the one people skip. The default general-purpose subagent ships with
 the harness filesystem tools, and leaving it enabled is how a carefully scoped
@@ -53,11 +54,10 @@ DENY_EVERY_WRITE = {"operations": ["write"], "paths": ["/**"], "mode": "deny"}
 # message text as-is; with it the parent always gets valid JSON matching the
 # schema, JSON-serialized into the ToolMessage the parent reads.
 #
-# `gates.decide` takes a `judge_done` argument and `implementer.py` does not pass it today, so the live path
-# passes on a green rubric alone. Naming a gate is
-# still the one thing the judge may not do, the same reason sol1's schema
-# forbids `ready`: a stop condition a model can phrase its way past is not a
-# stop condition.
+# `implementer.run` now passes `judge_done` to `gates.decide`. Unparseable is
+# done=False. Naming a gate is still the one thing the judge may not do, the
+# same reason sol1's schema forbids `ready`: a stop condition a model can
+# phrase its way past is not a stop condition.
 JUDGE_RESPONSE = {
     "type": "object",
     "title": "JudgeVerdict",
@@ -92,8 +92,9 @@ def _skill_path(name: str) -> str | None:
 def _inside(repo: Path, path: str):
     """Resolve `path` under `repo`, or None when it escapes.
 
-    `virtual_mode` on the Deep Agents backend fences the built-in filesystem
-    tools. It does not fence a tool this folder wrote. Without this check,
+    `virtual_mode` on the Deep Agents backend is routing: built-in filesystem
+    tools see paths relative to `root_dir`. It is not a security boundary, and
+    it does not fence a tool this folder wrote. Without this check,
     `read_file("../../secrets")` walks straight off the target repo, and the
     harness never sees the call.
 

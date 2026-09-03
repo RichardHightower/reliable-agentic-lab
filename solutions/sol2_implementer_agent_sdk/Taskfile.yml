@@ -1,9 +1,8 @@
 # Standalone. No dependency on the root Taskfile.
 #
 # `task test` and `task table` need no SDK, no API key, and no clone.
-# `task run` prints this runtime's options and needs the SDK. This folder is
-# the cast, not the driver. `task setup` creates `.venv` in this folder so
-# Homebrew Python (PEP 668) is not in the way.
+# `task run -- --doer sdk` drives tickets and needs the SDK. `task setup`
+# creates `.venv` in this folder so Homebrew Python (PEP 668) is not in the way.
 version: '3'
 
 dotenv: ['../../.env', '.env']
@@ -29,6 +28,17 @@ tasks:
           {{.PY}} -m pytest tests -q
         fi
 
+  e2e:
+    desc: Offline loop tests. No SDK, no key, no public CRM clone.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" -m pytest tests/test_implementer.py tests/test_adapter.py -q
+        else
+          {{.PY}} -m pytest tests/test_implementer.py tests/test_adapter.py -q
+        fi
+
   table:
     desc: Print the role table and stop, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
@@ -51,12 +61,19 @@ tasks:
       - git clone --quiet https://github.com/RichardHightower/northwind-field-crm.git {{.TARGET}}
 
   run:
-    desc: Print this runtime's options. Needs the SDK. This folder is not the driver.
+    desc: Implementer loop against TARGET. Pass --doer sdk to use the Agent SDK.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - |
-        if [ ! -x "{{.RUN_PY}}" ]; then
-          echo "run task setup first. It creates .venv in this folder and installs claude-agent-sdk."
-          exit 1
+        args=" {{.CLI_ARGS}} "
+        if echo "$args" | grep -q -- " --doer sdk"; then
+          if [ ! -x "{{.RUN_PY}}" ]; then
+            echo "run task setup first. --doer sdk needs claude-agent-sdk in .venv."
+            exit 1
+          fi
+          "{{.RUN_PY}}" harness.py --repo {{.TARGET}} {{.CLI_ARGS}}
+        elif [ -x "{{.RUN_PY}}" ]; then
+          "{{.RUN_PY}}" harness.py --repo {{.TARGET}} {{.CLI_ARGS}}
+        else
+          {{.PY}} harness.py --repo {{.TARGET}} {{.CLI_ARGS}}
         fi
-        "{{.RUN_PY}}" harness.py --repo {{.TARGET}} {{.CLI_ARGS}}

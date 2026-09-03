@@ -40,6 +40,8 @@ import ticket as tickets
 import write_scope as roles
 from contract import Contract, ContractError
 
+TEST_GLOBS = ("tests/**",)
+
 
 def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
     """Test ids that are failing now and did not exist before. The red proof."""

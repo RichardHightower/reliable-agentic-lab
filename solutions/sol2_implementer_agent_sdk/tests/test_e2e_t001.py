@@ -1,4 +1,4 @@
-"""The T001 bridge is a Deep Agents Backend without needing either SDK."""
+"""The live T001 path wraps a local Backend. No SDK. No sibling folder."""
 
 from __future__ import annotations
 
@@ -47,13 +47,18 @@ def test_the_e2e_wrapper_is_a_doers_backend(tmp_path):
 def test_the_e2e_wrapper_selects_the_backend_for_each_phase(tmp_path):
     tester = FakeAgentSdkBackend()
     coder = FakeAgentSdkBackend()
-    wrapper = e2e_t001.AgentSdkE2EBackend({"test": tester, "code": coder})
+    inner = e2e_t001.adapter.AgentSdkPhaseBackend(test=tester, code=coder)
+    wrapper = e2e_t001.AgentSdkE2EBackend(inner)
 
     wrapper.run(repo=tmp_path, prompt="test", allow=["tests/**"])
     wrapper.run(repo=tmp_path, prompt="code", allow=["app/**"])
 
     assert tester.calls == 1
     assert coder.calls == 1
+
+
+def test_the_live_turn_ceiling_is_high_enough_for_a_green_run():
+    assert e2e_t001.E2E_MAX_TURNS >= 12
 
 
 def test_a_controlled_sdk_turn_ceiling_is_not_a_failed_query(tmp_path):

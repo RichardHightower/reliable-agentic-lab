@@ -27,12 +27,13 @@ name what is missing, rather than inventing a step that will pass either way.
 ## Output contract
 
 Write `steps.jsonl`, one JSON object per line, and nothing else. That path is
-the only one you can reach.
+the only one you can reach. Each line must carry `ticket`, `role`, `action`,
+and `validation`. `role` is `test_implementer` or `code_implementer`. A line
+with `kind` / `path` / `goal` is rejected.
 
 ```json
-{"id": "s1", "criterion": "c1", "kind": "test", "path": "tests/test_due_date.py", "goal": "..."}
-{"id": "s2", "criterion": "c1", "kind": "code", "path": "app/models.py", "goal": "..."}
+{"id": "S1T", "ticket": "T001", "role": "test_implementer", "action": "Write a failing test for AC-2", "validation": "tests/test_due_date.py::test_ac_2_due_date_is_nullable fails", "criterion": "AC-2", "status": "todo"}
+{"id": "S1C", "ticket": "T001", "role": "code_implementer", "action": "Implement AC-2", "validation": "tests/test_due_date.py::test_ac_2_due_date_is_nullable passes", "criterion": "AC-2", "status": "todo"}
 ```
 
-`kind` is `test` or `code`. `path` is where the work lands. Your final message
-is a one-paragraph summary of the plan, not the plan itself.
+Your final message is a one-paragraph summary of the plan, not the plan itself.

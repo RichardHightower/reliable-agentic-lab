@@ -81,7 +81,12 @@ task run -- --ticket T001 --doer deep
 
 `task run` calls `harness.py --repo <target>`. Extra flags after `--` go to
 `harness.py`. Python still owns the red gate and `gates.decide`. Same
-signature twice means stop.
+signature twice means stop. A retry carries the failed rubric rows and the
+failing test ids. After a green rubric the judge subagent answers in JSON;
+unparseable is a fail.
+
+LangChain does not emit a dollar cost. This port prices token counts at
+Sonnet-class rates so the money exit can fire. That number is an estimate.
 
 ## What this folder will not do
 

@@ -36,7 +36,8 @@ your benefit of the doubt is an attempt that ships a hole.
 ## Output contract
 
 Return ONLY one JSON object. The first character is `{` and the last is `}`.
+Do not include a `rows` key. Python scores the rubric. You answer `done`.
 
 ```json
-{"done": false, "summary": "one sentence", "rows": {"covered": true, "honest": true, "scoped": false, "named": true}, "issues": ["..."]}
+{"done": false, "summary": "due_date is parsed but never stored", "issues": [{"severity": "major", "path": "app/models.py", "description": "the column is missing"}]}
 ```

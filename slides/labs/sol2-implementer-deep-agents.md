@@ -17,11 +17,11 @@ Read `HOW_TO_RUN.md` and `DESIGN_DOC.md`. Skills are mounted, not pasted.
 
 ---
 
-# Driver, not a cast
+# Two drivers, two fences
 
 ![h:420](images/driver-versus-cast.jpg)
 
-Demo T001 from this folder. The Agent SDK twin prints options. It does not implement the ticket.
+Demo T001 from this folder. The Agent SDK twin is the same eight-step loop. Enforcement there is one PreToolUse hook, not a scoped write tool.
 
 
 ---
@@ -93,8 +93,8 @@ Python runs the suite through `Contract`. No role holds a shell. See `docs/diagr
 4. Red gate. Empty new-ids → escalate. Stop. Do not write app code.
 5. `code_implementer` writes `app/**` until green. Denied `tests/**`.
 6. Ten-row rubric. No model.
-7. `judge_done=None`. A green rubric is enough on this path. Session 2 still teaches a model judge.
-8. `gates.decide`. Trace to `.harness/last-implementer.json`.
+7. Final judge. JSON `{done, why}`. Unparseable is `done=False`. Green rubric plus `judge_done=False` is escalate.
+8. `gates.decide`. A retry carries the failed rows and the failing test ids. Trace to `.harness/last-implementer.json`. Receipt to `.harness/receipt.json`.
 
 `create_deep_agent` does not count retries.
 
@@ -163,7 +163,7 @@ Do not paste `SKILL.md` into a subagent prompt. Do not shadow `read_file` with a
 
 `.agents/skills/test-ticket-implementer/`
 
-Works on every `solutions/sol2_implementer_*` folder. Track A is this driver. Track B plugs another runtime into it.
+Works on every `solutions/sol2_implementer_*` folder. Each port owns its own driver.
 
 Read `HOW_TO_RUN.md` first. Run `task test` and `task e2e` before any live spend.
 

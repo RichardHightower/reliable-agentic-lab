@@ -30,7 +30,9 @@ Assert on behavior a caller can observe. A test that reaches into a private
 attribute or asserts a call count breaks when the code is refactored and
 passes when the behavior regresses.
 
-One criterion, one test function, one reason to fail.
+One criterion, one test function, one reason to fail. Put the criterion id in
+the test name, for example `test_ac_2_due_date_is_nullable` for `(AC-2)`. The
+harness marks a step done only when a passing junit id contains that id.
 
 ## Output contract
 
