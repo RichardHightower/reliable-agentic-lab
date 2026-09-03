@@ -43,6 +43,8 @@ def _schema(properties: dict, required: list[str]) -> dict:
 
 _STRINGS = {"type": "array", "items": {"type": "string"}}
 
+# The old planner shape, kept so a reader comparing this port to an earlier
+# revision can see what the outliner replaced. Nothing calls it.
 PLAN_SCHEMA = _schema(
     {
         "title": {"type": "string"},
@@ -82,6 +84,75 @@ PLAN_SCHEMA = _schema(
         },
     },
     ["title", "sections", "questions"],
+)
+
+# Bounded and non-recursive. A section cannot contain sections.
+_FIGURE_SCHEMA = _schema(
+    {
+        "name": {"type": "string"},
+        "kind": {"type": "string", "enum": ["diagram", "chart"]},
+        "shows": {"type": "string"},
+        "data_needed": {"type": "string"},
+    },
+    ["name", "kind", "shows", "data_needed"],
+)["schema"]
+
+_SECTION_SCHEMA = _schema(
+    {
+        "id": {"type": "string"},
+        "heading": {"type": "string"},
+        "objective": {"type": "string"},
+        "abstract": {"type": "string"},
+        "key_questions": _STRINGS,
+        "claims_to_support": _STRINGS,
+        "required_evidence": _STRINGS,
+        "word_target": {"type": "integer"},
+        "figures": {"type": "array", "items": _FIGURE_SCHEMA},
+        "depends_on": _STRINGS,
+        "corpus_refs": _STRINGS,
+    },
+    [
+        "id",
+        "heading",
+        "objective",
+        "abstract",
+        "key_questions",
+        "claims_to_support",
+        "required_evidence",
+        "word_target",
+        "figures",
+        "depends_on",
+    ],
+)["schema"]
+
+OUTLINE_SCHEMA = _schema(
+    {
+        "title": {"type": "string"},
+        "audience": {"type": "string"},
+        "thesis": {"type": "string"},
+        "word_target_total": {"type": "integer"},
+        "sections": {"type": "array", "items": _SECTION_SCHEMA},
+    },
+    ["title", "audience", "thesis", "word_target_total", "sections"],
+)
+
+_ISSUE_SCHEMA = _schema(
+    {
+        "section": {"type": "string"},
+        "rule": {"type": "string"},
+        "description": {"type": "string"},
+    },
+    ["section", "rule", "description"],
+)["schema"]
+
+OUTLINE_VERDICT_SCHEMA = _schema(
+    {
+        "passed": {"type": "boolean"},
+        "score": {"type": "number"},
+        "blocking_issues": {"type": "array", "items": _ISSUE_SCHEMA},
+        "actionable_changes": _STRINGS,
+    },
+    ["passed", "score", "blocking_issues", "actionable_changes"],
 )
 
 RESEARCH_SCHEMA = _schema(
@@ -147,6 +218,129 @@ REVIEW_SCHEMA = _schema(
         },
     },
     ["done", "summary", "issues"],
+)
+
+_SOURCE_SCHEMA = _schema(
+    {
+        "kind": {"type": "string", "enum": ["corpus", "web"]},
+        "ref": {"type": "string"},
+        "title": {"type": "string"},
+        "url_or_path": {"type": "string"},
+        "vendor": {"type": "string"},
+        "tier": {"type": "integer"},
+    },
+    ["kind", "ref", "title", "url_or_path", "vendor", "tier"],
+)["schema"]
+
+_NUMBER_SCHEMA = _schema(
+    {
+        "value": {"type": "string"},
+        "unit": {"type": "string"},
+        "measures": {"type": "string"},
+    },
+    ["value", "unit", "measures"],
+)["schema"]
+
+_FINDING_SCHEMA = _schema(
+    {
+        "id": {"type": "string"},
+        "answers_question": {"type": "string"},
+        "claim": {"type": "string"},
+        "quote": {"type": "string"},
+        "source": _SOURCE_SCHEMA,
+        "evidence_strength": {"type": "number"},
+        "counterargument_to": {"type": "string"},
+        "numbers": {"type": "array", "items": _NUMBER_SCHEMA},
+    },
+    [
+        "id",
+        "answers_question",
+        "claim",
+        "quote",
+        "source",
+        "evidence_strength",
+        "counterargument_to",
+        "numbers",
+    ],
+)["schema"]
+
+FINDINGS_SCHEMA = _schema(
+    {
+        "findings": {"type": "array", "items": _FINDING_SCHEMA},
+        "queries": _STRINGS,
+    },
+    ["findings", "queries"],
+)
+
+SECTION_VERDICT_SCHEMA = _schema(
+    {
+        "passed": {"type": "boolean"},
+        "failed_rows": _STRINGS,
+        "notes": _STRINGS,
+    },
+    ["passed", "failed_rows", "notes"],
+)
+
+LEDGER_SCHEMA = _schema(
+    {
+        "section_id": {"type": "string"},
+        "heading": {"type": "string"},
+        "claims": {
+            "type": "array",
+            "items": _schema(
+                {
+                    "claim": {"type": "string"},
+                    "ref": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                ["claim", "ref", "confidence"],
+            )["schema"],
+        },
+        "numbers": {
+            "type": "array",
+            "items": _schema(
+                {
+                    "value": {"type": "string"},
+                    "unit": {"type": "string"},
+                    "measures": {"type": "string"},
+                    "ref": {"type": "string"},
+                },
+                ["value", "unit", "measures", "ref"],
+            )["schema"],
+        },
+        "decisions": {
+            "type": "array",
+            "items": _schema(
+                {
+                    "decision": {"type": "string"},
+                    "rationale": {"type": "string"},
+                },
+                ["decision", "rationale"],
+            )["schema"],
+        },
+        "terms_defined": {
+            "type": "array",
+            "items": _schema(
+                {
+                    "term": {"type": "string"},
+                    "definition": {"type": "string"},
+                },
+                ["term", "definition"],
+            )["schema"],
+        },
+        "open_questions": _STRINGS,
+        "forward_refs": _STRINGS,
+    },
+    [
+        "section_id",
+        "heading",
+        "claims",
+        "numbers",
+        "decisions",
+        "terms_defined",
+        "open_questions",
+        "forward_refs",
+    ],
 )
 
 # Parent prompt. Python is the harness. The model only spawns the named agent.

@@ -1,12 +1,16 @@
 # How to run this solution
 
 Everything here runs from `solutions/sol2_implementer_agent_sdk/`, standalone.
+Copy this folder somewhere else and it still runs. This folder owns the loop.
 
-You need `python3` and `task`. A live SDK run also needs an `ANTHROPIC_API_KEY`.
+You need `python3` and `task`. `--doer reference` and `--doer none` need no
+SDK and no key. `--doer sdk` also needs `claude-agent-sdk` and an
+`ANTHROPIC_API_KEY`.
 
-Python is the harness. This folder is the cast, the write scope, and the
-runtime wiring. It is not the Lab 2 driver. The working loop lives in
-`sol2_implementer_deep_agents`. Saturday Lab 2 is `labs/lab2_implementer`.
+This is the take-home runtime. Saturday live path is `labs/lab2_implementer`.
+
+Python is the harness. The model writes tests and then code. It does not score
+the rubric, and it does not decide Pass, Retry, or Escalate.
 
 ## One-time setup
 
@@ -19,7 +23,7 @@ task setup
 
 Creates `.venv` in this folder and installs the package there. Homebrew
 Python will not let `pip` write to the system interpreter (PEP 668).
-`task run` uses this venv. You do not activate it.
+`task run -- --doer sdk` uses this venv. You do not activate it.
 
 Put the API key in the repo root `.env`, or export it in this shell.
 Task loads `../../.env` first, then this folder's `.env`.
@@ -28,7 +32,7 @@ Task loads `../../.env` first, then this folder's `.env`.
 echo 'ANTHROPIC_API_KEY=sk-ant-...' >> ../../.env
 ```
 
-Clone the CRM if you want to print live options against a real repo:
+Clone the CRM:
 
 ```bash
 task clone
@@ -39,27 +43,34 @@ task clone
 ```bash
 task table
 task test
+task e2e
 ```
 
 `task table` prints the role table. The judge must print `no` in the writes
-column. `task test` is the pytest suite. Neither needs the SDK, a key, or a
-clone.
+column. `task test` is the pytest suite. `task e2e` is the offline loop
+against a disposable fixture. None of them need the SDK, a key, or a clone.
 
-## Print this runtime's options
+## Run the implementer
 
-Needs the SDK. Refuses if you skipped `task setup`.
+Needs the clone. `--doer none` and `--doer reference` need no key and no
+SDK venv. `--doer sdk` needs `task setup` and the key. That path refuses if
+you skipped `task setup`.
 
 ```bash
-task run --
+task run -- --ticket T001 --doer reference
+task run -- --ticket T001 --doer sdk
 ```
 
-That is configuration, not a ticket run. To drive the loop, hand
-`AgentSdkBackend` to the Deep Agents implementer driver, or copy that driver
-into this folder. Do not invent a shared `loops/` package.
+`task run` calls `harness.py --repo <target>`. Extra flags after `--` go to
+`harness.py`. Python still owns the red gate and `gates.decide`. Same
+signature twice means stop. A retry carries the failed rubric rows and the
+failing test ids. After a green rubric the judge subagent answers in JSON;
+unparseable is a fail.
 
 ## What this folder will not do
 
 It will not write `tests/**` from the code implementer. That fence is the
 lesson. One PreToolUse hook reads `agent_type` and looks up that role's
 scope. A write with no agent is denied, because the parent has no business
-writing anything.
+writing anything. It will not paste `SKILL.md` into a subagent prompt. The
+skill is listed on `AgentDefinition.skills`.

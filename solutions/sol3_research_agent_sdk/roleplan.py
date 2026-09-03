@@ -4,12 +4,12 @@ Three runtimes enforce write scope three different ways. Plain Python uses a
 missing method. The Claude Agent SDK uses a tool list and a PreToolUse hook.
 Deep Agents uses a per-subagent tool list. All three read the same table.
 
-Four loops, four casts. The research cast is the largest, at seven roles. A
+Four loops, four casts. The research cast is the largest, at ten roles. A
 role earns a line here by holding a tool set no other role holds, never by
 being another name for work an existing role already does. The researcher
 searches and cannot write. The verifier searches a second time and never sees
-the researcher's answer. The diagrammer is the only role with `Bash`, because
-it is the only role that runs the renderer.
+the researcher's answer. The diagrammer returns figure source; Python writes
+it and runs the renderer. No role in this table holds `Bash`.
 
 If the table and a runtime ever disagree, the runtime is wrong. This folder's
 own tests check the cast with no SDK installed.
@@ -28,6 +28,7 @@ READ_TOOLS = ("Read", "Glob", "Grep")
 # says it should do.
 SEARCH_TOOLS = (
     "WebSearch",
+    "mcp__corpus__corpus_search",
     "mcp__perplexity__perplexity_search",
     "mcp__perplexity__perplexity_ask",
     "mcp__context7__resolve-library-id",
@@ -46,9 +47,12 @@ LOOPS = {
     ),
     "research": (
         "orchestrator",
-        "planner",
+        "outliner",
+        "outline_judge",
         "researcher",
         "verifier",
+        "section_judge",
+        "ledger",
         "diagrammer",
         "writer",
         "judge",
@@ -62,10 +66,14 @@ PURPOSE = {
     "orchestrator": "Owns the budget and the order. Writes nothing.",
     "doer": "Edits the ticket body. Nothing else in the repo.",
     "planner": "Writes steps.jsonl. Runs in its own context and returns a summary.",
+    "outliner": "Turns the topic into a two-level outline. Returns it; Python writes the file.",
+    "outline_judge": "Scores the outline. Reads it and returns a verdict. Holds no write path.",
     "test_implementer": "Writes the failing tests. Nothing else.",
     "code_implementer": "Writes the code until the tests pass. Cannot touch tests.",
-    "researcher": "Calls the tool boundary and returns findings. Writes nothing.",
-    "verifier": "Checks a claim against a second source. Writes nothing.",
+    "researcher": "Calls the corpus first, then the live tool boundary, and returns findings. Writes nothing.",
+    "verifier": "Checks a claim against the corpus and a second live source. Writes nothing.",
+    "section_judge": "Grades one section against its outline row. Holds no write path.",
+    "ledger": "Extracts the section's facts and terms. Python appends the ledger. Holds no write path.",
     "diagrammer": "Draws the figures and runs the renderer. Writes diagrams only.",
     "writer": "Assembles the paper from verified claims. Writes prose only.",
     "judge": "Scores the attempt. Reads reports and the diff. Holds no write path.",
@@ -73,14 +81,28 @@ PURPOSE = {
 
 # Roles that hold no tool that writes. The separation is the tool list, not a
 # rule in a prompt, so there is nothing for a model to talk its way past.
-READERS = ("orchestrator", "judge", "researcher", "verifier")
+READERS = (
+    "orchestrator",
+    "judge",
+    "researcher",
+    "verifier",
+    "outliner",
+    "outline_judge",
+    "section_judge",
+    "ledger",
+)
 
 TOOLS_FOR_READER = {
     "orchestrator": ("Task",),
     "judge": (*READ_TOOLS, "Bash"),
     "researcher": (*READ_TOOLS, "WebSearch"),
     "verifier": ("Read", *SEARCH_TOOLS),
+    "outliner": READ_TOOLS,
+    "outline_judge": READ_TOOLS,
+    "section_judge": READ_TOOLS,
+    "ledger": ("Read",),
 }
+
 
 # Where a role may write when `.loop.yml` says nothing about it. A target repo
 # declares scope for the implementer's roles. It has never heard of the others.
@@ -102,20 +124,48 @@ NO_WRITE_SCOPE = ((), ("**",))
 #
 # Two roles share a name across casts and mean different things. The
 # implementer's planner writes `steps.jsonl` against a repo. The research
-# planner writes `plan.json` against a topic. Overriding here is how the two
-# stay in one table without one quietly inheriting the other's write scope.
+# outliner returns an outline against a topic. Overriding here is how a
+# research role stays in one table without inheriting another loop's write
+# scope.
 OVERRIDES: dict[tuple[str, str], dict] = {
-    ("research", "planner"): {
-        "purpose": "Turns the topic into sections and questions. Returns a plan.",
-        # No write tool. The plan comes back as schema-checked structured
-        # output and Python writes `plan.json` from it. Letting the planner
-        # write the file too would give the run two plans that can disagree.
+    ("research", "outliner"): {
+        "purpose": "Turns the topic into a two-level outline. Returns it; Python writes the file.",
+        # No write tool. The outline comes back as schema-checked structured
+        # output and Python writes `outline.json` from it.
         "tools": READ_TOOLS,
         "allow": (),
         "deny": ("**",),
+        "model": "claude-sonnet-5",
+    },
+    ("research", "outline_judge"): {
+        "purpose": "Scores the outline. Reads it and returns a verdict. Holds no write path.",
+        "tools": READ_TOOLS,
+        "allow": (),
+        "deny": ("**",),
+        "model": "claude-opus-5",
+        "effort": "high",
     },
     ("research", "researcher"): {
         "tools": (*READ_TOOLS, *SEARCH_TOOLS),
+        "model": "claude-sonnet-5",
+    },
+    ("research", "verifier"): {
+        "model": "claude-sonnet-5",
+    },
+    ("research", "section_judge"): {
+        "purpose": "Grades one section against its outline row. Holds no write path.",
+        "tools": READ_TOOLS,
+        "allow": (),
+        "deny": ("**",),
+        "model": "claude-sonnet-5",
+    },
+    ("research", "ledger"): {
+        "purpose": "Extracts the section's facts and terms. Python appends the ledger. Holds no write path.",
+        "tools": ("Read",),
+        "allow": (),
+        "deny": ("**",),
+        "model": "claude-haiku-4-5",
+        "effort": "low",
     },
     ("research", "diagrammer"): {
         # No write tool and no shell. It returns the diagram source, and Python
@@ -126,6 +176,7 @@ OVERRIDES: dict[tuple[str, str], dict] = {
         "tools": READ_TOOLS,
         "allow": (),
         "deny": ("**",),
+        "model": "claude-sonnet-5",
     },
     ("research", "writer"): {
         # The one role in this cast that writes, and the reason the PreToolUse
@@ -137,13 +188,17 @@ OVERRIDES: dict[tuple[str, str], dict] = {
         "tools": (*READ_TOOLS, "Write"),
         "allow": ("sections/**",),
         "deny": (),
+        "model": "claude-opus-5",
     },
     ("research", "judge"): {
         # No `Bash` here. The enhancer's judge reads a junit file, which is why
         # it has a shell. This one reads markdown and a JSON check report.
         "tools": READ_TOOLS,
+        "model": "claude-opus-5",
+        "effort": "high",
     },
 }
+
 
 
 @dataclass(frozen=True)
@@ -155,6 +210,8 @@ class RolePlan:
     tools: tuple[str, ...]
     allow: tuple[str, ...] = ()
     deny: tuple[str, ...] = ()
+    model: str | None = None
+    effort: str | None = None
 
     @property
     def can_write(self) -> bool:

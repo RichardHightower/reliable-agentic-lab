@@ -69,13 +69,21 @@ def test_the_paper_passes_its_own_gates(finished_paper):
     assert report["failures"] == []
 
 
+def test_the_finished_paper_clears_the_word_floor(finished_paper):
+    import paper_check  # noqa: PLC0415
+
+    body = (finished_paper / "whitepaper.md").read_text()
+    assert paper_check.word_count(body) >= paper_check.MIN_WORDS
+
+
 def test_a_warning_is_not_filed_as_a_failure(finished_paper):
     """`publish` reads this file to decide whether the paper may ship, so a soft
-    word count must not look like a blocked gate."""
+    limitations warning must not look like a blocked gate. Length is now hard."""
     report = json.loads((finished_paper / "gates.json").read_text())
     assert "warnings" in report
-    assert set(report["warnings"]) & {"length", "limitations"} or report["warnings"] == []
-    assert not set(report["failures"]) & {"length", "limitations"}
+    assert "length" not in report["warnings"]
+    assert "length" not in report["failures"]
+    assert not set(report["failures"]) & {"limitations"}
 
 
 def test_every_citation_in_the_paper_resolves(finished_paper):
@@ -144,6 +152,15 @@ def test_the_live_planner_file_is_the_plan_not_its_tool_receipt(offline, run_dir
         name = "deep_agents"
 
         def ask(self, role, prompt):
+            if role == "outline_judge":
+                return paper.Reply(
+                    data={
+                        "passed": True,
+                        "score": 1.0,
+                        "blocking_issues": [],
+                        "actionable_changes": [],
+                    }
+                )
             assert role == "planner"
             (run_dir / "plan.json").write_text(json.dumps(expected), encoding="utf-8")
             return paper.Reply(text="wrote plan.json")
@@ -441,6 +458,9 @@ class Priced(paper.FixtureRunner):
 
     PRICE: ClassVar[dict] = {
         "planner": 0.05,
+        "outline_judge": 0.05,
+        "section_judge": 0.05,
+        "ledger": 0.05,
         "researcher": 0.05,
         "verifier": 0.05,
         "diagrammer": 0.05,
@@ -450,7 +470,7 @@ class Priced(paper.FixtureRunner):
 
     def ask(self, role, prompt):
         reply = super().ask(role, prompt)
-        reply.usd = self.PRICE[role]
+        reply.usd = self.PRICE.get(role, 0.05)
         return reply
 
 
@@ -496,7 +516,7 @@ def test_the_writer_was_actually_reached(run_dir, stub_renderer):
     run = priced_run(run_dir, 3.00)
     run.run()
     done = [n for n, s in run.state.stages.items() if s.status == pstate.COMPLETE]
-    assert done == ["plan", "search", "verify", "outline", "diagram"], done
+    assert done == ["corpus", "plan", "search", "verify", "outline", "diagram"], done
 
 
 def test_the_run_says_which_call_it_could_not_afford(run_dir, stub_renderer, capsys):

@@ -38,7 +38,7 @@ DEFAULT_MODEL = "anthropic:claude-sonnet-5"
 GRAPH_MAX_TOKENS = 4_096
 # The writer also binds the evidence ledger into a multi-section JSON outline.
 # A 2,048-token prose ceiling truncated that outline mid-string on the live
-# E2E. Section prompts still enforce 180 to 300 words; the transport ceiling
+# E2E. Section prompts ask for 400 to 1200 words; the transport ceiling
 # must accommodate the writer's larger structured turn as well.
 WRITER_MAX_TOKENS = 4_096
 MODEL_TIMEOUT_SECONDS = 120
@@ -321,6 +321,31 @@ def second_brain_tool(root: Path | None):
     return recall
 
 
+def corpus_search_tool(roots: list | None):
+    """Typed corpus search. Read only. The researcher and the verifier hold it."""
+    from langchain.tools import tool  # noqa: PLC0415
+
+    @tool
+    def corpus_search(query: str) -> str:
+        """Search configured second brains. Read only. Returns claim, quote, and key."""
+        import corpus as corpus_mod  # noqa: PLC0415
+
+        paths = [Path(root) for root in (roots or []) if root]
+        if not paths:
+            return "NO BRAIN. The corpus is not available here. Continue without it."
+        hits = corpus_mod.search(query, paths, limit=8)
+        if not hits:
+            return f"no corpus hit for {query!r}"
+        blocks = []
+        for hit in hits:
+            blocks.append(
+                f"{hit.key}\nCLAIM: {hit.claim}\nQUOTE: {hit.quote}\nSOURCE: {hit.source_title}"
+            )
+        return "\n\n".join(blocks)
+
+    return corpus_search
+
+
 def permission_rules(role: RolePlan) -> list[dict]:
     """Declarative filesystem rules for one role. First match wins.
 
@@ -400,6 +425,8 @@ def subagents_for(  # noqa: PLR0913  (one keyword per wiring point)
                 tools.append(search_tool(backend, budget))
         if role.name == "planner":
             tools.append(second_brain_tool(brain))
+        if role.name in ("researcher", "verifier"):
+            tools.append(corpus_search_tool([brain] if brain is not None else []))
         if role.can_write and not answer_only_writer:
             tools.append(scoped_write_tool(root, role))
 

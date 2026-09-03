@@ -42,7 +42,14 @@ def test_the_deny_envelope_key_by_key(hook):
 
 def test_a_reader_that_tries_to_write_is_denied(hook):
     """`agent_type` is what tells the one writer from the five readers."""
-    for reader in ("research-planner", "research-diagrammer", "research-judge"):
+    for reader in (
+        "research-outliner",
+        "research-diagrammer",
+        "research-judge",
+        "research-outline-judge",
+        "research-section-judge",
+        "research-ledger",
+    ):
         assert call(hook, agent=reader, path=f"{WORK}/sections/s1.md"), reader
 
 
@@ -110,6 +117,7 @@ def test_the_allowlist_covers_every_tool_the_cast_holds(fake_sdk, work, monkeypa
             assert tool in options.allowed_tools, f"{role.name} would be denied {tool}"
     assert "mcp__perplexity__perplexity_search" in options.allowed_tools
     assert "mcp__perplexity__perplexity_ask" in options.allowed_tools
+    assert "mcp__corpus__corpus_search" in options.allowed_tools
     assert "Write" in options.allowed_tools
 
 
@@ -202,7 +210,7 @@ def test_the_folder_declares_its_own_search_boundary(fake_sdk, work, monkeypatch
     monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
     fake_sdk()
     options = roles.options_for(work)
-    assert set(options.mcp_servers) == {"context7", "perplexity"}
+    assert set(options.mcp_servers) == {"context7", "perplexity", "corpus"}
     assert options.mcp_servers["context7"]["url"].startswith("https://mcp.context7.com")
     assert options.mcp_servers["perplexity"]["env"]["PERPLEXITY_API_KEY"] == "test-key"
     assert options.mcp_servers["perplexity"]["args"] == ["-yq", "@perplexity-ai/mcp-server"]
@@ -215,7 +223,7 @@ def test_perplexity_is_left_out_when_its_key_is_not_set(fake_sdk, work, monkeypa
     monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
     monkeypatch.setattr(roles, "DOTENV_PATHS", ())
     fake_sdk()
-    assert set(roles.options_for(work).mcp_servers) == {"context7"}
+    assert set(roles.options_for(work).mcp_servers) == {"context7", "corpus"}
 
 
 def test_a_nearby_dotenv_supplies_the_perplexity_key(fake_sdk, work, monkeypatch, tmp_path):
@@ -279,9 +287,12 @@ def test_every_role_gets_its_prompt_from_the_plugin(fake_sdk, work):
     fake_sdk()
     agents = roles.options_for(work).agents
     assert set(agents) == {
-        "research-planner",
+        "research-outliner",
+        "research-outline-judge",
         "research-researcher",
         "research-verifier",
+        "research-section-judge",
+        "research-ledger",
         "research-diagrammer",
         "research-writer",
         "research-judge",
@@ -296,7 +307,14 @@ def test_a_reader_carries_the_write_tools_as_a_deny_list(fake_sdk, work):
     list still fails closed."""
     fake_sdk()
     agents = roles.options_for(work).agents
-    for reader in ("research-judge", "research-planner", "research-diagrammer"):
+    for reader in (
+        "research-judge",
+        "research-outliner",
+        "research-outline-judge",
+        "research-diagrammer",
+        "research-section-judge",
+        "research-ledger",
+    ):
         assert agents[reader].disallowedTools == roles.NO_WRITE, reader
     assert agents["research-writer"].disallowedTools == []
 
@@ -330,5 +348,5 @@ def test_an_agent_file_that_widens_its_tools_is_refused(fake_sdk, work, monkeypa
 def test_a_missing_agent_file_is_refused(fake_sdk, work, monkeypatch):
     fake_sdk()
     monkeypatch.setattr(roles, "agent_files", dict)
-    with pytest.raises(FileNotFoundError, match="research-planner"):
+    with pytest.raises(FileNotFoundError, match="research-outliner"):
         roles.options_for(work)

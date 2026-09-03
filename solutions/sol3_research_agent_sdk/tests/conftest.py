@@ -39,6 +39,7 @@ class FakeAgentDefinition:
     maxTurns: int = 0  # the SDK's wire name, not Python's
     background: bool = False
     model: str | None = None
+    effort: str | None = None
 
 
 @dataclass
@@ -92,6 +93,21 @@ def make_sdk_module(messages=None):
     module.query = query
     module.last_prompt = None
     module.last_options = None
+
+    def tool(name, description, schema):
+        def decorator(fn):
+            fn.mcp_name = name
+            fn.mcp_description = description
+            fn.mcp_schema = schema
+            return fn
+
+        return decorator
+
+    def create_sdk_mcp_server(*, name, version="1.0.0", tools=()):
+        return {"type": "sdk", "name": name, "version": version, "tools": list(tools)}
+
+    module.tool = tool
+    module.create_sdk_mcp_server = create_sdk_mcp_server
     return module
 
 
@@ -129,18 +145,51 @@ class RecordingTurns:
         # is the fallback path and therefore the default under test.
         self.root = root
 
-    def plan(self, topic, prior_art, budget=None, note=""):
-        self.asked.append(("plan", topic, prior_art, budget, note))
+    def outline(self, topic, prior_art, budget=None, note="", brief=""):
+        self.asked.append(("outline", topic, prior_art, budget, note, brief))
+        words = int((budget or {}).get("words") or 400)
         return {
             "title": f"On {topic}",
-            "abstract": "An abstract.",
-            "sections": [{"id": "s1", "heading": "The problem", "goal": "State it."}],
-            "questions": [{"id": "q1", "text": f"what is {topic}", "section": "s1"}],
-            "diagrams": [],
+            "audience": "engineers",
+            "thesis": "An abstract.",
+            "word_target_total": words,
+            "sections": [
+                {
+                    "id": "s1",
+                    "heading": "The problem",
+                    "objective": "State it.",
+                    "abstract": "This section states the problem.",
+                    "key_questions": [
+                        f"what is {topic}",
+                        f"why does {topic} fail",
+                    ],
+                    "claims_to_support": ["The problem is structural."],
+                    "required_evidence": ["a primary specification"],
+                    "word_target": words,
+                    "figures": [],
+                    "depends_on": [],
+                }
+            ],
+        }
+
+    def plan(self, topic, prior_art, budget=None, note="", brief=""):
+        return self.outline(topic, prior_art, budget, note, brief)
+
+    def judge_outline(self, drafted, note=""):
+        self.asked.append(("judge_outline", note))
+        return {
+            "passed": True,
+            "score": 1.0,
+            "blocking_issues": [],
+            "actionable_changes": [],
         }
 
     def research(self, question, note=""):
         self.asked.append(("research", question, note))
+        already = sum(1 for item in self.asked if item[0] == "research")
+        if already > 1:
+            # One canned finding, not a copy on every key question.
+            return {"answer": "", "sources": [], "claims": []}
         claims = self.claims
         if claims is None:
             claims = [
@@ -155,6 +204,7 @@ class RecordingTurns:
             "sources": [{"url": "https://example.invalid/doc", "title": "Doc"}],
             "claims": claims,
         }
+
 
     def verify(self, claim):
         self.asked.append(("verify", claim))
@@ -175,6 +225,10 @@ class RecordingTurns:
             lines += [f"![Figure: {figure['name']}]({figure['path']})", "", "Cap.", ""]
         for claim in claims:
             lines += [f"{claim['text']} [{claim.get('number', 1)}]", ""]
+        for question in section.get("key_questions") or []:
+            marker = f"[{claims[0].get('number', 1)}]" if claims else ""
+            if claims:
+                lines += [f"This section answers: {question} {marker}".strip(), ""]
         body = "\n".join(lines)
         if self.root is not None and path:
             target = Path(self.root) / path

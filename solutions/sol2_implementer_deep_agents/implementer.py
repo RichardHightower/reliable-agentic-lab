@@ -11,12 +11,12 @@ of it is enforced by something other than a prompt:
     4. RED GATE. Read junit.xml. If the new tests are not failing, stop. A test
        that passes before any code exists proves nothing.
     5. The code implementer writes code until the suite is green. It cannot
-       touch tests, so it cannot reach green by weakening one.
-    6. The rubric judge scores ten rows. No model call.
-    7. The final judge subagent exists and answers in JSON, but `run()` does
-       not pass its verdict to `gates.decide`. `judge_done` stays None, so a
-       green rubric is enough on this path. Session 2 teaches the model judge;
-       this port teaches the deterministic one.
+       touch tests, so it cannot reach green by weakening one. A retry carries
+       the failed rubric rows and the failing test ids, not the same ticket
+       prompt again.
+    6. The rubric judge scores ten rows. No model.
+    7. The final judge subagent answers in JSON. Unparseable is done=False.
+       Green rubric plus the judge saying not done is escalate.
     8. Pass, retry, or escalate.
 
 Run it against any repo that satisfies the contract:
@@ -28,26 +28,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import time
 from pathlib import Path
 
 import doers
 import gates
-import loop_roles as roles
+import receipt
 import rubric
 import steps
 import ticket as tickets
+import write_scope as roles
 from contract import Contract, ContractError
-
-TEST_GLOBS = ("tests/**",)
-
-
-def _diff(repo: Path) -> str:
-    out = subprocess.run(
-        ["git", "diff", "HEAD"], cwd=repo, text=True, capture_output=True, check=False
-    )
-    return out.stdout
 
 
 def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
@@ -84,6 +75,83 @@ def plan_for(target_ticket: tickets.Ticket) -> steps.Plan:
             )
         )
     return steps.Plan(steps=made)
+
+
+def _extract_json(text: str) -> dict | None:
+    """The first JSON object in `text`, or None. Never raises."""
+    blob = (text or "").strip()
+    if not blob:
+        return None
+    try:
+        raw = json.loads(blob)
+        return raw if isinstance(raw, dict) else None
+    except ValueError:
+        pass
+    start, end = blob.find("{"), blob.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        raw = json.loads(blob[start : end + 1])
+        return raw if isinstance(raw, dict) else None
+    except ValueError:
+        return None
+
+
+def parse_judge_verdict(text: str, structured: dict | None = None) -> tuple[bool, dict]:
+    """The judge's `done` flag. Unparseable is done=False, never a pass."""
+    payload = structured if isinstance(structured, dict) else _extract_json(text)
+    if not isinstance(payload, dict) or "done" not in payload:
+        return False, {
+            "done": False,
+            "why": "unparseable verdict",
+            "raw": (text or "")[:400],
+        }
+    return bool(payload["done"]), payload
+
+
+def _ask_judge(backend, *, repo: Path, ticket: tickets.Ticket, score: rubric.Score) -> tuple[bool, dict, float]:
+    """Invoke the judge once. Offline backends return valid JSON; live ones run."""
+    prompt = (
+        f"{ticket.for_prompt()}\n\n"
+        "The ten-row rubric is green.\n\n"
+        f"{score.report()}\n\n"
+        "Does this diff do what the ticket asked? Reply with JSON only: "
+        '{"done": true, "why": "one sentence"}. Do not name a gate. '
+        "Do not say pass, retry, or escalate."
+    )
+    judge = getattr(backend, "judge", None)
+    if judge is None:
+        done, payload = parse_judge_verdict(
+            '{"done": true, "why": "offline backend; rubric is green"}'
+        )
+        return done, payload, 0.0
+    result = judge(repo=repo, prompt=prompt)
+    structured = getattr(result, "structured", None)
+    if structured is not None and not isinstance(structured, dict):
+        structured = None
+    done, payload = parse_judge_verdict(getattr(result, "output", "") or "", structured)
+    return done, payload, float(getattr(result, "usd", 0.0) or 0.0)
+
+
+def _code_prompt(
+    ticket: tickets.Ticket,
+    decision: gates.Decision | None,
+    failed_rows: list[str],
+    failed_tests: list[str],
+) -> str:
+    """The ticket, plus what failed, when this is a retry.
+
+    The first code turn gets the ticket. Every later turn gets
+    `gates.retry_instruction` and the failing test ids in front of it, so the
+    doer is not asked to rediscover the same failure.
+    """
+    body = ticket.for_prompt()
+    if decision is None or decision.gate != gates.RETRY:
+        return body
+    extra = gates.retry_instruction(decision, failed_rows)
+    if failed_tests:
+        extra += f"\nFailing tests: {', '.join(failed_tests)}."
+    return extra + "\n\n" + body
 
 
 def run(  # noqa: PLR0915
@@ -188,12 +256,16 @@ def run(  # noqa: PLR0915
     # Steps 5 to 8. Code until green, then judge.
     coder = cast["code_implementer"]
     previous_signature: tuple[str, ...] | None = None
+    previous_decision: gates.Decision | None = None
+    last_failed_rows: list[str] = []
+    last_failed_tests: list[str] = []
     decision = gates.Decision(gates.RETRY, "not started")
 
     while True:
         iteration = boss.start_iteration()
+        prompt = _code_prompt(the_ticket, previous_decision, last_failed_rows, last_failed_tests)
         code_result = backend.run(
-            repo=target, prompt=the_ticket.for_prompt(), allow=list(coder.scope.allow)
+            repo=target, prompt=prompt, allow=list(coder.scope.allow)
         )
         boss.spend(code_result.usd)
 
@@ -221,6 +293,13 @@ def run(  # noqa: PLR0915
             scope_violations=violations,
             changed=changed,
         )
+        judge_done: bool | None = None
+        if score.passed:
+            judge_done, judge_payload, judge_usd = _ask_judge(
+                backend, repo=target, ticket=the_ticket, score=score
+            )
+            boss.spend(judge_usd)
+            trace["judge"] = judge_payload
         decision = gates.decide(
             passed=score.passed,
             iteration=iteration,
@@ -228,21 +307,27 @@ def run(  # noqa: PLR0915
             signature=score.signature(),
             previous_signature=previous_signature,
             usd_left=boss.usd_left,
+            judge_done=judge_done,
         )
         trace["iterations"].append(
             {
                 "iteration": iteration,
                 "wrote": code_result.wrote,
+                "prompt": prompt,
                 "rows": {row.name: row.passed for row in score.rows},
                 "failed": list(score.signature()),
                 "gate": decision.gate,
                 "reason": decision.reason,
+                "judge_done": judge_done,
             }
         )
         trace["rubric"] = score.report()
         if decision.stop:
             break
         previous_signature = score.signature()
+        previous_decision = decision
+        last_failed_rows = list(score.signature())
+        last_failed_tests = sorted(test_run.junit.failed_ids)
 
     trace["gate"] = decision.gate
     trace["reason"] = decision.reason
@@ -253,14 +338,22 @@ def run(  # noqa: PLR0915
 def _mark_proven(plan: steps.Plan, passing: set[str], repo: Path) -> steps.Plan:
     """Mark a step done when a passing test names its criterion.
 
-    Evidence comes from junit, never from the doer's own claim.
+    Evidence comes from junit, never from the doer's own claim. The test name
+    has to contain the criterion id (`AC-1`, `ac_1`, ...). A T001-shaped
+    filename is not evidence for every unmatched step.
     """
     for step in plan.steps:
         if step.done or not step.criterion:
             continue
-        hit = next((t for t in passing if step.criterion.lower() in t.lower()), None)
-        if hit is None:
-            hit = next((t for t in passing if "due_date" in t.lower()), None)
+        needle = step.criterion.lower().replace("-", "_")
+        hit = next(
+            (
+                test_id
+                for test_id in passing
+                if step.criterion.lower() in test_id.lower() or needle in test_id.lower()
+            ),
+            None,
+        )
         if hit:
             step.status = steps.DONE
             step.evidence = hit
@@ -275,6 +368,8 @@ def _finish(contract: Contract, trace: dict, write_trace: bool) -> dict:
         out.mkdir(parents=True, exist_ok=True)
         trace["written_at"] = time.time()
         (out / "last-implementer.json").write_text(json.dumps(trace, indent=2), encoding="utf-8")
+        exit_code = 0 if trace.get("gate") == gates.PASS else 1
+        receipt.write(contract.repo, exit_code, list(trace.get("red_ids") or []))
     return trace
 
 

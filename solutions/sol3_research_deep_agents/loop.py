@@ -76,13 +76,16 @@ def run_paper(args) -> int:
         args.topic,
         backend_name=args.backend,
         work_root=args.work_root,
-        brain=second_brain(),
+        brain=Path(args.brains[0]) if args.brains else second_brain(),
         max_usd=args.max_usd,
         max_verify=args.max_verify,
         attempts=args.attempts,
         theme=args.theme,
         publish=args.publish,
         debug=args.debug,
+        ingest_brain=Path(args.ingest_brain) if args.ingest_brain else None,
+        require_approval=args.approve,
+        resume=args.resume,
     )
     try:
         return run.run()
@@ -103,17 +106,39 @@ def main(argv: list[str] | None = None) -> int:
     paper_args.add_argument("--paper", action="store_true", help="run the nine stage pipeline")
     paper_args.add_argument("--topic", default=None, help="what the paper is about")
     paper_args.add_argument("--work-root", default=None, help="where runs are kept")
-    paper_args.add_argument("--max-usd", type=float, default=5.0, help="the hard cost cap")
+    paper_args.add_argument("--max-usd", type=float, default=12.0, help="the hard cost cap")
     paper_args.add_argument("--attempts", type=int, default=3, help="retries per stage")
     paper_args.add_argument(
         "--max-verify",
         type=int,
-        default=12,
+        default=24,
         help="how many claims one verify stage cross-checks. The verifier "
         "searches once per claim, so this is the size of the work.",
     )
     paper_args.add_argument("--theme", default="spillwave-light")
     paper_args.add_argument("--publish", action="store_true", help="push to a secret gist")
+    paper_args.add_argument(
+        "--brain",
+        action="append",
+        dest="brains",
+        default=None,
+        help="corpus root (repeatable). Default: sibling loop_eng_2nd_brain/knowledge",
+    )
+    paper_args.add_argument(
+        "--ingest-brain",
+        default=None,
+        help="opt-in: copy the knowledge bundle into a brain git worktree. Never writes main.",
+    )
+    paper_args.add_argument(
+        "--approve",
+        action="store_true",
+        help="stop after the outline judge (exit 3) with outline.md",
+    )
+    paper_args.add_argument(
+        "--resume",
+        action="store_true",
+        help="re-judge outline.json if it changed, then stamp outline.approved.json",
+    )
     paper_args.add_argument(
         "--debug",
         action="store_true",

@@ -129,19 +129,17 @@ def _patch_runs(monkeypatch, runs: list[RunResult]):
     leftover = list(runs)
 
     def fake_run(self, task: str, timeout: int = 900) -> RunResult:
-        if leftover:
-            result = leftover.pop(0)
-        else:
-            result = _run(passed=("tests/test_health.py::test_health",), failed=())
         if task != "test":
-            result = RunResult(
+            return RunResult(
                 task=task,
                 exit_code=0,
                 output="",
                 junit=_suite(passed=("e2e::ok",)) if task == "e2e" else SuiteReport(),
                 coverage=CoverageReport(),
             )
-        return result
+        if leftover:
+            return leftover.pop(0)
+        return _run(passed=("tests/test_health.py::test_health",), failed=())
 
     monkeypatch.setattr(contract_mod.Contract, "run", fake_run)
     monkeypatch.setattr(implementer.Contract, "run", fake_run)
@@ -251,6 +249,7 @@ def test_happy_path_passes_the_rubric(tmp_path, monkeypatch):
     assert backend.calls == 2
     assert trace["gate"] == "pass"
     assert "the rubric is green" in trace["reason"]
+    assert trace["judge"]["done"] is True
     assert (repo / "tests" / "test_greet.py").exists()
     assert (repo / "app" / "greet.py").exists()
     assert "tests/test_greet.py" in trace["test_phase"]["files"]
@@ -337,7 +336,8 @@ def test_ac_1_backend_and_ui_use_display_name():
     assert all(iteration["rows"].values())
     assert iteration["failed"] == []
     assert iteration["gate"] == "pass"
-    assert iteration["reason"] == "the rubric is green"
+    assert "the rubric is green" in iteration["reason"]
+    assert iteration["judge_done"] is True
     plan = (repo / "steps.jsonl").read_text(encoding="utf-8")
     assert "display_name" in plan
     assert '"role": "test_implementer"' in plan
@@ -362,3 +362,175 @@ def test_ac_1_backend_and_ui_use_display_name():
     refused = code_spec["tools"][1]("tests/test_task_fields.py", "def test_weakened(): pass\n")
     assert refused.startswith("REFUSED")
     assert test_path.read_text(encoding="utf-8") == renamed_test
+
+
+def test_a_retry_carries_the_failed_rows_and_test_ids(tmp_path, monkeypatch):
+    """The second code turn must not see the same ticket prompt again."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+
+    class Recording(ScriptedBackend):
+        def __init__(self):
+            super().__init__(
+                [
+                    [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+                    [("app/greet.py", "def greet():\n    return 'nope'\n")],
+                    [("app/greet.py", "def greet():\n    return 'hello'\n")],
+                ]
+            )
+            self.prompts: list[str] = []
+
+        def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+            self.prompts.append(prompt)
+            return super().run(repo=repo, prompt=prompt, allow=allow)
+
+    backend = Recording()
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=3)
+
+    assert trace["gate"] == "pass"
+    assert len(backend.prompts) == 3
+    assert "These rubric rows failed" in backend.prompts[2]
+    assert new_test in backend.prompts[2]
+    assert "These rubric rows failed" not in backend.prompts[0]
+    assert "These rubric rows failed" not in backend.prompts[1]
+
+
+def test_a_judge_who_says_not_done_escalates(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+
+    class Disagreeing(ScriptedBackend):
+        def judge(self, *, repo: Path, prompt: str) -> doers.DoerResult:
+            return doers.DoerResult(output='{"done": false, "why": "greet never called"}')
+
+    backend = Disagreeing(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1)
+
+    assert trace["gate"] == "escalate"
+    assert "final judge says the ticket is not done" in trace["reason"]
+    assert trace["judge"]["done"] is False
+
+
+def test_an_unparseable_verdict_is_a_fail(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+
+    class Gibberish(ScriptedBackend):
+        def judge(self, *, repo: Path, prompt: str) -> doers.DoerResult:
+            return doers.DoerResult(output="looks good to me")
+
+    backend = Gibberish(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1)
+
+    assert trace["gate"] == "escalate"
+    assert "final judge says the ticket is not done" in trace["reason"]
+    assert trace["judge"]["why"] == "unparseable verdict"
+
+
+def test_due_date_in_a_passing_id_does_not_prove_every_step(tmp_path):
+    """The old T001 leak. A passing test named due_date is not evidence for AC-9."""
+    plan = implementer.plan_for(
+        implementer.tickets.Ticket(
+            id="T009",
+            title="x",
+            state="ready",
+            criteria=[
+                implementer.tickets.Criterion("AC-1", "has due_date"),
+                implementer.tickets.Criterion("AC-9", "something else"),
+            ],
+        )
+    )
+    proven = implementer._mark_proven(
+        plan, {"tests/test_due_date.py::test_model_has_optional_due_date"}, tmp_path
+    )
+    by_id = {step.id: step for step in proven.steps}
+    assert by_id["S1T"].status == "todo"
+    assert by_id["S2T"].status == "todo"
+
+
+def test_a_passing_id_that_names_the_criterion_proves_the_step(tmp_path):
+    plan = implementer.plan_for(
+        implementer.tickets.Ticket(
+            id="T001",
+            title="x",
+            state="ready",
+            criteria=[implementer.tickets.Criterion("AC-1", "greet returns hello")],
+        )
+    )
+    proven = implementer._mark_proven(plan, {"tests/test_greet.py::test_AC-1"}, tmp_path)
+    assert proven.steps[0].status == "done"
+    assert proven.steps[0].evidence == "tests/test_greet.py::test_AC-1"
+
+
+def test_a_draft_with_criteria_is_not_ready():
+    ticket = implementer.tickets.parse(
+        "---\nid: T001\nstate: draft\n---\n# T001\n\n## Acceptance criteria\n\n- (AC-1) greet\n"
+    )
+    assert ticket.criteria
+    assert ticket.state == "draft"
+    assert ticket.ready is False
+
+
+def test_happy_path_writes_the_three_claim_receipt(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    backend = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+    implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+    path = repo / ".harness" / "receipt.json"
+    assert path.exists()
+    payload = __import__("json").loads(path.read_text(encoding="utf-8"))
+    assert "tree_hash" in payload
+    assert "green" in payload
+    assert "written_at" in payload

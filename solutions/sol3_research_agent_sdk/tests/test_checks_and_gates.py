@@ -82,6 +82,27 @@ def test_every_written_section_satisfies_the_row():
     assert checks.check(body, ["https://a"], headings=["The problem"]).passed
 
 
+def test_a_short_paper_fails_the_hard_length_gate():
+    """A structurally green brief is not a paper. Length ships as a hard row."""
+    body = "The system is fast [1]."
+    score = checks.check(body, ["https://a"], min_words=checks.MIN_WORDS)
+    assert "length" in score.signature()
+    assert not score.passed
+
+
+def test_a_thin_section_fails_has_body_when_the_floor_is_on():
+    body = "# T\n\n## The problem\n\nA point [1].\n\n## References\n\n1. https://a"
+    score = checks.check(body, ["https://a"], min_section_words=checks.MIN_SECTION_WORDS)
+    assert "has_body" in score.signature()
+    assert "The problem" in score.report()
+
+
+def test_the_assembler_abstract_is_not_held_to_the_section_floor():
+    body = "# T\n\n## Abstract\n\nA short summary.\n\n## The problem\n\n" + ("A point [1]. " * 40)
+    score = checks.check(body, ["https://a"], min_section_words=checks.MIN_SECTION_WORDS)
+    assert "has_body" not in score.signature(), score.report()
+
+
 def test_the_paper_gate_requires_done_then_cost_then_max_turns_in_figure_one():
     body = (
         "# T\n\n## Control\n\n"

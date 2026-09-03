@@ -32,7 +32,9 @@ from pathlib import Path
 
 import evidence
 import gates
+import outline as outlines
 import research
+import sections
 import stages
 import state as pstate
 from stages import GateFailed, StageResult
@@ -41,11 +43,23 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_WORK = HERE / "work" / "paper"
 DEFAULT_BRAIN = HERE / ".." / ".." / ".." / "loop_eng_2nd_brain" / "knowledge"
 
-DEFAULT_MAX_USD = 5.0
+DEFAULT_MAX_USD = 12.0
 DEFAULT_STAGE_ATTEMPTS = 3
-DEFAULT_SEARCH_CALLS = 24
+DEFAULT_SEARCH_CALLS = 36
 
 DONE, COST, MAX_TURNS = "done", "cost", "max turns"
+
+
+def _section_word_range(heading: str, claim_count: int) -> str:
+    """How long a section should be. The Saturday brief is already short."""
+    name = heading.strip().lower()
+    if name == "abstract":
+        return "120 to 180"
+    if name == "limitations":
+        return "150 to 250"
+    if claim_count < 3:
+        return "400 to 800"
+    return "700 to 1200"
 
 
 def section_body(text: str, heading: str) -> str:
@@ -59,6 +73,10 @@ def section_body(text: str, heading: str) -> str:
     """
     pattern = rf"\A\s*(?:#{{1,6}}\s*)?{re.escape(heading)}\s*(?:\n+|\Z)"
     return re.sub(pattern, "", text, count=1, flags=re.IGNORECASE).strip()
+
+
+class AwaitingApproval(RuntimeError):
+    """`--approve` stops here. The operator edits outline.json, then `--resume`."""
 
 
 class BudgetSpent(RuntimeError):
@@ -293,6 +311,10 @@ class Paper:
     theme: str = "spillwave-light"
     publish: bool = False
     quiet: bool = False
+    brains: list = field(default_factory=list)
+    ingest_brain: Path | None = None
+    require_approval: bool = False
+    resume: bool = False
 
     state: pstate.PaperState = field(init=False)
     ledger: evidence.Ledger = field(init=False)
@@ -405,12 +427,23 @@ class Paper:
             if stop["stop"]:
                 return self._escalate(name, f"the {stop['reason']} budget is spent")
 
-            decision = self._run_stage(name)
+            try:
+                decision = self._run_stage(name)
+            except AwaitingApproval as exc:
+                self.say(f"  outline    awaiting approval ({exc})")
+                self.state.save()
+                return 3
             if decision is not None:
                 return decision
 
         self.state.save()
         stop = check_stop(done=True, spent_usd=self.state.total_cost_usd, max_usd=self.max_usd)
+        if self.ingest_brain is not None:
+            import corpus as corpus_mod  # noqa: PLC0415
+
+            bundle = self.work_dir / "knowledge"
+            result = corpus_mod.ingest_brain(bundle, self.ingest_brain)
+            self.say(f"  ingest     {result}")
         self.say(f"\nstopped: {stop['reason']}. {self.state.line()}")
         self.say(f"paper: {self.paper_path}")
         return 0
@@ -477,6 +510,18 @@ class Paper:
 
     # -- 1. plan -----------------------------------------------------------
 
+    def stage_corpus(self, extra: str = "") -> StageResult:
+        """Read configured brains before any model call. Missing brain is a note."""
+        import corpus as corpus_mod  # noqa: PLC0415
+
+        dest = self.work_dir / "corpus"
+        packed = corpus_mod.pack(self.topic, list(self.brains), dest, limit=40)
+        return StageResult(
+            "corpus",
+            artifacts={"corpus/brain-pack.json": str(dest / "brain-pack.json")},
+            summary=f"{packed.get('hits') or 0} hits, thin={packed.get('corpus_thin')}",
+        )
+
     def stage_plan(self, extra: str = "") -> StageResult:
         path = self.work_dir / "plan.json"
         usd = 0.0
@@ -502,6 +547,7 @@ class Paper:
         self.plan = stages.normalize_plan(self.plan)
         stages.plan_gate(self.plan)
         path.write_text(json.dumps(self.plan, indent=2), encoding="utf-8")
+        usd += self._approve_outline()
         self.state.record("plan", path)
         return StageResult(
             "plan",
@@ -510,6 +556,52 @@ class Paper:
             summary=f"{len(self.plan['questions'])} questions, "
             f"{len(self.plan['diagrams'])} figures planned",
         )
+
+    def _approve_outline(self) -> float:
+        """Validate, judge, and stamp the outline. `--approve` stops before research."""
+        dest = self.work_dir / "outline.json"
+        judged_path = self.work_dir / "outline-judged.json"
+        stamped = self.work_dir / "outline.approved.json"
+        usd = 0.0
+        if dest.exists():
+            drafted = json.loads(dest.read_text(encoding="utf-8"))
+        else:
+            drafted = outlines.outline_from_plan(self.plan)
+        errors = outlines.validate(drafted, word_target_total=drafted.get("word_target_total") or 2000)
+        if errors:
+            raise GateFailed(outlines.retry_note(errors), ("outline",))
+        dest.write_text(json.dumps(drafted, indent=2) + "\n", encoding="utf-8")
+        (self.work_dir / "outline.md").write_text(outlines.to_markdown(drafted), encoding="utf-8")
+
+        if not judged_path.exists() or self.resume:
+            reply = self._ask(
+                "outline_judge",
+                "Grade this outline against logical flow, completeness, titles, "
+                "and corpus_fit. Do not re-litigate Python's validator.\n"
+                + json.dumps(drafted, indent=2)[:8000],
+            )
+            usd = reply.usd
+            verdict = self._json_reply("outline_judge", reply)
+            (self.work_dir / "outline-verdict.json").write_text(
+                json.dumps(verdict, indent=2) + "\n", encoding="utf-8"
+            )
+            if not verdict.get("passed"):
+                raise GateFailed(
+                    "the outline judge rejected the outline: "
+                    + (verdict.get("summary") or "failed"),
+                    outlines.judge_signature(verdict),
+                )
+            judged_path.write_text(json.dumps(drafted, indent=2) + "\n", encoding="utf-8")
+
+        if self.require_approval and not self.resume:
+            raise AwaitingApproval(self.work_dir / "outline.md")
+
+        approved_by = "operator" if self.resume else "judge"
+        stamped.write_text(
+            json.dumps(outlines.stamp(drafted, approved_by=approved_by), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return usd
 
     # -- 2. search ---------------------------------------------------------
 
@@ -776,7 +868,7 @@ class Paper:
                 }
             )
             briefs = "\n".join(stages.claim_brief(self.ledger, cid, index) for cid in claim_ids)
-            word_range = "90 to 180" if len(claim_ids) < 3 else "180 to 300"
+            word_range = _section_word_range(heading, len(claim_ids))
             reply = self._ask(
                 "writer",
                 f"Write the {heading!r} section of {self.plan['title']!r}.\n"
@@ -784,12 +876,13 @@ class Paper:
                 f"Audience: {self.plan['audience']}\n{extra}\n\n"
                 f"Use only these claims and their citation markers:\n{briefs}\n\n"
                 f"Return {word_range} words of section body as markdown. No heading "
-                "line, the assembler adds it. No references section. The word "
-                "limit is part of the contract: prefer concise, cited mechanisms "
-                "over an exhaustive survey. Every prose paragraph that makes a "
+                "line, the assembler adds it. No references section. Unpack every "
+                "bound claim: finding, mechanism, alternative and its cost, then the "
+                "limit of the evidence. Do not invent facts. Do not repeat a paragraph. "
+                "Every prose paragraph that makes a "
                 "factual claim must include one or more of its allowed citation markers. "
                 "Every sentence must be entailed by a listed claim. Omit unsupported "
-                "background, framing, forecasts, and generalizations instead of padding. "
+                "background, framing, forecasts, and generalizations. "
                 "The gate treats scope, transition, recommendation, and limitation paragraphs "
                 "as prose claims too, so every prose paragraph must carry at least one allowed "
                 "marker; do not leave an editorial paragraph uncited.",
@@ -813,6 +906,12 @@ class Paper:
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body
             self._save_sections()
+            try:
+                usd += sections.close_section(self, section, body)
+            except GateFailed:
+                self.written.pop(heading, None)
+                self._save_sections()
+                raise
         self._save_sections()
         words = sum(len(body.split()) for body in self.written.values())
         return StageResult(
@@ -871,7 +970,7 @@ class Paper:
                 }
             )
             briefs = "\n".join(stages.claim_brief(self.ledger, claim_id, index) for claim_id in claim_ids)
-            word_range = "90 to 180" if len(claim_ids) < 3 else "180 to 300"
+            word_range = _section_word_range(heading, len(claim_ids))
             earlier = []
             for prior_heading, prior_body in self.written.items():
                 if prior_heading == heading:
@@ -893,8 +992,8 @@ class Paper:
                 "body sections introduce later. Do not reuse a citation for a distinct claim unless the "
                 "provided claim brief explicitly supports both claims. Every prose paragraph that makes "
                 "a factual claim must include one or more of its allowed citation markers. "
-                "Every sentence must be entailed by a listed claim. Omit unsupported background, "
-                "framing, forecasts, and generalizations instead of padding. "
+                "Every sentence must be entailed by a listed claim. Unpack mechanism, alternative, "
+                "and evidence limit instead of restating the claims. "
                 "Do not restate a mechanism already explained in an earlier section. Build on it "
                 "with a new implication supported by this section's claims, or omit it. "
                 "The gate treats scope, transition, recommendation, and limitation paragraphs "
@@ -907,6 +1006,7 @@ class Paper:
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body
             self._save_sections()
+            usd += sections.close_section(self, section, body, force=True)
         return StageResult("revise", usd=usd, artifacts={"sections": len(targets)}, summary=f"{len(targets)} sections")
 
     # -- 7. review ---------------------------------------------------------
@@ -1077,6 +1177,7 @@ def build(
         docs_backend=docs,
         search_budget=search_budget,
         work_dir=work_dir,
+        brains=[brain] if brain is not None else [],
         **kwargs,
     )
 

@@ -21,8 +21,13 @@ Grade each row `pass` or `fail`. A row is not a feeling.
 | `evidence_matches` | A paragraph's citation does not support what the paragraph says |
 | `scope_honest` | The paper claims more generality than its evidence covers |
 | `no_filler` | A paragraph restates a previous paragraph or the introduction |
+| `depth` | A body section only restates its bound claims, with no mechanism, alternative, or evidence limit |
 | `voice` | Marketing language, a hook, an analogy in place of a mechanism, or a rhetorical question |
 | `figure_earns_place` | A figure shows what the adjacent prose already said in one line |
+
+`depth` is the row that keeps this pipeline from shipping a cited brief and
+calling it a paper. Two short paragraphs that quote the claims are not enough,
+even when every citation resolves.
 
 ## What you never do
 
@@ -31,8 +36,9 @@ You do not decide whether to ship. You do not decide whether to retry.
 Python, and both would ignore your opinion anyway.
 
 Do not report a mechanical failure. Em dashes, dangling citations, missing
-sections, and missing alt text are already checked without you. Reporting them
-spends your turn on work a regular expression finished before you started.
+sections, missing alt text, and word count are already checked without you.
+Reporting them spends your turn on work a regular expression finished before
+you started.
 
 ## Report
 

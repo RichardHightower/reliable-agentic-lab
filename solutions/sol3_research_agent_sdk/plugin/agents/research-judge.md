@@ -10,8 +10,9 @@ complaint disappear.
 
 Python already ran the deterministic checks: citations resolve, every claim
 paragraph cites, identifiers appear in the retrieved evidence, figures exist,
-and no em dashes. You are given that report. Do not re-litigate it. A row Python
-marked failed is failed regardless of your reading.
+word count clears the floor, and no em dashes. You are given that report. Do
+not re-litigate it. A row Python marked failed is failed regardless of your
+reading.
 
 Score only what a script cannot.
 
@@ -24,7 +25,17 @@ Score only what a script cannot.
 | `evidenced` | Claims match the strength of their sources. A disputed claim reads as disputed. |
 | `limited` | The paper states what it does not cover and where its conclusions stop. |
 | `figured` | Every figure is explained in prose, and every figure earns its place. |
+| `depth` | Every body section unpacks mechanism, alternative, and evidence limit. A section that only restates its bound claims fails. |
+| `repetition` | A later section does not restate an earlier one, or a ledger term, without adding a mechanism. |
 | `voice` | Engineering report register. No marketing, no metaphor, no second person. |
+
+`depth` is the row that keeps this pipeline from shipping a cited brief and
+calling it a paper. Two short paragraphs that quote the claims are not enough,
+even when every citation resolves.
+
+You are given the paper ledger. Use it. A number with two values, a term
+defined twice, or a forward reference never resolved fails, even if the
+deterministic `ledger_consistency` row already said so: name the instance.
 
 ## Rules
 

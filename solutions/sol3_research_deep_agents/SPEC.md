@@ -28,6 +28,9 @@ This folder imports no shared engine. Every module below is a copy, and
 | `brief.py` | Citation arithmetic and the em dash sweep |
 | `adapter.py` | Deep Agents results into a `DoerResult` |
 | `mcp_tools.py` | `.mcp.json`, and the fallbacks under it |
+| `corpus.py` | Second-brain search, pack, and opt-in ingest |
+| `outline.py` | Outline validator, stamp, and plan lift |
+| `sections.py` | Per-section check, judge, and ledger |
 | `evidence.py` | `SourceDocument`, `Claim`, `Finding`, and corroboration |
 | `paper.py` | The nine stage pipeline and the three exits |
 | `stages.py` | Each stage's gate |
@@ -42,10 +45,13 @@ This folder imports no shared engine. Every module below is a copy, and
 role              writes  scope
 orchestrator      no      nothing
 planner           yes     plan.json
+outline_judge     no      nothing
 researcher        no      nothing
 verifier          yes     evidence/**   (denied: paper/**)
+section_judge     no      nothing
+ledger            no      nothing
 diagrammer        yes     diagrams/*.mmd, diagrams/*.puml   (denied: paper/**, evidence/**)
-writer            yes     brief.md, paper/**, work/research/**   (denied: evidence/**)
+writer            yes     brief.md, paper/**, work/research/**, sections/**   (denied: evidence/**)
 reviewer          no      nothing
 ```
 
@@ -82,14 +88,14 @@ agent writes anywhere it likes.
 
 | # | Stage | Model? | Its gate |
 | --- | --- | --- | --- |
-| 1 | plan | yes | Three to eight questions, each with a check, at least one important |
+| 1 | plan | yes | Three to twelve questions, each with a check, at most six important |
 | 2 | search | yes | Every claim names a source that resolves |
 | 3 | verify | yes | Every important claim has a decided truth state, and anything past the cap says it was skipped |
 | 4 | outline | yes | Every body section names claim ids that exist and may be used |
 | 5 | diagram | yes | At most twelve nodes, alt text present, and the pinned plugin judge accepts a `*_imagen.png` |
-| 6 | write | yes | A section cites only the numbers its claims support |
-| 7 | review | yes | Every rubric row passes |
-| 8 | assemble | no | Every hard gate in `paper_check`, including that the paper has a body |
+| 6 | write | yes | A section cites only the numbers its claims support, and carries real prose rather than a restated claim list |
+| 7 | review | yes | Every rubric row passes, including `depth` |
+| 8 | assemble | no | Every hard gate in `paper_check`, including that the paper has a body and clears 2000 words |
 | 9 | publish | no | The gates passed. Opt-in only |
 
 ## Three exits, and no fourth
@@ -146,7 +152,7 @@ figure keeps the renderer sidecar, judge sidecar, and local audit record.
 ## Verification is bounded
 
 The verifier searches once per claim it is handed, so the length of that list is
-the size of the work. `--max-verify` caps it at twelve, shakiest first: lowest
+the size of the work. `--max-verify` caps it at twenty-four, shakiest first: lowest
 confidence, then fewest sources. A cap that took claims in whatever order the
 dictionary held them would spend the budget confirming the facts nobody doubted.
 

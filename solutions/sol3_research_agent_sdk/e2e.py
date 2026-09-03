@@ -67,6 +67,7 @@ def validate(work_dir: Path, *, max_usd: float | None = None) -> dict:
         return False
 
     paper_path = work_dir / "paper.md"
+    outline_path = work_dir / "outline.approved.json"
     plan_path = work_dir / "plan.json"
     sources_path = work_dir / "sources.json"
     claims_path = work_dir / "claims.json"
@@ -76,7 +77,7 @@ def validate(work_dir: Path, *, max_usd: float | None = None) -> dict:
     state_path = work_dir / ".harness" / "state.json"
     for path in (
         paper_path,
-        plan_path,
+        outline_path,
         sources_path,
         claims_path,
         diagrams_path,
@@ -90,7 +91,13 @@ def validate(work_dir: Path, *, max_usd: float | None = None) -> dict:
         return report
 
     paper = paper_path.read_text(encoding="utf-8")
-    plan = _read_json(plan_path)
+    stamp = _read_json(outline_path)
+    import outline as outlines  # noqa: PLC0415
+
+    plan = outlines.plan_view(outlines.load_approved(stamp))
+    if plan_path.is_file():
+        # Older artifacts kept a derived plan.json. The approved outline wins.
+        pass
     sources = _read_json(sources_path)
     claims = _read_json(claims_path).get("claims", [])
     figures = _read_json(diagrams_path).get("figures", [])
@@ -249,6 +256,7 @@ def run(mode: str, out: Path, python: str, max_usd: float) -> int:
         "2",
         "--max-usd",
         str(max_usd),
+        "--enforce-loop-doctrine",
     ]
     if mode == "fixture":
         command += ["--backend", "fixture", "--fixture", str(FIXTURE)]

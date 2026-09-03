@@ -45,14 +45,15 @@ SOURCE_SYNTAX = re.compile(
     re.M,
 )
 
-MIN_WORDS = 400
+MIN_WORDS = 2000
 
 # The fewest words a section can carry and still count as written.
 #
-# Deliberately low. This gate answers "is there prose here", which is a fact.
-# Whether a section says enough is a judgment, and judgment belongs to the
-# reviewer, where being wrong costs a retry instead of blocking a good paper.
-MIN_SECTION_WORDS = 5
+# 80 words is a real paragraph, not a heading with one sentence under it.
+# Whether a section says enough past that is still a reviewer judgment, but a
+# paper of two-sentence sections is a brief, and this gate exists to stop
+# calling that a paper.
+MIN_SECTION_WORDS = 80
 EXIT_TERMS = (re.compile(r"\bdone\b", re.I), re.compile(r"\bcost\b", re.I), re.compile(r"\bmax\s+turns\b", re.I))
 
 SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
@@ -139,7 +140,7 @@ def visible_source_syntax(body: str) -> list[str]:
     return found
 
 
-def sections_without_prose(body: str) -> list[str]:
+def sections_without_prose(body: str, min_words: int = MIN_SECTION_WORDS) -> list[str]:
     """Headings with no real prose under them.
 
     Every other check on this page is a check on content that exists. Grounding
@@ -163,7 +164,7 @@ def sections_without_prose(body: str) -> list[str]:
         # nothing else still owes the reader an explanation.
         chunk = IMAGE.sub("", FENCE.sub("", chunk))
         words = re.findall(r"\b[\w'-]+\b", chunk)
-        if len(words) < MIN_SECTION_WORDS:
+        if len(words) < min_words:
             thin.append(f"{heading} ({len(words)} words)")
     return thin
 
@@ -337,8 +338,12 @@ def check(
     *,
     ledger: evidence.Ledger | None = None,
     required=REQUIRED_SECTIONS,
+    min_words: int | None = None,
+    min_section_words: int | None = None,
 ) -> PaperScore:
     """Score a white paper. Every check here is arithmetic."""
+    words_needed = MIN_WORDS if min_words is None else min_words
+    section_needed = MIN_SECTION_WORDS if min_section_words is None else min_section_words
     checks: list[Check] = []
 
     # The three brief.py already owns, reused rather than restated.
@@ -457,7 +462,7 @@ def check(
         )
     )
 
-    thin = sections_without_prose(body)
+    thin = sections_without_prose(body, min_words=section_needed)
     checks.append(
         Check(
             "has_body",
@@ -470,9 +475,9 @@ def check(
     checks.append(
         Check(
             "length",
-            words >= MIN_WORDS,
-            f"{words} words",
-            hard=False,
+            words >= words_needed,
+            f"{words} words (need {words_needed})",
+            hard=True,
         )
     )
 
@@ -495,8 +500,16 @@ def demo() -> None:
     )
     urls = ["https://docs.langchain.com/one", "https://docs.claude.com/two"]
 
-    score = check(good, urls)
+    def gate(body, *a, **kw):
+        kw.setdefault("min_words", 0)
+        kw.setdefault("min_section_words", 5)
+        return check(body, *a, **kw)
+
+    score = gate(good, urls)
     assert score.passed, score.report()
+
+    # Length is a hard gate. A structurally green short paper does not ship.
+    assert "length" in check(good, urls).signature()
 
     # A paper of headings and a reference list satisfies every other gate,
     # because each of them checks content that is not there.
@@ -505,7 +518,7 @@ def demo() -> None:
         "## Limitations\n\n## References\n\n"
         "1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
     )
-    score = check(hollow, urls)
+    score = gate(hollow, urls)
     assert not score.passed, score.report()
     assert score.signature() == ("has_body",), score.signature()
 
@@ -513,27 +526,27 @@ def demo() -> None:
     thin = good.replace(
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]", "Yes. [1]"
     )
-    assert "has_body" in check(thin, urls).signature()
+    assert "has_body" in gate(thin, urls).signature()
 
     # A Figures appendix is images and alt text, and owes no prose.
     appendix = good.replace(
         "## References",
         "## Figures\n\n![A flowchart of the three exits](figures/exits_imagen.png)\n\n## References",
     )
-    assert "has_body" not in check(appendix, urls).signature(), check(appendix, urls).report()
+    assert "has_body" not in gate(appendix, urls).signature(), check(appendix, urls).report()
 
     # A dangling citation is not a style opinion.
-    score = check(good.replace("[2]", "[9]"), urls)
+    score = gate(good.replace("[2]", "[9]"), urls)
     assert not score.passed
     assert "grounded" in score.signature()
 
     # A missing section blocks.
-    score = check(good.replace("## Abstract", "## Overview"), urls)
+    score = gate(good.replace("## Abstract", "## Overview"), urls)
     assert not score.passed
     assert "sections" in score.signature()
 
     # A figure with no alt text blocks.
-    score = check(good.replace("[A flowchart of the three exits]", "[]"), urls)
+    score = gate(good.replace("[A flowchart of the three exits]", "[]"), urls)
     assert not score.passed
     assert "figure_alt" in score.signature()
 
@@ -541,7 +554,7 @@ def demo() -> None:
     leaked = good.replace(
         "![A flowchart", "```mermaid\nflowchart TB\n  A --> B\n```\n\n![A flowchart"
     )
-    score = check(leaked, urls)
+    score = gate(leaked, urls)
     assert not score.passed
     assert "no_diagram_source" in score.signature()
 
@@ -552,7 +565,7 @@ def demo() -> None:
     # Missing limitations warns, it does not block, and it never reaches the
     # signature the retry loop reads.
     trimmed = good.replace("## Limitations\n\nThis paper measures two runtimes only. [2]\n\n", "")
-    score = check(trimmed, urls)
+    score = gate(trimmed, urls)
     assert score.passed, score.report()
     assert "limitations" in score.warnings()
     assert "limitations" not in score.signature()
@@ -574,7 +587,7 @@ def demo() -> None:
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]",
         "Three exits cover the observed cases: done, then cost, then max turns. [1] https://docs.langchain.com/one",
     )
-    score = check(body, urls, ledger=ledger)
+    score = gate(body, urls, ledger=ledger)
     assert not score.passed
     assert "single_source_caveat" in score.signature()
 
@@ -582,12 +595,12 @@ def demo() -> None:
         "Three exits cover the observed cases: done, then cost, then max turns. [1]",
         "Three exits cover the observed cases: done, then cost, then max turns, on a single source. [1]",
     )
-    score = check(caveated, urls, ledger=ledger)
+    score = gate(caveated, urls, ledger=ledger)
     assert "single_source_caveat" not in score.signature(), score.report()
 
     # A contradicted claim never reaches the paper.
     evidence.corroborate(claim, contradicted=True)
-    score = check(caveated, urls, ledger=ledger)
+    score = gate(caveated, urls, ledger=ledger)
     assert not score.passed
     assert "no_contradicted" in score.signature()
 

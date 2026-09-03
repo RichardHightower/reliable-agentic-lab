@@ -61,6 +61,7 @@ tasks:
       - '{{.PY}} gates.py --demo'
       - '{{.PY}} publish.py --demo'
       - '{{.PY}} rkc.py --demo'
+      - '{{.PY}} corpus.py --demo'
 
   # -- setup ----------------------------------------------------------------
 
@@ -111,9 +112,9 @@ tasks:
     cmds:
       - |
         if [ -x "{{.RUN_PY}}" ]; then
-          "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" --backend fixture --fresh
+          "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain
         else
-          {{.PY}} loop.py --topic "{{.TOPIC}}" --backend fixture --fresh
+          {{.PY}} loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain
         fi
 
   e2e-fixture:
@@ -169,7 +170,7 @@ tasks:
           echo "run task setup first. It creates .venv in this folder and installs claude-agent-sdk."
           exit 1
         fi
-        "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" {{.CLI_ARGS}}
+        "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" --profile "{{.PROFILE | default "demo"}}" {{.CLI_ARGS}}
 
   publish:
     desc: Run, then push the paper and its figures to a secret gist.

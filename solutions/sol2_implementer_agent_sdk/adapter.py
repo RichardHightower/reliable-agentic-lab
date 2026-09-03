@@ -25,32 +25,14 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
 
+from doers import Backend, DoerResult
 from write_scope import WriteScope
 
 _TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
 _COST_STOP = {"error_max_budget_usd", "error_max_budget"}
 QUERY_TIMEOUT_SECONDS = 180
-
-
-@dataclass
-class DoerResult:
-    wrote: list[str] = field(default_factory=list)
-    output: str = ""
-    usd: float = 0.0
-    ok: bool = True
-    structured: dict | None = None
-    stop_reason: str | None = None
-    raw_output: str = ""
-
-
-class Backend:
-    name = "backend"
-
-    def run(self, *, repo: Path, prompt: str, allow: list[str], **extra) -> DoerResult:
-        raise NotImplementedError
 
 
 def _changed_files(repo: Path) -> set[str]:
@@ -188,3 +170,47 @@ class AgentSdkBackend(Backend):
             )
         except Exception as exc:  # graceful failure. Never claim a write it did not make.
             return DoerResult(ok=False, output=f"agent sdk backend failed: {exc}")
+
+    def judge(self, *, repo: Path, prompt: str) -> DoerResult:
+        """One judge turn. Structured output when the schema is available."""
+        extra = {}
+        try:
+            from load_agents import JUDGE_SCHEMA  # noqa: PLC0415
+
+            extra["output_format"] = JUDGE_SCHEMA
+        except Exception:
+            pass
+        return self.run(repo=repo, prompt=prompt, allow=[], **extra)
+
+
+class AgentSdkPhaseBackend(Backend):
+    """One backend per phase. The driver never asks a test graph to write code."""
+
+    name = "agent_sdk"
+
+    def __init__(
+        self,
+        *,
+        test: AgentSdkBackend,
+        code: AgentSdkBackend,
+        judge: AgentSdkBackend | None = None,
+    ):
+        self.test = test
+        self.code = code
+        self.judge_backend = judge
+
+    def _for(self, allow: list[str]) -> AgentSdkBackend:
+        if any(pattern.startswith("tests/") for pattern in allow):
+            return self.test
+        if any(pattern.startswith(("app/", "src/")) for pattern in allow):
+            return self.code
+        raise ValueError(f"no Agent SDK backend is configured for scope {allow!r}")
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str], **extra) -> DoerResult:
+        return self._for(allow).run(repo=repo, prompt=prompt, allow=allow, **extra)
+
+    def judge(self, *, repo: Path, prompt: str) -> DoerResult:
+        if self.judge_backend is None:
+            return super().judge(repo=repo, prompt=prompt)
+        return self.judge_backend.judge(repo=repo, prompt=prompt)
+

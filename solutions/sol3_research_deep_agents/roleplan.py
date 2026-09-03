@@ -40,8 +40,11 @@ LOOPS = {
     "paper": (
         "orchestrator",
         "planner",
+        "outline_judge",
         "researcher",
         "verifier",
+        "section_judge",
+        "ledger",
         "diagrammer",
         "writer",
         "reviewer",
@@ -71,17 +74,38 @@ PURPOSE = {
         "Grades the draft against the rubric and returns verdicts. "
         "Holds no write path, so it cannot fix its own complaint."
     ),
+    "outline_judge": (
+        "Scores the outline before any research spend. Holds no write path."
+    ),
+    "section_judge": (
+        "Grades one section against its outline row. Holds no write path."
+    ),
+    "ledger": (
+        "Extracts facts and terms from one finished section. Holds no write path. "
+        "Python appends the ledger."
+    ),
 }
 
 # Roles that hold no tool that writes. The separation is the tool list, not a
 # rule in a prompt, so there is nothing for a model to talk its way past.
-READERS = ("orchestrator", "judge", "researcher", "reviewer")
+READERS = (
+    "orchestrator",
+    "judge",
+    "researcher",
+    "reviewer",
+    "outline_judge",
+    "section_judge",
+    "ledger",
+)
 
 TOOLS_FOR_READER = {
     "orchestrator": ("Task",),
     "judge": (*READ_TOOLS, "Bash"),
     "researcher": (*READ_TOOLS, "WebSearch"),
     "reviewer": (*READ_TOOLS,),
+    "outline_judge": (*READ_TOOLS,),
+    "section_judge": (*READ_TOOLS,),
+    "ledger": (*READ_TOOLS,),
 }
 
 # Where a role may write when `.loop.yml` says nothing about it. A target repo
@@ -92,7 +116,7 @@ FALLBACK_SCOPE = {
     "doer": (("tickets/**",), ()),
     # The writer owns the prose and nothing else. It cannot write an evidence
     # record, which is what stops it inventing a source to cite.
-    "writer": (("brief.md", "paper/**", "work/research/**"), ("evidence/**",)),
+    "writer": (("brief.md", "paper/**", "work/research/**", "sections/**"), ("evidence/**",)),
     # The planner owns the plan. The verifier owns the evidence. The diagrammer
     # owns diagram source and not one rendered figure, because a figure is the
     # renderer's output and a role that can write one can fake one.

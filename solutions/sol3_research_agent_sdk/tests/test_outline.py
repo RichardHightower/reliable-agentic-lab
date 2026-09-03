@@ -1,0 +1,394 @@
+"""Outline schema, validator, judge loop, approval stamp, coverage row."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import load_agents
+import outline as outlines
+import paper
+import pytest
+
+
+def sample_section(sid="s1", heading="The problem", **over):
+    section = {
+        "id": sid,
+        "heading": heading,
+        "objective": "State it.",
+        "abstract": "Two sentences about the problem. A third names the stake.",
+        "key_questions": ["what is the problem", "why existing approaches fail"],
+        "claims_to_support": ["The problem is structural."],
+        "required_evidence": ["a primary specification"],
+        "word_target": 400,
+        "figures": [],
+        "depends_on": [],
+    }
+    section.update(over)
+    return section
+
+
+def sample_outline(**over):
+    drafted = {
+        "title": "On a topic",
+        "audience": "engineers",
+        "thesis": "A thesis.",
+        "word_target_total": 400,
+        "sections": [sample_section()],
+    }
+    drafted.update(over)
+    return drafted
+
+
+def test_the_outline_schema_is_closed_and_non_recursive():
+    schema = load_agents.OUTLINE_SCHEMA["schema"]
+    assert schema["additionalProperties"] is False
+    dumped = json.dumps(schema)
+    assert "$ref" not in dumped
+    required = set(schema["required"])
+    assert required == {"title", "audience", "thesis", "word_target_total", "sections"}
+    section = schema["properties"]["sections"]["items"]
+    assert section["additionalProperties"] is False
+    assert "sections" not in section["properties"]
+    assert "corpus_refs" in section["properties"]
+    figure = section["properties"]["figures"]["items"]
+    assert set(figure["properties"]["kind"]["enum"]) == {"diagram", "chart"}
+
+
+def test_the_verdict_schema_is_closed():
+    schema = load_agents.OUTLINE_VERDICT_SCHEMA["schema"]
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {
+        "passed",
+        "score",
+        "blocking_issues",
+        "actionable_changes",
+    }
+
+
+def test_a_valid_outline_has_no_errors():
+    assert outlines.validate(sample_outline()) == []
+
+
+def test_duplicate_ids_fail():
+    drafted = sample_outline(
+        word_target_total=800,
+        sections=[
+            sample_section("s1", word_target=400),
+            sample_section("s1", heading="Other", word_target=400),
+        ],
+    )
+    errors = outlines.validate(drafted)
+    assert any("duplicated" in item for item in errors)
+
+
+def test_depends_on_a_later_section_fails():
+    drafted = sample_outline(
+        word_target_total=800,
+        sections=[
+            sample_section("s1", depends_on=["s2"], word_target=400),
+            sample_section("s2", heading="Later", word_target=400),
+        ],
+    )
+    errors = outlines.validate(drafted)
+    assert any("not an earlier section" in item for item in errors)
+
+
+def test_depends_on_unknown_id_fails():
+    drafted = sample_outline(sections=[sample_section(depends_on=["nope"])])
+    errors = outlines.validate(drafted)
+    assert any("unknown id" in item for item in errors)
+
+
+def test_a_depends_on_cycle_fails():
+    drafted = sample_outline(
+        word_target_total=800,
+        sections=[
+            sample_section("a", word_target=400, depends_on=[]),
+            sample_section("b", heading="B", word_target=400, depends_on=["a"]),
+        ],
+    )
+    assert outlines.validate(drafted) == []
+    cycle = outlines._cycle(["a", "b"], {"a": ["b"], "b": ["a"]})
+    assert cycle is not None
+
+
+def test_word_targets_off_by_more_than_ten_percent_fail():
+    drafted = sample_outline(word_target_total=1000, sections=[sample_section(word_target=400)])
+    errors = outlines.validate(drafted)
+    assert any("ten percent" in item for item in errors)
+
+
+def test_word_targets_within_ten_percent_pass():
+    drafted = sample_outline(word_target_total=420, sections=[sample_section(word_target=400)])
+    assert outlines.validate(drafted) == []
+
+
+def test_a_chart_without_data_needed_fails():
+    drafted = sample_outline(
+        sections=[
+            sample_section(
+                figures=[
+                    {
+                        "name": "latency",
+                        "kind": "chart",
+                        "shows": "p95 by version",
+                        "data_needed": "",
+                    }
+                ]
+            )
+        ]
+    )
+    errors = outlines.validate(drafted)
+    assert any("data_needed" in item for item in errors)
+
+
+def test_a_diagram_may_have_empty_data_needed():
+    drafted = sample_outline(
+        sections=[
+            sample_section(
+                figures=[
+                    {
+                        "name": "control-loop",
+                        "kind": "diagram",
+                        "shows": "the exits",
+                        "data_needed": "",
+                    }
+                ]
+            )
+        ]
+    )
+    assert outlines.validate(drafted) == []
+
+
+def test_a_section_with_fewer_than_two_key_questions_fails():
+    drafted = sample_outline(sections=[sample_section(key_questions=["only one"])])
+    errors = outlines.validate(drafted)
+    assert any("at least two" in item for item in errors)
+
+
+def test_sections_must_be_objects():
+    drafted = sample_outline(sections=["just a heading"])
+    errors = outlines.validate(drafted)
+    assert any("SECTIONS MUST BE OBJECTS" in item for item in errors)
+
+
+def make_run(work, turns, **kwargs):
+    kwargs.setdefault("brain", None)
+    kwargs.setdefault("log", lambda *a: None)
+    return paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=turns,
+        state=paper.State.load_or_new(work, "a topic"),
+        **kwargs,
+    )
+
+
+def test_the_judge_loop_escalates_on_a_repeated_signature(work, turns):
+    class Stubborn(turns):
+        def judge_outline(self, drafted, note=""):
+            self.asked.append(("judge_outline", note))
+            return {
+                "passed": False,
+                "score": 0.4,
+                "blocking_issues": [
+                    {
+                        "section": "s1",
+                        "rule": "completeness",
+                        "description": "no limitations section",
+                    }
+                ],
+                "actionable_changes": ["add a limitations section"],
+            }
+
+    run = make_run(work, Stubborn())
+    paper.prior_art(run)
+    with pytest.raises(paper.RunFailed, match="not converging"):
+        paper.do_outline(run)
+    judged = [item for item in run.turns.asked if item[0] == "judge_outline"]
+    assert len(judged) == 2
+
+
+def test_passed_wins_over_a_low_score(work, turns):
+    class Generous(turns):
+        def judge_outline(self, drafted, note=""):
+            return {
+                "passed": True,
+                "score": 0.2,
+                "blocking_issues": [
+                    {"section": "s1", "rule": "titles", "description": "heading is vague"}
+                ],
+                "actionable_changes": [],
+            }
+
+    run = make_run(work, Generous())
+    paper.prior_art(run)
+    paper.do_outline(run)
+    stamp = json.loads((Path(work) / "outline.approved.json").read_text())
+    assert stamp["approved_by"] == "judge"
+    assert stamp["sha256"]
+
+
+def test_approve_writes_markdown_and_stops(work, turns):
+    run = make_run(work, turns(), require_approval=True)
+    paper.prior_art(run)
+    with pytest.raises(paper.AwaitingApproval) as raised:
+        paper.do_outline(run)
+    assert raised.value.path == Path(work) / "outline.md"
+    assert (Path(work) / "outline.md").is_file()
+    assert (Path(work) / "outline.json").is_file()
+    assert (Path(work) / "outline-judged.json").is_file()
+    assert (Path(work) / "outline-verdict.json").is_file()
+    assert not (Path(work) / "outline.approved.json").exists()
+    assert raised.value.exit_code == 3
+
+
+def test_resume_after_approve_stamps_the_operator(work, turns):
+    run = make_run(work, turns(), require_approval=True)
+    paper.prior_art(run)
+    with pytest.raises(paper.AwaitingApproval):
+        paper.do_outline(run)
+    continued = make_run(work, turns(), resume=True)
+    meta = paper.do_outline(continued)
+    stamp = json.loads((Path(work) / "outline.approved.json").read_text())
+    assert stamp["approved_by"] == "operator"
+    assert meta["approved_by"] == "operator"
+
+
+def test_resume_rejudges_an_edited_outline(work, turns):
+    class Counting(turns):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.judged = 0
+
+        def judge_outline(self, drafted, note=""):
+            self.judged += 1
+            return super().judge_outline(drafted, note)
+
+    first = Counting()
+    run = make_run(work, first, require_approval=True)
+    paper.prior_art(run)
+    with pytest.raises(paper.AwaitingApproval):
+        paper.do_outline(run)
+    assert first.judged == 1
+
+    drafted = json.loads((Path(work) / "outline.json").read_text())
+    drafted["title"] = "Edited title"
+    (Path(work) / "outline.json").write_text(json.dumps(drafted, indent=2) + "\n")
+
+    second = Counting()
+    continued = make_run(work, second, resume=True)
+    paper.do_outline(continued)
+    assert second.judged == 1
+    stamp = json.loads((Path(work) / "outline.approved.json").read_text())
+    assert stamp["outline"]["title"] == "Edited title"
+
+
+def test_without_approve_the_judge_stamps(work, turns):
+    run = make_run(work, turns())
+    paper.prior_art(run)
+    paper.do_outline(run)
+    stamp = json.loads((Path(work) / "outline.approved.json").read_text())
+    assert stamp["approved_by"] == "judge"
+
+
+def test_later_phases_read_only_the_approved_outline(work, turns):
+    run = make_run(work, turns())
+    paper.prior_art(run)
+    paper.do_outline(run)
+    (Path(work) / "outline.json").write_text(json.dumps({"title": "stale"}) + "\n")
+    loaded = paper.approved_outline(run)
+    assert loaded["title"] == "On a topic"
+    assert loaded["sections"][0]["id"] == "s1"
+
+
+def test_outline_coverage_fails_when_a_key_question_is_missing():
+    import checks  # noqa: PLC0415
+
+    drafted = sample_outline()
+    body = "# T\n\n## The problem\n\nA point [1].\n"
+    gaps = checks.outline_coverage_gaps(body, drafted)
+    assert any("never names" in item for item in gaps)
+    score = checks.check(body, ["https://a"], headings=["The problem"], outline=drafted)
+    assert "outline_coverage" in score.signature()
+
+
+def test_outline_coverage_passes_when_questions_are_named():
+    import checks  # noqa: PLC0415
+
+    drafted = sample_outline()
+    body = (
+        "# T\n\n## The problem\n\n"
+        "A point about what is the problem [1].\n\n"
+        "Another point about why existing approaches fail [1].\n"
+    )
+    score = checks.check(body, ["https://a"], headings=["The problem"], outline=drafted)
+    assert score.passed, score.report()
+
+
+def test_a_chart_is_skipped_with_a_log(work, turns):
+    class Charted(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            drafted["sections"][0]["figures"] = [
+                {
+                    "name": "latency",
+                    "kind": "chart",
+                    "shows": "p95",
+                    "data_needed": "latency table by version",
+                },
+                {
+                    "name": "control-loop",
+                    "kind": "diagram",
+                    "shows": "the exits",
+                    "data_needed": "",
+                },
+            ]
+            return drafted
+
+    notes = []
+    run = make_run(work, Charted(), log=notes.append)
+    paper.prior_art(run)
+    paper.do_outline(run)
+    paper.do_research(run)
+    paper.verify(run)
+    meta = paper.diagram(run)
+    assert meta["skipped_charts"] == 1
+    assert any("skipping chart" in str(item) for item in notes)
+
+
+def test_an_invalid_outline_is_retried_with_the_validator_text(work, turns):
+    class Flaky(turns):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.tries = 0
+
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            self.tries += 1
+            self.asked.append(("outline", topic, prior_art, budget, note, brief))
+            if self.tries == 1:
+                return {"title": "t", "sections": ["a string"]}
+            return super().outline(topic, prior_art, budget, note, brief)
+
+    run = make_run(work, Flaky())
+    paper.prior_art(run)
+    paper.do_outline(run)
+    notes = [item[4] for item in run.turns.asked if item[0] == "outline"]
+    assert notes[0] == ""
+    assert "SECTIONS MUST BE OBJECTS" in notes[1]
+
+
+def test_doctrine_is_off_by_default(work, turns):
+    run = make_run(work, turns())
+    paper.prior_art(run)
+    paper.do_outline(run)
+    paper.do_research(run)
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    score = paper.check(run)
+    names = [row["name"] for row in score["checks"]]
+    assert "doctrine" not in names
+    assert "outline_coverage" in names

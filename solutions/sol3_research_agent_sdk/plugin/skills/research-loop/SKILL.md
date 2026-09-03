@@ -35,9 +35,12 @@ Plus the research record that produced them, as an RKC knowledge bundle under
 | Role | Holds | Writes |
 | --- | --- | --- |
 | orchestrator | `Task` | nothing |
-| planner | read tools | nothing |
-| researcher | read tools, `WebSearch`, filtered Perplexity, Context7 | nothing |
-| verifier | `Read`, `WebSearch`, filtered Perplexity, Context7 | nothing |
+| outliner | read tools | nothing |
+| outline_judge | read tools | nothing |
+| researcher | read tools, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
+| verifier | `Read`, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
+| section_judge | read tools | nothing |
+| ledger | `Read` | nothing |
 | diagrammer | read tools | nothing |
 | writer | read tools, `Write` | `sections/**` |
 | judge | read tools | nothing |
@@ -48,9 +51,10 @@ It cannot reach `paper.md`: assembly is deterministic, in Python, and stitching
 the parts is not the model's to do.
 
 Everything else comes back as schema-checked structured output that Python
-writes. The planner returns a plan and Python writes `plan.json`. The
-diagrammer returns diagram source and Python writes it, renders it, and runs
-the fidelity judge.
+writes. The outliner returns an outline and Python writes `outline.json`.
+The outline judge returns a verdict and Python writes `outline-verdict.json`.
+The diagrammer returns diagram source and Python writes it, renders it, and
+runs the fidelity judge.
 
 No role holds `Bash`. The renderer is one subprocess with fixed arguments, and
 Python runs it. Handing a model a shell to save that would widen the blast
@@ -61,27 +65,41 @@ search and write can adjust the evidence to fit the paper.
 
 ## The phases
 
-0. **Prior art.** Read the second brain for established terminology and earlier
-   conclusions on this topic. Skip when it is not there. Never treat it as
-   verified.
-1. **Plan.** Turn the topic into sections, questions, and figures, inside the
-   question and figure budget the planner is told.
-2. **Research.** Answer each question from primary sources. Return atomic
-   claims, each with a source URL and a verbatim quote.
-3. **Verify.** Check each claim against a source found independently. The
-   verifier never sees the researcher's answer.
-4. **Diagram.** The diagrammer returns the source. Python renders it and runs
-   the fidelity judge, and a miss goes back to the diagrammer as a list of what
-   the image lost. Three attempts, then keep the closest image.
-5. **Write.** One section at a time, from verified claims only.
-6. **Assemble.** Stitch the sections and append the reference list.
-7. **Check.** Run the deterministic rows: sources, hosts, doctrine, complete,
-   grounded, cited, sourced, images, style. The paper names its exits in order:
-   done, then cost, then max turns; Figure 1 shows the same order. No model
-   votes here.
-8. **Review.** The judge scores what a script cannot.
-9. **Publish.** Push the paper and its figures to a secret gist, on request,
+0. **Corpus pack.** Read the configured brains for established terminology and
+   earlier conclusions on this topic. Write `corpus/brain-pack.md` and
+   `corpus/brain-pack.json`. Skip when no brain is there. Never treat the pack
+   as verified. A topic with fewer than ten hits is noted `corpus_thin`.
+1. **Outline.** Turn the topic into a two-level outline: sections with
+   objectives, abstracts, key questions, claims to support, required evidence,
+   word targets, planned figures, and `corpus_refs` from the pack. Python
+   validates the outline, an Opus judge scores it (including `corpus_fit`),
+   and a stamp writes `outline.approved.json`. Later phases read that file
+   and nothing else.
+2. **Sections.** For each approved section, in outline order: ask the
+   section's key questions, search the corpus first, fill gaps, verify
+   independently, write the section, run the section check, grade it, and
+   append a ledger entry. Writes `knowledge/<id>/findings.json`,
+   `sections/<id>.md`, and `paper_ledger.json`. A finished section is
+   skipped on resume.
+3. **Diagram.** The diagrammer returns source for `kind: diagram` figures.
+   Python renders it and runs the fidelity judge. `kind: chart` figures are
+   logged and skipped in this phase.
+4. **Assemble.** Stitch the sections and append the reference list.
+5. **Check.** Run the deterministic rows: sources, hosts, doctrine, complete,
+   outline_coverage, grounded, cited, sourced, images, style, ledger_consistency,
+   corpus_marked, gaps_stated, and, on a paper run, has_body and length. Length
+   is hard at 2000 words. Doctrine is
+   scoped to the E2E lane. `outline_coverage` requires every approved section
+   and every key question on the page. No model votes here.
+6. **Review.** The judge scores what a script cannot. It reads the ledger.
+7. **Edit.** Once, after the first green check. The writer rewrites for flow
+   only. Python diffs for new specifics and reverts any the evidence does not
+   contain. Then assemble, check, and review run again.
+8. **Publish.** Push the paper and its figures to a secret gist, on request,
    and only after the paper passes.
+9. **Bundle.** Always. The run writes an RKC knowledge bundle under
+   `knowledge/research/`. `--ingest-brain` is opt-in: it copies that bundle
+   into a brain git worktree and opens a PR. It never writes `main`.
 
 ## The verdicts
 

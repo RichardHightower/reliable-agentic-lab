@@ -67,6 +67,7 @@ class FakeAgentDefinition:
     maxTurns: int = 0  # the SDK's wire name, not Python's
     background: bool = False
     model: str | None = None
+    skills: list = field(default_factory=list)
 
 
 @dataclass

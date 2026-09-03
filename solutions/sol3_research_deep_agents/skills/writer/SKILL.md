@@ -31,6 +31,34 @@ Do not write:
 - marketing verbs: leverage, unlock, empower, revolutionize, seamless, robust
 - a conclusion that restates the introduction
 
+## Length is part of the contract
+
+A section that restates its claims in two sentences is a brief, not a paper.
+The Saturday lab already produces a cited brief. This writer produces a
+document a colleague can use.
+
+Unpack every bound claim, in this order:
+
+1. State the finding.
+2. Name the mechanism. Which component does the work, in what order, and what
+   happens if that component is missing.
+3. Name the alternative and the cost of choosing this design instead.
+4. State the limit of the evidence. Single source, vendor documentation, or no
+   production measurement. Do not quietly upgrade it.
+
+Targets:
+
+- abstract: 120 to 180 words
+- limitations: 150 to 250 words
+- any other section with one or two claims: 400 to 800 words
+- any other section with three or more claims: 700 to 1200 words
+
+Do not invent facts to hit the count. Do not repeat a paragraph. Do not add
+background, framing, forecasts, or generalizations the claims do not support.
+Expand by unpacking mechanism, tradeoff, and limit. Short sentences stay the
+unit of prose. The paper is long because it covers the claims, not because the
+sentences ramble.
+
 ## Sentences
 
 Use the active voice and name the actor. "The orchestrator charges the budget",
@@ -64,12 +92,9 @@ Each section names the claim ids it may use. Use those and no others. A fact you
 know but that no claim supports does not go in the paper. That rule is what
 makes the citation count mean something.
 
-Do not pad a sparsely sourced section to reach a target length. Omit unsupported
-background, framing, forecasts, and generalizations. A concise section grounded
-in two claims is better than a longer section whose opening and transition have
-no evidence.
-
 ## Figures
 
 Reference a figure by its markdown image with real alt text describing what the
-figure shows. Never paste diagram source into the paper.
+figure shows. Never paste diagram source into the paper. After the image, spend
+three to five sentences on what the figure makes visible that the surrounding
+prose does not.

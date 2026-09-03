@@ -4,20 +4,21 @@ Ten phases, in a list, in order. The list is the dispatch order and the number
 is only a state key, which is what lets a phase slot in later without
 renumbering the run records that already exist on disk.
 
-    0 prior_art   read the second brain     -> prior-art.md
-    1 plan        sections and questions    -> plan.json
-    2 research    answers and claims        -> sources.json, claims.json
-    3 verify      an independent second look-> verdicts.json
+    0 corpus_pack read the configured brains   -> corpus/brain-pack.md
+    1 outline     two-level outline, judged -> outline.approved.json
+    2 sections    per-section research/write -> sections/*.md, paper_ledger.json
     4 diagram     figures, rendered         -> diagrams.json
-    5 write       one section at a time     -> sections/*.md
+    5 write       retry rewrite             -> sections/*.md
     6 assemble    stitch and reference      -> paper.md
     7 check       deterministic rows        -> check.json
     8 review      the judge, on what is left-> review.json
+    8b edit       flow only, add no facts   -> sections/*.md (once)
     9 publish     a private gist, on request-> gist.json
 
 Phases 0 to 4 run once. Phases 5 to 8 are the retry cycle, because the only
 thing worth redoing on a failed check is the writing. Re-running the research
 because a paragraph lost its citation marker buys a bill, not a better paper.
+The edit pass runs once after the first green check and re-enters the cycle.
 
 Every phase writes a new named file and no phase mutates another's output. That
 one rule is what makes `--resume` need no bookkeeping: a phase whose file exists
@@ -39,11 +40,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import checks
+import corpus
 import diagrams
 import gates
+import outline as outlines
 import publish as publisher
 import research
 import rkc
+import sections as section_loop
 from turns import Escalate, TurnFailed, slugify
 
 FOLDER = Path(__file__).resolve().parent
@@ -62,12 +66,14 @@ MAX_PRIOR_ART_HITS = 12
 # well-planned paper from being an expensive one.
 MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
+MAX_CLAIMS = 40
+MAX_WORDS = 2000
+OUTLINE_JUDGE_ROUNDS = 3
 
 # A ceiling on verification, for the same reason. Four good questions produced
 # a hundred and eleven claims on one live run, and every claim is a turn. The
 # cap decides how many get a second opinion; the rest stay `unverified`, which
 # the writer states qualitatively.
-MAX_CLAIMS = 24
 
 # Which claims get the budget when there is not enough for all of them. A claim
 # with a number, a version, or a date is the one most worth a second look: it is
@@ -75,8 +81,39 @@ MAX_CLAIMS = 24
 NUMERIC = re.compile(r"\d")
 
 
+def _section_instruction(section: dict, notes: str = "") -> str:
+    """How long a section should be. The outline's word_target is the contract."""
+    target = section.get("word_target")
+    length_note = (
+        "Unpack every bound claim: finding, mechanism, alternative and its cost, "
+        "then the limit of the evidence. Do not invent facts. Do not repeat a paragraph."
+    )
+    if target:
+        length_note = (
+            f"Return about {target} words of section body (0.6 to 1.25 times that). "
+            + length_note
+        )
+    if notes:
+        return f"{length_note}\n\n{notes}"
+    return length_note
+
+
 class RunFailed(RuntimeError):
     """A person has to look at this. The run stopped."""
+
+
+class AwaitingApproval(RuntimeError):
+    """The outline passed the judge and is waiting for `--resume`.
+
+    Exit code 3. Not a failure. The operator reads `outline.md`, edits
+    `outline.json` if needed, and continues.
+    """
+
+    exit_code = 3
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        super().__init__(f"outline awaiting approval: {self.path}")
 
 
 @dataclass
@@ -144,20 +181,34 @@ class Run:
     max_questions: int = MAX_QUESTIONS
     max_diagrams: int = MAX_DIAGRAMS
     max_claims: int = MAX_CLAIMS
+    word_target_total: int = MAX_WORDS
     theme: str = diagrams.DEFAULT_THEME
     brain: Path | None = BRAIN
+    brains: list = field(default_factory=list)
+    corpus_subjects: list | None = None
     brief: str = ""
     should_publish: bool = False
+    require_approval: bool = False
+    resume: bool = False
+    ingest_brain: Path | None = None
     # The workshop entry point enables these hard gates.  Keeping synthetic
     # phase tests opt-in lets them exercise one phase at a time without having
     # to manufacture the whole loop-control paper contract.
     enforce_research_policy: bool = False
+    enforce_loop_doctrine: bool = False
     log: object = print
 
     # -- files -------------------------------------------------------------
 
     def file(self, name: str) -> Path:
         return Path(self.work_dir) / name
+
+    def corpus_roots(self) -> list[Path]:
+        if self.brains:
+            return [Path(path) for path in self.brains]
+        if self.brain:
+            return [Path(self.brain)]
+        return []
 
     def read_json(self, name: str) -> dict:
         return json.loads(self.file(name).read_text(encoding="utf-8"))
@@ -232,131 +283,237 @@ def attempt(run: Run, *, kind: str, do, attempts: int = 2):
 # Phases 0 to 4. Each runs once, and skips when its output already exists.
 
 
-def prior_art(run: Run) -> dict:
-    """Read the second brain for established terminology and earlier conclusions.
+def corpus_pack(run: Run) -> dict:
+    """Build the topic's corpus pack before any model call.
 
-    Read-only, and optional. The brain is a sibling repository that an attendee
-    will not have. A missing brain is a thinner plan, not a failed run.
-
-    Nothing here is treated as verified. It tells the planner what words this
-    body of work already uses, so the paper does not rename a concept that
-    already has a name. Anything time-sensitive still goes on the question list.
+    Read-only, and optional. A missing brain is a thinner outline, not a
+    failed run. Nothing here is treated as verified. It tells the outliner
+    what words this body of work already uses, and which corpus keys a
+    section may cite.
     """
-    brain = Path(run.brain) if run.brain else None
-    if brain is None or not brain.exists():
-        run.file("prior-art.md").write_text(
-            "No second brain was found. Planned from the topic alone.\n", encoding="utf-8"
-        )
-        return {"hits": 0, "brain": str(brain) if brain else ""}
-
-    words = [w for w in slugify(run.topic).split("-") if len(w) > 3]
-    hits: list[str] = []
-    seen: set[str] = set()
-    for path in sorted((brain / "research").rglob("*.md")) if (brain / "research").exists() else []:
-        if len(hits) >= MAX_PRIOR_ART_HITS:
-            break
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        lowered = text.lower()
-        if not all(word in lowered for word in words[:2]) or path.stem in seen:
-            continue
-        seen.add(path.stem)
-        title = next(
-            (
-                line[7:].strip().strip('"')
-                for line in text.splitlines()
-                if line.startswith("title:")
-            ),
-            path.stem,
-        )
-        body = "\n".join(
-            line for line in text.split("---", 2)[-1].strip().splitlines() if line.strip()
-        )
-        hits.append(f"- **{title}** ({path.parent.name})\n  {body[:280]}")
-
-    run.file("prior-art.md").write_text(
-        f"# Prior art on {run.topic}\n\n"
-        "Read for terminology and for what was already concluded. Not verified.\n\n"
-        + ("\n".join(hits) if hits else "Nothing in the brain matched this topic.\n"),
-        encoding="utf-8",
+    dest = run.file("corpus")
+    packed = corpus.pack(
+        run.topic,
+        run.corpus_roots(),
+        dest,
+        limit=MAX_PRIOR_ART_HITS * 4,
+        subjects=run.corpus_subjects,
     )
-    return {"hits": len(hits), "brain": str(brain)}
+    return {
+        "hits": len(packed["hits"]),
+        "brains": packed["roots"],
+        "missing": packed["missing"],
+        "corpus_thin": packed["corpus_thin"],
+        "subjects": packed["subjects"],
+    }
+
+
+# Old name. Tests and greps that still say prior_art keep working.
+prior_art = corpus_pack
+
+
+def _pack_keys(run: Run) -> list[str]:
+    path = run.file("corpus/brain-pack.json")
+    if not path.exists():
+        return []
+    try:
+        return list(json.loads(path.read_text(encoding="utf-8")).get("keys") or [])
+    except (OSError, json.JSONDecodeError):
+        return []
 
 
 def plan(run: Run) -> dict:
-    """Plan the paper, then hold the plan to a budget.
+    """Outline the paper, validate it, judge it, and stamp the approved copy.
 
-    Python writes `plan.json` from the planner's schema-checked answer. Letting
-    the planner write it too would give the run two plans that can disagree.
+    Python writes `outline.json`, `outline-verdict.json`, and
+    `outline.approved.json`. The outliner and the outline judge hold no write
+    tool, so they cannot disagree with those files.
 
-    The truncation is not tidying. Every question is a research turn and a
-    verification turn, so an uncapped plan is an uncapped bill, and the planner
-    has no idea what a turn costs.
+    Kept as `plan` so existing tests and log lines still name the phase.
     """
-    prior = run.file("prior-art.md")
-    prior_text = prior.read_text(encoding="utf-8") if prior.exists() else ""
+    return do_outline(run)
 
+
+def _budget_for(run: Run) -> dict:
+    return {
+        "questions": run.max_questions,
+        "diagrams": run.max_diagrams,
+        "words": run.word_target_total,
+    }
+
+
+def _call_outliner(run: Run, note: str) -> dict:
+    pack_path = run.file("corpus/brain-pack.md")
+    prior_text = pack_path.read_text(encoding="utf-8") if pack_path.exists() else ""
+    args = (run.topic, prior_text, _budget_for(run), note)
+    method = getattr(run.turns, "outline", run.turns.plan)
+    drafted = method(*args, brief=run.brief) if run.brief else method(*args)
+    if not isinstance(drafted, dict):
+        raise RunFailed("the outliner returned no outline object")
+    errors = outlines.validate(
+        drafted,
+        word_target_total=run.word_target_total,
+        corpus_keys=_pack_keys(run),
+    )
+    if errors:
+        raise RunFailed(outlines.retry_note(errors))
+    return drafted
+
+
+def _draft_valid_outline(run: Run) -> dict:
     def once(note: str) -> dict:
-        args = (
-            run.topic,
-            prior_text,
-            {"questions": run.max_questions, "diagrams": run.max_diagrams},
-            note,
-        )
-        # A commissioning brief is optional. Keep the normal turn call exactly
-        # as it was so an attendee's minimal runtime only needs the six base
-        # methods; the Agent SDK path receives the extra context when an E2E
-        # scenario needs a specific deliverable.
-        drafted = run.turns.plan(*args, brief=run.brief) if run.brief else run.turns.plan(*args)
-        if not drafted.get("sections") or not drafted.get("questions"):
-            raise RunFailed("the planner returned no sections or no questions")
-        return drafted
+        return _call_outliner(run, note)
 
     try:
-        result = attempt(run, kind="plan", do=once)
+        return attempt(run, kind="outline", do=once)
     except UnitFailed as exc:
-        # The plan is the one unit with no partial success to keep. Nothing
-        # downstream has anything to work from.
         raise RunFailed(str(exc)) from exc
 
-    asked, drawn = len(result["questions"]), len(result.get("diagrams", []))
-    # A section the planner never asked a question about is a section it meant
-    # to write from the topic alone. Work that set out before truncating, or
-    # every orphan the cut creates looks like one of them.
-    never_asked = {section["id"] for section in result["sections"]} - {
-        question["section"] for question in result["questions"]
-    }
-    result["questions"] = result["questions"][: run.max_questions]
-    result["diagrams"] = result.get("diagrams", [])[: run.max_diagrams]
-    served = {question["section"] for question in result["questions"]}
-    result["sections"] = [
-        section
-        for section in result["sections"]
-        if section["id"] in served or section["id"] in never_asked
-    ]
 
-    run.write_json("plan.json", result)
+def _judge_loop(run: Run, drafted: dict) -> dict:
+    """Judge, then re-outline with actionable_changes, at most three rounds.
+
+    `passed` from the judge wins over `score`. A repeated failure signature
+    escalates as a stall through `gates.decide`.
+    """
+    previous: tuple[str, ...] | None = None
+    current = drafted
+    judge = getattr(run.turns, "judge_outline", None)
+    if judge is None:
+        verdict = {
+            "passed": True,
+            "score": 1.0,
+            "blocking_issues": [],
+            "actionable_changes": [],
+        }
+        run.write_json("outline-verdict.json", verdict)
+        return current
+
+    for round_no in range(1, OUTLINE_JUDGE_ROUNDS + 1):
+        spent = run.exhausted()
+        if spent and round_no > 1:
+            raise RunFailed(f"outline judge: {spent}")
+        try:
+            verdict = judge(current)
+        except Escalate:
+            raise
+        except (TurnFailed, RunFailed) as exc:
+            raise RunFailed(f"outline judge: {exc}") from exc
+        if not isinstance(verdict, dict):
+            raise RunFailed("the outline judge returned no verdict object")
+        run.write_json("outline-verdict.json", verdict)
+        # passed wins over score. A high score with passed false is still a fail.
+        if verdict.get("passed"):
+            return current
+        signature = outlines.judge_signature(verdict)
+        decision = gates.decide(
+            passed=False,
+            iteration=round_no,
+            budget=OUTLINE_JUDGE_ROUNDS,
+            signature=signature,
+            previous_signature=previous,
+            usd_left=0.0 if run.exhausted() else 1.0,
+        )
+        run.log(f"    outline judge round {round_no}: {decision.reason}")
+        if decision.stop:
+            raise RunFailed(f"outline judge: {decision.reason}")
+        previous = signature
+        changes = verdict.get("actionable_changes") or []
+        issues = [
+            f"{item.get('section') or 'paper'}/{item.get('rule')}: {item.get('description')}"
+            for item in (verdict.get("blocking_issues") or [])
+            if isinstance(item, dict)
+        ]
+        note = gates.retry_instruction(decision, issues or list(signature))
+        if changes:
+            note += "\nApply these actionable changes:\n" + "\n".join(f"- {c}" for c in changes)
+        current = _draft_valid_outline_with_note(run, note)
+        run.write_json("outline.json", current)
+    raise RunFailed("outline judge: three rounds exhausted")
+
+
+def _draft_valid_outline_with_note(run: Run, note: str) -> dict:
+    def once(ignored: str) -> dict:
+        return _call_outliner(run, note)
+
+    try:
+        return attempt(run, kind="outline", do=once)
+    except UnitFailed as exc:
+        raise RunFailed(str(exc)) from exc
+
+
+def _finish_outline(run: Run, drafted: dict) -> dict:
+    """Stamp, or pause for `--approve`."""
+    run.write_json("outline.json", drafted)
+    run.file("outline.md").write_text(outlines.to_markdown(drafted), encoding="utf-8")
+    judged_path = run.file("outline-judged.json")
+    if judged_path.exists():
+        judged = json.loads(judged_path.read_text(encoding="utf-8"))
+        if outlines.canonical(drafted) != outlines.canonical(judged):
+            run.log("    outline.json changed since it was judged; judging once more")
+            judge = getattr(run.turns, "judge_outline", None)
+            if judge is not None:
+                verdict = judge(drafted)
+                run.write_json("outline-verdict.json", verdict)
+                if not verdict.get("passed"):
+                    raise RunFailed("the edited outline did not pass the judge")
+            run.write_json("outline-judged.json", drafted)
+    else:
+        run.write_json("outline-judged.json", drafted)
+
+    if run.require_approval and not run.resume:
+        raise AwaitingApproval(run.file("outline.md"))
+
+    approved_by = "operator" if run.resume else "judge"
+    run.write_json("outline.approved.json", outlines.stamp(drafted, approved_by=approved_by))
     return {
-        "sections": len(result["sections"]),
-        "questions": len(result["questions"]),
-        "diagrams": len(result["diagrams"]),
-        "trimmed": {
-            "questions": asked - len(result["questions"]),
-            "diagrams": drawn - len(result["diagrams"]),
-        },
+        "sections": len(drafted.get("sections") or []),
+        "questions": len(outlines.questions(drafted)),
+        "diagrams": len(outlines.diagrams(drafted)),
+        "charts": len(outlines.charts(drafted)),
+        "approved_by": approved_by,
+        "sha256": outlines.digest(drafted),
     }
+
+
+def do_outline(run: Run) -> dict:
+    """Produce a validated, judged, approved outline.
+
+    Resume after `--approve`: `outline.json` exists, `outline-judged.json`
+    exists, `outline.approved.json` does not. Diff, maybe re-judge, stamp.
+    """
+    existing = run.file("outline.json")
+    judged = run.file("outline-judged.json")
+    if existing.exists() and judged.exists():
+        drafted = run.read_json("outline.json")
+        errors = outlines.validate(drafted, word_target_total=run.word_target_total)
+        if errors:
+            raise RunFailed(outlines.retry_note(errors))
+        return _finish_outline(run, drafted)
+
+    drafted = _draft_valid_outline(run)
+    run.write_json("outline.json", drafted)
+    drafted = _judge_loop(run, drafted)
+    run.write_json("outline.json", drafted)
+    return _finish_outline(run, drafted)
+
+
+def approved_outline(run: Run) -> dict:
+    """The only outline later phases may read."""
+    path = run.file("outline.approved.json")
+    if not path.exists():
+        raise RunFailed("no approved outline. Later phases read outline.approved.json only.")
+    return outlines.load_approved(run.read_json("outline.approved.json"))
 
 
 def do_research(run: Run) -> dict:
-    """Answer every planned question, and split each answer into atomic claims.
+    """Answer every approved key_question, in outline order.
 
     A claim carries the section it serves so the writer never has to guess, and
     a quote so the verify phase has something to search for. A claim with no
     quote is a claim nobody can check, and it is recorded as such.
     """
-    planned = run.read_json("plan.json")
+    planned = outlines.plan_view(approved_outline(run))
     findings: list[dict] = []
     claims: list[dict] = []
     failed: list[dict] = []
@@ -426,6 +583,7 @@ def do_research(run: Run) -> dict:
         "failed": len(failed),
         "stopped": stopped,
     }
+
 
 
 def to_verify(claims: list[dict], limit: int) -> list[dict]:
@@ -515,9 +673,15 @@ def verify(run: Run) -> dict:
 
 
 def diagram(run: Run) -> dict:
-    planned = run.read_json("plan.json")
+    drafted = approved_outline(run)
     figures = []
-    for spec in planned.get("diagrams", []):
+    skipped_charts = 0
+    for spec in outlines.charts(drafted):
+        skipped_charts += 1
+        run.log(
+            f"    skipping chart {spec.get('name')!r}: charts are not rendered in this phase"
+        )
+    for spec in outlines.diagrams(drafted):
         figure = diagrams.draw(
             run.turns,
             name=spec["name"],
@@ -528,9 +692,114 @@ def diagram(run: Run) -> dict:
             theme=run.theme,
         )
         figures.append(figure.to_dict())
-    run.write_json("diagrams.json", {"figures": figures})
+    run.write_json("diagrams.json", {"figures": figures, "skipped_charts": skipped_charts})
     drawn = [f for f in figures if f["path"]]
-    return {"figures": len(figures), "rendered": len(drawn)}
+    return {"figures": len(figures), "rendered": len(drawn), "skipped_charts": skipped_charts}
+
+
+def do_sections(run: Run) -> dict:
+    """Forward-only section loop. Writes claims.json so assemble still reads it."""
+    approved = approved_outline(run)
+    drafted_sections = approved.get("sections") or []
+    if not drafted_sections:
+        raise RunFailed("the approved outline has no sections")
+    metas = []
+    for section in drafted_sections:
+        stopped = run.exhausted()
+        if stopped:
+            break
+        metas.append(section_loop.run_section(run, section))
+
+    findings: list[dict] = []
+    claims: list[dict] = []
+    verdicts: list[dict] = []
+    sources: list[dict] = []
+    seen: set[str] = set()
+    failed: list[dict] = []
+    for section in drafted_sections:
+        sid = section["id"]
+        fpath = run.file(f"knowledge/{sid}/findings.json")
+        if not fpath.exists():
+            continue
+        try:
+            payload = json.loads(fpath.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        section_findings = payload.get("findings") or []
+        findings.extend(section_findings)
+        vpath = run.file(f"knowledge/{sid}/verdicts.json")
+        by_id: dict[str, dict] = {}
+        if vpath.exists():
+            try:
+                for item in json.loads(vpath.read_text(encoding="utf-8")).get("verdicts") or []:
+                    by_id[item.get("finding_id") or ""] = item
+                    verdicts.append(item)
+            except (OSError, json.JSONDecodeError):
+                pass
+        number = len(claims)
+        for finding in section_findings:
+            status = (by_id.get(finding.get("id") or "") or {}).get("state") or "unverified"
+            url = (finding.get("source") or {}).get("url_or_path") or ""
+            if status != "contradicted":
+                number += 1
+                claims.append(
+                    {
+                        "id": finding.get("id") or f"{sid}-c{number}",
+                        "text": finding.get("claim") or "",
+                        "source_url": url,
+                        "quote": finding.get("quote") or "",
+                        "question_id": finding.get("answers_question") or "",
+                        "section": sid,
+                        "status": status,
+                        "number": number,
+                        "origin": finding.get("origin")
+                        or (finding.get("source") or {}).get("kind")
+                        or "",
+                        "source_kind": (finding.get("source") or {}).get("source_kind")
+                        or finding.get("source_kind")
+                        or "",
+                        "vendor": (finding.get("source") or {}).get("vendor") or "",
+                        "epistemic": finding.get("epistemic") or "",
+                    }
+                )
+            if url and url not in seen:
+                seen.add(url)
+                src = finding.get("source") or {}
+                sources.append({"url": url, "title": src.get("title") or ""})
+        for gap in payload.get("coverage_gaps") or []:
+            failed.append({"id": sid, "text": gap.get("question") or "", "reason": "coverage_gap"})
+
+    run.write_json(
+        "sources.json",
+        {"findings": findings, "sources": sources, "failed": failed, "stopped": None},
+    )
+    run.write_json("claims.json", {"claims": claims})
+    run.write_json("verdicts.json", {"verdicts": verdicts})
+    if not claims:
+        raise RunFailed("no source produced a single claim. There is nothing to write a paper from.")
+    return {
+        "sections": len(metas),
+        "findings": len(findings),
+        "claims": len(claims),
+        "skipped": sum(1 for item in metas if item.get("skipped")),
+    }
+
+
+def maybe_write(run: Run) -> dict:
+    """First attempt: the section loop already wrote. Retry: rewrite from claims."""
+    planned = outlines.plan_view(approved_outline(run))
+    out = run.file("sections")
+    have = bool(planned["sections"]) and all(
+        (out / f"{section['id']}.md").exists() for section in planned["sections"]
+    )
+    if have and run.state.iteration <= 1 and not run.file("review.json").exists():
+        return {
+            "sections": len(planned["sections"]),
+            "from_message": 0,
+            "retry_notes": False,
+            "skipped": True,
+        }
+    return write_sections(run)
 
 
 # ---------------------------------------------------------------------------
@@ -552,16 +821,42 @@ def _numbered(claims: list[dict], planned: dict) -> tuple[list[dict], list[dict]
     usable.sort(key=lambda c: order.index(c["section"]) if c["section"] in order else len(order))
 
     sources: list[str] = []
+    extra: dict[str, dict] = {}
     for claim in usable:
         url = claim.get("source_url") or claim.get("verifier_url") or ""
         if url and url not in sources:
             sources.append(url)
+            extra[url] = {
+                "origin": claim.get("origin") or "",
+                "source_kind": claim.get("source_kind") or "",
+                "epistemic": claim.get("epistemic") or "",
+            }
         claim["number"] = sources.index(url) + 1 if url else 0
-    return usable, [{"url": url, "number": index + 1} for index, url in enumerate(sources)]
+    refs = []
+    for index, url in enumerate(sources):
+        meta = extra.get(url) or {}
+        refs.append(
+            {
+                "url": url,
+                "number": index + 1,
+                "origin": meta.get("origin") or "",
+                "source_kind": meta.get("source_kind") or "",
+                "epistemic": meta.get("epistemic") or "",
+                "model_brief": checks.is_model_brief(meta),
+            }
+        )
+    return usable, refs
 
 
 def write_sections(run: Run) -> dict:
-    planned = run.read_json("plan.json")
+    planned = outlines.plan_view(approved_outline(run))
+    # Pass the full approved section (objective, abstract, claims, word_target)
+    # through to the writer. plan_view keeps those fields.
+    by_id = {section["id"]: section for section in planned["sections"]}
+    approved = approved_outline(run)
+    for section in approved.get("sections") or []:
+        if section["id"] in by_id:
+            by_id[section["id"]] = {**by_id[section["id"]], **section}
     claims = run.read_json("claims.json")["claims"]
     figures = run.read_json("diagrams.json")["figures"]
     usable, _ = _numbered(claims, planned)
@@ -590,22 +885,37 @@ def write_sections(run: Run) -> dict:
     for section in planned["sections"]:
         if run.exhausted():
             break
-        target = out / f"{section['id']}.md"
-        target.unlink(missing_ok=True)
-        body = run.turns.write(
-            section,
-            [c for c in usable if c["section"] == section["id"]],
-            [f for f in figures if f["section"] == section["id"] and f["path"]],
-            notes,
-            f"sections/{section['id']}.md",
-        )
+        payload = by_id.get(section["id"], section)
+        path = out / f"{section['id']}.md"
+        path.unlink(missing_ok=True)
+        bound = [c for c in usable if c["section"] == section["id"]]
+        figures_here = [f for f in figures if f["section"] == section["id"] and f["path"]]
+        relative = f"sections/{section['id']}.md"
+        instruction = _section_instruction(payload, notes)
+        body = run.turns.write(payload, bound, figures_here, instruction, relative)
         # The writer holds `Write` scoped to `sections/**` and is told to use
         # it. Prefer the file, because a long section that round-trips through
         # a message is the one that comes back truncated. Fall back to the
         # message so a writer that only answered still produces a section.
-        if not target.exists() or not target.read_text(encoding="utf-8").strip():
-            target.write_text((body or "").rstrip() + "\n", encoding="utf-8")
+        if not path.exists() or not path.read_text(encoding="utf-8").strip():
+            path.write_text((body or "").rstrip() + "\n", encoding="utf-8")
             from_message += 1
+        if run.enforce_research_policy and not run.exhausted():
+            words = checks.word_count(path.read_text(encoding="utf-8"))
+            if words < checks.MIN_SECTION_WORDS:
+                target = payload.get("word_target") or checks.MIN_SECTION_WORDS
+                extra = (
+                    f"{_section_instruction(payload)}\n\nThe last draft was {words} words. "
+                    "Unpack the bound claims into mechanism, tradeoff, and evidence "
+                    f"limit until the section reaches about {target} words. Do not invent facts."
+                )
+                if notes:
+                    extra = f"{extra}\n\n{notes}"
+                path.unlink(missing_ok=True)
+                body = run.turns.write(payload, bound, figures_here, extra, relative)
+                if not path.exists() or not path.read_text(encoding="utf-8").strip():
+                    path.write_text((body or "").rstrip() + "\n", encoding="utf-8")
+                    from_message += 1
         written += 1
     if not written:
         raise RunFailed("the budget ran out before any section was written")
@@ -618,13 +928,13 @@ def assemble(run: Run) -> dict:
     Deterministic. Asking a model to re-emit the whole paper to join it is how
     a paper loses a section between two model calls.
     """
-    planned = run.read_json("plan.json")
+    planned = outlines.plan_view(approved_outline(run))
     claims = run.read_json("claims.json")["claims"]
     _, references = _numbered(claims, planned)
 
     parts = [f"# {planned['title']}", ""]
-    if planned.get("abstract"):
-        parts += ["## Abstract", "", planned["abstract"].strip(), ""]
+    if planned.get("abstract") or planned.get("thesis"):
+        parts += ["## Abstract", "", (planned.get("abstract") or planned.get("thesis") or "").strip(), ""]
     flags: list[dict] = []
     for section in planned["sections"]:
         path = run.file("sections") / f"{section['id']}.md"
@@ -638,7 +948,11 @@ def assemble(run: Run) -> dict:
         parts += [text.strip(), ""]
     if references:
         parts += ["## References", ""]
-        parts += [f"{ref['number']}. {ref['url']}" for ref in references]
+        parts += [
+            f"{ref['number']}. {ref['url']}"
+            + (" (model-written brief)" if ref.get("model_brief") else "")
+            for ref in references
+        ]
         parts.append("")
 
     body = checks.strip_em_dashes("\n".join(parts))
@@ -659,27 +973,58 @@ def corpus_for(run: Run) -> str:
     """
     parts = []
     for finding in run.read_json("sources.json")["findings"]:
-        parts.append(finding.get("answer", ""))
+        parts.append(finding.get("answer") or finding.get("claim") or "")
         parts += [s.get("url", "") + " " + s.get("title", "") for s in finding.get("sources", [])]
+        src = finding.get("source") or {}
+        parts += [src.get("url_or_path") or "", src.get("title") or "", finding.get("quote") or ""]
     for claim in run.read_json("claims.json")["claims"]:
         parts += [claim.get("quote", ""), claim.get("verifier_excerpt", "")]
     return "\n".join(parts)
 
 
+def _ledger(run: Run):
+    path = run.file("paper_ledger.json")
+    if not path.exists():
+        return {"entries": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"entries": []}
+    if isinstance(payload, list):
+        return {"entries": payload}
+    return payload
+
+
+def _coverage_gaps(run: Run) -> list:
+    path = run.file("sources.json")
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return list(payload.get("failed") or [])
+
+
 def check(run: Run) -> dict:
     body = run.file("paper.md").read_text(encoding="utf-8")
-    planned = run.read_json("plan.json")
-    references = [
-        ref["url"] for ref in _numbered(run.read_json("claims.json")["claims"], planned)[1]
-    ]
+    planned = outlines.plan_view(approved_outline(run))
+    claims = run.read_json("claims.json")["claims"]
+    references = [ref["url"] for ref in _numbered(claims, planned)[1]]
     score = checks.check(
         body,
         references,
         base_dir=run.work_dir,
         corpus=corpus_for(run),
         headings=[section["heading"] for section in planned["sections"]],
+        outline=approved_outline(run),
         enforce_source_policy=run.enforce_research_policy,
-        enforce_loop_doctrine=run.enforce_research_policy,
+        enforce_loop_doctrine=run.enforce_loop_doctrine,
+        min_words=checks.MIN_WORDS if run.enforce_research_policy else 0,
+        min_section_words=checks.MIN_SECTION_WORDS if run.enforce_research_policy else 0,
+        ledger=_ledger(run) if run.enforce_research_policy else None,
+        gaps=_coverage_gaps(run) if run.enforce_research_policy else None,
+        claims=claims if run.enforce_research_policy else None,
     )
     run.write_json("check.json", score.to_dict())
     return score.to_dict()
@@ -690,8 +1035,15 @@ def review(run: Run) -> dict:
     report = checks.Score(
         checks=[checks.Check(**c) for c in run.read_json("check.json")["checks"]]
     ).report()
+    ledger = _ledger(run)
     try:
-        verdict = run.turns.review(body, report)
+        if hasattr(run.turns, "review"):
+            try:
+                verdict = run.turns.review(body, report, ledger=ledger)
+            except TypeError:
+                verdict = run.turns.review(body, report)
+        else:
+            verdict = {"done": True, "summary": "no judge", "issues": []}
     except TurnFailed as exc:
         # A judge that did not answer is not a judge that agreed.
         verdict = {"done": False, "summary": f"the judge failed: {exc}", "issues": []}
@@ -699,19 +1051,66 @@ def review(run: Run) -> dict:
     return verdict
 
 
+def edit_paper(run: Run) -> dict:
+    """One flow-only pass after the first green check. Add no facts.
+
+    Python diffs each section for new specifics. A specific the evidence pack
+    does not contain is reverted, so a writer that invented a number cannot
+    keep it by talking past `sourced`.
+    """
+    sentinel = run.file("edit.done.json")
+    if sentinel.exists():
+        return {"skipped": True}
+    planned = outlines.plan_view(approved_outline(run))
+    evidence = corpus_for(run)
+    reverted: list[str] = []
+    edited = 0
+    for section in planned["sections"]:
+        path = run.file("sections") / f"{section['id']}.md"
+        if not path.exists():
+            continue
+        before = path.read_text(encoding="utf-8")
+        relative = f"sections/{section['id']}.md"
+        if hasattr(run.turns, "edit_paper"):
+            after = run.turns.edit_paper(section, before, relative)
+        elif hasattr(run.turns, "edit_section"):
+            after = run.turns.edit_section(
+                section,
+                before,
+                {
+                    "failed_rows": ["flow"],
+                    "notes": ["Do not add new facts. Fix transitions and definitions only."],
+                },
+                relative,
+            )
+        else:
+            after = before
+        if not path.exists() or not path.read_text(encoding="utf-8").strip():
+            path.write_text((after or before).rstrip() + "\n", encoding="utf-8")
+        after = path.read_text(encoding="utf-8")
+        novel = checks.new_claims(before, after)
+        invented = [token for token in novel if token.lower() not in evidence.lower()]
+        if invented:
+            path.write_text(before, encoding="utf-8")
+            reverted.extend(invented)
+        else:
+            edited += 1
+    run.write_json("edit.done.json", {"edited": edited, "reverted": reverted})
+    return {"edited": edited, "reverted": reverted}
+
+
 # ---------------------------------------------------------------------------
 # The driver.
 
 LINEAR = [
-    (0, "prior_art", "prior-art.md", prior_art),
-    (1, "plan", "plan.json", plan),
-    (2, "research", "claims.json", do_research),
-    (3, "verify", "verdicts.json", verify),
+    (0, "corpus_pack", "corpus/brain-pack.json", corpus_pack),
+    (1, "outline", "outline.approved.json", do_outline),
+    (2, "sections", "claims.json", do_sections),
     (4, "diagram", "diagrams.json", diagram),
 ]
 
 CYCLE = [
-    (5, "write", write_sections),
+    (5, "write", maybe_write),
     (6, "assemble", assemble),
     (7, "check", check),
     (8, "review", review),
@@ -741,6 +1140,10 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         before = run.state.total_usd
         try:
             meta = phase(run)
+        except AwaitingApproval:
+            run.state.mark(name, "awaiting_approval")
+            run.state.save(work)
+            raise
         except Escalate as exc:
             run.state.mark(name, "escalated", reason=str(exc))
             run.state.save(work)
@@ -802,6 +1205,41 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         )
         run.state.previous_signature = list(signature)
         run.state.save(work)
+
+        # The edit pass runs once after the first green check, then the cycle
+        # re-enters at assemble. A new specific the evidence does not contain
+        # is reverted in edit_paper; if anything else broke, write retries.
+        if (
+            decision.gate == gates.PASS
+            and not run.file("edit.done.json").exists()
+            and not run.exhausted()
+        ):
+            run.log("  8 edit      ...")
+            before = run.state.total_usd
+            meta = edit_paper(run)
+            run.state.mark("edit", "complete", usd=round(run.state.total_usd - before, 4), **meta)
+            run.state.save(work)
+            run.log(f"  8 edit      {meta}")
+            assemble(run)
+            check_meta = check(run)
+            review(run)
+            run.log(f"  6 assemble  after edit")
+            run.log(f"  7 check     {check_meta['signature']}")
+            score = run.read_json("check.json")
+            verdict = run.read_json("review.json")
+            judge_done = bool(verdict.get("done"))
+            signature = tuple(score["signature"]) + (() if judge_done else ("judge",))
+            decision = gates.decide(
+                passed=score["passed"] and judge_done,
+                iteration=iteration,
+                budget=run.max_iterations,
+                signature=signature,
+                previous_signature=previous,
+                usd_left=0.0 if run.exhausted() else 1.0,
+            )
+            run.state.previous_signature = list(signature)
+            run.state.save(work)
+
         if decision.stop:
             break
         for name in CYCLE_OUTPUT:
@@ -817,9 +1255,10 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         run.file("knowledge"),
         topic=run.topic,
         area=run.area,
-        plan=run.read_json("plan.json"),
+        plan=outlines.plan_view(approved_outline(run)),
         findings=run.read_json("sources.json")["findings"],
         claims=run.read_json("claims.json")["claims"],
+        ledger=_ledger(run),
     )
     valid, note = rkc.validate(run.file("knowledge"))
     run.state.mark(
@@ -829,6 +1268,13 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         **{k: v for k, v in counts.items() if k != "subject_id"},
     )
     run.state.save(work)
+
+    ingest = None
+    if run.ingest_brain is not None:
+        ingest = rkc.ingest_brain(run.file("knowledge"), run.ingest_brain)
+        run.state.mark("ingest", "complete" if ingest.get("ok") else "skipped", **ingest)
+        run.log(f"  9 ingest    {ingest}")
+        run.state.save(work)
 
     gist = None
     if run.should_publish:
@@ -851,6 +1297,7 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         "knowledge": counts,
         "knowledge_valid": valid,
         "knowledge_note": note,
+        "ingest": ingest,
         "gist": gist,
         "report": checks.Score(
             checks=[checks.Check(**c) for c in run.read_json("check.json")["checks"]]

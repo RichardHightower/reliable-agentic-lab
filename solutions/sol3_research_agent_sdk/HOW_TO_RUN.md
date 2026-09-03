@@ -5,7 +5,7 @@ Everything here runs from `solutions/sol3_research_agent_sdk/`, standalone.
 You need `python3` and `task`. A live run also needs an `ANTHROPIC_API_KEY`.
 `task publish` also needs `gh` with the `gist` scope.
 
-Python is the harness. The model plans, searches, verifies, and writes
+Python is the harness. The model outlines, searches, verifies, and writes
 sections. It does not assemble `paper.md` and it does not run the checks.
 
 Saturday Lab 3 is `labs/lab3_research`. That lab fills `loop.py` and checks
@@ -59,7 +59,9 @@ task demo
 
 `task demo` runs the recorded fixture. No key, no network. `task table`
 prints the role table. The writer is the only role that prints `yes` in the
-writes column.
+writes column. A paper run is supposed to produce a document a colleague can
+use, not a cited brief: 2000 words, with each body section unpacked from its
+claims. Saturday Lab 3 is still the short brief.
 
 ## White-paper acceptance runs
 
@@ -129,8 +131,44 @@ TOPIC="your topic" task run --
 task publish --
 ```
 
-`task run` refuses if you skipped `task setup`. Cap it while you are
-developing:
+`task run` refuses if you skipped `task setup`. It defaults to `--profile demo`
+(2000 words, 12 questions, 40 verified claims, $12). A paper run is supposed
+to produce a document a colleague can use, not a cited brief. Saturday Lab 3
+is still the short brief.
+
+Raise the budget for a real white paper:
+
+```bash
+TOPIC="how MCP servers authenticate" PROFILE=paper task run --
+```
+
+`--profile paper` is 4000 words, 20 questions, 60 verified claims, $40.
+`--profile whitepaper` is 6000 words, 32 questions, 100 verified claims, $80.
+
+`--ingest-brain` is off by default. When you pass it a brain knowledge
+directory that is a git worktree on a branch other than `main`, the run
+copies the RKC bundle there and opens a PR. It refuses `main`.
+
+```bash
+TOPIC="loop engineering exit criteria" CLI_ARGS="--ingest-brain /path/to/brain/knowledge" task run --
+```
+
+Stop after the outline judge and read `outline.md` before any research spend:
+
+```bash
+TOPIC="how MCP servers authenticate" PROFILE=paper CLI_ARGS="--approve" task run --
+```
+
+That exits 3. Edit `outline.json` if needed, then continue:
+
+```bash
+TOPIC="how MCP servers authenticate" PROFILE=paper CLI_ARGS="--resume" task run --
+```
+
+Python stamps `outline.approved.json` (or re-judges if the outline changed)
+and later phases read only that file.
+
+Cap a live run while you are developing:
 
 ```bash
 timeout 420 task run --

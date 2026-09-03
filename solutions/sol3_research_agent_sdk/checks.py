@@ -10,6 +10,11 @@ what needs judgement.
     sourced       every identifier in the text appears in the retrieved evidence
     images        every figure the paper references is a file on disk
     style         an em dash is replaced, not argued about
+    has_body      every named section carries real prose, not a heading
+    length        the paper clears the 2000-word floor (opt-in on paper runs)
+    ledger_consistency a number or term disagrees with itself, or a forward ref is open
+    corpus_marked a model-written corpus brief is labelled in the reference list
+    gaps_stated   a coverage gap is named in Limitations
 
 `complete` looks redundant and is not. Without it a paper with no body at all
 passes every other row: the abstract is exempt from `cited`, the reference list
@@ -45,6 +50,16 @@ HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.M)  # re.M so finditer sees every he
 # the citation. Demanding a marker in either produces a paper that cites its own
 # bibliography.
 UNCITED_SECTIONS = {"abstract", "references", "summary"}
+
+# Opt-in floors. Unit tests of other rows stay short. The pipeline passes
+# these when it is producing a paper rather than exercising one phase.
+# Abstract is assembler-owned from the outline thesis, so the section floor
+# does not apply to it. The whole-paper floor still does.
+MIN_WORDS = 2000
+MIN_SECTION_WORDS = 80
+PROSE_EXEMPT = {"references", "figures", "abstract"}
+SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
+FENCE = re.compile(r"```(\w*)\n(.*?)```", re.S)
 IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 EXIT_ORDER = re.compile(r"\bdone\b[\s\S]{0,240}?\bcost\b[\s\S]{0,240}?\bmax(?:imum)?\s+turns?\b", re.I)
 WHICHEVER_FIRST = re.compile(r"\bwhichever\s+(?:comes|fires)\s+first\b", re.I)
@@ -66,6 +81,15 @@ NEEDS_SOURCE = re.compile(r"<!--\s*NEEDS-SOURCE:\s*(.*?)\s*-->", re.S)
 ARXIV = re.compile(r"\barXiv[:\s]*(\d{4}\.\d{4,5})", re.I)
 DOI = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)")
 AUTHOR_YEAR = re.compile(r"\[([A-Z][^\[\]\n]{2,60}?,\s*(?:19|20)\d{2})\]")
+PERCENT = re.compile(r"\b\d+(?:\.\d+)?%")
+VERSION = re.compile(r"\bv?\d+\.\d+(?:\.\d+)?\b")
+YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+BIG_INT = re.compile(r"\b([1-9]\d{2,})\b")
+QUOTED = re.compile(r'"([^"]{3,})"')
+PROPER = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b")
+SECOND_PERSON = re.compile(r"\b(you|your|yours)\b", re.I)
+RHETORICAL = re.compile(r"\?\s*$")
+STUB = re.compile(r"\bTODO\b|\[placeholder\]|lorem ipsum", re.I)
 
 
 @dataclass
@@ -190,19 +214,26 @@ def uncited_claims(body: str) -> list[str]:
     return loose
 
 
-def ungrounded_identifiers(body: str, corpus: str) -> list[str]:
+def ungrounded_identifiers(body: str, corpus: str, *, extended: bool = False) -> list[str]:
     """Lookup identifiers that appear nowhere in the retrieved evidence.
 
     Ported from `v3/article_pipeline/util/verified_facts.py`. A fabricated
     arXiv id or DOI reads exactly like a real one and survives every check that
-    asks a model whether it is real. It does not survive being looked for in the
-    text that was actually retrieved.
+    asks a model whether it is real. It does not survive being looked for in
+    the text that was actually retrieved.
+
+    `extended` adds percentages, versions, years, and integers above 100. The
+    section check uses that set. The paper-level `sourced` row stays on the
+    original three so a unit test of citations is not a census of every digit.
     """
     if not corpus:
         return []
     text = _mask_code(body)
     found: list[str] = []
-    for pattern in (ARXIV, DOI, AUTHOR_YEAR):
+    patterns = (ARXIV, DOI, AUTHOR_YEAR)
+    if extended:
+        patterns = patterns + (PERCENT, VERSION, YEAR, BIG_INT)
+    for pattern in patterns:
         for match in pattern.findall(text):
             token = match if isinstance(match, str) else match[0]
             if token and token not in corpus and token not in found:
@@ -243,6 +274,37 @@ def drop_owned_headings(body: str) -> str:
                 continue
         out.append(line)
     return "\n".join(out)
+
+
+def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
+    """Approved sections missing from the paper, or key questions never named.
+
+    A key question is named when its text appears in the section body, case
+    insensitive. The writer is handed the questions; this row checks they
+    reached the page.
+    """
+    if not outline:
+        return []
+    matches = list(HEADING.finditer(body))
+    bodies: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        heading = match.group(1).strip().lower()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        bodies[heading] = body[start:end]
+    gaps = []
+    for section in outline.get("sections") or []:
+        heading = (section.get("heading") or "").strip()
+        key = heading.lower()
+        if key not in bodies:
+            gaps.append(f"section {heading!r} never written")
+            continue
+        text = bodies[key].lower()
+        for question in section.get("key_questions") or []:
+            named = question if not isinstance(question, dict) else question.get("text") or ""
+            if str(named).strip().lower() not in text:
+                gaps.append(f"section {heading!r} never names {named!r}")
+    return gaps
 
 
 def missing_sections(body: str, headings: list[str]) -> list[str]:
@@ -317,6 +379,27 @@ def disallowed_reference_hosts(sources: list[str]) -> list[str]:
     return [url for url in sources if not source_policy.is_allowed_url(url)]
 
 
+def word_count(body: str) -> int:
+    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", body)))
+
+
+def sections_without_prose(body: str, min_words: int) -> list[str]:
+    if min_words <= 0:
+        return []
+    thin = []
+    matches = list(SECTION_HEADING.finditer(body))
+    for index, match in enumerate(matches):
+        heading = match.group(2).strip()
+        if heading.lower() in PROSE_EXEMPT:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        chunk = IMAGE.sub("", FENCE.sub("", body[match.end() : end]))
+        words = re.findall(r"\b[\w'-]+\b", chunk)
+        if len(words) < min_words:
+            thin.append(f"{heading} ({len(words)} words)")
+    return thin
+
+
 def check(
     body: str,
     sources: list[str],
@@ -324,8 +407,14 @@ def check(
     base_dir: Path | str | None = None,
     corpus: str = "",
     headings: list[str] | None = None,
+    outline: dict | None = None,
     enforce_source_policy: bool = False,
     enforce_loop_doctrine: bool = False,
+    min_words: int = 0,
+    min_section_words: int = 0,
+    ledger=None,
+    gaps=None,
+    claims=None,
 ) -> Score:
     """Score a paper. No model call."""
     checks: list[Check] = []
@@ -366,6 +455,18 @@ def check(
             else f"never written: {absent[:3]}",
         )
     )
+
+    if outline is not None:
+        gaps = outline_coverage_gaps(body, outline)
+        checks.append(
+            Check(
+                "outline_coverage",
+                not gaps,
+                "every approved section and key question is on the page"
+                if not gaps
+                else f"missing: {gaps[:3]}",
+            )
+        )
 
     dangling = ungrounded_citations(body, sources)
     checks.append(
@@ -410,6 +511,332 @@ def check(
     dashes = len(EM_DASH.findall(_mask_code(body)))
     checks.append(Check("style", dashes == 0, f"{dashes} em dashes"))
 
+    if min_section_words:
+        thin = sections_without_prose(body, min_section_words)
+        checks.append(
+            Check(
+                "has_body",
+                not thin,
+                "every section carries prose" if not thin else f"empty or near empty: {thin[:3]}",
+            )
+        )
+    if min_words:
+        words = word_count(body)
+        checks.append(
+            Check(
+                "length",
+                words >= min_words,
+                f"{words} words (need {min_words})",
+            )
+        )
+
+    if ledger is not None:
+        clashes = ledger_inconsistencies(ledger)
+        checks.append(
+            Check(
+                "ledger_consistency",
+                not clashes,
+                "numbers, terms, and forward refs agree"
+                if not clashes
+                else f"ledger: {clashes[:3]}",
+            )
+        )
+
+    if claims is not None:
+        unmarked = unmarked_corpus_briefs(body, claims)
+        checks.append(
+            Check(
+                "corpus_marked",
+                not unmarked,
+                "model-written corpus briefs are labelled"
+                if not unmarked
+                else f"unmarked: {unmarked[:3]}",
+            )
+        )
+
+    if gaps is not None:
+        unnamed = unstated_gaps(body, gaps)
+        checks.append(
+            Check(
+                "gaps_stated",
+                not unnamed,
+                "every coverage gap is named"
+                if not unnamed
+                else f"unnamed gaps: {unnamed[:2]}",
+            )
+        )
+
+    return Score(checks=checks)
+
+
+def has_specifics(text: str) -> bool:
+    """A number, a version, a date, a proper name, or a quoted phrase."""
+    masked = _mask_code(text)
+    return bool(
+        PERCENT.search(masked)
+        or VERSION.search(masked)
+        or YEAR.search(masked)
+        or BIG_INT.search(masked)
+        or QUOTED.search(masked)
+        or PROPER.search(masked)
+        or re.search(r"\d", masked)
+    )
+
+
+MODEL_BRIEF_KINDS = (
+    "brief",
+    "deep_research_brief",
+    "deep-research-brief",
+    "model_brief",
+    "model-written-brief",
+)
+
+
+def _specifics(text: str) -> set[str]:
+    """Identifiers a later edit must not invent."""
+    masked = _mask_code(text)
+    found: set[str] = set()
+    for rx in (ARXIV, DOI, AUTHOR_YEAR, PERCENT, VERSION, YEAR, BIG_INT, QUOTED):
+        for match in rx.finditer(masked):
+            token = match.group(1) if match.lastindex else match.group(0)
+            if token:
+                found.add(token.strip())
+    return found
+
+
+def new_claims(before: str, after: str) -> list[str]:
+    """Specifics that appear in the edit and not in the original."""
+    return sorted(_specifics(after) - _specifics(before))
+
+
+def _ledger_entries(ledger) -> list[dict]:
+    if ledger is None:
+        return []
+    if isinstance(ledger, list):
+        return [item for item in ledger if isinstance(item, dict)]
+    if isinstance(ledger, dict):
+        return [item for item in (ledger.get("entries") or []) if isinstance(item, dict)]
+    return []
+
+
+def ledger_inconsistencies(ledger) -> list[str]:
+    """A number with two values, a term defined twice, or an unresolved forward ref."""
+    entries = _ledger_entries(ledger)
+    issues: list[str] = []
+    numbers: dict[tuple[str, str], str] = {}
+    terms: dict[str, str] = {}
+    defined: set[str] = set()
+    forward: list[str] = []
+    for entry in entries:
+        for item in entry.get("numbers") or []:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                str(item.get("measures") or "").strip().lower(),
+                str(item.get("unit") or "").strip().lower(),
+            )
+            value = str(item.get("value") or "").strip()
+            if not value or key == ("", ""):
+                continue
+            previous = numbers.get(key)
+            if previous is not None and previous != value:
+                issues.append(f"{key[0] or key[1]} is {previous} and {value}")
+            else:
+                numbers[key] = value
+        for item in entry.get("terms_defined") or []:
+            if not isinstance(item, dict):
+                continue
+            term = str(item.get("term") or "").strip()
+            definition = str(item.get("definition") or "").strip()
+            if not term:
+                continue
+            lowered = term.lower()
+            defined.add(lowered)
+            previous = terms.get(lowered)
+            if previous is not None and previous != definition:
+                issues.append(f"{term} defined twice")
+            else:
+                terms[lowered] = definition
+        for item in entry.get("forward_refs") or []:
+            if isinstance(item, dict):
+                name = str(item.get("term") or item.get("ref") or "").strip()
+            else:
+                name = str(item).strip()
+            if name:
+                forward.append(name.lower())
+    for name in forward:
+        if name and name not in defined:
+            issues.append(f"unresolved forward ref: {name}")
+    return issues
+
+
+def is_model_brief(claim: dict) -> bool:
+    kind = str(claim.get("source_kind") or "").lower().replace(" ", "_")
+    return any(token in kind for token in MODEL_BRIEF_KINDS) or str(
+        claim.get("epistemic") or ""
+    ).lower() in {"model_written", "model-written"}
+
+
+def unmarked_corpus_briefs(body: str, claims: list) -> list[str]:
+    labelled = "model-written brief" in body.lower()
+    unmarked: list[str] = []
+    for claim in claims or []:
+        origin = str(claim.get("origin") or "").lower()
+        if origin not in {"corpus", "brain"}:
+            continue
+        if not is_model_brief(claim):
+            continue
+        if labelled:
+            return []
+        unmarked.append(claim.get("source_url") or claim.get("id") or "corpus brief")
+    return unmarked
+
+
+def unstated_gaps(body: str, gaps: list) -> list[str]:
+    questions = []
+    for gap in gaps or []:
+        if isinstance(gap, str):
+            text = gap.strip()
+        elif isinstance(gap, dict):
+            text = str(gap.get("question") or gap.get("text") or "").strip()
+        else:
+            text = ""
+        if text:
+            questions.append(text)
+    if not questions:
+        return []
+    lower = body.lower()
+    if not re.search(r"^#{1,6}\s+limitations?\b", body, re.I | re.M):
+        return questions[:3]
+    start = re.search(r"^#{1,6}\s+limitations?\b", body, re.I | re.M)
+    rest = lower[start.start() :] if start else lower
+    unnamed = []
+    for question in questions:
+        tokens = [w for w in re.findall(r"[a-z]{4,}", question.lower()) if w not in {"this", "that", "with", "from", "what", "when"}]
+        if tokens and not any(token in rest for token in tokens[:4]):
+            unnamed.append(question)
+        elif not tokens and question.lower() not in rest:
+            unnamed.append(question)
+    return unnamed
+
+
+def _paragraphs(body: str) -> list[str]:
+    return [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+
+
+def section_check(
+    body: str,
+    *,
+    section: dict | None = None,
+    findings: list | None = None,
+    evidence: str = "",
+    word_target: int = 0,
+) -> Score:
+    """Eight deterministic rows on one section, before any judge."""
+    section = section or {}
+    findings = findings or []
+    checks: list[Check] = []
+    target = int(word_target or section.get("word_target") or 0)
+    words = word_count(body)
+    if target:
+        low = int(0.6 * target)
+        high = int(1.25 * target)
+        checks.append(
+            Check(
+                "length",
+                low <= words <= high,
+                f"{words} words (need {low}-{high} for target {target})",
+            )
+        )
+    else:
+        checks.append(Check("length", True, f"{words} words"))
+
+    stub = STUB.findall(body)
+    checks.append(
+        Check("stub", not stub, "no stub markers" if not stub else f"stub: {stub[:3]}")
+    )
+
+    questions = []
+    for item in section.get("key_questions") or []:
+        text = item if not isinstance(item, dict) else item.get("text") or ""
+        if str(text).strip():
+            questions.append(str(text).strip())
+    missing_q = [q for q in questions if q.lower() not in body.lower()]
+    checks.append(
+        Check(
+            "coverage",
+            not missing_q,
+            "every key question is named" if not missing_q else f"unnamed: {missing_q[:2]}",
+        )
+    )
+
+    uncited = []
+    for para in _paragraphs(body):
+        if para.startswith("#") or para.startswith("!") or para.startswith(">"):
+            continue
+        if para.startswith(("|", "-", "*")):
+            continue
+        if has_specifics(para) and not CITATION.search(para):
+            uncited.append(para.splitlines()[0][:80])
+    checks.append(
+        Check(
+            "cited",
+            not uncited,
+            "every specific is cited" if not uncited else f"uncited: {uncited[:2]}",
+        )
+    )
+
+    numbers = {str(f.get("number") or "") for f in findings if f.get("number")}
+    ids = {str(f.get("id") or "") for f in findings}
+    dangling = []
+    for marker in CITATION.findall(body):
+        if marker not in numbers and marker not in ids and f"[{marker}]" not in "".join(
+            str(f.get("id") or "") for f in findings
+        ):
+            # A citation is grounded if it matches a finding number or id suffix.
+            if not any(str(f.get("number")) == marker for f in findings):
+                dangling.append(f"[{marker}]")
+    checks.append(
+        Check(
+            "grounded",
+            not dangling,
+            "every citation resolves" if not dangling else f"dangling: {dangling[:3]}",
+        )
+    )
+
+    unknown = ungrounded_identifiers(body, evidence, extended=True)
+    checks.append(
+        Check(
+            "sourced",
+            not unknown,
+            "every identifier is in the evidence" if not unknown else f"ungrounded: {unknown[:3]}",
+        )
+    )
+
+    planned = [
+        fig.get("name")
+        for fig in (section.get("figures") or [])
+        if isinstance(fig, dict) and fig.get("name")
+    ]
+    missing_fig = [name for name in planned if name and name not in body]
+    checks.append(
+        Check(
+            "figures",
+            not missing_fig,
+            "planned figures referenced" if not missing_fig else f"missing: {missing_fig}",
+        )
+    )
+
+    style_hits = []
+    if EM_DASH.search(body):
+        style_hits.append("em dash")
+    if SECOND_PERSON.search(_mask_code(body)):
+        style_hits.append("second person")
+    if any(RHETORICAL.search(p.splitlines()[-1]) for p in _paragraphs(body) if p):
+        style_hits.append("rhetorical question")
+    checks.append(
+        Check("style", not style_hits, "clean" if not style_hits else ", ".join(style_hits))
+    )
     return Score(checks=checks)
 
 
@@ -476,6 +903,46 @@ def demo() -> int:
     clean = check("The system is fast [1].", ["u1"])
     assert clean.passed, clean.report()
     assert clean.signature() == ()
+
+    short = check("The system is fast [1].", ["u1"], min_words=MIN_WORDS)
+    assert "length" in short.signature()
+
+    assert new_claims("done first", "done first. Python 3.13") == ["3.13"]
+    clash = ledger_inconsistencies(
+        {
+            "entries": [
+                {"numbers": [{"value": "12", "unit": "USD", "measures": "budget"}]},
+                {"numbers": [{"value": "40", "unit": "USD", "measures": "budget"}]},
+            ]
+        }
+    )
+    assert clash
+    assert unmarked_corpus_briefs(
+        "no label",
+        [{"origin": "corpus", "source_kind": "deep_research_brief", "source_url": "brain:x"}],
+    )
+    assert unstated_gaps("## Body\n\nx", [{"question": "how watchdog timers fire"}])
+
+    thin = section_check(
+        "TODO write this later",
+        section={"word_target": 200, "key_questions": ["what failed"], "figures": []},
+        findings=[{"id": "f1", "number": 1}],
+        evidence="",
+    )
+    assert "length" in thin.signature()
+    assert "stub" in thin.signature()
+    assert "coverage" in thin.signature()
+    specific = section_check(
+        "Python 3.13 shipped in 2024 [1].",
+        section={"word_target": 10, "key_questions": [], "figures": []},
+        findings=[{"id": "f1", "number": 1, "quote": "Python 3.13 shipped in 2024"}],
+        evidence="Python 3.13 shipped in 2024",
+        word_target=10,
+    )
+    assert "cited" not in specific.signature(), specific.report()
+    assert "sourced" not in specific.signature(), specific.report()
+    assert has_specifics('The "Model Context Protocol" landed.')
+    assert not has_specifics("The mechanism is local.")
 
     print("checks: ok")
     return 0

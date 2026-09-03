@@ -30,12 +30,12 @@ import source_policy
 
 # A plan that asks fewer than this is not research, it is a lookup.
 MIN_QUESTIONS = 3
-MAX_QUESTIONS = 8
-# Verification cost scales with this count, not with the prose length. Three
-# load-bearing questions are enough for a focused workshop paper; marking five
-# speculative questions important made one unavailable standards host block an
+MAX_QUESTIONS = 12
+# Verification cost scales with this count, not with the prose length. Four
+# to six load-bearing questions are enough for a focused paper; marking every
+# speculative question important made one unavailable standards host block an
 # otherwise well-sourced run.
-MAX_IMPORTANT_QUESTIONS = 3
+MAX_IMPORTANT_QUESTIONS = 6
 EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
 # Sections that bind to no claims of their own. The abstract restates what the
@@ -47,6 +47,7 @@ FENCED_JSON = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 CITATION = re.compile(r"\[(\d+)\]")
 
 STAGE_ORDER = (
+    "corpus",
     "plan",
     "search",
     "verify",
@@ -268,10 +269,10 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
 # stage had no upper bound at all, and neither the money cap nor the turn cap
 # was checked until it finished.
 #
-# Twelve is a working default, not a discovered constant. Raise it with
-# `--max-verify` when a paper genuinely rests on more than twelve load-bearing
+# Twenty-four is a working default, not a discovered constant. Raise it with
+# `--max-verify` when a paper genuinely rests on more than that many load-bearing
 # facts, and expect the bill to scale with it.
-MAX_VERIFY_CLAIMS = 12
+MAX_VERIFY_CLAIMS = 24
 
 
 def verify_batch(ledger: evidence.Ledger, limit: int = MAX_VERIFY_CLAIMS):
@@ -560,6 +561,14 @@ def write_gate(section: str, body: str, allowed: list[int]) -> None:
             f"section {section!r} has uncited prose paragraphs: {uncited[:2]}. "
             "Put an allowed marker in every paragraph that makes a factual claim.",
             ("uncited_paragraph",),
+        )
+    words = len(re.findall(r"\b[\w'-]+\b", body))
+    if words < paper_check.MIN_SECTION_WORDS:
+        raise GateFailed(
+            f"section {section!r} is {words} words. Unpack the bound claims into "
+            f"at least {paper_check.MIN_SECTION_WORDS} words of mechanism, tradeoff, "
+            "and evidence limit. Do not invent facts.",
+            ("thin_section",),
         )
 
 
