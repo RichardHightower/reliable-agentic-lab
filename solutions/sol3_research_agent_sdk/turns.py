@@ -26,11 +26,14 @@ import research
 import source_policy
 from load_agents import (
     DIAGRAM_SCHEMA,
+    FINDINGS_SCHEMA,
     GROUNDING,
+    LEDGER_SCHEMA,
     OUTLINE_SCHEMA,
     OUTLINE_VERDICT_SCHEMA,
     RESEARCH_SCHEMA,
     REVIEW_SCHEMA,
+    SECTION_VERDICT_SCHEMA,
     VERIFY_SCHEMA,
 )
 
@@ -150,6 +153,51 @@ class Turns:
 
     def review(self, paper: str, report: str) -> dict:
         raise NotImplementedError
+
+    def research_section(self, section: dict, questions: list, note: str = "") -> dict:
+        """Default: one research() call per question, wrapped as findings."""
+        from sections import findings_from_research  # noqa: PLC0415
+
+        findings = []
+        queries = []
+        for question in questions:
+            text = question if isinstance(question, str) else question.get("text") or ""
+            if not text:
+                continue
+            result = self.research(text, note)
+            queries.append(text)
+            findings.extend(
+                findings_from_research(result, section.get("id") or "", text, start=len(findings) + 1)
+            )
+        return {"findings": findings, "queries": queries}
+
+    def gap_research(self, section: dict, question: dict, previous_queries: list, note: str = "") -> dict:
+        text = question if isinstance(question, str) else question.get("text") or ""
+        listed = ", ".join(previous_queries[:8])
+        return self.research(text, f"{note}\nPrevious queries: {listed}")
+
+    def judge_section(self, section: dict, body: str, findings: list, note: str = "") -> dict:
+        return {"passed": True, "failed_rows": [], "notes": []}
+
+    def ledger_turn(self, section: dict, body: str) -> dict:
+        return {
+            "section_id": section.get("id") or "",
+            "heading": section.get("heading") or "",
+            "claims": [],
+            "numbers": [],
+            "decisions": [],
+            "terms_defined": [],
+            "open_questions": [],
+            "forward_refs": [],
+        }
+
+    def edit_section(self, section: dict, body: str, verdict: dict, path: str = "") -> str:
+        rows = ", ".join(verdict.get("failed_rows") or [])
+        notes = (
+            f"Edit mode. Fix only these rows: {rows}. Add no facts.\n"
+            + "\n".join(verdict.get("notes") or [])
+        )
+        return self.write(section, [], [], notes, path)
 
 
 @dataclass
@@ -318,6 +366,59 @@ class SdkTurns(Turns):
             REVIEW_SCHEMA,
         )
 
+    def research_section(self, section: dict, questions: list, note: str = "") -> dict:
+        payload = json.dumps({"section": section.get("id"), "questions": questions}, indent=2)
+        return self._json(
+            "research-researcher",
+            "Answer every key question for this section. Call corpus_search first "
+            "for every question. Record each corpus hit as a finding with origin "
+            "corpus. Then you may use live search for questions the corpus did "
+            f"not answer.\n{payload}\n{note}\n\n{GROUNDING}",
+            FINDINGS_SCHEMA,
+        )
+
+    def gap_research(self, section: dict, question: dict, previous_queries: list, note: str = "") -> dict:
+        text = question if isinstance(question, str) else question.get("text") or ""
+        listed = ", ".join(previous_queries[:8])
+        result = self._json(
+            "research-researcher",
+            f"Follow-up. This question still has no finding: {text}\n"
+            f"Do not repeat these queries: {listed}\n{note}\n\n{GROUNDING}",
+            RESEARCH_SCHEMA,
+        )
+        return result
+
+    def judge_section(self, section: dict, body: str, findings: list, note: str = "") -> dict:
+        payload = json.dumps({"section": section, "findings": findings}, indent=2)
+        return self._json(
+            "research-section-judge",
+            "Grade this section against its outline row. Python already ran the "
+            "deterministic section check. Do not re-litigate those rows.\n"
+            f"{payload}\n\nSection body:\n{body[:8000]}\n{note}",
+            SECTION_VERDICT_SCHEMA,
+        )
+
+    def ledger_turn(self, section: dict, body: str) -> dict:
+        return self._json(
+            "research-ledger",
+            f"Extract the ledger entry for section {section.get('id')} "
+            f"({section.get('heading')}).\n\n{body[:8000]}",
+            LEDGER_SCHEMA,
+        )
+
+    def edit_section(self, section: dict, body: str, verdict: dict, path: str = "") -> str:
+        target = path or f"sections/{section['id']}.md"
+        rows = ", ".join(verdict.get("failed_rows") or [])
+        result = self._ask(
+            "research-writer",
+            f"Edit mode for '{section['heading']}'. Fix only these rows: {rows}. "
+            "Add no facts. Write the result to "
+            f"{target} and also return it as your final message.\n"
+            f"Notes: {json.dumps(verdict.get('notes') or [])}\n\nCurrent body:\n{body[:8000]}",
+            allow=[target],
+        )
+        return result.output or ""
+
 
 # The offline twin. Templates, not intelligence. Each one produces the shape the
 # phase expects so the pipeline is exercised end to end without a key.
@@ -328,6 +429,35 @@ _STOP = {"the", "a", "an", "of", "in", "for", "and", "to", "how", "what", "is", 
 def slugify(text: str, limit: int = 60) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug[:limit].strip("-") or "untitled"
+
+
+def _fit_word_target(lines: list[str], target: int) -> list[str]:
+    """Keep the section inside 0.6 to 1.25 of word_target for the offline twin."""
+    if target <= 0:
+        return lines
+    text = "\n".join(lines)
+    words = re.findall(r"\b[\w'-]+\b", text)
+    low, high = int(0.6 * target), max(int(1.25 * target), low := int(0.6 * target))
+    high = max(int(1.25 * target), low)
+    if low <= len(words) <= high:
+        return lines
+    if len(words) > high:
+        kept: list[str] = []
+        count = 0
+        for line in lines:
+            extra = len(re.findall(r"\b[\w'-]+\b", line))
+            if count and count + extra > high:
+                break
+            kept.append(line)
+            count += extra
+        return kept or lines[:1]
+    # Too short: repeat the last cited paragraph until the floor.
+    filler = next((ln for ln in reversed(lines) if ln.strip() and not ln.startswith("#")), "")
+    while len(re.findall(r"\b[\w'-]+\b", "\n".join(lines))) < low and filler:
+        lines += ["", filler]
+        if len(lines) > 400:
+            break
+    return lines
 
 
 def develop_claim(text: str, marker: str, status: str = "verified") -> list[str]:
@@ -612,8 +742,9 @@ class OfflineTurns(Turns):
                 "verdict": "supports",
                 "source_url": finding.citations[0],
                 "excerpt": finding.answer[:160],
+                "queries_used": [claim[:80]],
             }
-        return {"verdict": "unclear", "source_url": "", "excerpt": ""}
+        return {"verdict": "unclear", "source_url": "", "excerpt": "", "queries_used": [claim[:80]]}
 
     def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
         if name == "trust-boundary":
@@ -644,6 +775,25 @@ class OfflineTurns(Turns):
         self, section: dict, claims: list[dict], figures: list[dict], notes: str, path: str = ""
     ) -> str:
         lines = [f"## {section['heading']}", ""]
+        questions = section.get("key_questions") or []
+        marker = f"[{claims[0]['number']}]" if claims and claims[0].get("number") else ""
+        for question in questions:
+            text = question if isinstance(question, str) else question.get("text") or ""
+            if claims:
+                lines += [
+                    f"This section answers: {text} {marker}".strip(),
+                    "",
+                ]
+            else:
+                lines += [f"> This section would have answered: {text}", ""]
+        for planned in section.get("figures") or []:
+            name = planned.get("name") if isinstance(planned, dict) else ""
+            if name:
+                extra = f" {marker}".rstrip()
+                lines += [
+                    f"Figure {name} shows {planned.get('shows') or 'the bound'}{extra}.",
+                    "",
+                ]
         for figure in figures:
             # Alt text names the figure. The caption explains it. Using the
             # caption for both prints the same sentence twice, once invisibly.
@@ -665,16 +815,6 @@ class OfflineTurns(Turns):
         for claim in claims:
             marker = f"[{claim['number']}]" if claim.get("number") else ""
             lines += develop_claim(claim["text"], marker, claim.get("status") or "verified")
-        questions = section.get("key_questions") or []
-        marker = f"[{claims[0]['number']}]" if claims and claims[0].get("number") else ""
-        for question in questions:
-            if claims:
-                lines += [
-                    f"This section answers: {question} {marker}".strip(),
-                    "",
-                ]
-            else:
-                lines += [f"> This section would have answered: {question}", ""]
         if not claims:
             # A blockquote, not a paragraph. An empty section still has to pass
             # `cited`, and inventing a citation marker to satisfy the check is
@@ -685,7 +825,31 @@ class OfflineTurns(Turns):
                 "This question is open.",
                 "",
             ]
+        target = int(section.get("word_target") or 0)
+        if target:
+            lines = _fit_word_target(lines, target)
         return "\n".join(lines)
+
+    def judge_section(self, section: dict, body: str, findings: list, note: str = "") -> dict:
+        return {"passed": True, "failed_rows": [], "notes": []}
+
+    def ledger_turn(self, section: dict, body: str) -> dict:
+        claims = []
+        for line in body.splitlines():
+            if "[" in line and "]" in line and line[:1] not in "#>!":
+                claims.append({"claim": line.strip()[:160], "ref": "1", "confidence": 0.6})
+                if len(claims) >= 4:
+                    break
+        return {
+            "section_id": section.get("id") or "",
+            "heading": section.get("heading") or "",
+            "claims": claims,
+            "numbers": [],
+            "decisions": [],
+            "terms_defined": [],
+            "open_questions": [],
+            "forward_refs": [],
+        }
 
     def review(self, paper: str, report: str) -> dict:
         """Agree with the deterministic report and add nothing.

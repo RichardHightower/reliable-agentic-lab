@@ -5,7 +5,7 @@ The Agent SDK enforces scope in two places, and you need both.
     tools=[...]        decides whether a role can write at all
     PreToolUse hook    decides which paths it may write
 
-Six of the eight roles hold no `Edit` and no `Write`, so for them there is
+Eight of the ten roles hold no `Edit` and no `Write`, so for them there is
 nothing for a hook to guard. The writer holds `Write`, scoped to `sections/**`,
 and the hook is what keeps it there and out of `paper.md`.
 

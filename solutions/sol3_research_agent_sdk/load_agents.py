@@ -220,6 +220,129 @@ REVIEW_SCHEMA = _schema(
     ["done", "summary", "issues"],
 )
 
+_SOURCE_SCHEMA = _schema(
+    {
+        "kind": {"type": "string", "enum": ["corpus", "web"]},
+        "ref": {"type": "string"},
+        "title": {"type": "string"},
+        "url_or_path": {"type": "string"},
+        "vendor": {"type": "string"},
+        "tier": {"type": "integer"},
+    },
+    ["kind", "ref", "title", "url_or_path", "vendor", "tier"],
+)["schema"]
+
+_NUMBER_SCHEMA = _schema(
+    {
+        "value": {"type": "string"},
+        "unit": {"type": "string"},
+        "measures": {"type": "string"},
+    },
+    ["value", "unit", "measures"],
+)["schema"]
+
+_FINDING_SCHEMA = _schema(
+    {
+        "id": {"type": "string"},
+        "answers_question": {"type": "string"},
+        "claim": {"type": "string"},
+        "quote": {"type": "string"},
+        "source": _SOURCE_SCHEMA,
+        "evidence_strength": {"type": "number"},
+        "counterargument_to": {"type": "string"},
+        "numbers": {"type": "array", "items": _NUMBER_SCHEMA},
+    },
+    [
+        "id",
+        "answers_question",
+        "claim",
+        "quote",
+        "source",
+        "evidence_strength",
+        "counterargument_to",
+        "numbers",
+    ],
+)["schema"]
+
+FINDINGS_SCHEMA = _schema(
+    {
+        "findings": {"type": "array", "items": _FINDING_SCHEMA},
+        "queries": _STRINGS,
+    },
+    ["findings", "queries"],
+)
+
+SECTION_VERDICT_SCHEMA = _schema(
+    {
+        "passed": {"type": "boolean"},
+        "failed_rows": _STRINGS,
+        "notes": _STRINGS,
+    },
+    ["passed", "failed_rows", "notes"],
+)
+
+LEDGER_SCHEMA = _schema(
+    {
+        "section_id": {"type": "string"},
+        "heading": {"type": "string"},
+        "claims": {
+            "type": "array",
+            "items": _schema(
+                {
+                    "claim": {"type": "string"},
+                    "ref": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                ["claim", "ref", "confidence"],
+            )["schema"],
+        },
+        "numbers": {
+            "type": "array",
+            "items": _schema(
+                {
+                    "value": {"type": "string"},
+                    "unit": {"type": "string"},
+                    "measures": {"type": "string"},
+                    "ref": {"type": "string"},
+                },
+                ["value", "unit", "measures", "ref"],
+            )["schema"],
+        },
+        "decisions": {
+            "type": "array",
+            "items": _schema(
+                {
+                    "decision": {"type": "string"},
+                    "rationale": {"type": "string"},
+                },
+                ["decision", "rationale"],
+            )["schema"],
+        },
+        "terms_defined": {
+            "type": "array",
+            "items": _schema(
+                {
+                    "term": {"type": "string"},
+                    "definition": {"type": "string"},
+                },
+                ["term", "definition"],
+            )["schema"],
+        },
+        "open_questions": _STRINGS,
+        "forward_refs": _STRINGS,
+    },
+    [
+        "section_id",
+        "heading",
+        "claims",
+        "numbers",
+        "decisions",
+        "terms_defined",
+        "open_questions",
+        "forward_refs",
+    ],
+)
+
 # Parent prompt. Python is the harness. The model only spawns the named agent.
 # The skill is not loaded, so this prompt does not mention it. A sentence
 # forbidding something the model was never given is a sentence that teaches the

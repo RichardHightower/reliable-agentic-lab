@@ -42,7 +42,14 @@ def test_the_deny_envelope_key_by_key(hook):
 
 def test_a_reader_that_tries_to_write_is_denied(hook):
     """`agent_type` is what tells the one writer from the five readers."""
-    for reader in ("research-outliner", "research-diagrammer", "research-judge", "research-outline-judge"):
+    for reader in (
+        "research-outliner",
+        "research-diagrammer",
+        "research-judge",
+        "research-outline-judge",
+        "research-section-judge",
+        "research-ledger",
+    ):
         assert call(hook, agent=reader, path=f"{WORK}/sections/s1.md"), reader
 
 
@@ -284,6 +291,8 @@ def test_every_role_gets_its_prompt_from_the_plugin(fake_sdk, work):
         "research-outline-judge",
         "research-researcher",
         "research-verifier",
+        "research-section-judge",
+        "research-ledger",
         "research-diagrammer",
         "research-writer",
         "research-judge",
@@ -298,7 +307,14 @@ def test_a_reader_carries_the_write_tools_as_a_deny_list(fake_sdk, work):
     list still fails closed."""
     fake_sdk()
     agents = roles.options_for(work).agents
-    for reader in ("research-judge", "research-outliner", "research-outline-judge", "research-diagrammer"):
+    for reader in (
+        "research-judge",
+        "research-outliner",
+        "research-outline-judge",
+        "research-diagrammer",
+        "research-section-judge",
+        "research-ledger",
+    ):
         assert agents[reader].disallowedTools == roles.NO_WRITE, reader
     assert agents["research-writer"].disallowedTools == []
 

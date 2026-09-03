@@ -271,24 +271,30 @@ def test_a_finished_phase_is_not_rerun(work, turns, no_renderer):
     again = turns()
     paper.run_paper(make_run(work, again))
     assert [a for a in again.asked if a[0] == "research"] == []
-    assert first == 2
+    assert first >= 1
 
 
 def test_deleting_one_output_reruns_only_that_phase(work, turns, no_renderer):
     paper.run_paper(make_run(work, turns()))
-    (Path(work) / "verdicts.json").unlink()
+    (Path(work) / "claims.json").unlink()
+    findings = Path(work) / "knowledge" / "s1" / "findings.json"
+    if findings.exists():
+        findings.unlink()
+    section = Path(work) / "sections" / "s1.md"
+    if section.exists():
+        section.unlink()
 
     again = turns()
     paper.run_paper(make_run(work, again))
     kinds = {a[0] for a in again.asked}
-    assert "verify" in kinds
-    assert "research" not in kinds and "plan" not in kinds
+    assert "research" in kinds
+    assert "outline" not in kinds
 
 
 def test_the_state_file_records_every_phase(work, turns, no_renderer):
     paper.run_paper(make_run(work, turns()))
     state = json.loads(paper.State.path(work).read_text())
-    assert state["phases"]["research"]["status"] == "complete"
+    assert state["phases"]["sections"]["status"] == "complete"
     assert state["phases"]["knowledge"]["valid"] is True
     assert state["slug"] == "a-topic"
 

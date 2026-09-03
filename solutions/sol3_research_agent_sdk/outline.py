@@ -169,7 +169,7 @@ def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys
         if not isinstance(questions, list):
             errors.append(f"section {sid!r} key_questions must be an array of strings")
             questions = []
-        questions = [q for q in questions if isinstance(q, str) and q.strip()]
+        questions = [q for q in questions if question_text(q)]
         if len(questions) < 2:
             errors.append(
                 f"section {sid!r} has {len(questions)} key_questions; every section "
@@ -210,17 +210,33 @@ def retry_note(errors: list[str]) -> str:
     )
 
 
+def question_text(question) -> str:
+    """A key question is a string or `{text, kind}`."""
+    if isinstance(question, dict):
+        return str(question.get("text") or "").strip()
+    return str(question or "").strip()
+
+
+def question_kind(question) -> str:
+    if isinstance(question, dict):
+        kind = str(question.get("kind") or "fact").strip().lower()
+        return kind if kind in {"fact", "mechanism", "comparison", "data"} else "fact"
+    return "fact"
+
+
 def questions(outline: dict) -> list[dict]:
     """Flatten key_questions in outline order. The research phase iterates this."""
     out = []
     for section in outline.get("sections") or []:
-        for index, text in enumerate(section.get("key_questions") or []):
-            if not str(text).strip():
+        for index, question in enumerate(section.get("key_questions") or []):
+            text = question_text(question)
+            if not text:
                 continue
             out.append(
                 {
                     "id": f"{section['id']}-q{index + 1}",
                     "text": text,
+                    "kind": question_kind(question),
                     "section": section["id"],
                 }
             )

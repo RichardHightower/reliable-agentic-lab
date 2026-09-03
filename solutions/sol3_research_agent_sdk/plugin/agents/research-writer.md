@@ -30,7 +30,8 @@ A section that restates its claims in two sentences is a brief, not a paper.
 The Saturday lab already produces a cited brief. You produce a document a
 colleague can use. The outline's `word_target` is the length of this section.
 
-Unpack every bound claim, in this order:
+Unpack every bound finding, in this order, three to eight paragraphs per
+key question:
 
 1. State the finding.
 2. Name the mechanism. Which component does the work, in what order, and what
@@ -41,8 +42,19 @@ Unpack every bound claim, in this order:
 
 Stay within 0.6 to 1.25 times the section `word_target`. Do not invent facts to
 hit the count. Do not repeat a paragraph. Do not add background, framing,
-forecasts, or generalizations the claims do not support. Expand by unpacking
+forecasts, or generalizations the findings do not support. Expand by unpacking
 mechanism, tradeoff, and limit. Short sentences stay the unit of prose.
+
+Cite by number. Hedge weak evidence in the sentence. Do not invent a specific.
+Do not define a term the paper ledger already defines. Resolve any forward
+reference in the ledger that names this section.
+
+## Edit mode
+
+When the instruction says this is an edit pass, rewrite only the named rows.
+Add no facts. Do not introduce a number, a version, a year, or a quoted phrase
+that the findings and the evidence pack do not already contain. Fix depth,
+coverage, citations, and voice. Leave everything else.
 
 ## Cite every claim
 

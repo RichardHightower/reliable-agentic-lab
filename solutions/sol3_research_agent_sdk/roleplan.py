@@ -4,7 +4,7 @@ Three runtimes enforce write scope three different ways. Plain Python uses a
 missing method. The Claude Agent SDK uses a tool list and a PreToolUse hook.
 Deep Agents uses a per-subagent tool list. All three read the same table.
 
-Four loops, four casts. The research cast is the largest, at eight roles. A
+Four loops, four casts. The research cast is the largest, at ten roles. A
 role earns a line here by holding a tool set no other role holds, never by
 being another name for work an existing role already does. The researcher
 searches and cannot write. The verifier searches a second time and never sees
@@ -51,6 +51,8 @@ LOOPS = {
         "outline_judge",
         "researcher",
         "verifier",
+        "section_judge",
+        "ledger",
         "diagrammer",
         "writer",
         "judge",
@@ -70,6 +72,8 @@ PURPOSE = {
     "code_implementer": "Writes the code until the tests pass. Cannot touch tests.",
     "researcher": "Calls the corpus first, then the live tool boundary, and returns findings. Writes nothing.",
     "verifier": "Checks a claim against the corpus and a second live source. Writes nothing.",
+    "section_judge": "Grades one section against its outline row. Holds no write path.",
+    "ledger": "Extracts the section's facts and terms. Python appends the ledger. Holds no write path.",
     "diagrammer": "Draws the figures and runs the renderer. Writes diagrams only.",
     "writer": "Assembles the paper from verified claims. Writes prose only.",
     "judge": "Scores the attempt. Reads reports and the diff. Holds no write path.",
@@ -77,7 +81,16 @@ PURPOSE = {
 
 # Roles that hold no tool that writes. The separation is the tool list, not a
 # rule in a prompt, so there is nothing for a model to talk its way past.
-READERS = ("orchestrator", "judge", "researcher", "verifier", "outliner", "outline_judge")
+READERS = (
+    "orchestrator",
+    "judge",
+    "researcher",
+    "verifier",
+    "outliner",
+    "outline_judge",
+    "section_judge",
+    "ledger",
+)
 
 TOOLS_FOR_READER = {
     "orchestrator": ("Task",),
@@ -86,6 +99,8 @@ TOOLS_FOR_READER = {
     "verifier": ("Read", *SEARCH_TOOLS),
     "outliner": READ_TOOLS,
     "outline_judge": READ_TOOLS,
+    "section_judge": READ_TOOLS,
+    "ledger": ("Read",),
 }
 
 
@@ -136,6 +151,21 @@ OVERRIDES: dict[tuple[str, str], dict] = {
     },
     ("research", "verifier"): {
         "model": "claude-sonnet-5",
+    },
+    ("research", "section_judge"): {
+        "purpose": "Grades one section against its outline row. Holds no write path.",
+        "tools": READ_TOOLS,
+        "allow": (),
+        "deny": ("**",),
+        "model": "claude-sonnet-5",
+    },
+    ("research", "ledger"): {
+        "purpose": "Extracts the section's facts and terms. Python appends the ledger. Holds no write path.",
+        "tools": ("Read",),
+        "allow": (),
+        "deny": ("**",),
+        "model": "claude-haiku-4-5",
+        "effort": "low",
     },
     ("research", "diagrammer"): {
         # No write tool and no shell. It returns the diagram source, and Python

@@ -6,10 +6,9 @@ renumbering the run records that already exist on disk.
 
     0 corpus_pack read the configured brains   -> corpus/brain-pack.md
     1 outline     two-level outline, judged -> outline.approved.json
-    2 research    answers and claims        -> sources.json, claims.json
-    3 verify      an independent second look-> verdicts.json
+    2 sections    per-section research/write -> sections/*.md, paper_ledger.json
     4 diagram     figures, rendered         -> diagrams.json
-    5 write       one section at a time     -> sections/*.md
+    5 write       retry rewrite             -> sections/*.md
     6 assemble    stitch and reference      -> paper.md
     7 check       deterministic rows        -> check.json
     8 review      the judge, on what is left-> review.json
@@ -46,6 +45,7 @@ import outline as outlines
 import publish as publisher
 import research
 import rkc
+import sections as section_loop
 from turns import Escalate, TurnFailed, slugify
 
 FOLDER = Path(__file__).resolve().parent
@@ -694,6 +694,103 @@ def diagram(run: Run) -> dict:
     return {"figures": len(figures), "rendered": len(drawn), "skipped_charts": skipped_charts}
 
 
+def do_sections(run: Run) -> dict:
+    """Forward-only section loop. Writes claims.json so assemble still reads it."""
+    approved = approved_outline(run)
+    drafted_sections = approved.get("sections") or []
+    if not drafted_sections:
+        raise RunFailed("the approved outline has no sections")
+    metas = []
+    for section in drafted_sections:
+        stopped = run.exhausted()
+        if stopped:
+            break
+        metas.append(section_loop.run_section(run, section))
+
+    findings: list[dict] = []
+    claims: list[dict] = []
+    verdicts: list[dict] = []
+    sources: list[dict] = []
+    seen: set[str] = set()
+    failed: list[dict] = []
+    for section in drafted_sections:
+        sid = section["id"]
+        fpath = run.file(f"knowledge/{sid}/findings.json")
+        if not fpath.exists():
+            continue
+        try:
+            payload = json.loads(fpath.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        section_findings = payload.get("findings") or []
+        findings.extend(section_findings)
+        vpath = run.file(f"knowledge/{sid}/verdicts.json")
+        by_id: dict[str, dict] = {}
+        if vpath.exists():
+            try:
+                for item in json.loads(vpath.read_text(encoding="utf-8")).get("verdicts") or []:
+                    by_id[item.get("finding_id") or ""] = item
+                    verdicts.append(item)
+            except (OSError, json.JSONDecodeError):
+                pass
+        number = len(claims)
+        for finding in section_findings:
+            status = (by_id.get(finding.get("id") or "") or {}).get("state") or "unverified"
+            url = (finding.get("source") or {}).get("url_or_path") or ""
+            if status != "contradicted":
+                number += 1
+                claims.append(
+                    {
+                        "id": finding.get("id") or f"{sid}-c{number}",
+                        "text": finding.get("claim") or "",
+                        "source_url": url,
+                        "quote": finding.get("quote") or "",
+                        "question_id": finding.get("answers_question") or "",
+                        "section": sid,
+                        "status": status,
+                        "number": number,
+                    }
+                )
+            if url and url not in seen:
+                seen.add(url)
+                src = finding.get("source") or {}
+                sources.append({"url": url, "title": src.get("title") or ""})
+        for gap in payload.get("coverage_gaps") or []:
+            failed.append({"id": sid, "text": gap.get("question") or "", "reason": "coverage_gap"})
+
+    run.write_json(
+        "sources.json",
+        {"findings": findings, "sources": sources, "failed": failed, "stopped": None},
+    )
+    run.write_json("claims.json", {"claims": claims})
+    run.write_json("verdicts.json", {"verdicts": verdicts})
+    if not claims:
+        raise RunFailed("no source produced a single claim. There is nothing to write a paper from.")
+    return {
+        "sections": len(metas),
+        "findings": len(findings),
+        "claims": len(claims),
+        "skipped": sum(1 for item in metas if item.get("skipped")),
+    }
+
+
+def maybe_write(run: Run) -> dict:
+    """First attempt: the section loop already wrote. Retry: rewrite from claims."""
+    planned = outlines.plan_view(approved_outline(run))
+    out = run.file("sections")
+    have = bool(planned["sections"]) and all(
+        (out / f"{section['id']}.md").exists() for section in planned["sections"]
+    )
+    if have and run.state.iteration <= 1 and not run.file("review.json").exists():
+        return {
+            "sections": len(planned["sections"]),
+            "from_message": 0,
+            "retry_notes": False,
+            "skipped": True,
+        }
+    return write_sections(run)
+
+
 # ---------------------------------------------------------------------------
 # Phases 5 to 8. The retry cycle.
 
@@ -842,8 +939,10 @@ def corpus_for(run: Run) -> str:
     """
     parts = []
     for finding in run.read_json("sources.json")["findings"]:
-        parts.append(finding.get("answer", ""))
+        parts.append(finding.get("answer") or finding.get("claim") or "")
         parts += [s.get("url", "") + " " + s.get("title", "") for s in finding.get("sources", [])]
+        src = finding.get("source") or {}
+        parts += [src.get("url_or_path") or "", src.get("title") or "", finding.get("quote") or ""]
     for claim in run.read_json("claims.json")["claims"]:
         parts += [claim.get("quote", ""), claim.get("verifier_excerpt", "")]
     return "\n".join(parts)
@@ -891,13 +990,12 @@ def review(run: Run) -> dict:
 LINEAR = [
     (0, "corpus_pack", "corpus/brain-pack.json", corpus_pack),
     (1, "outline", "outline.approved.json", do_outline),
-    (2, "research", "claims.json", do_research),
-    (3, "verify", "verdicts.json", verify),
+    (2, "sections", "claims.json", do_sections),
     (4, "diagram", "diagrams.json", diagram),
 ]
 
 CYCLE = [
-    (5, "write", write_sections),
+    (5, "write", maybe_write),
     (6, "assemble", assemble),
     (7, "check", check),
     (8, "review", review),
