@@ -190,6 +190,7 @@ class Run:
     should_publish: bool = False
     require_approval: bool = False
     resume: bool = False
+    ingest_brain: Path | None = None
     # The workshop entry point enables these hard gates.  Keeping synthetic
     # phase tests opt-in lets them exercise one phase at a time without having
     # to manufacture the whole loop-control paper contract.
@@ -1257,6 +1258,7 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         plan=outlines.plan_view(approved_outline(run)),
         findings=run.read_json("sources.json")["findings"],
         claims=run.read_json("claims.json")["claims"],
+        ledger=_ledger(run),
     )
     valid, note = rkc.validate(run.file("knowledge"))
     run.state.mark(
@@ -1266,6 +1268,13 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         **{k: v for k, v in counts.items() if k != "subject_id"},
     )
     run.state.save(work)
+
+    ingest = None
+    if run.ingest_brain is not None:
+        ingest = rkc.ingest_brain(run.file("knowledge"), run.ingest_brain)
+        run.state.mark("ingest", "complete" if ingest.get("ok") else "skipped", **ingest)
+        run.log(f"  9 ingest    {ingest}")
+        run.state.save(work)
 
     gist = None
     if run.should_publish:
@@ -1288,6 +1297,7 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         "knowledge": counts,
         "knowledge_valid": valid,
         "knowledge_note": note,
+        "ingest": ingest,
         "gist": gist,
         "report": checks.Score(
             checks=[checks.Check(**c) for c in run.read_json("check.json")["checks"]]

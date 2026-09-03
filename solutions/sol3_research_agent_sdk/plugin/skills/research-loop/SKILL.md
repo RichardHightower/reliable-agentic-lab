@@ -97,6 +97,9 @@ search and write can adjust the evidence to fit the paper.
    contain. Then assemble, check, and review run again.
 8. **Publish.** Push the paper and its figures to a secret gist, on request,
    and only after the paper passes.
+9. **Bundle.** Always. The run writes an RKC knowledge bundle under
+   `knowledge/research/`. `--ingest-brain` is opt-in: it copies that bundle
+   into a brain git worktree and opens a PR. It never writes `main`.
 
 ## The verdicts
 

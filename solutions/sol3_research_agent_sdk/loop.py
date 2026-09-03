@@ -197,6 +197,12 @@ def main(argv: list[str] | None = None) -> int:
         help="comma-separated subject globs, e.g. seminar-*,harness-ch03",
     )
     parser.add_argument("--publish", action="store_true", help="push the paper to a private gist")
+    parser.add_argument(
+        "--ingest-brain",
+        type=Path,
+        default=None,
+        help="opt-in: copy the RKC bundle into a brain git worktree and open a PR. Never writes main.",
+    )
     parser.add_argument("--fresh", action="store_true", help="delete the work directory first")
     args = parser.parse_args(argv)
 
@@ -278,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         brain=brains[0] if brains else None,
         brains=brains,
         corpus_subjects=subjects,
+        ingest_brain=args.ingest_brain,
     )
 
     print()
@@ -317,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
         f"spent:   ${result['usd']:.4f} over {result['turns']} turns, {result['iterations']} attempts"
     )
     print(f"know:    {json.dumps(result['knowledge'])}  valid={result['knowledge_valid']}")
+    if result.get("ingest"):
+        print(f"ingest:  {result['ingest']}")
     if result["gist"]:
         print(f"gist:    {result['gist']['url']}")
     print(f"gate:    {result['gate']}")
