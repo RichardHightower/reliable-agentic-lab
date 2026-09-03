@@ -41,6 +41,9 @@ def backend(contract):
                 contract, loop=LOOP, subagent_names=frozenset({"code-implementer"})
             ),
         },
+        judge_agent=deep.build_agent(
+            contract, loop=LOOP, subagent_names=frozenset({"judge"})
+        ),
         # The runtime's recursion guard is the model-turn ceiling for this
         # live probe. It leaves time for the deterministic test/rubric pass and
         # receipt instead of letting the outer 420-second watchdog kill it.

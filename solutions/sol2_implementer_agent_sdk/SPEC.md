@@ -106,19 +106,18 @@ this section claimed otherwise. It runs pytest now, and the suite asserts:
 - Every `task` this document names exists in the Taskfile.
 - `task setup` creates `.venv` in this folder. Homebrew Python will not let pip write to the system interpreter.
 
-The live operator path is [HOW_TO_RUN.md](HOW_TO_RUN.md). This folder is the
-cast, not the driver. `task run` prints this runtime's options. It does not
-drive tickets.
+The live operator path is [HOW_TO_RUN.md](HOW_TO_RUN.md). This folder owns
+the loop. `task run -- --doer reference` drives tickets with no SDK.
+`task run -- --doer sdk` drives them through the Agent SDK.
 
 ## What this folder is not
 
 This folder is standalone. Copy it somewhere else and it runs. Do not import a
 shared engine.
 
-It is not the driver. There is no `implementer.py`, no `gates.py`, and no
-`rubric.py` here, and that is deliberate. This folder is the cast, the write
-scope, and the runtime wiring. The working Lab 2 loop lives in
-`sol2_implementer_deep_agents`, and Saturday Lab 2 is `labs/lab2_implementer`.
+Saturday Lab 2 is still `labs/lab2_implementer`. Do not copy these fences into
+that folder.
 
 An earlier docstring pointed `backend()` at `loops.implementer.run(...)`. That
-package was deleted in #130.
+package was deleted in #130. An earlier live path imported the Deep Agents
+driver through a `sys.path` swap. That bridge is gone.

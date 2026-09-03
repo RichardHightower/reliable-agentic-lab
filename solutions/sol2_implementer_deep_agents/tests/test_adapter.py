@@ -151,6 +151,17 @@ def test_an_unparseable_cost_is_skipped_not_crashed():
     assert adapter.last_usd(state(ai("x", {"cost": "free"}))) == 0.0
 
 
+def test_token_counts_are_priced_when_there_is_no_cost_field():
+    """LangChain emits tokens, not dollars. Price them or the money exit never fires."""
+    result = state(ai("x", {"input_tokens": 1_000_000, "output_tokens": 1_000_000}))
+    assert adapter.last_usd(result) == adapter.INPUT_USD_PER_MTOK + adapter.OUTPUT_USD_PER_MTOK
+
+
+def test_a_cost_key_wins_over_token_counts():
+    result = state(ai("x", {"cost": 0.5, "input_tokens": 1_000_000, "output_tokens": 1_000_000}))
+    assert adapter.last_usd(result) == 0.5
+
+
 def test_a_top_level_usd_wins():
     assert adapter.last_usd({"usd": 2.5, "messages": [ai("x", {"cost": 1.0})]}) == 2.5
 
@@ -198,6 +209,19 @@ def test_phase_backend_sets_the_documented_recursion_limit(tmp_path):
     backend.run(repo=tmp_path, prompt="write code", allow=["app/**"])
 
     assert agent.calls[0][1] == {"recursion_limit": 16}
+
+
+def test_the_judge_graph_is_the_one_that_answers(tmp_path):
+    writer = FakeAgent("wrote it")
+    judge = FakeAgent('{"done": true, "why": "the diff matches"}')
+    backend = adapter.DeepAgentsBackend(writer, judge_agent=judge)
+
+    result = backend.judge(repo=tmp_path, prompt="grade this")
+
+    assert result.ok
+    assert "the diff matches" in result.output
+    assert writer.calls == []
+    assert len(judge.calls) == 1
 
 
 def test_changed_files_includes_a_new_untracked_test(tmp_path):
@@ -350,8 +374,7 @@ def test_object_messages_take_the_same_path():
 
 
 def test_read_file_refuses_a_path_outside_the_repo(fake_langchain, tmp_path):
-    """`virtual_mode` fences the built-in filesystem tools. It does not fence a
-    tool this folder wrote. Without a check here, `..` walks off the repo."""
+    """`virtual_mode` is routing for built-in tools. Custom tools still call `_inside`."""
     import roles  # noqa: PLC0415
 
     repo = tmp_path / "repo"

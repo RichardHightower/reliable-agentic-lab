@@ -18,6 +18,12 @@ from pathlib import Path
 from doers import Backend, DoerResult
 from write_scope import WriteScope
 
+# Sonnet-class list prices. LangChain never emits a cost field, so the money
+# exit is dead unless we price the token counts ourselves. These numbers are
+# the estimate the loop uses, not a bill.
+INPUT_USD_PER_MTOK = 3.0
+OUTPUT_USD_PER_MTOK = 15.0
+
 
 def _changed_files(repo: Path) -> set[str]:
     """Every path this working tree changes, including untracked files.
@@ -143,14 +149,32 @@ def last_ai_text(result) -> str:
     return _content_text(_content_of(messages[-1]))
 
 
+def _usage_usd(usage: dict) -> float:
+    """One message's cost. Vendor dollars first, then priced tokens."""
+    for key in ("total_cost", "total_cost_usd", "cost"):
+        if usage.get(key) is None:
+            continue
+        try:
+            return float(usage[key])
+        except (TypeError, ValueError):
+            continue
+    try:
+        inp = float(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+        out = float(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if inp <= 0 and out <= 0:
+        return 0.0
+    return (inp * INPUT_USD_PER_MTOK + out * OUTPUT_USD_PER_MTOK) / 1_000_000
+
+
 def last_usd(result) -> float:
-    """What the run cost, summed from usage metadata. Missing is zero.
+    """What the run cost.
 
-    Zero, not a guess. A budget built on estimated costs is wrong in whichever
-    direction is least convenient, and this number decides when the loop stops.
-
-    `usage_metadata` is not always a dict. Testing `key in usage` on an object
-    raises, and a backend that raises takes the loop down with it.
+    LangChain `usage_metadata` has token counts, not dollars. When a cost key
+    is present we trust it. When only tokens are present we price them at
+    Sonnet-class rates so `usd_left` can actually drop. Missing is zero, not
+    a guess of a different kind.
     """
     if isinstance(result, dict) and result.get("usd") is not None:
         try:
@@ -166,14 +190,7 @@ def last_usd(result) -> float:
         )
         if not isinstance(usage, dict):
             continue
-        for key in ("total_cost", "total_cost_usd", "cost"):
-            if usage.get(key) is None:
-                continue
-            try:
-                total += float(usage[key])
-            except (TypeError, ValueError):
-                continue
-            break
+        total += _usage_usd(usage)
     return total
 
 
@@ -182,11 +199,19 @@ class DeepAgentsBackend(Backend):
 
     name = "deep_agents"
 
-    def __init__(self, agent=None, *, phase_agents=None, recursion_limit: int | None = None):
+    def __init__(
+        self,
+        agent=None,
+        *,
+        phase_agents=None,
+        judge_agent=None,
+        recursion_limit: int | None = None,
+    ):
         if agent is None and not phase_agents:
             raise ValueError("provide an agent or one agent for each implementation phase")
         self.agent = agent
         self.phase_agents = phase_agents
+        self.judge_agent = judge_agent
         self.recursion_limit = recursion_limit
 
     def _agent_for(self, allow: list[str]):
@@ -217,3 +242,18 @@ class DeepAgentsBackend(Backend):
         # Mirrors CliBackend.run: never raise, report it.
         except Exception as exc:
             return DoerResult(ok=False, output=f"deep_agents backend failed: {exc}")
+
+    def judge(self, *, repo: Path, prompt: str) -> DoerResult:
+        """Run the judge-only graph. No write tools, JSON in, JSON out."""
+        agent = self.judge_agent
+        if agent is None:
+            return super().judge(repo=repo, prompt=prompt)
+        try:
+            payload = {"messages": [{"role": "user", "content": prompt}]}
+            if self.recursion_limit:
+                result = agent.invoke(payload, config={"recursion_limit": self.recursion_limit})
+            else:
+                result = agent.invoke(payload)
+            return DoerResult(output=last_ai_text(result), usd=last_usd(result))
+        except Exception as exc:
+            return DoerResult(ok=False, output=f"deep_agents judge failed: {exc}")

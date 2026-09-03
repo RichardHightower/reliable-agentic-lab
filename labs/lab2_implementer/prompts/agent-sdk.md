@@ -9,9 +9,9 @@ finished answer is `solutions/sol2_implementer_agent_sdk/`. Read its
 [HOW_TO_RUN.md](../../../solutions/sol2_implementer_agent_sdk/HOW_TO_RUN.md),
 and [DESIGN_DOC.md](../../../solutions/sol2_implementer_agent_sdk/DESIGN_DOC.md).
 
-This port is a config port of the Deep Agents driver. Demo T001 from
-`solutions/sol2_implementer_deep_agents`. Do not copy these fences into this
-lab folder.
+This port is a standalone driver, the same eight-step loop as the Deep Agents
+twin. Demo T001 from this folder with `--doer reference` (no key) or
+`--doer sdk` (needs the SDK). Do not copy these fences into this lab folder.
 
 Python holds the loop. The model writes tests, then code. It does not score
 the rubric. It does not decide Pass, Retry, or Escalate.
@@ -101,11 +101,12 @@ task table
 task test
 ```
 
-Live T001 is the Deep Agents driver:
+Live T001 from this folder:
 
 ```bash
-cd ../sol2_implementer_deep_agents
-python3 harness.py --repo ../../work/northwind-field-crm --ticket T001 --doer reference
+cd solutions/sol2_implementer_agent_sdk
+task run -- --ticket T001 --doer reference
+task run -- --ticket T001 --doer sdk
 ```
 
 ## Prompt 4: compare against the answer

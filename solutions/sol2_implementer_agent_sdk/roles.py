@@ -156,6 +156,7 @@ def agent_definitions(roles: dict[str, RolePlan], *, max_turns: int = DEFAULT_MA
             # SDK 2.1.198 defaults a subagent to background. The driver needs
             # the verdict, so wait for it.
             background=False,
+            skills=[role.name] if (PLUGIN / "skills" / role.name).is_dir() else [],
         )
     return agents
 

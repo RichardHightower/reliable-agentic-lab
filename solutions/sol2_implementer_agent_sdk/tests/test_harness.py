@@ -84,7 +84,7 @@ def test_the_docs_do_not_promise_a_task_that_does_not_exist():
     declared = set(re.findall(r"^  (\w[\w-]*):$", taskfile, re.M))
     for name in ("SPEC.md", "HOW_TO_RUN.md"):
         prose = (FOLDER / name).read_text(encoding="utf-8")
-        for named in re.findall(r"task ([a-z][a-z-]*)", prose):
+        for named in re.findall(r"task ([a-z][a-z0-9-]*)", prose):
             assert named in declared, f"{name} names `task {named}`, the Taskfile does not"
 
 
@@ -99,7 +99,7 @@ def test_setup_creates_a_local_venv_and_how_to_run_exists():
     text = how.read_text(encoding="utf-8")
     assert "venv you activated" not in text
     assert "task setup" in text
-    assert "This folder is the cast" in text or "not the driver" in text.lower()
+    assert "--doer sdk" in text or "this folder owns the loop" in text.lower()
 
 
 def test_the_judge_schema_does_not_name_a_gate():
@@ -111,3 +111,37 @@ def test_the_judge_schema_does_not_name_a_gate():
     props = load_agents.JUDGE_SCHEMA["schema"]["properties"]
     assert "done" in props
     assert "issues" in props
+
+
+def test_the_planner_prompt_matches_the_steps_schema():
+    """kind/path/goal would be rejected the day the planner runs."""
+    text = (FOLDER / "plugin" / "agents" / "implementer-planner.md").read_text(encoding="utf-8")
+    assert '"role": "test_implementer"' in text
+    assert '"role": "code_implementer"' in text
+    assert "kind" not in text.split("Output contract", 1)[-1] or '"kind"' not in text
+    body = text.split("Output contract", 1)[-1]
+    assert '"kind"' not in body
+    assert '"goal"' not in body
+    assert "validation" in body
+
+
+def test_the_judge_prompt_matches_the_schema():
+    text = (FOLDER / "plugin" / "agents" / "implementer-judge.md").read_text(encoding="utf-8")
+    body = text.split("Output contract", 1)[-1]
+    assert '"rows"' not in body
+    assert '"done"' in body
+    assert '"issues"' in body
+
+
+def test_no_two_modules_are_byte_identical():
+    seen: dict[bytes, str] = {}
+    for path in sorted(FOLDER.glob("*.py")):
+        blob = path.read_bytes()
+        assert blob not in seen, f"{path.name} is a byte copy of {seen[blob]}"
+        seen[blob] = path.name
+
+
+def test_the_e2e_path_does_not_import_the_sibling_folder():
+    text = (FOLDER / "e2e_t001.py").read_text(encoding="utf-8")
+    assert "sol2_implementer_deep_agents" not in text
+    assert "sys.path" not in text or "_flat_modules" not in text

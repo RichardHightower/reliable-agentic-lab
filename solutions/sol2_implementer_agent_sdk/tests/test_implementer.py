@@ -8,7 +8,6 @@ from pathlib import Path
 import contract as contract_mod
 import doers
 import implementer
-import roles
 from contract import CoverageReport, RunResult, SuiteReport
 
 TASKFILE = """\
@@ -282,15 +281,8 @@ def test_code_phase_cannot_hide_a_test_write(tmp_path, monkeypatch):
     assert "FAIL" in report
 
 
-def test_simple_field_rename_reaches_a_read_only_judge(
-    tmp_path, monkeypatch, fake_langchain, fake_deepagents
-):
-    """A tiny offline story: plan, change one test, rename backend/UI fields,
-    then enter a judge-only graph that has no way to weaken that test.
-
-    This must stay entirely scripted. It is the fast regression for the phase
-    boundary, not a live-model proxy that can hang or spend a token.
-    """
+def test_simple_field_rename_stays_inside_the_loop(tmp_path, monkeypatch):
+    """A tiny offline story: plan, change one test, rename backend/UI fields."""
     repo = _git_repo(tmp_path / "repo")
     test_path, backend_path, form_path = _seed_field_rename_ticket(repo)
 
@@ -347,21 +339,6 @@ def test_ac_1_backend_and_ui_use_display_name():
     assert form_path.read_text(encoding="utf-8") == renamed_form
     assert "task_title" not in backend_path.read_text(encoding="utf-8")
     assert "taskTitle" not in form_path.read_text(encoding="utf-8")
-
-    # Judge mode is a separate graph: it admits only the read-only judge. The
-    # former code doer is absent, and its scoped writer still refuses tests.
-    contract = contract_mod.Contract(repo)
-    assert roles.build_agent(contract, subagent_names=frozenset({"judge"})) == "agent"
-    judge_specs = fake_deepagents["subagents"]
-    assert [spec["name"] for spec in judge_specs] == ["judge"]
-    assert [tool.__name__ for tool in judge_specs[0]["tools"]] == ["read_file"]
-
-    code_spec = next(
-        spec for spec in roles.subagents_for(contract) if spec["name"] == "code-implementer"
-    )
-    refused = code_spec["tools"][1]("tests/test_task_fields.py", "def test_weakened(): pass\n")
-    assert refused.startswith("REFUSED")
-    assert test_path.read_text(encoding="utf-8") == renamed_test
 
 
 def test_a_retry_carries_the_failed_rows_and_test_ids(tmp_path, monkeypatch):

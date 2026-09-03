@@ -19,7 +19,7 @@ status: "Current implementation"
 
 ## 1. Introduction and goals
 
-This folder is the Claude Agent SDK implementation cast for Lab 2. It translates a five-role software implementation policy into Agent SDK configuration. It is intentionally not a driver: the working loop is the Deep Agents port, while this artifact demonstrates the equivalent cast, write scope, hook behavior, and runtime wiring.
+This folder is the Claude Agent SDK Ticket Implementer. It is a standalone eight-step loop: plan, red gate, scoped writers, ten-row rubric, model judge, three exits. Python owns the loop. The Agent SDK is the maker. Copy this folder somewhere else and it runs.
 
 ### Functional requirements
 
@@ -64,23 +64,32 @@ The cast is a reusable policy representation inside this standalone folder, not 
 
 ```text
 sol2_implementer_agent_sdk/
-├── harness.py                Role table and configuration entry point
+├── harness.py                CLI. --table-only or --ticket T001
+├── implementer.py            Eight-step loop
+├── doers.py                  none / reference / sdk backends
+├── gates.py                  Pass, retry, escalate
+├── rubric.py                 Ten deterministic rows
+├── steps.py                  steps.jsonl schema
+├── ticket.py                 Ready-ticket loader
+├── receipt.py                Three-claim receipt
+├── observability.py          Trace writer
 ├── roleplan.py               Five-role policy declaration
-├── roles.py                  SDK options and single write hook
-├── adapter.py                SDK result adaptation
+├── roles.py                  SDK options, skills=, one PreToolUse hook
+├── adapter.py                SDK result adaptation and judge()
 ├── contract.py               Target task and report contract
 ├── write_scope.py            Allow and deny scope evaluation
-├── config.json.example       Target repository template
-└── tests/                    Offline scope and runtime checks
+├── plugin/skills/<role>/     SKILL.md mounted per role
+└── tests/                    Offline loop, fence, and schema checks
 ```
 
 | Module | Responsibility |
 | --- | --- |
-| `harness.py` | Builds and displays the SDK cast. |
-| `roleplan.py` | Defines role purpose, tools, and path scope. |
-| `roles.py` | Enforces a single `agent_type`-aware hook. |
-| `contract.py` | Runs named target tasks and reads reports. |
-| `adapter.py` | Reads turn text, costs, and changed-file evidence. |
+| `harness.py` | CLI. Table, or `implementer.run` with `--doer reference\|sdk\|none`. |
+| `implementer.py` | Eight-step loop. Red gate, rubric, judge, three exits. |
+| `roles.py` | One `agent_type`-aware hook. `skills=` on each `AgentDefinition`. |
+| `adapter.py` | Reads turn text, costs, structured judge JSON, and changed-file evidence. |
+| `gates.py` | Pass, retry, or escalate. A retry carries failed rows and test ids. |
+| `receipt.py` | Green, this tree, newer than the last edit. |
 
 ## 4. Runtime and data model
 
@@ -102,7 +111,7 @@ flowchart TD
     Gate -- Yes --> Done([Implementation ready])
 ```
 
-The workflow describes the intended implementation lifecycle even though this port deliberately supplies the cast rather than the complete ticket driver. Source: [`docs/diagrams/workflow.mmd`](docs/diagrams/workflow.mmd).
+The workflow is the eight-step loop this folder owns. Python scores the rubric and calls `gates.decide`. The model writes tests, then code, then a JSON verdict. Source: [`docs/diagrams/workflow.mmd`](docs/diagrams/workflow.mmd).
 
 ```mermaid
 sequenceDiagram
@@ -174,6 +183,9 @@ Use `task table` and `task test` as offline checks. `task setup` installs the op
 | Parent process writes a file | Absence of `agent_type` causes denial. |
 | SDK option spelling drifts | Tests catch the invalid `max_turns` spelling. |
 | Test run fails | The report is evidence for the judge and red gate, not an agent-owned command. |
+| Retry | The code-phase prompt carries `gates.retry_instruction` and the failing test ids. |
+| Green rubric, unparseable judge | `done=False`. `gates.decide` escalates. |
+| Green run | `.harness/receipt.json` claims green, this tree, newer than last edit. |
 
 The principal risk is runtime hook semantics. Tests pin the one-hook design because a role-specific hook set can silently widen scope.
 

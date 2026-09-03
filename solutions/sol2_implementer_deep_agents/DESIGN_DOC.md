@@ -26,8 +26,9 @@ This is the complete LangChain Deep Agents implementation loop for a ready ticke
 - Create a plan in `steps.jsonl`.
 - Let the test implementer write `tests/**` and the code implementer write `app/**` while denying it `tests/**`.
 - Run the target suite and parse `reports/junit.xml`.
-- Apply a ten-row rubric and return pass, retry, or escalation.
-- Stop when the same failure signature repeats or the retry budget is spent.
+- Apply a ten-row rubric, then ask the judge subagent. Unparseable is `done=False`.
+- Feed failed rubric rows and failing test ids back on retry.
+- Write the three-claim receipt. Stop when the same failure signature repeats or the retry budget is spent.
 
 ### Quality requirements
 
@@ -66,24 +67,32 @@ The write scopes preserve the key lesson: a failing test cannot be edited by the
 
 ```text
 sol2_implementer_deep_agents/
-├── harness.py                Ticket implementation driver
+├── harness.py                CLI. --table-only or --ticket T001
+├── implementer.py            Eight-step loop
 ├── roles.py                  Deep Agents subagent construction
 ├── roleplan.py               Five-role policy declaration
 ├── write_scope.py            Scoped writer checks
+├── loop_roles.py             Re-export of write_scope, not a byte copy
 ├── gates.py                  Pass, retry, and escalation decisions
 ├── rubric.py                 Deterministic evaluation rows
 ├── contract.py               Target task and JUnit contract
 ├── doers.py                  Reference and Deep Agents backends
-├── ticket.py                 Ticket loading
+├── ticket.py                 Ticket loading. ready is state == ready
+├── receipt.py                Three-claim receipt
+├── observability.py          Trace writer
+├── skills/<role>/            Mounted per writing role
 └── tests/                    Offline contract and fence checks
 ```
 
 | Module | Responsibility |
 | --- | --- |
-| `harness.py` | Coordinates plan, write turns, test runs, and terminal result. |
-| `roles.py` | Builds the parent graph and constrained child roles. |
+| `harness.py` | CLI. Table, or `implementer.run` with `--doer reference\|deep\|none`. |
+| `implementer.py` | Eight-step loop. Red gate, rubric, judge, three exits. |
+| `roles.py` | Builds the parent graph and constrained child roles. Skills are mounts. |
 | `gates.py` | Decides pass, retry, or escalation from deterministic evidence. |
 | `rubric.py` | Provides the fixed evaluation criteria. |
+| `adapter.py` | Prices LangChain token counts at Sonnet-class rates so the money exit can fire. |
+| `receipt.py` | Green, this tree, newer than the last edit. |
 | `contract.py` | Runs the target suite and reads the result report. |
 
 ## 4. Runtime and data model

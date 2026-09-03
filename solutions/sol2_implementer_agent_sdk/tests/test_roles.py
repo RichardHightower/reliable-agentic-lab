@@ -252,6 +252,26 @@ def test_every_role_gets_its_prompt_from_the_plugin(fake_sdk, contract):
         assert agent.description, name
 
 
+def test_each_role_with_a_skill_directory_gets_the_skill(fake_sdk, contract):
+    """Mount, do not paste. The skill body must not also live in the prompt."""
+    fake_sdk()
+    agents = roles.options_for(contract).agents
+    expected = {
+        "implementer-planner": "planner",
+        "implementer-test-implementer": "test_implementer",
+        "implementer-code-implementer": "code_implementer",
+        "implementer-judge": "judge",
+    }
+    for name, skill in expected.items():
+        assert agents[name].skills == [skill], name
+        body = (roles.PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+        # Front matter plus a distinctive sentence must not be inlined.
+        distinctive = next(
+            line.strip() for line in body.splitlines() if line.startswith("# ")
+        )
+        assert distinctive not in agents[name].prompt, name
+
+
 def test_an_agent_file_that_widens_its_tools_is_refused(fake_sdk, contract, monkeypatch):
     """Drift in a tool list is how a reader quietly becomes a writer."""
     fake_sdk()

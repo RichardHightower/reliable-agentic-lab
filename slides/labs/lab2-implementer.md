@@ -179,7 +179,7 @@ The code implementer cannot weaken a test, not because it was told not to, but b
 
 # `gates.decide`. Three exits, no fourth
 
-1. Rubric green (`judge_done is None`) → pass
+1. Rubric green and no judge ran (`judge_done is None`) → pass
 2. Rubric green and final judge agrees → pass
 3. Rubric green, judge says not done → escalate
 4. `signature == previous_signature` → escalate (not converging)
@@ -188,6 +188,8 @@ The code implementer cannot weaken a test, not because it was told not to, but b
 7. else → retry, `final_attempt` if the next one is last
 
 `signature` is the tuple of **failed row names**, not the wording. Two equal signatures mean the last attempt changed nothing.
+
+Both sol2 ports invoke the judge after a green rubric, so `judge_done` is a boolean on the live path. Row 1 is the API of `gates.decide` when the judge did not run.
 
 
 ---
