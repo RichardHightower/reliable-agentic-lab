@@ -26,6 +26,13 @@ sibling session and recorded in the "Spillwave Pipelines Digest" artifact.
 Numbers quoted below for v2, v3, and the book come from that read: agent
 files, stage code, and the word counts of checked-in finals.
 
+A follow-up, [the outline-first design](2026-09-03-sol3-outline-first-design.md),
+adds the three Spillwave book pipelines (book-gen, book-gen2, booksurf) to
+the comparison and turns the recommendations below into one proposed
+pipeline shape: outline, Opus 5 outline judge, optional human approval,
+then forward-only sections with a Haiku fact ledger between them. Read this
+doc for the diagnosis and that one for the target design.
+
 ## The one-line diagnosis
 
 sol3 ported v3's checking layer (retry loop, cost cap, verified facts,
