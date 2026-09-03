@@ -15,6 +15,8 @@ on disk as a knowledge bundle.
 - `outline_judge`
 - `researcher`
 - `verifier`
+- `section_judge`
+- `ledger`
 - `diagrammer`
 - `writer`
 - `judge`
@@ -22,7 +24,7 @@ on disk as a knowledge bundle.
 `roleplan.py` is where that list lives. Read it there. Do not restate a scope in
 this folder.
 
-Eight roles is more than the other three loops need, and each one is here
+Ten roles is more than the other three loops need, and each one is here
 because it holds a tool set or a context no other role holds. The researcher
 searches and cannot write, because a searcher that can write can edit the
 evidence to fit the paper. The verifier searches again and is never shown the
@@ -144,7 +146,7 @@ task test
 
 Those checks need no SDK, no API key, and no network. They assert:
 
-- The cast is seven roles, and the judge writes nothing in every loop.
+- The cast is ten roles, and the judge writes nothing in every loop.
 - Every tool the cast holds appears in `allowed_tools`, so no role is denied a
   tool its own list grants.
 - One writer, one hook, and no reader can write through it.
@@ -185,6 +187,9 @@ corpus/brain-pack.md     what the brains already said (not verified)
 corpus/brain-pack.json   the same data, for Python
 outline.json             the outliner's last draft
 outline.approved.json    the stamped contract every later phase reads
+sections/<id>.md         one file per approved section
+paper_ledger.json        facts, numbers, terms, and forward refs per section
+knowledge/<id>/          findings, evidence, verdicts for that section
 paper.md                 the deliverable
 paper.pdf                Arctic Fox publication export
 paper.pdf.json           PDF theme, page, figure, and byte receipt
@@ -219,30 +224,26 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
    questions, and truncating that to four questions left a paper with two
    sections and five orphaned headings. An outliner that knows the ceiling
    writes a whole paper under it.
-3. **Research.** Answer each approved key question from primary sources through
-   Perplexity and Context7. Return atomic claims, each with a source and a
-   verbatim quote.
-4. **Verify.** Check each claim against a source the verifier finds itself. It
-   is given the claim text and nothing else.
-5. **Diagram.** The diagrammer returns the source, Python renders it and runs
+3. **Sections.** For each approved section, in outline order: ask the
+   section's key questions, search the corpus first, fill unanswered
+   questions once, verify independently, write the section, run the
+   section check, grade it, and append a ledger entry. Writes
+   `knowledge/<id>/findings.json`, `sections/<id>.md`, and
+   `paper_ledger.json`. A finished section is skipped on resume.
+   Research for a section runs once; only that section's write retries.
+4. **Diagram.** The diagrammer returns the source, Python renders it and runs
    the fidelity judge, and a miss goes back to the diagrammer as a list of what
    the image lost. Three attempts, then keep the closest image and record the
    miss.
-6. **Write.** One section at a time, from surviving claims only. A verified
-   claim is stated. A disputed one names the disagreement. An unverified one is
-   stated qualitatively or left out. A contradicted one never reaches the
-   writer. Length is part of the contract: unpack finding, mechanism,
-   alternative, and evidence limit. A section that restates its claims in two
-   sentences is a brief, and this pipeline is supposed to produce a paper.
-7. **Assemble.** Stitch the sections and append the reference list, in Python.
+5. **Assemble.** Stitch the sections and append the reference list, in Python.
    Asking a model to re-emit the whole paper to join it is how a paper loses a
    section between two calls.
-8. **Check.** Deterministic rows: sources, complete, outline_coverage, grounded,
+6. **Check.** Deterministic rows: sources, complete, outline_coverage, grounded,
    cited, sourced, images, style, and, on a paper run, has_body and length.
    Length is hard at 1800 words. No model votes here.
-9. **Review.** The judge scores the rows a script cannot, including `depth`,
+7. **Review.** The judge scores the rows a script cannot, including `depth`,
    and its verdict is a row in the failure signature rather than a separate veto.
-10. **Publish.** On request, and only after the paper passes.
+8. **Publish.** On request, and only after the paper passes.
 
 Then the knowledge bundle is written, whatever the gate said. A run that
 escalated still found sources and checked claims, and throwing that away means

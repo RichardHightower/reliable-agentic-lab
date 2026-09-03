@@ -39,6 +39,8 @@ Plus the research record that produced them, as an RKC knowledge bundle under
 | outline_judge | read tools | nothing |
 | researcher | read tools, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
 | verifier | `Read`, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
+| section_judge | read tools | nothing |
+| ledger | `Read` | nothing |
 | diagrammer | read tools | nothing |
 | writer | read tools, `Write` | `sections/**` |
 | judge | read tools | nothing |
@@ -73,27 +75,23 @@ search and write can adjust the evidence to fit the paper.
    validates the outline, an Opus judge scores it (including `corpus_fit`),
    and a stamp writes `outline.approved.json`. Later phases read that file
    and nothing else.
-2. **Research.** Answer each approved key question from primary sources, in
-   outline order. Return atomic claims, each with a source URL and a verbatim
-   quote.
-3. **Verify.** Check each claim against a source found independently. The
-   verifier never sees the researcher's answer.
-4. **Diagram.** The diagrammer returns source for `kind: diagram` figures.
+2. **Sections.** For each approved section, in outline order: ask the
+   section's key questions, search the corpus first, fill gaps, verify
+   independently, write the section, run the section check, grade it, and
+   append a ledger entry. Writes `knowledge/<id>/findings.json`,
+   `sections/<id>.md`, and `paper_ledger.json`. A finished section is
+   skipped on resume.
+3. **Diagram.** The diagrammer returns source for `kind: diagram` figures.
    Python renders it and runs the fidelity judge. `kind: chart` figures are
    logged and skipped in this phase.
-5. **Write.** One section at a time, from verified claims only, handed the
-   section's objective, abstract, claims to support, and word target. Unpack
-   every bound claim: finding, mechanism, alternative and its cost, then the
-   limit of the evidence. A section that restates its claims in two sentences
-   is a brief.
-6. **Assemble.** Stitch the sections and append the reference list.
-7. **Check.** Run the deterministic rows: sources, hosts, doctrine, complete,
+4. **Assemble.** Stitch the sections and append the reference list.
+5. **Check.** Run the deterministic rows: sources, hosts, doctrine, complete,
    outline_coverage, grounded, cited, sourced, images, style, and, on a paper
    run, has_body and length. Length is hard at 1800 words. Doctrine is
    scoped to the E2E lane. `outline_coverage` requires every approved section
    and every key question on the page. No model votes here.
-8. **Review.** The judge scores what a script cannot.
-9. **Publish.** Push the paper and its figures to a secret gist, on request,
+6. **Review.** The judge scores what a script cannot.
+7. **Publish.** Push the paper and its figures to a secret gist, on request,
    and only after the paper passes.
 
 ## The verdicts

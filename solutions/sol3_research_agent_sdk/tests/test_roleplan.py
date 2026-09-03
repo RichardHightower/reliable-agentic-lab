@@ -20,13 +20,15 @@ def test_the_orchestrator_only_spawns(loop):
     assert not orchestrator.can_write
 
 
-def test_the_research_cast_is_eight_roles():
+def test_the_research_cast_is_ten_roles():
     assert roleplan.LOOPS["research"] == (
         "orchestrator",
         "outliner",
         "outline_judge",
         "researcher",
         "verifier",
+        "section_judge",
+        "ledger",
         "diagrammer",
         "writer",
         "judge",
@@ -39,7 +41,17 @@ def test_the_research_cast_needs_no_contract():
 
 
 @pytest.mark.parametrize(
-    "name", ["outliner", "outline_judge", "researcher", "verifier", "diagrammer", "judge"]
+    "name",
+    [
+        "outliner",
+        "outline_judge",
+        "researcher",
+        "verifier",
+        "section_judge",
+        "ledger",
+        "diagrammer",
+        "judge",
+    ],
 )
 def test_a_searcher_cannot_write(name):
     """A role that can search and write can edit the evidence to fit the paper."""
