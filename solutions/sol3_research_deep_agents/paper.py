@@ -305,6 +305,8 @@ class Paper:
     theme: str = "spillwave-light"
     publish: bool = False
     quiet: bool = False
+    brains: list = field(default_factory=list)
+    ingest_brain: Path | None = None
 
     state: pstate.PaperState = field(init=False)
     ledger: evidence.Ledger = field(init=False)
@@ -423,6 +425,12 @@ class Paper:
 
         self.state.save()
         stop = check_stop(done=True, spent_usd=self.state.total_cost_usd, max_usd=self.max_usd)
+        if self.ingest_brain is not None:
+            import corpus as corpus_mod  # noqa: PLC0415
+
+            bundle = self.work_dir / "knowledge"
+            result = corpus_mod.ingest_brain(bundle, self.ingest_brain)
+            self.say(f"  ingest     {result}")
         self.say(f"\nstopped: {stop['reason']}. {self.state.line()}")
         self.say(f"paper: {self.paper_path}")
         return 0
@@ -488,6 +496,18 @@ class Paper:
         return 2
 
     # -- 1. plan -----------------------------------------------------------
+
+    def stage_corpus(self, extra: str = "") -> StageResult:
+        """Read configured brains before any model call. Missing brain is a note."""
+        import corpus as corpus_mod  # noqa: PLC0415
+
+        dest = self.work_dir / "corpus"
+        packed = corpus_mod.pack(self.topic, list(self.brains), dest, limit=40)
+        return StageResult(
+            "corpus",
+            artifacts={"corpus/brain-pack.json": str(dest / "brain-pack.json")},
+            summary=f"{packed.get('hits') or 0} hits, thin={packed.get('corpus_thin')}",
+        )
 
     def stage_plan(self, extra: str = "") -> StageResult:
         path = self.work_dir / "plan.json"
@@ -1090,6 +1110,7 @@ def build(
         docs_backend=docs,
         search_budget=search_budget,
         work_dir=work_dir,
+        brains=[brain] if brain is not None else [],
         **kwargs,
     )
 

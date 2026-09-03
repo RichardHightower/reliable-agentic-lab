@@ -79,6 +79,14 @@ def test_only_the_planner_gets_the_brain(fake_langchain):
         assert "recall" not in names(specs[role]), role
 
 
+def test_researcher_and_verifier_hold_corpus_search(fake_langchain):
+    specs = by_name(roles.subagents_for(None, "paper", repo=Path(".")))
+    assert "corpus_search" in names(specs["researcher"])
+    assert "corpus_search" in names(specs["verifier"])
+    for role in ("planner", "writer", "reviewer", "diagrammer"):
+        assert "corpus_search" not in names(specs[role]), role
+
+
 def test_write_tool_refuses_out_of_scope(fake_langchain, tmp_path):
     import roleplan  # noqa: PLC0415  (sys.path is set by conftest first)
 

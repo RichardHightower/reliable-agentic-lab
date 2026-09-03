@@ -45,7 +45,7 @@ SOURCE_SYNTAX = re.compile(
     re.M,
 )
 
-MIN_WORDS = 1800
+MIN_WORDS = 2000
 
 # The fewest words a section can carry and still count as written.
 #

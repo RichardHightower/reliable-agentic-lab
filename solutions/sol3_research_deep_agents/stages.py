@@ -47,6 +47,7 @@ FENCED_JSON = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 CITATION = re.compile(r"\[(\d+)\]")
 
 STAGE_ORDER = (
+    "corpus",
     "plan",
     "search",
     "verify",
