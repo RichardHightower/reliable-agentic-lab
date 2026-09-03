@@ -20,3 +20,15 @@ Plan exactly these two figures, with these identifiers:
 The article should have at least three substantive sections in addition to its
 abstract and references. Every substantive recommendation must be grounded in
 retrieved evidence.
+
+The first key question of the section that explains loop control is binding
+and must be exactly:
+
+```text
+What three exits does this repo's paper loop check, and in what order?
+```
+
+Its answer is grounded in this repository's implementation. Do not substitute
+a framework's generic "whichever comes first" rule. The paper must name the
+exits in order: done, then cost, then max turns. Figure 1 (`control-loop`)
+shows the same order.

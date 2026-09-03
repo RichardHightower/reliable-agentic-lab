@@ -103,12 +103,12 @@ def main(argv: list[str] | None = None) -> int:
     paper_args.add_argument("--paper", action="store_true", help="run the nine stage pipeline")
     paper_args.add_argument("--topic", default=None, help="what the paper is about")
     paper_args.add_argument("--work-root", default=None, help="where runs are kept")
-    paper_args.add_argument("--max-usd", type=float, default=5.0, help="the hard cost cap")
+    paper_args.add_argument("--max-usd", type=float, default=12.0, help="the hard cost cap")
     paper_args.add_argument("--attempts", type=int, default=3, help="retries per stage")
     paper_args.add_argument(
         "--max-verify",
         type=int,
-        default=12,
+        default=24,
         help="how many claims one verify stage cross-checks. The verifier "
         "searches once per claim, so this is the size of the work.",
     )

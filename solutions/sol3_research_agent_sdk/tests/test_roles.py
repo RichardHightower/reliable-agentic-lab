@@ -42,7 +42,7 @@ def test_the_deny_envelope_key_by_key(hook):
 
 def test_a_reader_that_tries_to_write_is_denied(hook):
     """`agent_type` is what tells the one writer from the five readers."""
-    for reader in ("research-planner", "research-diagrammer", "research-judge"):
+    for reader in ("research-outliner", "research-diagrammer", "research-judge", "research-outline-judge"):
         assert call(hook, agent=reader, path=f"{WORK}/sections/s1.md"), reader
 
 
@@ -279,7 +279,8 @@ def test_every_role_gets_its_prompt_from_the_plugin(fake_sdk, work):
     fake_sdk()
     agents = roles.options_for(work).agents
     assert set(agents) == {
-        "research-planner",
+        "research-outliner",
+        "research-outline-judge",
         "research-researcher",
         "research-verifier",
         "research-diagrammer",
@@ -296,7 +297,7 @@ def test_a_reader_carries_the_write_tools_as_a_deny_list(fake_sdk, work):
     list still fails closed."""
     fake_sdk()
     agents = roles.options_for(work).agents
-    for reader in ("research-judge", "research-planner", "research-diagrammer"):
+    for reader in ("research-judge", "research-outliner", "research-outline-judge", "research-diagrammer"):
         assert agents[reader].disallowedTools == roles.NO_WRITE, reader
     assert agents["research-writer"].disallowedTools == []
 
@@ -330,5 +331,5 @@ def test_an_agent_file_that_widens_its_tools_is_refused(fake_sdk, work, monkeypa
 def test_a_missing_agent_file_is_refused(fake_sdk, work, monkeypatch):
     fake_sdk()
     monkeypatch.setattr(roles, "agent_files", dict)
-    with pytest.raises(FileNotFoundError, match="research-planner"):
+    with pytest.raises(FileNotFoundError, match="research-outliner"):
         roles.options_for(work)

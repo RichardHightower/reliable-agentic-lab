@@ -10,6 +10,8 @@ what needs judgement.
     sourced       every identifier in the text appears in the retrieved evidence
     images        every figure the paper references is a file on disk
     style         an em dash is replaced, not argued about
+    has_body      every named section carries real prose, not a heading
+    length        the paper clears the 1800-word floor (opt-in on paper runs)
 
 `complete` looks redundant and is not. Without it a paper with no body at all
 passes every other row: the abstract is exempt from `cited`, the reference list
@@ -45,6 +47,16 @@ HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.M)  # re.M so finditer sees every he
 # the citation. Demanding a marker in either produces a paper that cites its own
 # bibliography.
 UNCITED_SECTIONS = {"abstract", "references", "summary"}
+
+# Opt-in floors. Unit tests of other rows stay short. The pipeline passes
+# these when it is producing a paper rather than exercising one phase.
+# Abstract is assembler-owned from the outline thesis, so the section floor
+# does not apply to it. The whole-paper floor still does.
+MIN_WORDS = 1800
+MIN_SECTION_WORDS = 80
+PROSE_EXEMPT = {"references", "figures", "abstract"}
+SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
+FENCE = re.compile(r"```(\w*)\n(.*?)```", re.S)
 IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 EXIT_ORDER = re.compile(r"\bdone\b[\s\S]{0,240}?\bcost\b[\s\S]{0,240}?\bmax(?:imum)?\s+turns?\b", re.I)
 WHICHEVER_FIRST = re.compile(r"\bwhichever\s+(?:comes|fires)\s+first\b", re.I)
@@ -245,6 +257,36 @@ def drop_owned_headings(body: str) -> str:
     return "\n".join(out)
 
 
+def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
+    """Approved sections missing from the paper, or key questions never named.
+
+    A key question is named when its text appears in the section body, case
+    insensitive. The writer is handed the questions; this row checks they
+    reached the page.
+    """
+    if not outline:
+        return []
+    matches = list(HEADING.finditer(body))
+    bodies: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        heading = match.group(1).strip().lower()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        bodies[heading] = body[start:end]
+    gaps = []
+    for section in outline.get("sections") or []:
+        heading = (section.get("heading") or "").strip()
+        key = heading.lower()
+        if key not in bodies:
+            gaps.append(f"section {heading!r} never written")
+            continue
+        text = bodies[key].lower()
+        for question in section.get("key_questions") or []:
+            if str(question).strip().lower() not in text:
+                gaps.append(f"section {heading!r} never names {question!r}")
+    return gaps
+
+
 def missing_sections(body: str, headings: list[str]) -> list[str]:
     """Sections the plan named that are not in the paper.
 
@@ -317,6 +359,27 @@ def disallowed_reference_hosts(sources: list[str]) -> list[str]:
     return [url for url in sources if not source_policy.is_allowed_url(url)]
 
 
+def word_count(body: str) -> int:
+    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", body)))
+
+
+def sections_without_prose(body: str, min_words: int) -> list[str]:
+    if min_words <= 0:
+        return []
+    thin = []
+    matches = list(SECTION_HEADING.finditer(body))
+    for index, match in enumerate(matches):
+        heading = match.group(2).strip()
+        if heading.lower() in PROSE_EXEMPT:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        chunk = IMAGE.sub("", FENCE.sub("", body[match.end() : end]))
+        words = re.findall(r"\b[\w'-]+\b", chunk)
+        if len(words) < min_words:
+            thin.append(f"{heading} ({len(words)} words)")
+    return thin
+
+
 def check(
     body: str,
     sources: list[str],
@@ -324,8 +387,11 @@ def check(
     base_dir: Path | str | None = None,
     corpus: str = "",
     headings: list[str] | None = None,
+    outline: dict | None = None,
     enforce_source_policy: bool = False,
     enforce_loop_doctrine: bool = False,
+    min_words: int = 0,
+    min_section_words: int = 0,
 ) -> Score:
     """Score a paper. No model call."""
     checks: list[Check] = []
@@ -366,6 +432,18 @@ def check(
             else f"never written: {absent[:3]}",
         )
     )
+
+    if outline is not None:
+        gaps = outline_coverage_gaps(body, outline)
+        checks.append(
+            Check(
+                "outline_coverage",
+                not gaps,
+                "every approved section and key question is on the page"
+                if not gaps
+                else f"missing: {gaps[:3]}",
+            )
+        )
 
     dangling = ungrounded_citations(body, sources)
     checks.append(
@@ -409,6 +487,25 @@ def check(
 
     dashes = len(EM_DASH.findall(_mask_code(body)))
     checks.append(Check("style", dashes == 0, f"{dashes} em dashes"))
+
+    if min_section_words:
+        thin = sections_without_prose(body, min_section_words)
+        checks.append(
+            Check(
+                "has_body",
+                not thin,
+                "every section carries prose" if not thin else f"empty or near empty: {thin[:3]}",
+            )
+        )
+    if min_words:
+        words = word_count(body)
+        checks.append(
+            Check(
+                "length",
+                words >= min_words,
+                f"{words} words (need {min_words})",
+            )
+        )
 
     return Score(checks=checks)
 
@@ -476,6 +573,9 @@ def demo() -> int:
     clean = check("The system is fast [1].", ["u1"])
     assert clean.passed, clean.report()
     assert clean.signature() == ()
+
+    short = check("The system is fast [1].", ["u1"], min_words=MIN_WORDS)
+    assert "length" in short.signature()
 
     print("checks: ok")
     return 0

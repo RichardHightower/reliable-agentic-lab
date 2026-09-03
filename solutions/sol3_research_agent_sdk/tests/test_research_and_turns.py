@@ -345,13 +345,56 @@ def test_the_exit_doctrine_finding_accepts_only_this_repository(work):
     assert [claim["text"] for claim in finding["claims"]] == ["repo"]
 
 
-def test_the_first_planner_question_is_the_repository_exit_doctrine(work):
+def test_the_offline_outline_includes_the_exit_doctrine_question(work):
     offline = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
-    assert offline.plan("topic", "")["questions"][0]["text"] == t.EXIT_DOCTRINE_QUESTION
+    drafted = offline.plan("topic", "")
+    questions = [q for s in drafted["sections"] for q in s["key_questions"]]
+    assert t.EXIT_DOCTRINE_QUESTION in questions
 
-    backend = Backend([result(structured={"title": "t", "sections": [], "questions": [], "diagrams": []})])
-    t.SdkTurns(backend=backend, work_dir=work).plan("topic", "")
-    assert t.EXIT_DOCTRINE_QUESTION in backend.prompts[0][0]
+    backend = Backend(
+        [result(structured={"title": "t", "audience": "a", "thesis": "x", "word_target_total": 400, "sections": []})]
+    )
+    t.SdkTurns(backend=backend, work_dir=work).outline("topic", "")
+    assert "research-outliner" in backend.prompts[0][0]
+    assert t.EXIT_DOCTRINE_QUESTION not in backend.prompts[0][0]
+
+
+def test_the_offline_outline_reads_as_prose():
+    """The topic is the title, not a template hole.
+
+    Interpolating 'how MCP servers authenticate' into 'Describe how {topic}
+    works' produced 'how how MCP servers authenticate works'. Section
+    objectives and questions have to be English on their own.
+    """
+    import outline as outlines  # noqa: PLC0415
+
+    offline = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
+    topic = "how MCP servers authenticate"
+    drafted = offline.outline(topic, "")
+    rendered = outlines.to_markdown(drafted).lower()
+    assert "how how" not in rendered
+    assert drafted["title"].lower().startswith("how mcp")
+    assert topic in drafted["thesis"]
+    for section in drafted["sections"]:
+        objective = section["objective"]
+        assert objective[0].isupper(), objective
+        assert topic not in objective, objective
+        assert not objective.lower().startswith("describe how how")
+        assert not objective.lower().startswith("state what how")
+        for question in section["key_questions"]:
+            assert "how how" not in question.lower(), question
+            assert not question.lower().startswith(topic), question
+            assert question[0].isupper() or question[0].isdigit(), question
+
+
+def test_bind_exit_doctrine_still_exists_for_the_commissioning_brief():
+    """Removed from the normal outline path. Reachable for E2E via the brief."""
+    plan = {
+        "sections": [{"id": "problem"}],
+        "questions": [{"id": "q1", "text": "other", "section": "problem"}],
+    }
+    bound = t.bind_exit_doctrine(plan)
+    assert bound["questions"][0]["text"] == t.EXIT_DOCTRINE_QUESTION
 
 
 def test_each_turn_declares_the_scope_it_may_write(work):
@@ -390,6 +433,32 @@ def test_the_offline_writer_never_invents_a_citation_marker():
     import checks  # noqa: PLC0415
 
     assert checks.uncited_claims(body) == []
+
+
+def test_the_offline_writer_unpacks_a_claim_into_a_section():
+    """A one-sentence echo of the claim is a brief, not a paper."""
+    import checks  # noqa: PLC0415
+
+    turn = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
+    claim = {
+        "text": "The paper loop checks three exits: done, then cost, then max turns.",
+        "number": 1,
+        "status": "verified",
+    }
+    body = turn.write({"id": "s", "heading": "The approach", "goal": "g"}, [claim], [], "")
+    assert checks.word_count(body) >= 400
+    assert "—" not in body
+    assert "[1]" in body
+
+
+def test_three_developed_claims_clear_the_paper_floor():
+    import checks  # noqa: PLC0415
+
+    claim = "The paper loop checks three exits in this order: done, then cost, then max turns."
+    parts = []
+    for index in range(1, 4):
+        parts += t.develop_claim(claim, f"[{index}]")
+    assert checks.word_count("\n".join(parts)) >= checks.MIN_WORDS
 
 
 def test_the_offline_writer_marks_a_weaker_claim_as_weaker():

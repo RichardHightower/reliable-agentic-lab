@@ -66,9 +66,9 @@ def test_a_brief_is_forwarded_only_when_the_run_has_one(work, turns):
     import paper  # noqa: PLC0415
 
     class Briefed(turns):
-        def plan(self, topic, prior_art, budget=None, note="", brief=""):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
             self.received_brief = brief
-            return super().plan(topic, prior_art, budget, note)
+            return super().outline(topic, prior_art, budget, note, brief)
 
     run = paper.Run(
         topic="topic",

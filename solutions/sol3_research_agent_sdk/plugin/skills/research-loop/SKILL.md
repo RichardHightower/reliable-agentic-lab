@@ -35,7 +35,8 @@ Plus the research record that produced them, as an RKC knowledge bundle under
 | Role | Holds | Writes |
 | --- | --- | --- |
 | orchestrator | `Task` | nothing |
-| planner | read tools | nothing |
+| outliner | read tools | nothing |
+| outline_judge | read tools | nothing |
 | researcher | read tools, `WebSearch`, filtered Perplexity, Context7 | nothing |
 | verifier | `Read`, `WebSearch`, filtered Perplexity, Context7 | nothing |
 | diagrammer | read tools | nothing |
@@ -48,9 +49,10 @@ It cannot reach `paper.md`: assembly is deterministic, in Python, and stitching
 the parts is not the model's to do.
 
 Everything else comes back as schema-checked structured output that Python
-writes. The planner returns a plan and Python writes `plan.json`. The
-diagrammer returns diagram source and Python writes it, renders it, and runs
-the fidelity judge.
+writes. The outliner returns an outline and Python writes `outline.json`.
+The outline judge returns a verdict and Python writes `outline-verdict.json`.
+The diagrammer returns diagram source and Python writes it, renders it, and
+runs the fidelity judge.
 
 No role holds `Bash`. The renderer is one subprocess with fixed arguments, and
 Python runs it. Handing a model a shell to save that would widen the blast
@@ -64,21 +66,30 @@ search and write can adjust the evidence to fit the paper.
 0. **Prior art.** Read the second brain for established terminology and earlier
    conclusions on this topic. Skip when it is not there. Never treat it as
    verified.
-1. **Plan.** Turn the topic into sections, questions, and figures, inside the
-   question and figure budget the planner is told.
-2. **Research.** Answer each question from primary sources. Return atomic
-   claims, each with a source URL and a verbatim quote.
+1. **Outline.** Turn the topic into a two-level outline: sections with
+   objectives, abstracts, key questions, claims to support, required evidence,
+   word targets, and planned figures. Python validates the outline, an Opus
+   judge scores it, and a stamp writes `outline.approved.json`. Later phases
+   read that file and nothing else.
+2. **Research.** Answer each approved key question from primary sources, in
+   outline order. Return atomic claims, each with a source URL and a verbatim
+   quote.
 3. **Verify.** Check each claim against a source found independently. The
    verifier never sees the researcher's answer.
-4. **Diagram.** The diagrammer returns the source. Python renders it and runs
-   the fidelity judge, and a miss goes back to the diagrammer as a list of what
-   the image lost. Three attempts, then keep the closest image.
-5. **Write.** One section at a time, from verified claims only.
+4. **Diagram.** The diagrammer returns source for `kind: diagram` figures.
+   Python renders it and runs the fidelity judge. `kind: chart` figures are
+   logged and skipped in this phase.
+5. **Write.** One section at a time, from verified claims only, handed the
+   section's objective, abstract, claims to support, and word target. Unpack
+   every bound claim: finding, mechanism, alternative and its cost, then the
+   limit of the evidence. A section that restates its claims in two sentences
+   is a brief.
 6. **Assemble.** Stitch the sections and append the reference list.
 7. **Check.** Run the deterministic rows: sources, hosts, doctrine, complete,
-   grounded, cited, sourced, images, style. The paper names its exits in order:
-   done, then cost, then max turns; Figure 1 shows the same order. No model
-   votes here.
+   outline_coverage, grounded, cited, sourced, images, style, and, on a paper
+   run, has_body and length. Length is hard at 1800 words. Doctrine is
+   scoped to the E2E lane. `outline_coverage` requires every approved section
+   and every key question on the page. No model votes here.
 8. **Review.** The judge scores what a script cannot.
 9. **Publish.** Push the paper and its figures to a secret gist, on request,
    and only after the paper passes.

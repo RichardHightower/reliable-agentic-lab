@@ -23,6 +23,14 @@ def make_run(work, turns, **kwargs):
     )
 
 
+def test_section_instruction_uses_the_outline_word_target():
+    with_target = paper._section_instruction({"word_target": 400})
+    assert "400" in with_target
+    assert "words of section body" in with_target
+    assert "Unpack every bound claim" in paper._section_instruction({"heading": "The approach"})
+    assert "fix the thing" in paper._section_instruction({"word_target": 400}, "fix the thing")
+
+
 @pytest.fixture
 def no_renderer(monkeypatch):
     """A run must survive a machine with no diagram renderer."""
@@ -53,16 +61,18 @@ def test_prior_art_reads_the_brain_when_it_is_there(work, turns, tmp_path):
 
 def test_a_plan_with_no_questions_stops_the_run(work, turns):
     class Empty(turns):
-        def plan(self, topic, prior_art, budget=None, note=""):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
             return {
                 "title": "t",
-                "sections": [{"id": "s", "heading": "h", "goal": "g"}],
-                "questions": [],
+                "audience": "a",
+                "thesis": "t",
+                "word_target_total": 400,
+                "sections": [],
             }
 
     run = make_run(work, Empty())
     paper.prior_art(run)
-    with pytest.raises(paper.RunFailed, match="no sections or no questions"):
+    with pytest.raises(paper.RunFailed, match="sections must be a non-empty array"):
         paper.plan(run)
 
 
@@ -175,6 +185,34 @@ def test_a_full_run_passes_and_writes_a_paper(work, turns, no_renderer):
     assert result["knowledge"]["claims"] == 1
 
 
+def test_a_fixture_paper_clears_the_word_floor(work, no_renderer):
+    """The offline twin unpacks claims so task demo is a paper, not a brief."""
+    import checks  # noqa: PLC0415
+    import research  # noqa: PLC0415
+    import turns as t  # noqa: PLC0415
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
+    run = paper.Run(
+        topic="loop engineering exit criteria",
+        work_dir=work,
+        turns=t.OfflineTurns(backend=research.FixtureBackend(fixture)),
+        state=paper.State.load_or_new(work, "loop engineering exit criteria"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.run_paper(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert checks.word_count(body) >= checks.MIN_WORDS
+    score = checks.check(
+        body,
+        ["https://example.invalid/doc"],
+        min_words=checks.MIN_WORDS,
+        min_section_words=checks.MIN_SECTION_WORDS,
+    )
+    assert "length" not in score.signature(), score.report()
+    assert "has_body" not in score.signature(), score.report()
+
+
 def test_the_knowledge_bundle_survives_an_escalation(work, turns, no_renderer):
     """A run that escalated still found sources. Throwing them away is waste."""
     run = make_run(work, turns(done=False))
@@ -218,7 +256,8 @@ def test_the_retry_hands_the_writer_only_the_current_issues(work, turns, no_rend
     run.turns = Noisy(done=False)
     paper.run_paper(run)
     notes = [args[2] for args in run.turns.asked if args[0] == "write"]
-    assert notes[0] == "", "the first attempt has nothing to react to"
+    assert "fix the thing" not in notes[0], "the first attempt has no judge issues yet"
+    assert "words of section body" in notes[0]
     assert "fix the thing" in notes[1]
     assert "FINAL ATTEMPT" in notes[1], "the last attempt narrows the ask"
 
@@ -234,7 +273,7 @@ def test_a_finished_phase_is_not_rerun(work, turns, no_renderer):
     again = turns()
     paper.run_paper(make_run(work, again))
     assert [a for a in again.asked if a[0] == "research"] == []
-    assert first == 1
+    assert first == 2
 
 
 def test_deleting_one_output_reruns_only_that_phase(work, turns, no_renderer):
@@ -338,38 +377,25 @@ def test_the_plan_is_held_to_a_question_budget(work, turns):
     an uncapped bill, and the planner has no idea what a turn costs."""
 
     class Ambitious(turns):
-        def plan(self, topic, prior_art, budget=None, note=""):
-            return {
-                "title": "t",
-                "sections": [{"id": f"s{i}", "heading": "H", "goal": "g"} for i in range(9)],
-                "questions": [{"id": f"q{i}", "text": "q", "section": f"s{i}"} for i in range(9)],
-                "diagrams": [{"name": f"d{i}", "concept": "c", "section": "s0"} for i in range(9)],
-            }
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            return drafted
 
     run = make_run(work, Ambitious(), max_questions=3, max_diagrams=2)
     paper.prior_art(run)
-    meta = paper.plan(run)
-    assert meta["questions"] == 3
-    assert meta["diagrams"] == 2
-    assert meta["trimmed"] == {"questions": 6, "diagrams": 7}
+    paper.plan(run)
+    asked = next(args for args in run.turns.asked if args[0] == "outline")
+    assert asked[3] == {"questions": 3, "diagrams": 2, "words": 1800}
 
 
 def test_truncation_never_leaves_a_heading_with_nothing_under_it(work, turns):
-    class Ambitious(turns):
-        def plan(self, topic, prior_art, budget=None, note=""):
-            return {
-                "title": "t",
-                "sections": [{"id": f"s{i}", "heading": "H", "goal": "g"} for i in range(4)],
-                "questions": [{"id": f"q{i}", "text": "q", "section": f"s{i}"} for i in range(4)],
-                "diagrams": [],
-            }
-
-    run = make_run(work, Ambitious(), max_questions=2)
+    """The outliner is told the budget so Python does not silently drop sections."""
+    run = make_run(work, turns(), max_questions=2)
     paper.prior_art(run)
     paper.plan(run)
-    planned = json.loads((Path(work) / "plan.json").read_text())
-    served = {q["section"] for q in planned["questions"]}
-    assert {s["id"] for s in planned["sections"]} == served
+    approved = paper.approved_outline(run)
+    assert approved["sections"]
+    assert all(len(s["key_questions"]) >= 2 for s in approved["sections"])
 
 
 def test_research_stops_when_the_money_runs_out(work, turns):
@@ -377,13 +403,10 @@ def test_research_stops_when_the_money_runs_out(work, turns):
     times over before the gate ever sees it."""
 
     class Costly(turns):
-        def plan(self, topic, prior_art, budget=None, note=""):
-            return {
-                "title": "t",
-                "sections": [{"id": "s1", "heading": "H", "goal": "g"}],
-                "questions": [{"id": f"q{i}", "text": "q", "section": "s1"} for i in range(5)],
-                "diagrams": [],
-            }
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            drafted["sections"][0]["key_questions"] = [f"q{i}" for i in range(5)]
+            return drafted
 
     run = make_run(work, Costly(), max_usd=1.0)
     paper.prior_art(run)
@@ -460,8 +483,8 @@ def test_the_planner_is_told_what_it_can_afford(work, turns, no_renderer):
     run = make_run(work, recorder, max_questions=5, max_diagrams=2)
     paper.prior_art(run)
     paper.plan(run)
-    budget = next(args[3] for args in recorder.asked if args[0] == "plan")
-    assert budget == {"questions": 5, "diagrams": 2}
+    budget = next(args[3] for args in recorder.asked if args[0] == "outline")
+    assert budget == {"questions": 5, "diagrams": 2, "words": 1800}
 
 
 # -- the verification budget ------------------------------------------------
@@ -542,7 +565,7 @@ def test_a_reference_list_a_section_wrote_for_itself_is_removed(work, turns, no_
     class Overreaching(turns):
         def write(self, section, claims, figures, notes, path=""):
             self.asked.append(("write", section["id"], notes, path))
-            return "## The problem\n\nA point [1].\n\n## References\n\n1. https://stray"
+            return "## The problem\n\nA point [1].\n\nThis section answers: what is a topic [1].\n\nThis section answers: why does a topic fail [1].\n\n## References\n\n1. https://stray"
 
     run = make_run(work, Overreaching())
     paper.run_paper(run)
@@ -558,7 +581,7 @@ def test_a_needs_source_flag_leaves_the_paper_and_lands_in_the_manifest(work, tu
     class Flagging(turns):
         def write(self, section, claims, figures, notes, path=""):
             self.asked.append(("write", section["id"], notes, path))
-            return "## The problem\n\nA point [1]. <!-- NEEDS-SOURCE: the version -->"
+            return "## The problem\n\nA point [1]. This section answers: what is a topic [1]. This section answers: why does a topic fail [1]. <!-- NEEDS-SOURCE: the version -->"
 
     run = make_run(work, Flagging())
     paper.run_paper(run)
@@ -584,17 +607,17 @@ def test_a_planner_that_fails_once_gets_the_gates_complaint(work, turns, no_rend
             super().__init__(**kw)
             self.tries = 0
 
-        def plan(self, topic, prior_art, budget=None, note=""):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
             self.tries += 1
-            self.asked.append(("plan", topic, prior_art, budget, note))
+            self.asked.append(("outline", topic, prior_art, budget, note, brief))
             if self.tries == 1:
-                raise TurnFailed("research-planner returned no JSON object")
-            return super().plan(topic, prior_art, budget, note)
+                raise TurnFailed("research-outliner returned no JSON object")
+            return super().outline(topic, prior_art, budget, note, brief)
 
     run = make_run(work, Flaky())
     paper.prior_art(run)
-    assert paper.plan(run)["questions"] == 1
-    notes = [args[4] for args in run.turns.asked if args[0] == "plan"]
+    assert paper.plan(run)["questions"] == 2
+    notes = [args[4] for args in run.turns.asked if args[0] == "outline"]
     assert notes[0] == "", "the first attempt has nothing to react to"
     assert "no JSON object" in notes[1], "the second is told what failed"
 
@@ -603,52 +626,45 @@ def test_a_planner_that_fails_twice_escalates_on_the_stall(work, turns):
     """Two identical failures are not converging, and the reason says so."""
 
     class Broken(turns):
-        def plan(self, topic, prior_art, budget=None, note=""):
-            self.asked.append(("plan", topic, prior_art, budget, note))
-            raise TurnFailed("research-planner returned no JSON object")
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            self.asked.append(("outline", topic, prior_art, budget, note, brief))
+            raise TurnFailed("research-outliner returned no JSON object")
 
     run = make_run(work, Broken())
     paper.prior_art(run)
     with pytest.raises(paper.RunFailed, match="not converging"):
         paper.plan(run)
-    assert len([a for a in run.turns.asked if a[0] == "plan"]) == 2
+    assert len([a for a in run.turns.asked if a[0] == "outline"]) == 2
 
 
 def test_a_runtime_ceiling_is_not_retried(work, turns):
     """Retrying a ceiling spends the rest of the budget rediscovering it."""
 
     class Capped(turns):
-        def plan(self, topic, prior_art, budget=None, note=""):
-            self.asked.append(("plan", topic, prior_art, budget, note))
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            self.asked.append(("outline", topic, prior_art, budget, note, brief))
             raise Escalate("max turns")
 
     run = make_run(work, Capped())
     paper.prior_art(run)
     with pytest.raises(Escalate):
         paper.plan(run)
-    assert len([a for a in run.turns.asked if a[0] == "plan"]) == 1
+    assert len([a for a in run.turns.asked if a[0] == "outline"]) == 1
 
 
 def test_one_bad_question_does_not_kill_the_research_phase(work, turns, no_renderer):
     """A thinner paper, and a record of why. Not a dead run."""
 
     class Partial(turns):
-        def plan(self, topic, prior_art, budget=None, note=""):
-            self.asked.append(("plan", topic, prior_art, budget, note))
-            return {
-                "title": "t",
-                "abstract": "a",
-                "sections": [{"id": "s1", "heading": "H", "goal": "g"}],
-                "questions": [
-                    {"id": "q1", "text": "good", "section": "s1"},
-                    {"id": "q2", "text": "bad", "section": "s1"},
-                ],
-                "diagrams": [],
-            }
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            self.asked.append(("outline", topic, prior_art, budget, note, brief))
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            drafted["sections"][0]["key_questions"] = ["good", "bad"]
+            return drafted
 
         def research(self, question, note=""):
-            self.asked.append(("research", question, note))
             if question == "bad":
+                self.asked.append(("research", question, note))
                 raise TurnFailed("research-researcher returned no JSON object")
             return super().research(question, note)
 
@@ -659,7 +675,7 @@ def test_one_bad_question_does_not_kill_the_research_phase(work, turns, no_rende
     assert meta["failed"] == 1
     assert meta["claims"] == 1
     recorded = json.loads((Path(work) / "sources.json").read_text())["failed"]
-    assert recorded[0]["id"] == "q2"
+    assert recorded[0]["id"] == "s1-q2"
     assert "no JSON object" in recorded[0]["reason"]
 
 
@@ -675,7 +691,7 @@ def test_a_failing_question_is_retried_once_before_it_is_recorded(work, turns):
     run = prepared_plan(work, Flaky())
     with pytest.raises(paper.RunFailed):
         paper.do_research(run)
-    assert len(tries) == 2
+    assert len(tries) == 4
     assert tries[0] == "" and "no JSON" in tries[1]
 
 

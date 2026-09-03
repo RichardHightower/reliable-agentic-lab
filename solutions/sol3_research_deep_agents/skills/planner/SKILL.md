@@ -39,17 +39,24 @@ generic vendor-runtime question.
 
 Set `important: true` on the claims a reader would act on: a version, a limit, a
 price, a capability, a benchmark number, a security property. The verifier
-cross-checks only these, because corroborating every incidental sentence spends
+cross-checks these first, because corroborating every incidental sentence spends
 the budget on the sentences nobody will dispute.
 
-Mark at most three questions important. Choose the three conclusions the paper
-cannot survive without. Other questions may still add context and references;
-they do not get to block the whole paper when an official source is silent.
+Mark four to six questions important. Choose the conclusions the paper cannot
+survive without. Other questions may still add context and references; they do
+not get to block the whole paper when an official source is silent. The gate
+allows at most six important questions.
 
 Plan only checks that the fixed source boundary can answer: this repository,
 official LangChain, Anthropic, OpenAI, Microsoft, Stripe, MCP, or Google SRE
 documentation and their approved GitHub organizations. Do not require
 OpenTelemetry, AutoGPT, arXiv, a blog, or a postmortem host outside that list.
+
+## Shape a paper, not a brief
+
+Aim for six to ten sections, including Abstract, Introduction, a mechanism or
+architecture section, tradeoffs, Limitations, and References. A white paper
+earns its length with evidence under those headings, not with extra headings.
 
 ## Diagrams
 
@@ -78,5 +85,6 @@ Write `plan.json` exactly:
 }
 ```
 
-Three questions minimum. Eight maximum. More than eight is a survey, and the
-budget will run out before the writing starts.
+Six questions minimum is the aim. Three is the gate floor, so a thin topic can
+still run. Twelve is the ceiling. More than twelve is a survey, and the budget
+will run out before the writing starts.
