@@ -11,7 +11,8 @@ on disk as a knowledge bundle.
 ## The cast for this loop
 
 - `orchestrator`
-- `planner`
+- `outliner`
+- `outline_judge`
 - `researcher`
 - `verifier`
 - `diagrammer`
@@ -21,7 +22,7 @@ on disk as a knowledge bundle.
 `roleplan.py` is where that list lives. Read it there. Do not restate a scope in
 this folder.
 
-Seven roles is more than the other three loops need, and each one is here
+Eight roles is more than the other three loops need, and each one is here
 because it holds a tool set or a context no other role holds. The researcher
 searches and cannot write, because a searcher that can write can edit the
 evidence to fit the paper. The verifier searches again and is never shown the
@@ -31,7 +32,7 @@ not a second opinion.
 Exactly one role writes. The writer holds `Write`, scoped to `sections/**`,
 because a section is long prose and returning it through a message invites
 truncation. Everything else comes back as schema-checked structured output that
-Python writes: the plan, the diagram source, the verdicts. Two of those roles
+Python writes: the outline, the diagram source, the verdicts. Two of those roles
 held `Write` in an earlier draft and never used it, which made the hook below
 decorative.
 
@@ -196,19 +197,25 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
 1. **Prior art.** Read the second brain at `../../loop_eng_2nd_brain` for
    terminology and earlier conclusions. Skip when it is not there. Never treat
    it as verified.
-2. **Plan.** Turn the topic into sections, the questions those sections need
-   answered, and the figures worth drawing. The planner is told the budget, and
-   Python enforces it afterwards with `--max-questions` and `--max-diagrams`.
+2. **Outline.** Turn the topic into a two-level outline: sections with
+   objectives, abstracts, key questions, claims to support, required evidence,
+   word targets, and planned figures. Python validates it, an outline judge
+   scores it, and a stamp writes `outline.approved.json`. Later phases read
+   that file and nothing else. `--profile demo` commissions 1800 words.
+   `--profile paper` commissions 4000. `--approve` stops after the outline
+   judge (exit 3) with a readable `outline.md`. `--resume` continues from the
+   stamped `outline.approved.json`, and re-judges if `outline.json` changed.
 
-   Both halves matter. Every question is a research turn and a verification
-   turn, so an uncapped plan is an uncapped bill. Enforcing the cap without
-   telling the planner is worse than it sounds: asked to plan a paper on MCP
-   authorization it returned seven good sections and twenty-eight questions,
-   and truncating that to four questions left a paper with two sections and
-   five orphaned headings. A planner that knows the ceiling writes a whole
-   paper under it.
-3. **Research.** Answer each question from primary sources through Perplexity
-   and Context7. Return atomic claims, each with a source and a verbatim quote.
+   Both halves of the budget matter. Every key question is a research turn and
+   a verification turn, so an uncapped outline is an uncapped bill. Enforcing
+   the cap without telling the outliner is worse than it sounds: asked to plan
+   a paper on MCP authorization it returned seven good sections and twenty-eight
+   questions, and truncating that to four questions left a paper with two
+   sections and five orphaned headings. An outliner that knows the ceiling
+   writes a whole paper under it.
+3. **Research.** Answer each approved key question from primary sources through
+   Perplexity and Context7. Return atomic claims, each with a source and a
+   verbatim quote.
 4. **Verify.** Check each claim against a source the verifier finds itself. It
    is given the claim text and nothing else.
 5. **Diagram.** The diagrammer returns the source, Python renders it and runs
@@ -218,14 +225,17 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
 6. **Write.** One section at a time, from surviving claims only. A verified
    claim is stated. A disputed one names the disagreement. An unverified one is
    stated qualitatively or left out. A contradicted one never reaches the
-   writer.
+   writer. Length is part of the contract: unpack finding, mechanism,
+   alternative, and evidence limit. A section that restates its claims in two
+   sentences is a brief, and this pipeline is supposed to produce a paper.
 7. **Assemble.** Stitch the sections and append the reference list, in Python.
    Asking a model to re-emit the whole paper to join it is how a paper loses a
    section between two calls.
-8. **Check.** Seven deterministic rows: sources, complete, grounded, cited,
-   sourced, images, style. No model votes here.
-9. **Review.** The judge scores the rows a script cannot, and its verdict is a
-   row in the failure signature rather than a separate veto.
+8. **Check.** Deterministic rows: sources, complete, outline_coverage, grounded,
+   cited, sourced, images, style, and, on a paper run, has_body and length.
+   Length is hard at 1800 words. No model votes here.
+9. **Review.** The judge scores the rows a script cannot, including `depth`,
+   and its verdict is a row in the failure signature rather than a separate veto.
 10. **Publish.** On request, and only after the paper passes.
 
 Then the knowledge bundle is written, whatever the gate said. A run that
@@ -261,7 +271,7 @@ that worked.
 
 | Unit | Attempts | On giving up |
 | --- | --- | --- |
-| the plan | 2 | the run escalates, nothing downstream has input |
+| the outline | 2 | the run escalates, nothing downstream has input |
 | one research question | 2 | recorded in `sources.json` under `failed`, the run goes on |
 | one claim | 1 | falls back to `unverified` |
 | one figure | 3 | keeps the closest image and records what it lost |
@@ -287,8 +297,8 @@ a live run needed it.
 | --- | --- | --- |
 | `--max-questions` | 12 | research turns, and therefore the paper's width |
 | `--max-diagrams` | 4 | figures |
-| `--max-claims` | 24 | how many claims get a second opinion |
-| `--max-usd` | 5.00 | the whole run, checked inside phases and at the gate |
+| `--max-claims` | 40 | how many claims get a second opinion |
+| `--max-usd` | 12.00 | the whole run, checked inside phases and at the gate |
 
 Four questions produced a hundred and eleven claims on one live run. Every claim
 is a verification turn, so without `--max-claims` the verify phase spent the

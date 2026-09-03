@@ -43,6 +43,8 @@ def _schema(properties: dict, required: list[str]) -> dict:
 
 _STRINGS = {"type": "array", "items": {"type": "string"}}
 
+# The old planner shape, kept so a reader comparing this port to an earlier
+# revision can see what the outliner replaced. Nothing calls it.
 PLAN_SCHEMA = _schema(
     {
         "title": {"type": "string"},
@@ -82,6 +84,74 @@ PLAN_SCHEMA = _schema(
         },
     },
     ["title", "sections", "questions"],
+)
+
+# Bounded and non-recursive. A section cannot contain sections.
+_FIGURE_SCHEMA = _schema(
+    {
+        "name": {"type": "string"},
+        "kind": {"type": "string", "enum": ["diagram", "chart"]},
+        "shows": {"type": "string"},
+        "data_needed": {"type": "string"},
+    },
+    ["name", "kind", "shows", "data_needed"],
+)["schema"]
+
+_SECTION_SCHEMA = _schema(
+    {
+        "id": {"type": "string"},
+        "heading": {"type": "string"},
+        "objective": {"type": "string"},
+        "abstract": {"type": "string"},
+        "key_questions": _STRINGS,
+        "claims_to_support": _STRINGS,
+        "required_evidence": _STRINGS,
+        "word_target": {"type": "integer"},
+        "figures": {"type": "array", "items": _FIGURE_SCHEMA},
+        "depends_on": _STRINGS,
+    },
+    [
+        "id",
+        "heading",
+        "objective",
+        "abstract",
+        "key_questions",
+        "claims_to_support",
+        "required_evidence",
+        "word_target",
+        "figures",
+        "depends_on",
+    ],
+)["schema"]
+
+OUTLINE_SCHEMA = _schema(
+    {
+        "title": {"type": "string"},
+        "audience": {"type": "string"},
+        "thesis": {"type": "string"},
+        "word_target_total": {"type": "integer"},
+        "sections": {"type": "array", "items": _SECTION_SCHEMA},
+    },
+    ["title", "audience", "thesis", "word_target_total", "sections"],
+)
+
+_ISSUE_SCHEMA = _schema(
+    {
+        "section": {"type": "string"},
+        "rule": {"type": "string"},
+        "description": {"type": "string"},
+    },
+    ["section", "rule", "description"],
+)["schema"]
+
+OUTLINE_VERDICT_SCHEMA = _schema(
+    {
+        "passed": {"type": "boolean"},
+        "score": {"type": "number"},
+        "blocking_issues": {"type": "array", "items": _ISSUE_SCHEMA},
+        "actionable_changes": _STRINGS,
+    },
+    ["passed", "score", "blocking_issues", "actionable_changes"],
 )
 
 RESEARCH_SCHEMA = _schema(

@@ -53,6 +53,25 @@ def complete_artifact(work: Path) -> None:
         encoding="utf-8",
     )
     write_json(
+        work / "outline.approved.json",
+        {
+            "outline": {
+                "title": "Loop engineering",
+                "audience": "engineers",
+                "thesis": "A summary.",
+                "word_target_total": 1800,
+                "sections": [
+                    {"id": "a", "heading": "A", "key_questions": ["q1", "q2"]},
+                    {"id": "b", "heading": "B", "key_questions": ["q3", "q4"]},
+                    {"id": "c", "heading": "C", "key_questions": ["q5", "q6"]},
+                ],
+            },
+            "approved_by": "judge",
+            "approved_at": "2026-09-03T00:00:00+00:00",
+            "sha256": "abc",
+        },
+    )
+    write_json(
         work / "plan.json",
         {
             "sections": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
