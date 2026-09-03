@@ -1,0 +1,12 @@
+flowchart LR
+  S["1 Explicit state<br/>Start from disk"] --> B["2 Bounded authority<br/>Declared write scope"]
+  B --> E["3 Observable evidence<br/>A trace and a file"]
+  E --> T["4 External transition<br/>Pass / retry / escalate"]
+  classDef one fill:#E6F4EA,stroke:#137333,color:#202124
+  classDef two fill:#E8F0FE,stroke:#174EA6,color:#202124
+  classDef three fill:#E8F0FE,stroke:#174EA6,color:#202124
+  classDef four fill:#FCE8D5,stroke:#B06000,color:#202124
+  class S one
+  class B two
+  class E three
+  class T four

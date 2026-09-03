@@ -1,0 +1,44 @@
+FRAMING
+This is a article diagram for a technical presentation about Agent SDK ticket enhancer use cases. Render an illustration of the concept below.
+
+STYLE
+White presentation canvas with crisp deep-navy outlined cards and arrows. Use a restrained orange dashed boundary for tools and a soft green outlined target repository. Prefer simple thin-line symbols only when they clarify a role. Plenty of whitespace. No gradients or shadows. Boxes, arrows, and labels. Labels at least 24 pixels at article scale. Arrows 2 to 3 px. Horizontal text. Landscape layout unless the structure is a tall flowchart. Article density. Clear labels. Limited node count. Key path visually dominant. Still simplified for editorial layout. The image must look like a professionally designed technical illustration, not a diagramming-tool screenshot.
+
+PALETTE
+Background #F8FAFD. Surface #FFFFFF. Primary #0B2E6B with text #FFFFFF. Accent #F97316. Secondary accent #EAF0FF. Success #2F6B2D. Ink arrows #0B2E6B. Muted #667085. Text contrast at least 4.5:1.
+
+NEGATIVE LIST
+gradients or drop shadows filled orange cards except a clearly marked tool boundary mermaid or plantuml source syntax ASCII art tiny labels watermarks or logos node IDs as visible labels Preserve call order on lifelines. Do not invent actors. Keep request and response direction correct. No mermaid syntax such as graph LR, -->, subgraph. No plantuml syntax such as @startuml. No ASCII art. No watermarks or logos. No em dash characters in labels. Do not expose source notation.
+
+DIAGRAM TYPE
+sequence
+
+LAYOUT HINTS
+Use the following source only as guidance for structure. Convert the visual boxes, arrows, and labels.
+```
+@startuml
+left to right direction
+actor Operator
+actor "Human reviewer" as Human
+actor "Claude Agent SDK" as SDK
+actor GitHub
+rectangle "Agent SDK Ticket Enhancer" {{
+  usecase "Poll one ticket" as Poll
+  usecase "Judge ticket completeness" as Judge
+  usecase "Draft a candidate" as Draft
+  usecase "Enforce write scope" as Scope
+  usecase "Publish status and labels" as Publish
+}}
+Operator --> Poll
+Poll .> Judge : includes
+Poll .> Draft : includes
+Draft .> Scope : includes
+Poll --> Publish
+Human --> Publish : LGTM
+SDK --> Judge
+SDK --> Draft
+GitHub --> Publish
+@enduml
+```
+
+Convert the visual boxes, arrows, and labels. The image must show a finished diagram, not Mermaid or PlantUML code.

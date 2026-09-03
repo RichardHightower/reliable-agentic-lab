@@ -1,0 +1,17 @@
+flowchart TB
+    subgraph Loop["The loop, unchanged across both runtimes"]
+        Rubric["Rubric: required fields by kind"]
+        Contract["Contract: budgets and write scope"]
+        Cast["Role table: who may write what"]
+        Gate["Red gate: proper subset, exact LGTM"]
+    end
+
+    subgraph Runtime["The runtime, rewritten for each"]
+        Fences["How a role is fenced"]
+        Verdict["How the judge returns a verdict"]
+        Reader["How an answer is read back"]
+        Stops["Which computed exits fire"]
+    end
+
+    Loop --> Runtime
+    Runtime --> Same["The same ticket outcome:<br/>passed, waiting, or escalated"]

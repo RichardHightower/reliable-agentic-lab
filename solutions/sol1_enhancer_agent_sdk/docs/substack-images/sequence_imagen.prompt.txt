@@ -1,0 +1,46 @@
+REGENERATION FEEDBACK
+Render exactly five lifelines labeled loop.py, Enhancer, Agent SDK, Checks, and GitHub. Preserve the call order: loop.py polls Enhancer; Enhancer asks Agent SDK to judge; Agent SDK returns kind and present_fields; Enhancer asks Checks for check_fields; Checks returns ready or missing. Only the still-red branch drafts missing fields, receives candidate and cost, then calls check_stop and receives stop or retry. The ready-without-LGTM branch returns waiting to loop.py. The ready-and-LGTM branch updates ticket and labels on GitHub, then returns passed to loop.py. Do not add actors, calls, branches, source syntax, or a combined check_fields/check_stop label. Do not render the word "TOOLS" anywhere. Do not draw an orange dashed tool boundary around Enhancer, Agent SDK, Checks, or any other participants. Enhancer is Python outer control, not a tools role.
+
+FRAMING
+This is a article diagram for a technical presentation about ticket enhancer poll sequence with independent checks. Render an illustration of the concept below.
+
+STYLE
+White presentation canvas with crisp deep-navy outlined cards and arrows. Use a restrained orange dashed boundary for tools and a soft green outlined target repository. Prefer simple thin-line symbols only when they clarify a role. Plenty of whitespace. No gradients or shadows. Boxes, arrows, and labels. Labels at least 24 pixels at article scale. Arrows 2 to 3 px. Horizontal text. Landscape layout unless the structure is a tall flowchart. Article density. Clear labels. Limited node count. Key path visually dominant. Still simplified for editorial layout. The image must look like a professionally designed technical illustration, not a diagramming-tool screenshot.
+
+PALETTE
+Background #F8FAFD. Surface #FFFFFF. Primary #0B2E6B with text #FFFFFF. Accent #F97316. Secondary accent #EAF0FF. Success #2F6B2D. Ink arrows #0B2E6B. Muted #667085. Text contrast at least 4.5:1.
+
+NEGATIVE LIST
+gradients or drop shadows filled orange cards except a clearly marked tool boundary mermaid or plantuml source syntax ASCII art tiny labels watermarks or logos node IDs as visible labels Preserve call order on lifelines. Do not invent actors. Keep request and response direction correct. No mermaid syntax such as graph LR, -->, subgraph. No plantuml syntax such as @startuml. No ASCII art. No watermarks or logos. No em dash characters in labels. Do not expose source notation.
+
+DIAGRAM TYPE
+sequence
+
+LAYOUT HINTS
+Use the following source only as guidance for structure. Convert the visual boxes, arrows, and labels.
+```
+sequenceDiagram
+    participant L as loop.py
+    participant E as Enhancer
+    participant A as Agent SDK
+    participant C as Checks
+    participant G as GitHub
+    L->>E: poll(ticket)
+    E->>A: judge(ticket)
+    A-->>E: kind and present_fields
+    E->>C: check_fields
+    C-->>E: ready or missing
+    alt still red
+        E->>A: draft missing fields
+        A-->>E: candidate and cost
+        E->>C: check_stop
+        C-->>E: stop or retry
+    else ready without LGTM
+        E-->>L: waiting
+    else ready and LGTM
+        E->>G: update ticket and labels
+        E-->>L: passed
+    end
+```
+
+Convert the visual boxes, arrows, and labels. The image must show a finished diagram, not Mermaid or PlantUML code.

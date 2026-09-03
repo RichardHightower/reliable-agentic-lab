@@ -1,0 +1,21 @@
+{
+  "source": "docs/diagrams/five-nodes-review.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "e010a4b073c27db2c778326a87f0bbf1bc65bc118c5d4795de90d6f0e55cfe0f",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "Trigger<br/>one poll, from outside the model",
+    "Action<br/>one scoped job, done by the worker",
+    "Verify<br/>a checker that is not the worker",
+    "Memory<br/>files a later process can read",
+    "Exit<br/>pass, retry, or escalate"
+  ],
+  "edges": 6,
+  "png": "docs/substack-images/five-nodes-review_imagen.png",
+  "prompt": "docs/substack-images/five-nodes-review_imagen.prompt.txt"
+}

@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><style>
+:root{--canvas:#F8FAFD;--surface:#FFFFFF;--ink:#0B2E6B;--accent:#F97316;--success:#2F6B2D;--rule:#C9D6EA}
+*{box-sizing:border-box}body{margin:0;background:var(--canvas)}
+.wrap{width:1376px;padding:56px 64px}
+h2{margin:0 0 28px;font:700 34px/1.2 -apple-system,"Helvetica Neue",sans-serif;color:var(--ink);letter-spacing:-.01em}
+table{width:100%;border-collapse:collapse;font:400 21px/1.45 -apple-system,"Helvetica Neue",sans-serif;color:var(--ink)}
+thead th{text-align:left;font-weight:700;font-size:19px;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);padding:0 18px 14px;border-bottom:3px solid var(--accent)}
+tbody td{background:var(--surface);padding:18px;vertical-align:top;border-bottom:1px solid var(--rule)}
+tbody tr td:nth-child(2){font-weight:600}
+.icon{width:1px;padding-right:0;font-size:25px}
+code{font:500 19px/1.4 ui-monospace,Menlo,monospace;color:var(--ink)}
+</style>
+<div class="wrap"><h2>Four homes for an unattended loop</h2>
+<table><thead><tr><th></th><th>Home</th><th>What wakes it</th><th>What it costs</th><th>When it fits</th></tr></thead><tbody>
+<tr><td class="icon">💻</td><td>poll-forever</td><td>A sleep loop in your terminal</td><td>Nothing, and it dies with the shell</td><td>Watching it work the first time</td></tr>
+<tr><td class="icon">⏰</td><td>cron</td><td>A clock, on a box you already own</td><td>Polls that find nothing changed</td><td>A first real scheduler, behind <code>flock</code></td></tr>
+<tr><td class="icon">⚡</td><td>GitHub Actions</td><td>The ticket itself, on issue events</td><td>Runner minutes, only on real changes</td><td>Most teams, most of the time</td></tr>
+<tr><td class="icon">🖥️</td><td>ngrok or a Droplet</td><td>A webhook to a receiver you own</td><td>Nothing, or about $6 a month</td><td>When the receiver has to be yours</td></tr>
+</tbody></table></div>

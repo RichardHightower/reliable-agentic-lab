@@ -1,0 +1,21 @@
+{
+  "source": "docs/diagrams/one-table-three-runtimes.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "7f4be04c8b75621de6969cf1df35a7c07133f304e77c79c7ff24e09c7c6be94d",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "Role table<br/>orchestrator, doer, judge<br/>tools and paths, as data",
+    "Plain Python<br/>enforces by a missing method",
+    "Claude Agent SDK<br/>enforces by tool list and a hook",
+    "Deep Agents<br/>enforces by per-subagent tool list",
+    "Same answer:<br/>judge writes nothing<br/>doer writes tickets only"
+  ],
+  "edges": 6,
+  "png": "docs/substack-images/one-table-three-runtimes_imagen.png",
+  "prompt": "docs/substack-images/one-table-three-runtimes_imagen.prompt.txt"
+}

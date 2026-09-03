@@ -1,0 +1,23 @@
+{
+  "source": "../reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/diagrams/sequence.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "9d295a33a503c035fa2da144a45f63eedb1de4eefe691e9ac1607ba95a283c1a",
+  "kind": "sequence",
+  "language": "mermaid",
+  "nodes": [
+    "ticket",
+    "ticket",
+    "L",
+    "E",
+    "A",
+    "C",
+    "G"
+  ],
+  "edges": 6,
+  "png": "../reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/sequence_imagen.png",
+  "prompt": "../reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/sequence_imagen.prompt.txt"
+}

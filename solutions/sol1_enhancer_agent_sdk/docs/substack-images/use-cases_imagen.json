@@ -1,0 +1,26 @@
+{
+  "source": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/diagrams/use-cases.puml",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "60f2cf90ddf82987c8771804eccf7f69713964de3ba821e52d48b1594bb1cf08",
+  "kind": "sequence",
+  "language": "plantuml",
+  "nodes": [
+    "Operator",
+    "Human",
+    "SDK",
+    "GitHub",
+    "Poll",
+    "Publish",
+    "Human",
+    "SDK",
+    "Judge",
+    "Draft"
+  ],
+  "edges": 6,
+  "png": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/use-cases_imagen.png",
+  "prompt": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/use-cases_imagen.prompt.txt"
+}

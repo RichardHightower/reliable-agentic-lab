@@ -1,0 +1,22 @@
+graph LR
+  AG["AgentGraph sol1-enhancer"]
+  O["OrchestratorAgent enhancer-loop"]
+  W["WorkerAgent enhancer-doer"]
+  J["JudgeAgent enhancer-judge"]
+  AG -->|contains| O
+  AG -->|contains| W
+  AG -->|contains| J
+  W -->|uses| Rd[Read]
+  W -->|uses| Gp[Grep]
+  W -->|uses| Gl[Glob]
+  J -->|uses| Rd
+  J -->|uses| Gp
+  J -->|uses| Gl
+  classDef gnode fill:#E8F0FE,stroke:#174EA6,color:#202124
+  classDef orch fill:#FCE8D5,stroke:#B06000,color:#202124
+  classDef work fill:#E6F4EA,stroke:#137333,color:#202124
+  classDef judge fill:#E8F0FE,stroke:#174EA6,color:#202124
+  class AG gnode
+  class O orch
+  class W work
+  class J judge

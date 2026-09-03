@@ -1,0 +1,25 @@
+{
+  "source": "docs/diagrams/three-fences.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "ac1d825ad96d94f288d5a5cc7dbb6aab13b5a34385f0f4bf7722ed378f95a3cf",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "Fence 3: harness profile, what the runtime itself supplies",
+    "Fence 2: tool list, what this subagent was handed",
+    "Fence 1: path check, inside the write tool",
+    "One write call",
+    "Doer subagent",
+    "tickets only, the candidate lands",
+    "Any other path",
+    "Nothing to call",
+    "No unscoped filesystem tools"
+  ],
+  "edges": 5,
+  "png": "docs/substack-images/three-fences_imagen.png",
+  "prompt": "docs/substack-images/three-fences_imagen.prompt.txt"
+}

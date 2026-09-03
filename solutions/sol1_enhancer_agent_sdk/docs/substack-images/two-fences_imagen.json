@@ -1,0 +1,24 @@
+{
+  "source": "../reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/two-fences.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "aee0d94331bf45f98402e9b940d068f5bda50f1c2f90f24bd73011739090b98e",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "Fence 1. Tool list",
+    "tools = Read, Glob, Grep",
+    "NO_WRITE strips Edit, Write, NotebookEdit, Bash",
+    "Fence 2. PreToolUse hook",
+    "roles.scope_hook",
+    "deny uses hookSpecificOutput",
+    "SDK tool call",
+    "Judge path: nothing to hook"
+  ],
+  "edges": 5,
+  "png": "../reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/two-fences_imagen.png",
+  "prompt": "../reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/two-fences_imagen.prompt.txt"
+}

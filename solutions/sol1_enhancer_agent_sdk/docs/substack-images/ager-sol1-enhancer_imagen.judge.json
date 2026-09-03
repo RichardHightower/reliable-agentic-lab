@@ -1,0 +1,15 @@
+{
+  "pass": true,
+  "nodes": [
+    "AgentGraph sol1-enhancer",
+    "OrchestratorAgent enhancer-loop",
+    "WorkerAgent enhancer-doer",
+    "JudgeAgent enhancer-judge",
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "edges": 9,
+  "misses": [],
+  "note": "Mechanical checks only. A vision pass must confirm every source label is readable text and that no source syntax is visible."
+}

@@ -1,0 +1,27 @@
+{
+  "source": "docs/diagrams/runtime-comparison.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "fd9aec9f364af269266d5e281060f8b78de734e4eec29b34876fffc538701b32",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "The loop, unchanged across both runtimes",
+    "Rubric: required fields by kind",
+    "Contract: budgets and write scope",
+    "Role table: who may write what",
+    "Red gate: proper subset, exact LGTM",
+    "The runtime, rewritten for each",
+    "How a role is fenced",
+    "How the judge returns a verdict",
+    "How an answer is read back",
+    "Which computed exits fire",
+    "The same ticket outcome:<br/>passed, waiting, or escalated"
+  ],
+  "edges": 2,
+  "png": "docs/substack-images/runtime-comparison_imagen.png",
+  "prompt": "docs/substack-images/runtime-comparison_imagen.prompt.txt"
+}

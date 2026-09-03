@@ -1,0 +1,33 @@
+FRAMING
+This is a article diagram for a technical presentation about The five nodes software owns in a production loop: trigger, action, verify, memory, and exit. Render an illustration of the concept below.
+
+STYLE
+White presentation canvas with crisp deep-navy outlined cards and arrows. Use a restrained orange dashed boundary for tools and a soft green outlined target repository. Prefer simple thin-line symbols only when they clarify a role. Plenty of whitespace. No gradients or shadows. Boxes, arrows, and labels. Labels at least 24 pixels at article scale. Arrows 2 to 3 px. Horizontal text. Landscape layout unless the structure is a tall flowchart. Article density. Clear labels. Limited node count. Key path visually dominant. Still simplified for editorial layout. The image must look like a professionally designed technical illustration, not a diagramming-tool screenshot.
+
+PALETTE
+Background #F8FAFD. Surface #FFFFFF. Primary #0B2E6B with text #FFFFFF. Accent #F97316. Secondary accent #EAF0FF. Success #2F6B2D. Ink arrows #0B2E6B. Muted #667085. Text contrast at least 4.5:1.
+
+NEGATIVE LIST
+gradients or drop shadows filled orange cards except a clearly marked tool boundary mermaid or plantuml source syntax ASCII art tiny labels watermarks or logos node IDs as visible labels Do not invent or duplicate nodes. Do not reroute edges. Keep horizontal text. Do not print node IDs as labels. No mermaid syntax such as graph LR, -->, subgraph. No plantuml syntax such as @startuml. No ASCII art. No watermarks or logos. No em dash characters in labels. Do not expose source notation.
+
+DIAGRAM TYPE
+flowchart
+
+LAYOUT HINTS
+Use the following source only as guidance for structure. Convert the visual boxes, arrows, and labels.
+```
+flowchart LR
+    Trigger["Trigger<br/>one poll, from outside the model"]
+    Action["Action<br/>one scoped job, done by the worker"]
+    Verify["Verify<br/>a checker that is not the worker"]
+    Memory["Memory<br/>files a later process can read"]
+    Exit["Exit<br/>pass, retry, or escalate"]
+
+    Trigger --> Action --> Verify --> Exit
+    Action --> Memory
+    Verify --> Memory
+    Exit -->|retry, same run| Action
+    Memory -.->|restore point| Trigger
+```
+
+Convert the visual boxes, arrows, and labels. The image must show a finished diagram, not Mermaid or PlantUML code.

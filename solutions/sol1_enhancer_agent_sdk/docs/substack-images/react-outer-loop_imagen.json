@@ -1,0 +1,21 @@
+{
+  "source": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/react-outer-loop.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "c2f14ce002e7d4039e31fd345295b458e2b86abb71be75403408af933cc4c270",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "Perceive<br/>Trigger",
+    "Reason<br/>Plan",
+    "Act<br/>Tool or write",
+    "Observe<br/>Tests, files, scores",
+    "Decide<br/>Pass, retry, escalate"
+  ],
+  "edges": 5,
+  "png": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/react-outer-loop_imagen.png",
+  "prompt": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/react-outer-loop_imagen.prompt.txt"
+}

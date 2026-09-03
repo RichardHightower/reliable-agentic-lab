@@ -42,3 +42,7 @@ solutions/**/debug.log
 
 # Generated Marp HTML (PDF remains tracked).
 slides/**/slides.html
+
+# scratch and generated artifacts
+tmp/
+output/pdf/

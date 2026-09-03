@@ -1,0 +1,1685 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A loop engineering guide built on the sol1 ticket enhancer: five nodes, bounded authority, computed exits, and the papers behind the design.">
+<style>:root{color-scheme:light}html{-webkit-text-size-adjust:100%}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Python Owns the Loop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&display=swap">
+<style>
+  /* Spillwave loop palette. One deliberate light theme, painted explicitly,
+     so the page holds on a light or dark host ground. */
+  :root {
+    --ground: #EDF2F7;
+    --band: #DFE7F0;
+    --panel: #FFFFFF;
+    --panel-2: #DFE7F0;
+    --navy: #0B2B58;
+    --ink: #101827;
+    --ink-2: #50627A;
+    --ink-3: #7A8AA0;
+    --rule: #C9D4E2;
+    --rule-soft: #E2E8F0;
+    --accent: #EA5B0C;
+    --accent-ink: #B4470A;
+    --accent-wash: #FDEDE1;
+    --deny: #A3231B;
+    --go: #0F6E5B;
+    --code-bg: #F7F9FC;
+    --display: "Newsreader", Georgia, "Times New Roman", serif;
+    --sans: "Geist", "Inter", system-ui, "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+  .prose { max-width: 68ch; margin-inline: auto; }
+  .prose > * + * { margin-top: 1.05em; }
+
+  a { color: var(--navy); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:hover { color: var(--accent-ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    color: var(--navy);
+    text-wrap: balance;
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+  }
+  h4 { font-family: var(--sans); margin: 0; font-weight: 700; letter-spacing: -0.005em; color: var(--ink); }
+
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  code, pre, .mono { font-family: var(--mono); }
+  p code, li code, td code, dd code {
+    font-size: 0.82em;
+    background: var(--code-bg);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: 0.08em 0.32em;
+    color: var(--navy);
+  }
+
+  /* ---------- masthead ---------- */
+
+  .gauge {
+    height: 26px;
+    background:
+      repeating-linear-gradient(to right, var(--rule) 0 1px, transparent 1px 16px);
+    background-position: bottom;
+    background-size: 100% 9px;
+    background-repeat: repeat-x;
+    border-bottom: 1px solid var(--rule);
+    position: relative;
+  }
+  .gauge::after {
+    content: "";
+    position: absolute;
+    left: 63%;
+    bottom: 0;
+    width: 2px;
+    height: 20px;
+    background: var(--accent);
+  }
+
+  header.masthead { padding: 58px 0 42px; }
+  header.masthead h1 {
+    font-size: clamp(46px, 7.4vw, 86px);
+    font-weight: 600;
+    line-height: 0.98;
+    letter-spacing: -0.042em;
+  }
+  header.masthead h1 span { display: block; color: var(--accent); }
+  .standfirst {
+    font-size: clamp(18px, 2.2vw, 21px);
+    line-height: 1.5;
+    max-width: 34ch;
+    margin-top: 24px;
+    color: var(--ink-2);
+  }
+  .standfirst em { font-style: italic; color: var(--navy); font-family: var(--display); font-size: 1.05em; }
+
+  .masthead-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    gap: 48px;
+    align-items: end;
+  }
+  @media (max-width: 820px) { .masthead-grid { grid-template-columns: 1fr; gap: 30px; } }
+
+  .spec {
+    border-top: 2px solid var(--navy);
+    padding-top: 14px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--ink-2);
+  }
+  .spec dl { display: grid; grid-template-columns: 10.6em 1fr; gap: 5px 14px; margin: 0; }
+  .spec dt {
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+    font-size: 10px;
+    font-weight: 800;
+    padding-top: 4px;
+  }
+  .spec dd { margin: 0; }
+
+  /* ---------- nav ---------- */
+
+  nav.rail {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--panel);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  nav.rail ul { display: flex; list-style: none; margin: 0; padding: 0; overflow-x: auto; scrollbar-width: thin; }
+  nav.rail li { flex: none; }
+  nav.rail a {
+    display: block;
+    padding: 11px 16px;
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    text-decoration: none;
+    border-right: 1px solid var(--rule-soft);
+    white-space: nowrap;
+  }
+  nav.rail a:hover { background: var(--band); color: var(--navy); }
+
+  /* ---------- sections ---------- */
+
+  section { padding: 64px 0 12px; }
+  .sec-head { max-width: 68ch; margin-inline: auto; margin-bottom: 28px; }
+  .sec-head h2 { font-size: clamp(30px, 4.4vw, 50px); line-height: 1.03; margin-top: 10px; }
+  .sec-head .kicker { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .sec-head .kicker .node { color: var(--accent); border: 1px solid var(--accent); border-radius: 2px; padding: 2px 7px; }
+  .sec-head .kicker span:last-child { color: var(--ink-3); }
+  h3 { font-size: 25px; margin-top: 1.9em; letter-spacing: -0.02em; }
+
+  .lede { font-size: 19.5px; line-height: 1.55; color: var(--ink); }
+
+  blockquote {
+    margin: 1.7em 0;
+    padding: 4px 0 4px 22px;
+    border-left: 3px solid var(--accent);
+    font-family: var(--display);
+    font-size: 22px;
+    line-height: 1.42;
+    color: var(--navy);
+  }
+
+  hr.band { border: 0; border-top: 1px solid var(--rule); margin: 58px 0 0; }
+
+  /* ---------- code ---------- */
+
+  figure.listing { margin: 30px auto; max-width: 880px; }
+  .listing-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 8px;
+  }
+  .listing-head .num {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    background: var(--navy);
+    color: #fff;
+    padding: 3px 8px;
+    border-radius: 2px;
+  }
+  .listing-head .num.bad { background: var(--deny); }
+  .listing-head .cap { font-family: var(--display); font-weight: 600; font-size: 19px; color: var(--navy); letter-spacing: -0.015em; }
+  .listing-head .file { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+  pre {
+    margin: 0;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-top: 0;
+    overflow-x: auto;
+    padding: 16px 18px;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--ink);
+    tab-size: 4;
+  }
+  pre code { font-size: inherit; background: none; border: 0; padding: 0; color: inherit; }
+
+  ol.notes {
+    list-style: none;
+    margin: 14px 0 0;
+    padding: 0;
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--ink-2);
+    display: grid;
+    gap: 8px;
+  }
+  ol.notes li { display: grid; grid-template-columns: 1.6em 1fr; gap: 6px; }
+  ol.notes li .n { color: var(--accent); font-family: var(--mono); font-size: 12.5px; font-weight: 700; }
+
+  /* highlight.js, tuned light */
+  .hljs-keyword, .hljs-built_in { color: var(--accent-ink); font-weight: 600; }
+  .hljs-string, .hljs-meta .hljs-string { color: var(--go); }
+  .hljs-comment { color: var(--ink-3); font-style: italic; }
+  .hljs-number, .hljs-literal { color: var(--deny); }
+  .hljs-title, .hljs-title.function_, .hljs-title.class_ { color: var(--navy); font-weight: 700; }
+  .hljs-params { color: var(--ink-2); }
+  .hljs-attr, .hljs-variable { color: var(--ink); }
+
+  /* ---------- figures ---------- */
+
+  figure.fig { margin: 34px auto; max-width: 960px; }
+  figure.fig .frame { border: 1px solid var(--rule); background: var(--panel); padding: 20px; overflow-x: auto; }
+  figure.fig svg { display: block; width: 100%; height: auto; min-width: 620px; color: var(--navy); }
+  figcaption { margin-top: 11px; font-size: 14.5px; line-height: 1.5; color: var(--ink-2); max-width: 64ch; }
+  .svg-box { fill: var(--band); stroke: currentColor; stroke-width: 1.2; }
+  .svg-box-2 { fill: none; stroke: currentColor; stroke-width: 1.2; }
+  .svg-ctx { fill: none; stroke: currentColor; stroke-width: 1; stroke-dasharray: 5 4; opacity: .45; }
+  .svg-accent { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+  .svg-accent-fill { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 1.3; }
+  .svg-line { stroke: currentColor; stroke-width: 1.3; fill: none; }
+  .svg-deny { stroke: var(--deny); stroke-width: 1.4; fill: none; }
+  text { font-family: var(--mono); fill: currentColor; }
+  .t-title { font-size: 13px; font-weight: 700; }
+  .t-sub { font-size: 11px; fill: var(--ink-2); }
+  .t-lab { font-size: 11px; fill: var(--ink-2); }
+  .t-accent { font-size: 11px; fill: var(--accent-ink); font-weight: 700; }
+  .t-deny { font-size: 11px; fill: var(--deny); font-weight: 700; }
+
+  /* ---------- tables ---------- */
+
+  .table-scroll { overflow-x: auto; margin: 26px auto; max-width: 880px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 16px 10px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th {
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    border-bottom: 1px solid var(--rule);
+    font-weight: 800;
+  }
+  td.mono, th.mono { font-family: var(--mono); font-size: 13px; }
+  td strong { color: var(--navy); }
+
+  /* ---------- cards ---------- */
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 30px auto;
+    max-width: 960px;
+  }
+  .cards > div { background: var(--panel); padding: 22px 20px 24px; }
+  .cards h4 { font-family: var(--display); font-weight: 700; font-size: 22px; color: var(--navy); margin-bottom: 8px; letter-spacing: -0.02em; }
+  .cards p { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--ink-2); }
+  .cards .tag {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 10px;
+  }
+
+  /* ---------- poll ladder ---------- */
+
+  .ladder { max-width: 900px; margin: 30px auto; border-top: 1px solid var(--rule); }
+  .step {
+    display: grid;
+    grid-template-columns: 3.4em minmax(0, 1fr) 9em;
+    gap: 18px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: start;
+  }
+  @media (max-width: 640px) { .step { grid-template-columns: 2.6em 1fr; } .step .out { grid-column: 2; } }
+  .step .idx { font-family: var(--display); font-weight: 600; font-size: 30px; line-height: 1; color: var(--rule); letter-spacing: -0.04em; }
+  .step h4 { margin: 0 0 4px; font-size: 16px; color: var(--navy); }
+  .step p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--ink-2); }
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+  }
+  .chip.pass { color: var(--go); }
+  .chip.wait { color: var(--accent); }
+  .chip.esc { color: var(--deny); }
+  .chip.neutral { color: var(--ink-3); }
+
+  /* ---------- interactive panels ---------- */
+
+  .panel { max-width: 880px; margin: 32px auto; border: 1px solid var(--rule); background: var(--panel); }
+  .panel-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--band);
+  }
+  .panel-head h4 { font-family: var(--display); font-weight: 600; font-size: 19px; color: var(--navy); letter-spacing: -0.015em; }
+  .panel-head .hint { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-left: auto; }
+  .panel-body { padding: 20px; display: grid; gap: 20px; }
+  @media (min-width: 760px) { .panel-body.split { grid-template-columns: 1fr 1fr; gap: 28px; } }
+
+  .field-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: block;
+    margin-bottom: 9px;
+  }
+  .segmented { display: flex; border: 1px solid var(--rule); width: fit-content; }
+  .segmented button {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 14px;
+    border: 0;
+    border-right: 1px solid var(--rule);
+    background: var(--panel);
+    color: var(--ink-2);
+    cursor: pointer;
+  }
+  .segmented button:last-child { border-right: 0; }
+  .segmented button[aria-pressed="true"] { background: var(--navy); color: #fff; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chips button {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 5px 10px;
+    border: 1px solid var(--rule);
+    background: transparent;
+    color: var(--ink-2);
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .chips button[aria-pressed="true"] { background: var(--accent-wash); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  .chips button.ghost { opacity: .5; text-decoration: line-through; }
+
+  .readout {
+    background: var(--code-bg);
+    border: 1px solid var(--rule-soft);
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--ink);
+    white-space: pre-wrap;
+    overflow-x: auto;
+  }
+  .verdict {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 13.5px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 12px;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; flex: none; }
+  .verdict.ok { color: var(--go); }
+  .verdict.no { color: var(--deny); }
+
+  .numgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+  .numgrid label { display: block; }
+  .numgrid input[type="number"] {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 7px 9px;
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+  }
+  .checkrow { display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); }
+  .checkrow input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+  .gates { display: grid; gap: 7px; }
+  .gate {
+    display: grid;
+    grid-template-columns: 1.4em 1fr auto;
+    gap: 10px;
+    align-items: baseline;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    padding: 8px 11px;
+    border: 1px solid var(--rule-soft);
+    color: var(--ink-3);
+  }
+  .gate.fires { border-color: var(--deny); color: var(--deny); background: #FBEDEB; font-weight: 700; }
+  .gate.passed { color: var(--ink-2); }
+  .gate .state { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+  /* ---------- papers ---------- */
+
+  .papers { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); max-width: 960px; margin: 30px auto; }
+  .paper { background: var(--panel); padding: 22px 24px; display: grid; grid-template-columns: 7.6em minmax(0, 1fr); gap: 20px; }
+  @media (max-width: 640px) { .paper { grid-template-columns: 1fr; gap: 6px; } }
+  .paper .id { font-family: var(--mono); font-size: 11px; color: var(--ink-3); padding-top: 6px; }
+  .paper h4 { font-family: var(--display); font-weight: 700; font-size: 23px; letter-spacing: -0.02em; margin-bottom: 4px; }
+  .paper h4 a { color: var(--navy); text-decoration: none; }
+  .paper h4 a:hover { color: var(--accent-ink); text-decoration: underline; }
+  .paper .who { font-size: 13px; color: var(--ink-3); }
+  .paper p { margin: 9px 0 0; font-size: 15px; line-height: 1.5; color: var(--ink-2); }
+  .paper .use { color: var(--accent-ink); font-weight: 700; }
+
+  /* ---------- glossary ---------- */
+
+  dl.gloss { max-width: 880px; margin: 26px auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.9fr); }
+  @media (max-width: 700px) { dl.gloss { grid-template-columns: 1fr; } }
+  dl.gloss dt {
+    font-family: var(--display);
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    padding: 13px 16px 13px 0;
+    border-top: 1px solid var(--rule-soft);
+    color: var(--navy);
+  }
+  dl.gloss dd { margin: 0; padding: 13px 0; border-top: 1px solid var(--rule-soft); font-size: 15px; line-height: 1.5; color: var(--ink-2); }
+  @media (max-width: 700px) { dl.gloss dd { border-top: 0; padding-top: 0; } }
+
+  footer.end {
+    border-top: 2px solid var(--navy);
+    margin-top: 62px;
+    padding: 32px 0 74px;
+    font-size: 15px;
+    color: var(--ink-2);
+  }
+  footer.end a { font-family: var(--mono); font-size: 13px; }
+  .srcs { display: grid; gap: 7px; margin-top: 16px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="gauge" aria-hidden="true"></div>
+
+<header class="masthead">
+  <div class="wrap masthead-grid">
+    <div>
+      <p class="eyebrow" style="margin:0 0 18px">Loop engineering &middot; harness engineering</p>
+      <h1>Python owns<br><span>the loop</span></h1>
+      <p class="standfirst">A production loop is not <em>call the model until it says done</em>. The model drafts and grades. Software holds every transition.</p>
+    </div>
+    <div class="spec">
+      <dl>
+        <dt>Worked example</dt><dd>Ticket enhancer, Claude Agent SDK port</dd>
+        <dt>Roles</dt><dd>orchestrator &middot; doer &middot; judge</dd>
+        <dt>Owner of stop</dt><dd>check_stop.py, never the model</dd>
+        <dt>Human gate</dt><dd>an exact <code>LGTM</code> comment</dd>
+        <dt>Code</dt><dd><a href="https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol1_enhancer_agent_sdk">sol1_enhancer_agent_sdk</a></dd>
+      </dl>
+    </div>
+  </div>
+</header>
+
+<nav class="rail" aria-label="Sections">
+  <div class="wrap" style="padding:0">
+    <ul>
+      <li><a href="#governor">Why a governor</a></li>
+      <li><a href="#nodes">Five nodes</a></li>
+      <li><a href="#example">The enhancer</a></li>
+      <li><a href="#authority">Bounded authority</a></li>
+      <li><a href="#verify">Verify</a></li>
+      <li><a href="#exit">Exit</a></li>
+      <li><a href="#poll">One poll</a></li>
+      <li><a href="#tests">Tests</a></li>
+      <li><a href="#papers">Papers</a></li>
+      <li><a href="#glossary">Glossary</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+
+  <!-- ============ 1. WHY A GOVERNOR ============ -->
+  <section id="governor">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Problem</span> <span>the loop everyone ships first</span></p>
+        <h2>A turbine with the governor removed</h2>
+      </div>
+      <div class="prose">
+        <p class="lede">Two failures show up in every agent loop that has no software around it. The first is the agent that declares a ticket done because it said so. The second is quieter and worse: the agent that will not stop, editing the same ticket forever, missing the same three headings it missed last round, reporting motion.</p>
+        <p>Both come from the same design. The stop condition lives inside the reply. A high powered model without a governor is a turbine spinning toward its own destruction, because continuation is what the model is for. The product you ship is the governor around that spin.</p>
+        <p>Here is that loop, written honestly. Every marked line is a failure.</p>
+      </div>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num bad">Listing 1</span>
+          <span class="cap">The intern grades the homework. Do not ship this.</span>
+          <span class="file">negative example</span>
+        </div>
+<pre><code class="language-python">ticket = open("ticket.md").read()
+
+while True:                                 # 1. no round count, no dollar cap
+    reply = model(
+        "Improve this ticket until it is DONE.\n" + ticket
+    )
+    if "DONE" in reply:                     # 2. stop is a token the model may emit
+        open("ticket.md", "w").write(reply) # 3. writer overwrites the ticket it graded
+        break
+    ticket = reply                          # 4. next turn's memory is a string in RAM
+</code></pre>
+        <ol class="notes">
+          <li><span class="n">1.</span> <span>The loop never counts rounds or dollars. There is no exit except vocabulary.</span></li>
+          <li><span class="n">2.</span> <span>Stop lives in the model. <code>"DONE"</code> is a token the author is allowed to emit.</span></li>
+          <li><span class="n">3.</span> <span>The writer is the grader. The same string that claims completeness overwrites the ticket.</span></li>
+          <li><span class="n">4.</span> <span>There is no evidence file. The next turn's memory is a string in RAM.</span></li>
+        </ol>
+      </figure>
+
+      <div class="prose">
+        <p>A clever prompt survives one ticket. At ten tickets a day it drifts. At a hundred, nobody remembers what good looked like, and the bottleneck is a person reading every diff to decide whether a confident paragraph counts as evidence.</p>
+      </div>
+
+      <div class="cards">
+        <div>
+          <span class="tag">failure</span>
+          <h4>Context rot</h4>
+          <p>The chat is the only memory. Tool dumps bury the original ticket. The fact is still in the window and the model can no longer find it.</p>
+        </div>
+        <div>
+          <span class="tag">failure</span>
+          <h4>Runaway iteration</h4>
+          <p>Unbounded authority: any tool, no allow list, no path check. The worker fires invented calls, burns tokens, and reports motion.</p>
+        </div>
+        <div>
+          <span class="tag">failure</span>
+          <h4>False completeness</h4>
+          <p>The worker says done. DONE is in the reply. Nobody ran verify and nobody wrote an evidence file.</p>
+        </div>
+        <div>
+          <span class="tag">failure</span>
+          <h4>Stagnation</h4>
+          <p>The same gap twice, dressed as progress. Missing criteria in round one, missing them in round two with a more confident paragraph around the hole.</p>
+        </div>
+      </div>
+
+      <div class="prose">
+        <blockquote>If the same model, in the same thread, in its own words, is allowed to stop the run, you do not have a loop. You have a turbine with the governor removed.</blockquote>
+      </div>
+      <hr class="band">
+    </div>
+  </section>
+
+  <!-- ============ 2. FIVE NODES ============ -->
+  <section id="nodes">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Model</span> <span>what the two disciplines actually name</span></p>
+        <h2>Five nodes, and the harness around them</h2>
+      </div>
+      <div class="prose">
+        <p><strong>Loop engineering</strong> is designing the cycle the agent runs, and deciding who is allowed to stop it. The unit of work is one controlled pass, not a single model reply. The model proposes the next action. Software owns five steps, and each step is a node.</p>
+        <p><strong>Harness engineering</strong> is the software around that cycle: who may write, what counts as done, when to stop, and which context a role may see. Loop engineering designs the cycle. Harness engineering is what makes the cycle safe to run unattended.</p>
+      </div>
+
+      <figure class="fig">
+        <div class="frame">
+          <svg viewBox="0 0 900 300" role="img" aria-label="One pass through a production loop: trigger, action, verify, memory and exit, with the model's inner reason-act-observe cycle contained inside the action node.">
+            <defs>
+              <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+              </marker>
+              <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"></path>
+              </marker>
+            </defs>
+
+            <line class="svg-line" x1="20" y1="52" x2="880" y2="52" marker-start="url(#ar)" marker-end="url(#ar)"></line>
+            <rect x="330" y="40" width="240" height="22" fill="var(--panel)"></rect>
+            <text class="t-accent" x="450" y="56" text-anchor="middle">SOFTWARE OWNS EVERY TRANSITION</text>
+
+            <rect class="svg-box" x="20" y="92" width="140" height="66"></rect>
+            <text class="t-title" x="90" y="120" text-anchor="middle">TRIGGER</text>
+            <text class="t-sub" x="90" y="140" text-anchor="middle">issue, poll, hook</text>
+
+            <rect class="svg-box" x="200" y="92" width="140" height="66"></rect>
+            <text class="t-title" x="270" y="120" text-anchor="middle">ACTION</text>
+            <text class="t-sub" x="270" y="140" text-anchor="middle">one scoped job</text>
+
+            <rect class="svg-box" x="380" y="92" width="140" height="66"></rect>
+            <text class="t-title" x="450" y="120" text-anchor="middle">VERIFY</text>
+            <text class="t-sub" x="450" y="140" text-anchor="middle">not the worker</text>
+
+            <rect class="svg-box" x="560" y="92" width="140" height="66"></rect>
+            <text class="t-title" x="630" y="120" text-anchor="middle">MEMORY</text>
+            <text class="t-sub" x="630" y="140" text-anchor="middle">files on disk</text>
+
+            <rect class="svg-box" x="740" y="92" width="140" height="66"></rect>
+            <text class="t-title" x="810" y="118" text-anchor="middle">EXIT</text>
+            <text class="t-sub" x="810" y="136" text-anchor="middle">pass, retry,</text>
+            <text class="t-sub" x="810" y="150" text-anchor="middle">or escalate</text>
+
+            <line class="svg-line" x1="164" y1="125" x2="194" y2="125" marker-end="url(#ar)"></line>
+            <line class="svg-line" x1="344" y1="125" x2="374" y2="125" marker-end="url(#ar)"></line>
+            <line class="svg-line" x1="524" y1="125" x2="554" y2="125" marker-end="url(#ar)"></line>
+            <line class="svg-line" x1="704" y1="125" x2="734" y2="125" marker-end="url(#ar)"></line>
+
+            <path class="svg-line" d="M 810 158 L 810 205 L 90 205 L 90 162" marker-end="url(#ar)" stroke-dasharray="4 4"></path>
+            <rect x="360" y="195" width="180" height="20" fill="var(--panel)"></rect>
+            <text class="t-lab" x="450" y="210" text-anchor="middle">retry = round + 1</text>
+
+            <rect class="svg-accent-fill" x="150" y="238" width="240" height="46" rx="3"></rect>
+            <text class="t-accent" x="270" y="257" text-anchor="middle">INNER ReAct</text>
+            <text class="t-sub" x="270" y="274" text-anchor="middle">reason &#8594; act &#8594; observe</text>
+            <line class="svg-accent" x1="270" y1="162" x2="270" y2="234" marker-end="url(#ar-a)" stroke-dasharray="4 3"></line>
+            <text class="t-lab" x="404" y="266">all the model owns</text>
+          </svg>
+        </div>
+        <figcaption>One pass. The inner reason, act, observe cycle is real and every coding agent runs some version of it, but it sits entirely inside the action node. The product you ship is the outer control: what starts a turn, who checks the result, what is written down, and which of the three doors the run leaves by.</figcaption>
+      </figure>
+
+      <div class="prose">
+        <h3>The five nodes</h3>
+        <p><strong>Trigger.</strong> Something outside the model starts a turn: an issue, a poll, a webhook. The model does not get to feel like going again. A timer that fires when no state has changed is not a trigger, it is a token burn with no new evidence.</p>
+        <p><strong>Action.</strong> One scoped job, done by a worker. An agent is a model given a role: a prompt, a declared tool list, a declared path check. The worker is the agent assigned the action, not every tool the platform owns.</p>
+        <p><strong>Verify.</strong> A checker that is not the worker, plus a deterministic fact. Asking the author whether the homework is done is not verify.</p>
+        <p><strong>Memory.</strong> Files a later process can read: a ticket, a JSON state file, a GitHub issue. Chat history is not a restore point.</p>
+        <p><strong>Exit.</strong> The run has to end. The ticket ships, you try again because the gap can still change, or a person has to look. The model can type DONE. Software still picks which of the three actually happens.</p>
+
+        <h3>Four properties of one iteration</h3>
+        <p>Miss one and the next turn cannot be trusted.</p>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th style="width:15em">Property</th><th>What it means</th><th style="width:14em">Where it lives here</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Explicit state</strong></td><td>A later pass reads files, it does not replay the chat.</td><td class="mono">ticket markdown, .harness/*.json</td></tr>
+            <tr><td><strong>Bounded authority</strong></td><td>A role uses only the tools and paths its row in the table allows.</td><td class="mono">roleplan.py, PreToolUse</td></tr>
+            <tr><td><strong>Observable evidence</strong></td><td>A candidate file, a judge report, a test result. Something you can point at later.</td><td class="mono">*.enhancer-candidate.md</td></tr>
+            <tr><td><strong>External transition</strong></td><td>Software decides pass, retry, or escalate. The model does not get the vote.</td><td class="mono">check_fields, check_stop</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="prose">
+        <h3>Three kinds of state, kept apart</h3>
+        <p>On disk: the ticket, the trace, the plan. In process: the current budget, signature, and round. Never in the transcript: writes, stop, and the release token. Context windows reset. Ticket files do not.</p>
+        <p>Isolated context does two jobs. It keeps a child's window small so the agent is not overwhelmed, and it splits the problem into a smaller unit of work carrying only the context that job needs. That is mechanical sympathy for a machine whose recall sags in the middle of a long window, which is what <a href="https://arxiv.org/abs/2307.03172">Lost in the Middle</a> measured. Put the patch, the research dump, and the plan on disk. Give the parent a short summary and a score.</p>
+        <p>Banking learned the other half a century ago. The person who writes the check is not the person who approves it. Maker and checker have to be different things, not different prompts in the same thread. A role name in a prompt is not a fence. The fence is the tool list, the path check, and a child session the parent does not share.</p>
+      </div>
+      <hr class="band">
+    </div>
+  </section>
+
+  <!-- ============ 3. THE EXAMPLE ============ -->
+  <section id="example">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Example</span> <span>one program, start to finish</span></p>
+        <h2>A ticket enhancer with three roles</h2>
+      </div>
+      <div class="prose">
+        <p class="lede">Vague GitHub issue in. Rubric ready ticket out. GitHub is the inbox: a human opens an issue, the loop writes a local markdown ticket, scores it against a kind specific rubric, drafts a better body when the rubric is red, and waits for an exact <code>LGTM</code> comment before releasing the ticket downstream.</p>
+        <p>Nobody sits in a chat driving it. The orchestrator polls. The only human input that changes the state machine is that one exact comment. Three roles run the job, and only two of them are model subagents.</p>
+      </div>
+
+      <figure class="fig">
+        <div class="frame">
+          <svg viewBox="0 0 940 330" role="img" aria-label="Role graph: a Python orchestrator spawns a doer subagent and a judge subagent, each in its own context window, neither holding a write tool; both return text to Python, which writes files and decides ready and stop.">
+            <defs>
+              <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+              </marker>
+            </defs>
+            <rect class="svg-ctx" x="20" y="56" width="230" height="176" rx="4"></rect>
+            <text class="t-lab" x="135" y="48" text-anchor="middle">own context window</text>
+            <rect class="svg-box" x="38" y="80" width="194" height="128"></rect>
+            <text class="t-title" x="135" y="112" text-anchor="middle">DOER</text>
+            <text class="t-sub" x="135" y="132" text-anchor="middle">maker &middot; the worker</text>
+            <text class="t-sub" x="135" y="150" text-anchor="middle">rewrites the ticket body</text>
+            <rect class="svg-accent-fill" x="76" y="166" width="116" height="24" rx="2"></rect>
+            <text class="t-accent" x="134" y="182" text-anchor="middle">NO WRITE TOOL</text>
+
+            <rect class="svg-ctx" x="690" y="56" width="230" height="176" rx="4"></rect>
+            <text class="t-lab" x="805" y="48" text-anchor="middle">own context window</text>
+            <rect class="svg-box" x="708" y="80" width="194" height="128"></rect>
+            <text class="t-title" x="805" y="112" text-anchor="middle">JUDGE</text>
+            <text class="t-sub" x="805" y="132" text-anchor="middle">checker</text>
+            <text class="t-sub" x="805" y="150" text-anchor="middle">reports present fields</text>
+            <rect class="svg-accent-fill" x="746" y="166" width="116" height="24" rx="2"></rect>
+            <text class="t-accent" x="804" y="182" text-anchor="middle">NO WRITE TOOL</text>
+
+            <rect class="svg-box-2" x="378" y="94" width="184" height="100" stroke-width="2"></rect>
+            <text class="t-title" x="470" y="126" text-anchor="middle">ORCHESTRATOR</text>
+            <text class="t-sub" x="470" y="146" text-anchor="middle">Python, not an agent</text>
+            <text class="t-sub" x="470" y="166" text-anchor="middle">enhancer.py</text>
+
+            <line class="svg-line" x1="374" y1="118" x2="256" y2="118" marker-end="url(#ar2)"></line>
+            <text class="t-lab" x="315" y="110" text-anchor="middle">spawn</text>
+            <line class="svg-line" x1="256" y1="170" x2="374" y2="170" marker-end="url(#ar2)"></line>
+            <text class="t-lab" x="315" y="188" text-anchor="middle">markdown text</text>
+
+            <line class="svg-line" x1="566" y1="118" x2="684" y2="118" marker-end="url(#ar2)"></line>
+            <text class="t-lab" x="625" y="110" text-anchor="middle">spawn</text>
+            <line class="svg-line" x1="684" y1="170" x2="566" y2="170" marker-end="url(#ar2)"></line>
+            <text class="t-lab" x="625" y="188" text-anchor="middle">kind + fields</text>
+
+            <line class="svg-deny" x1="262" y1="292" x2="678" y2="292" stroke-dasharray="6 5"></line>
+            <rect x="374" y="280" width="192" height="22" fill="var(--panel)"></rect>
+            <text class="t-deny" x="470" y="296" text-anchor="middle">NO SHARED CONTEXT</text>
+
+            <line class="svg-line" x1="470" y1="198" x2="470" y2="228" marker-end="url(#ar2)"></line>
+            <rect class="svg-box" x="300" y="228" width="340" height="28"></rect>
+            <text class="t-sub" x="470" y="246" text-anchor="middle">writes the file &middot; decides ready &middot; decides stop</text>
+          </svg>
+        </div>
+        <figcaption>The role graph. The doer proposes, the judge observes fields, and Python decides. The judge never sees the doer's inner chain of thought, because it runs in a child session the doer's window never touched. Two prompts in one thread are still one intern.</figcaption>
+      </figure>
+
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th style="width:11em">File</th><th>Job</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">loop.py</td><td>CLI. Builds the runtime and starts one poll, then the process exits.</td></tr>
+            <tr><td class="mono">contract.py</td><td>Loads <code>.loop.yml</code> from the target repo. Budgets and write scope.</td></tr>
+            <tr><td class="mono">enhancer.py</td><td>Orchestrator. Discovery, GitHub, writes, exits.</td></tr>
+            <tr><td class="mono">roleplan.py</td><td>The role table. Tools and paths, not a prompt.</td></tr>
+            <tr><td class="mono">roles.py</td><td>SDK options plus the <code>PreToolUse</code> hook.</td></tr>
+            <tr><td class="mono">check_fields.py</td><td>Rubric. Turns <code>{kind, present_fields}</code> into <code>ready</code>.</td></tr>
+            <tr><td class="mono">check_stop.py</td><td>Exits the model cannot talk its way past.</td></tr>
+            <tr><td class="mono">adapter.py</td><td>Cost, text, and <code>stop_reason</code> as data.</td></tr>
+            <tr><td class="mono">turns.py</td><td>Judge and draft calls. Writes the hung dump.</td></tr>
+            <tr><td class="mono">tests/test_roles.py</td><td>Pins the deny envelope. No SDK, no key.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="prose">
+        <p>Look at what is missing from the model. Discovery is Python. Writes are Python. Labels are Python. Stop is Python. The SDK runs two role turns under a tool list it did not choose.</p>
+      </div>
+      <hr class="band">
+    </div>
+  </section>
+
+  <!-- ============ 4. BOUNDED AUTHORITY ============ -->
+  <section id="authority">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Action</span> <span>who may write, and where</span></p>
+        <h2>The roles are a table, not a paragraph</h2>
+      </div>
+      <div class="prose">
+        <p>Capability is not a sentence in a system prompt. It is a row in a table that any runtime can read. If the table and a runtime disagree, the runtime is wrong.</p>
+      </div>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num">Listing 2</span>
+          <span class="cap">The cast is data</span>
+          <span class="file">roleplan.py</span>
+        </div>
+<pre><code class="language-python">WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")   # 1. tools that can change a file
+READ_TOOLS = ("Read", "Glob", "Grep")
+
+LOOPS = {
+    "enhancer": ("orchestrator", "doer", "judge"),  # 2. exactly three names
+}
+
+PURPOSE = {
+    "orchestrator": "Owns the budget and the order. Writes nothing.",
+    "doer": "Edits the ticket body. Nothing else in the repo.",
+    "judge": "Scores the attempt. Reads reports and the diff. Holds no write path.",
+}
+
+READERS = ("orchestrator", "judge", "researcher")  # 3. roles that hold no write tool
+
+FALLBACK_SCOPE = {
+    "doer": (("tickets/**",), ()),                 # 4. when .loop.yml is silent
+}
+
+@dataclass(frozen=True)
+class RolePlan:
+    name: str
+    purpose: str
+    tools: tuple[str, ...]
+    allow: tuple[str, ...] = ()
+    deny: tuple[str, ...] = ()
+
+    @property
+    def can_write(self) -&gt; bool:
+        return any(tool in WRITE_TOOLS for tool in self.tools)   # 5. computed, not declared
+</code></pre>
+        <ol class="notes">
+          <li><span class="n">1.</span> <span>If a role's tool list contains none of these, the role cannot write. That is the definition, and nothing else gets a say in it.</span></li>
+          <li><span class="n">2.</span> <span>The cast for this loop is three names. A runtime that starts a fourth role has drifted from the table.</span></li>
+          <li><span class="n">3.</span> <span>A sentence saying "do not write files" can be ignored. A missing <code>Write</code> tool cannot be called.</span></li>
+          <li><span class="n">4.</span> <span>The target repo's <code>.loop.yml</code> knows nothing about the doer, so Python falls back to <code>tickets/**</code> and nothing else.</span></li>
+          <li><span class="n">5.</span> <span><code>can_write</code> is membership in <code>WRITE_TOOLS</code>. If it is false and a runtime still hands the role <code>Write</code>, the runtime is wrong.</span></li>
+        </ol>
+      </figure>
+
+      <div class="prose">
+        <p>The table is the ceiling. This program is stricter than its own ceiling: the doer and the judge both hold no write tool at all, and Python writes the candidate file. A runtime may give a role fewer tools than the table. It may never give a role more.</p>
+        <p>Delete the table and the SDK still has to give <em>someone</em> tools. If that someone is the judge, the judge gets <code>Write</code>, and the same model that drafted the ticket can overwrite the ticket it is supposed to grade.</p>
+      </div>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num">Listing 3</span>
+          <span class="cap">The judge has no write tool</span>
+          <span class="file">roles.py</span>
+        </div>
+<pre><code class="language-python">NO_WRITE = ["Edit", "Write", "NotebookEdit", "Bash"]   # 1. one longer than WRITE_TOOLS
+
+def options_for(contract, loop: str = DEFAULT_LOOP):
+    # ...
+        tools = list(source["tools"]) if source else list(role.tools)
+        if enhancer:
+            tools = [tool for tool in tools if tool not in NO_WRITE]   # 2. strip
+            if role.name == "doer":
+                tools.append("Agent")                                  # 3. read-only Explore
+        agents[name] = AgentDefinition(
+            description=description,
+            prompt=prompt,
+            tools=tools,
+            disallowedTools=NO_WRITE if enhancer or not role.can_write else NO_SHELL,  # 4.
+            maxTurns=DEFAULT_MAX_TURNS,
+            background=False,
+            model="sonnet",
+        )
+    # ...
+    if enhancer:
+        kwargs.update(
+            allowed_tools=["Agent"],       # 5. the parent may only spawn a named subagent
+            disallowed_tools=NO_WRITE,
+        )
+</code></pre>
+        <ol class="notes">
+          <li><span class="n">1.</span> <span><code>Bash</code> is on the list because <code>Bash</code> is how a read only agent writes anyway.</span></li>
+          <li><span class="n">2.</span> <span>Every enhancer subagent loses Edit, Write, NotebookEdit and Bash. The judge cannot write the ticket it grades and the doer cannot write it either.</span></li>
+          <li><span class="n">3.</span> <span>The doer may spawn the built in read only explorer, which gets its own context too. Python still owns every candidate write.</span></li>
+          <li><span class="n">4.</span> <span>Repeating the list on <code>disallowedTools</code> is how an inherited <code>Write</code> does not sneak back in from the parent session.</span></li>
+          <li><span class="n">5.</span> <span>If the parent still held <code>Write</code>, it could skip the doer and edit the repo itself.</span></li>
+        </ol>
+      </figure>
+
+      <div class="prose">
+        <p>That is fence one: can this role write at all. Fence two answers a different question. If a write tool ever leaks back onto a role, which paths may it touch? A leaked write must not land in <code>app/</code>, and the first file an agent under pressure reaches for is a failing test.</p>
+      </div>
+
+      <figure class="fig">
+        <div class="frame">
+          <svg viewBox="0 0 900 250" role="img" aria-label="Two fences on one tool call: the tool list decides whether a role can write at all, and a PreToolUse hook decides which paths a leaked write may touch. Anything outside the allowed paths is denied.">
+            <defs>
+              <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+              </marker>
+              <marker id="ar3d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--deny)"></path>
+              </marker>
+            </defs>
+            <rect class="svg-box" x="20" y="88" width="150" height="70"></rect>
+            <text class="t-title" x="95" y="116" text-anchor="middle">WRITE CALL</text>
+            <text class="t-sub" x="95" y="136" text-anchor="middle">from a role</text>
+
+            <rect class="svg-box-2" x="230" y="66" width="176" height="114" stroke-width="2"></rect>
+            <text class="t-accent" x="318" y="90" text-anchor="middle">FENCE 1</text>
+            <text class="t-title" x="318" y="114" text-anchor="middle">TOOL LIST</text>
+            <text class="t-sub" x="318" y="136" text-anchor="middle">NO_WRITE strips</text>
+            <text class="t-sub" x="318" y="154" text-anchor="middle">Edit Write Bash</text>
+
+            <rect class="svg-box-2" x="466" y="66" width="176" height="114" stroke-width="2"></rect>
+            <text class="t-accent" x="554" y="90" text-anchor="middle">FENCE 2</text>
+            <text class="t-title" x="554" y="114" text-anchor="middle">PreToolUse</text>
+            <text class="t-sub" x="554" y="136" text-anchor="middle">is the path inside</text>
+            <text class="t-sub" x="554" y="154" text-anchor="middle">tickets/** ?</text>
+
+            <line class="svg-line" x1="174" y1="123" x2="224" y2="123" marker-end="url(#ar3)"></line>
+            <line class="svg-line" x1="410" y1="123" x2="460" y2="123" marker-end="url(#ar3)"></line>
+            <text class="t-lab" x="435" y="112" text-anchor="middle">leaked</text>
+
+            <path class="svg-line" d="M 646 100 L 686 100 L 686 52 L 706 52" marker-end="url(#ar3)"></path>
+            <rect class="svg-box" x="710" y="28" width="180" height="48"></rect>
+            <text class="t-sub" x="800" y="49" text-anchor="middle">return {}</text>
+            <text class="t-sub" x="800" y="65" text-anchor="middle">no opinion, allowed</text>
+
+            <path class="svg-deny" d="M 646 146 L 686 146 L 686 196 L 706 196" marker-end="url(#ar3d)"></path>
+            <rect x="710" y="172" width="180" height="48" class="svg-box-2" stroke="var(--deny)"></rect>
+            <text class="t-deny" x="800" y="193" text-anchor="middle">hookSpecificOutput</text>
+            <text class="t-deny" x="800" y="209" text-anchor="middle">permissionDecision: deny</text>
+
+            <text class="t-lab" x="692" y="90">in scope</text>
+            <text class="t-lab" x="692" y="166">outside</text>
+          </svg>
+        </div>
+        <figcaption>Both fences run on a single tool call, and only the second one has a failure mode you can typo into. An empty dictionary means no opinion, which lets the call through, so a deny that is misspelled anywhere in its envelope fails open and looks exactly like success.</figcaption>
+      </figure>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num">Listing 4</span>
+          <span class="cap">Deny must not fail open</span>
+          <span class="file">roles.py &middot; scope_hook</span>
+        </div>
+<pre><code class="language-python">def scope_hook(repo: Path, role: RolePlan):
+    """A PreToolUse hook that denies a write outside this role's scope.
+
+    Returning an empty dict means "no opinion", which lets the call through.
+    Denying needs the full hookSpecificOutput shape, so a typo here fails open.
+    """
+    scope = WriteScope(allow=list(role.allow), deny=list(role.deny))
+
+    async def check(input_data, tool_use_id, context):
+        if input_data["tool_name"] not in ("Edit", "Write", "NotebookEdit"):
+            return {}                       # 1. a tool that cannot write
+        raw = next(
+            (input_data["tool_input"][k] for k in PATH_KEYS if k in input_data["tool_input"]),
+            None,
+        )
+        if raw is None:
+            return {}                       # 2. no path to check
+        relative = _relative(repo, raw)
+        if relative is not None and scope.permits(relative):
+            return {}                       # 3. inside tickets/** for the doer
+        where = relative or f"{raw} (outside the target repo)"
+        return {
+            "hookSpecificOutput": {         # 4. deny is a nested object
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",     # 5. the string, not False
+                "permissionDecisionReason": (
+                    f"{role.name} may write {', '.join(role.allow) or 'nothing'}. "
+                    f"{where} is outside that scope."
+                ),
+            }
+        }
+
+    return check
+</code></pre>
+        <ol class="notes">
+          <li><span class="n">1.</span> <span>Three separate allow paths all return the same empty dictionary, which is also the shape a bug returns.</span></li>
+          <li><span class="n">2.</span> <span>Nothing to check means nothing to deny.</span></li>
+          <li><span class="n">3.</span> <span>A path the scope permits is allowed the same silent way.</span></li>
+          <li><span class="n">4.</span> <span>Miss the outer key and the SDK reads the return as no opinion.</span></li>
+          <li><span class="n">5.</span> <span><code>false</code>, <code>blocked</code> and <code>no</code> are not deny. A path outside the target repo fails closed.</span></li>
+        </ol>
+      </figure>
+      <hr class="band">
+    </div>
+  </section>
+
+  <!-- ============ 5. VERIFY ============ -->
+  <section id="verify">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Verify</span> <span>a judgment call and a fact are different things</span></p>
+        <h2>Ready is a fact, not a vibe</h2>
+      </div>
+      <div class="prose">
+        <p>The judge decides which required fields have real content. That is a model judgment call and there is no way around it. Whether the set adds up to ready is a fact, and facts live in Python.</p>
+      </div>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num">Listing 5</span>
+          <span class="cap">The rubric is a dict and ready is computed</span>
+          <span class="file">check_fields.py</span>
+        </div>
+<pre><code class="language-python">REQUIRED = {
+    "bug": ["title", "steps", "expected", "actual", "environment"],
+    "feature": ["problem", "proposal", "value", "criteria"],
+    "ui": ["problem", "proposal", "value", "criteria", "wireframe"],
+}
+
+
+def check(kind: str, present_fields: list[str]) -&gt; dict:
+    if kind not in REQUIRED:
+        raise ValueError(f"unknown ticket kind {kind!r}, expected one of {sorted(REQUIRED)}")
+    required = REQUIRED[kind]
+    present = set(present_fields)
+    missing_fields = [f for f in required if f not in present]   # 1. computed here
+    return {
+        "kind": kind,
+        "present_fields": [f for f in required if f in present], # 2. intersection only
+        "missing_fields": missing_fields,
+        "ready": not missing_fields,                             # 3. a boolean
+    }
+</code></pre>
+        <ol class="notes">
+          <li><span class="n">1.</span> <span>The function never reads a <code>ready</code> key out of the model payload.</span></li>
+          <li><span class="n">2.</span> <span>A field the model invents is dropped rather than counted. It is not evidence.</span></li>
+          <li><span class="n">3.</span> <span>A bug does not need problem, proposal and value. A UI ticket needs a wireframe on top of the feature fields.</span></li>
+        </ol>
+      </figure>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h4>Run the rubric</h4>
+          <span class="hint">check_fields.check(kind, present_fields)</span>
+        </div>
+        <div class="panel-body split">
+          <div>
+            <span class="field-label">Ticket kind</span>
+            <div class="segmented" id="kindSeg" role="group" aria-label="Ticket kind">
+              <button type="button" data-kind="bug" aria-pressed="false">bug</button>
+              <button type="button" data-kind="feature" aria-pressed="true">feature</button>
+              <button type="button" data-kind="ui" aria-pressed="false">ui</button>
+            </div>
+            <span class="field-label" style="margin-top:18px">Fields the judge says have real content</span>
+            <div class="chips" id="fieldChips"></div>
+            <p style="font-size:14px;color:var(--ink-3);margin:14px 0 0;line-height:1.5">Struck through chips are outside this kind's rubric. Toggle one on to watch it get dropped.</p>
+          </div>
+          <div>
+            <div class="verdict" id="rubricVerdict"><span class="dot"></span><span id="rubricVerdictText">ready: false</span></div>
+            <div class="readout" id="rubricOut"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="prose">
+        <p>Trust a <code>ready: true</code> key in the judge's JSON and the model has quietly taken back the decision. A green rubric is still not permission to ship: without the exact human comment, green means waiting, and a red rubric never consumes that comment.</p>
+      </div>
+      <hr class="band">
+    </div>
+  </section>
+
+  <!-- ============ 6. EXIT ============ -->
+  <section id="exit">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Exit</span> <span>four doors, all of them in software</span></p>
+        <h2>Stopping is the feature</h2>
+      </div>
+      <div class="prose">
+        <p>A <strong>failure signature</strong> is the missing field list from the last judge pass, for example <code>["criteria", "value"]</code>. The round stores it. The next round builds a new one and compares. Equal lists mean the ticket did not move, which is stagnation wearing a confident paragraph. The signature is a fingerprint of the stall, not a cryptographic hash.</p>
+      </div>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num">Listing 6</span>
+          <span class="cap">Four computed stops, none from the model</span>
+          <span class="file">check_stop.py</span>
+        </div>
+<pre><code class="language-python">def check(
+    round_: int,
+    budget: int,
+    signature: list[str],
+    previous_signature: list[str] | None,
+    usd: float = 0.0,
+    max_usd: float | None = None,
+    turns: int = 0,
+    max_turns: int | None = None,
+) -&gt; dict:
+    if previous_signature is not None and signature == previous_signature:
+        return {"stop": True, "reason": "same signature two rounds running"}   # 1.
+    if max_usd is not None and usd &gt;= max_usd:
+        return {"stop": True, "reason": "cost budget spent"}                   # 2.
+    if max_turns is not None and turns &gt;= max_turns:
+        return {"stop": True, "reason": "max turns"}                           # 3.
+    if round_ + 1 &gt;= budget:
+        return {"stop": True, "reason": "budget spent"}                        # 4.
+    return {"stop": False, "reason": None}
+</code></pre>
+        <ol class="notes">
+          <li><span class="n">1.</span> <span>Stable failure. Two rounds found exactly the same gaps.</span></li>
+          <li><span class="n">2.</span> <span>Dollars are a hard cap. The figure comes from the SDK result, not from a role's word.</span></li>
+          <li><span class="n">3.</span> <span>Turns are a hard cap too.</span></li>
+          <li><span class="n">4.</span> <span>Four returns in Python. Completing a ticket is a different exit, owned by the orchestrator. The model cannot type a fifth return.</span></li>
+        </ol>
+      </figure>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h4>Trip a stop</h4>
+          <span class="hint">first matching return wins</span>
+        </div>
+        <div class="panel-body split">
+          <div>
+            <div class="numgrid">
+              <label><span class="field-label">round_</span><input type="number" id="in-round" value="1" min="0"></label>
+              <label><span class="field-label">budget</span><input type="number" id="in-budget" value="3" min="1"></label>
+              <label><span class="field-label">usd spent</span><input type="number" id="in-usd" value="0.40" step="0.05" min="0"></label>
+              <label><span class="field-label">max_usd</span><input type="number" id="in-maxusd" value="2.00" step="0.25" min="0"></label>
+              <label><span class="field-label">turns</span><input type="number" id="in-turns" value="4" min="0"></label>
+              <label><span class="field-label">max_turns</span><input type="number" id="in-maxturns" value="12" min="0"></label>
+            </div>
+            <label class="checkrow" style="margin-top:16px">
+              <input type="checkbox" id="in-sig">
+              signature == previous_signature
+            </label>
+          </div>
+          <div>
+            <div class="verdict" id="stopVerdict"><span class="dot"></span><span id="stopVerdictText">stop: false</span></div>
+            <div class="gates" id="stopGates"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="prose">
+        <p>Order matters between the two checks. Ready is a fact about the ticket. Stop is a fact about the run. The orchestrator asks the rubric first, and only a still red ticket reaches the stop check. Reverse them and a green ticket that has spent its dollars picks up a <code>needs-human</code> label instead of waiting for a person to release it.</p>
+        <p>For any of that to work, dollars and timeouts have to be fields Python can read. The adapter turns the SDK result into <code>usd</code> and <code>stop_reason</code>, maps the SDK's own error subtypes onto the same strings the stop check already uses, and caps a query at 180 seconds. When a turn hangs, the raw events are written to <code>.harness/last-doer-T&lt;id&gt;.md</code> <em>before</em> the escalation, so the evidence survives the stop and the poll moves on to the next ticket.</p>
+      </div>
+      <hr class="band">
+    </div>
+  </section>
+
+  <!-- ============ 7. ONE POLL ============ -->
+  <section id="poll">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Trigger</span> <span>the state machine, in order</span></p>
+        <h2>What one poll does</h2>
+      </div>
+      <div class="prose">
+        <p>One poll walks every open draft ticket. Opening GitHub issues is a separate setup step, and a poll never opens one.</p>
+      </div>
+
+      <div class="ladder">
+        <div class="step">
+          <div class="idx">01</div>
+          <div>
+            <h4>Ingest</h4>
+            <p>List open issues and write a local draft where one is missing. Keep every draft this loop owns. A leftover candidate file is not a second ticket.</p>
+          </div>
+          <div class="out"><span class="chip neutral">memory</span></div>
+        </div>
+        <div class="step">
+          <div class="idx">02</div>
+          <div>
+            <h4>Find the issue, never create one</h4>
+            <p>First hit wins: state file, then ticket front matter, then a title search. A closed issue stops the ticket and asks you to reopen it. Closing an issue is not a reset.</p>
+          </div>
+          <div class="out"><span class="chip esc">blocked</span></div>
+        </div>
+        <div class="step">
+          <div class="idx">03</div>
+          <div>
+            <h4>Read the newest human comment for one exact token</h4>
+            <p>A comment never starts an enhance round and a missing comment never stops one. Fuzzy thanks are not a release, and <code>LGTM.</code> with a period fails.</p>
+          </div>
+          <div class="out"><span class="chip neutral">human gate</span></div>
+        </div>
+        <div class="step">
+          <div class="idx">04</div>
+          <div>
+            <h4>Respect a needs-human label</h4>
+            <p>If a person has already been called in, wait for the person. Another poll is not a person.</p>
+          </div>
+          <div class="out"><span class="chip esc">escalated</span></div>
+        </div>
+        <div class="step">
+          <div class="idx">05</div>
+          <div>
+            <h4>Grade the real ticket</h4>
+            <p>The judge reports kind and present fields. The rubric computes ready. The judge never claims the ticket is complete.</p>
+          </div>
+          <div class="out"><span class="chip neutral">verify</span></div>
+        </div>
+        <div class="step">
+          <div class="idx">06</div>
+          <div>
+            <h4>Decide from ready and the token only</h4>
+            <p>Green plus the exact comment marks the ticket ready and hands it to the implementer loop. Green without it is waiting. A red rubric never consumes the comment.</p>
+          </div>
+          <div class="out"><span class="chip pass">passed</span> <span class="chip wait">waiting</span></div>
+        </div>
+        <div class="step">
+          <div class="idx">07</div>
+          <div>
+            <h4>Draft, then keep the draft only if it strictly closes gaps</h4>
+            <p>The doer returns markdown. Python writes a candidate file and the judge grades <em>that</em>. The draft replaces the real ticket only when its missing set is a proper subset of the current one.</p>
+          </div>
+          <div class="out"><span class="chip wait">waiting</span></div>
+        </div>
+        <div class="step">
+          <div class="idx">08</div>
+          <div>
+            <h4>Ask for a stop</h4>
+            <p>Same missing fields twice, cost spent, max turns, round budget spent. Any computed stop adds the needs-human label and the poll continues to later tickets.</p>
+          </div>
+          <div class="out"><span class="chip esc">escalated</span></div>
+        </div>
+      </div>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num">Listing 7</span>
+          <span class="cap">Not worse is not good enough</span>
+          <span class="file">enhancer.py &middot; _improve</span>
+        </div>
+<pre><code class="language-python">    def _improve(self, tkt, verdict: dict, comment: str | None, issue: int) -&gt; list[str]:
+        """Keep the draft only when it strictly closes gaps."""
+        before = set(verdict["missing_fields"])
+        candidate = self.draft(tkt, verdict["kind"], verdict["missing_fields"], comment)
+        try:
+            after_verdict = self.judge(candidate)
+            after = set(after_verdict["missing_fields"])
+            if after &lt; before:                            # 1. proper subset, equal is not progress
+                shutil.copyfile(candidate, tkt.path)      # 2. only Python copies
+                set_front_matter(
+                    tkt.path, id=tkt.id, state="draft", loop="enhancer", github_issue=str(issue)
+                )
+                self.gh.set_body(issue, strip_front_matter(tkt.path.read_text(encoding="utf-8")))
+                self.gh.add_label(issue, "enhanced")
+                return sorted(after)
+            self.gh.comment(
+                issue,
+                f"The draft did not clear the rubric for a {verdict['kind']} ticket. "
+                f"Still missing {', '.join(verdict['missing_fields'])}.",
+            )
+            return sorted(before)
+        finally:
+            candidate.unlink(missing_ok=True)             # 3. the candidate always dies
+</code></pre>
+        <ol class="notes">
+          <li><span class="n">1.</span> <span>A draft that trades <code>value</code> for <code>criteria</code> looks busy. That is how a loop spends its whole budget standing still.</span></li>
+          <li><span class="n">2.</span> <span>The doer and the judge hold no write tool, so the promotion from candidate to ticket is the orchestrator's move.</span></li>
+          <li><span class="n">3.</span> <span>Accepted or rejected, the candidate file is removed in <code>finally</code>.</span></li>
+        </ol>
+      </figure>
+
+      <div class="prose">
+        <p>Retry is not the model saying try again. Retry is the round counter going up, the signature getting stored, and a later poll being the next attempt.</p>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th style="width:9em">Outcome</th><th>Means</th></tr></thead>
+          <tbody>
+            <tr><td class="mono" style="color:var(--go)">passed</td><td>Rubric green and a human typed the exact token. The ticket moves to the implementer loop.</td></tr>
+            <tr><td class="mono" style="color:var(--accent)">waiting</td><td>Either green and waiting for a person, or still red after a round. Do not read every waiting as green.</td></tr>
+            <tr><td class="mono" style="color:var(--deny)">escalated</td><td>Stop, hang, or budget. The issue gets a needs-human label. The poll continues.</td></tr>
+            <tr><td class="mono">blocked</td><td>Issue closed or missing. Reopen it. The poll does not invent a second issue.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <hr class="band">
+    </div>
+  </section>
+
+  <!-- ============ 8. TESTS + RUN ============ -->
+  <section id="tests">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Harness</span> <span>the fence you did not test</span></p>
+        <h2>The harness is production code</h2>
+      </div>
+      <div class="prose">
+        <p>A deny envelope you do not assert, key by key, will fail open the first time somebody misspells it, and it will fail open silently. The tests stub the SDK, so they need no API key and no clone.</p>
+      </div>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num">Listing 8</span>
+          <span class="cap">The tests pin the envelope</span>
+          <span class="file">tests/test_roles.py</span>
+        </div>
+<pre><code class="language-python">def test_the_hook_allows_a_write_inside_scope(repo, doer):
+    assert call(repo, doer, file_path=str(repo / "tickets" / "T001.md")) == {}   # 1.
+
+
+def test_the_hook_denies_a_write_outside_scope(repo, doer):
+    """The full shape matters. A typo anywhere in it fails open."""
+    output = call(repo, doer, file_path=str(repo / "app" / "models.py"))["hookSpecificOutput"]
+    assert output["hookEventName"] == "PreToolUse"                               # 2.
+    assert output["permissionDecision"] == "deny"
+    assert "outside that scope" in output["permissionDecisionReason"]
+
+
+def test_a_path_outside_the_repo_is_denied(repo, doer):
+    """Fail closed. A path outside the repo matches no allow rule for any role."""
+    result = call(repo, doer, file_path="/etc/hosts")                            # 3.
+    output = result["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    assert "outside the target repo" in output["permissionDecisionReason"]
+</code></pre>
+        <ol class="notes">
+          <li><span class="n">1.</span> <span>Recording the happy empty dictionary means a later change cannot silently start denying the doer's own scope.</span></li>
+          <li><span class="n">2.</span> <span>Every key in the deny envelope is asserted, because any one of them is the typo that fails open.</span></li>
+          <li><span class="n">3.</span> <span>A path that matches no allow rule does not get a free pass for failing to look like a ticket.</span></li>
+        </ol>
+      </figure>
+
+      <div class="prose">
+        <h3>Run it before you spend a token</h3>
+        <p>Three commands touch no model at all. The role table is the first one, and it is a pass or fail gate: if the judge prints <code>yes</code> in the writes column, the port is wrong and nothing else matters.</p>
+      </div>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num">Shell</span>
+          <span class="cap">Scripts with no model</span>
+          <span class="file">go-task recipes</span>
+        </div>
+<pre><code class="language-bash">git clone https://github.com/RichardHightower/reliable-agentic-lab.git
+cd reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk
+
+task setup     # folder-local .venv plus the Agent SDK and pytest
+task table     # the role table. judge must print no in the writes column
+task checks    # both demo assertion scripts
+task test      # pytest against a stubbed SDK. no key, no clone
+</code></pre>
+      </figure>
+
+      <figure class="listing">
+        <div class="listing-head">
+          <span class="num">Output</span>
+          <span class="cap">The gate you refuse to walk past</span>
+          <span class="file">task table</span>
+        </div>
+<pre><code>role              writes  scope
+orchestrator      no      nothing
+doer              yes     tickets/**
+judge             no      nothing
+</code></pre>
+      </figure>
+
+      <div class="prose">
+        <p>Then one poll: <code>task run --</code>. A ticket that still needs work normally costs three model calls, judge, doer, judge again. Every ticket prints one final line. On a fresh fork nothing is <code>passed</code> on the first poll, because nobody has released anything yet.</p>
+        <p>The same loop can sit on a plugin host instead of the SDK, where the round budget lives in skill instructions. A skill can ask itself to stop, but an instruction is not an enforcing mechanism. The Python form turns the budget, the timeout and the signature into software the model cannot revise in its own reply. Swap the host, keep the loop: same rubric, same exits, same role table.</p>
+      </div>
+      <hr class="band">
+    </div>
+  </section>
+
+  <!-- ============ 9. PAPERS ============ -->
+  <section id="papers">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Grounding</span> <span>what the literature settles, and what it does not</span></p>
+        <h2>The papers behind the design</h2>
+      </div>
+      <div class="prose">
+        <p>None of these papers prescribe this program. Read together they draw a clear line: a model improves reliably against an external signal, and unreliably against its own opinion of its own work. Every fence in the enhancer sits on one side of that line.</p>
+      </div>
+
+      <div class="papers">
+        <div class="paper">
+          <div class="id">2210.03629</div>
+          <div>
+            <h4><a href="https://arxiv.org/abs/2210.03629">ReAct: Synergizing Reasoning and Acting in Language Models</a></h4>
+            <p class="who">Yao et al., 2022</p>
+            <p><span class="use">Names the inner cycle.</span> Reason, act, observe, repeat. Every coding agent runs some version of it. The point for loop engineering is where it belongs: inside the action node, wrapped by control the model does not own.</p>
+          </div>
+        </div>
+        <div class="paper">
+          <div class="id">2303.17651</div>
+          <div>
+            <h4><a href="https://arxiv.org/abs/2303.17651">Self-Refine: Iterative Refinement with Self-Feedback</a></h4>
+            <p class="who">Madaan et al., 2023</p>
+            <p><span class="use">The optimistic case for iteration.</span> A model critiques its own output and revises, and on many generation tasks the revision is better. Worth knowing, and worth noticing what it does not establish: that the same model should also decide when the iterating stops.</p>
+          </div>
+        </div>
+        <div class="paper">
+          <div class="id">2310.01798</div>
+          <div>
+            <h4><a href="https://arxiv.org/abs/2310.01798">Large Language Models Cannot Self-Correct Reasoning Yet</a></h4>
+            <p class="who">Huang et al., 2023</p>
+            <p><span class="use">The counterweight, and the reason for the judge.</span> Without external feedback, intrinsic self correction on reasoning tasks can leave results unchanged or worse. Gains attributed to self correction often depend on an oracle that quietly told the model when it was wrong. In this program that oracle is a rubric in Python, not a second paragraph from the author.</p>
+          </div>
+        </div>
+        <div class="paper">
+          <div class="id">2303.11366</div>
+          <div>
+            <h4><a href="https://arxiv.org/abs/2303.11366">Reflexion: Language Agents with Verbal Reinforcement Learning</a></h4>
+            <p class="who">Shinn et al., 2023</p>
+            <p><span class="use">Reflection works when it is fed a real signal.</span> The agent reflects on an outcome it did not get to define, such as a failing test or a task reward, and carries that reflection into the next attempt. The failure signature here is the same shape of idea, reduced to something a machine can compare: the sorted missing field list.</p>
+          </div>
+        </div>
+        <div class="paper">
+          <div class="id">2401.08500</div>
+          <div>
+            <h4><a href="https://arxiv.org/abs/2401.08500">Code Generation with AlphaCodium: From Prompt Engineering to Flow Engineering</a></h4>
+            <p class="who">Ridnik, Kredo and Friedman, 2024</p>
+            <p><span class="use">Flow design changes what the same model produces.</span> On CodeContests validation, a planned flow with generated tests took GPT-4 from roughly 19% to roughly 44% pass@5. That is evidence that the outer flow matters, not a performance promise for any other program. The transferable part is smaller and harder: tests own done.</p>
+          </div>
+        </div>
+        <div class="paper">
+          <div class="id">2307.03172</div>
+          <div>
+            <h4><a href="https://arxiv.org/abs/2307.03172">Lost in the Middle: How Language Models Use Long Contexts</a></h4>
+            <p class="who">Liu et al., 2023</p>
+            <p><span class="use">Why durable state belongs outside the window.</span> Long context models use information more reliably near the beginning or the end of a window than in the middle. Keep the ticket, the trace and the plan on disk. Give the parent a short summary and a score.</p>
+          </div>
+        </div>
+        <div class="paper">
+          <div class="id">2310.06770</div>
+          <div>
+            <h4><a href="https://arxiv.org/abs/2310.06770">SWE-bench: Can Language Models Resolve Real-World GitHub Issues?</a></h4>
+            <p class="who">Jimenez et al., 2023</p>
+            <p><span class="use">Done is decided by an external check, at benchmark scale.</span> A patch counts when the repository's own tests pass, not when the model reports success. That is the same design decision as a rubric in Python, taken by an entire evaluation.</p>
+          </div>
+        </div>
+      </div>
+      <hr class="band">
+    </div>
+  </section>
+
+  <!-- ============ 10. GLOSSARY ============ -->
+  <section id="glossary">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker eyebrow"><span class="node">Terms</span> <span>defined once, used precisely</span></p>
+        <h2>Glossary</h2>
+      </div>
+
+      <dl class="gloss">
+        <dt>Loop engineering</dt>
+        <dd>Designing the cycle an agent runs, and who is allowed to stop it.</dd>
+
+        <dt>Harness engineering</dt>
+        <dd>The software around that cycle: who may write, what counts as done, when to stop, and which context a role may see.</dd>
+
+        <dt>Mechanical sympathy</dt>
+        <dd>Adapting to how the machine actually behaves, then feeding it only what it can take. The harness does that for an agent.</dd>
+
+        <dt>Production loop</dt>
+        <dd>The cycle running when a human is not watching every turn.</dd>
+
+        <dt>Node</dt>
+        <dd>One of the five steps software owns: trigger, action, verify, memory, exit.</dd>
+
+        <dt>Role graph</dt>
+        <dd>A reusable arrangement of roles, authority and context boundaries. Orchestrator, doer, judge here. The same graph serves other jobs on other objects.</dd>
+
+        <dt>Graph engineering</dt>
+        <dd>Mapping intent into named steps that can be checked. A criterion becomes a test step and a code step.</dd>
+
+        <dt>Worker</dt>
+        <dd>The agent assigned the action. One scoped job. Here the doer. The judge is a subagent too, but it is the checker, not the worker.</dd>
+
+        <dt>Subagent</dt>
+        <dd>An agent the parent spawns, with its own context, separate from the parent and from every other subagent.</dd>
+
+        <dt>Bounded authority</dt>
+        <dd>The worker may use only the tools and paths its row in the role table allows. The opposite is any tool the platform owns, with no allow list and no path check.</dd>
+
+        <dt>Write scope</dt>
+        <dd>Paths a role may change. For the doer, <code>tickets/**</code> unless the target repo says otherwise.</dd>
+
+        <dt>Maker / checker</dt>
+        <dd>The doer writes a candidate, the judge scores fields, Python decides ready and stop. The same model must not do all three, and the checker must not inherit the maker's context.</dd>
+
+        <dt>Failure signature</dt>
+        <dd>A fingerprint of what still failed. Here the sorted missing field list, stored after a round and compared on the next one.</dd>
+
+        <dt>Proper subset</dt>
+        <dd>The draft's missing set must be strictly smaller than the current one, or Python discards the draft.</dd>
+
+        <dt>Context rot</dt>
+        <dd>Tool dumps bury the original ticket. The fact is still in the window and the model can no longer find it.</dd>
+
+        <dt>Merge box</dt>
+        <dd>A human owned decision to merge, spend money, or deploy. This program prepares a ticket and never takes that decision.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <footer class="end">
+    <div class="wrap">
+      <div class="prose" style="margin-inline:0">
+        <p style="font-family:var(--display);font-weight:600;font-size:30px;line-height:1.15;letter-spacing:-0.03em;color:var(--navy)">When this thing is wrong, who is allowed to say so?</p>
+        <p>Not the doer, and not the judge in its own words. Python says ready. Python says stop. A human types the release token. The tests say whether the deny envelope is real. A high powered agent without a governor is still a turbine, and the interesting run is the one that stops.</p>
+      </div>
+      <div class="srcs">
+        <p class="eyebrow" style="margin:20px 0 4px">Code</p>
+        <a href="https://github.com/RichardHightower/reliable-agentic-lab">github.com/RichardHightower/reliable-agentic-lab</a>
+        <a href="https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol1_enhancer_agent_sdk">solutions/sol1_enhancer_agent_sdk</a>
+        <a href="https://github.com/RichardHightower/reliable-agentic-lab/blob/main/slides/labs/sol1-enhancer-agent-sdk.md">slides/labs/sol1-enhancer-agent-sdk.md</a>
+        <p class="eyebrow" style="margin:18px 0 4px">Concepts</p>
+        <a href="https://spillwave.com/harness-loop-enginering/">The Loop Is the Product &middot; spillwave.com</a>
+        <a href="https://rickhigh.substack.com/p/the-loop-is-the-product">The essay on Substack</a>
+      </div>
+    </div>
+  </footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+<script>
+  (function () {
+    if (window.hljs) {
+      document.querySelectorAll('pre code[class^="language-"]').forEach(function (el) {
+        try { window.hljs.highlightElement(el); } catch (e) { /* plain text is fine */ }
+      });
+    }
+
+    /* ---------- rubric widget ---------- */
+    var REQUIRED = {
+      bug: ["title", "steps", "expected", "actual", "environment"],
+      feature: ["problem", "proposal", "value", "criteria"],
+      ui: ["problem", "proposal", "value", "criteria", "wireframe"]
+    };
+    var ALL_FIELDS = ["title", "steps", "expected", "actual", "environment",
+                      "problem", "proposal", "value", "criteria", "wireframe", "screenshots"];
+
+    var kind = "feature";
+    var present = { problem: true, proposal: true };
+
+    var chipWrap = document.getElementById("fieldChips");
+    var out = document.getElementById("rubricOut");
+    var verdict = document.getElementById("rubricVerdict");
+    var verdictText = document.getElementById("rubricVerdictText");
+
+    function checkFields(k, presentFields) {
+      var required = REQUIRED[k];
+      var set = {};
+      presentFields.forEach(function (f) { set[f] = true; });
+      var missing = required.filter(function (f) { return !set[f]; });
+      return {
+        kind: k,
+        present_fields: required.filter(function (f) { return set[f]; }),
+        missing_fields: missing,
+        ready: missing.length === 0
+      };
+    }
+
+    function renderChips() {
+      chipWrap.innerHTML = "";
+      ALL_FIELDS.forEach(function (f) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.textContent = f;
+        var inRubric = REQUIRED[kind].indexOf(f) !== -1;
+        b.setAttribute("aria-pressed", present[f] ? "true" : "false");
+        if (!inRubric) { b.classList.add("ghost"); }
+        b.addEventListener("click", function () {
+          present[f] = !present[f];
+          renderChips();
+          renderRubric();
+        });
+        chipWrap.appendChild(b);
+      });
+    }
+
+    function renderRubric() {
+      var presentList = ALL_FIELDS.filter(function (f) { return present[f]; });
+      var r = checkFields(kind, presentList);
+      out.textContent =
+        "check(" + JSON.stringify(kind) + ", " + JSON.stringify(presentList) + ")\n\n" +
+        JSON.stringify(r, null, 2);
+      verdict.className = "verdict " + (r.ready ? "ok" : "no");
+      verdictText.textContent = r.ready
+        ? "ready: true"
+        : "ready: false  //  missing " + r.missing_fields.join(", ");
+    }
+
+    var seg = document.getElementById("kindSeg");
+    seg.addEventListener("click", function (e) {
+      var btn = e.target.closest("button[data-kind]");
+      if (!btn) { return; }
+      kind = btn.getAttribute("data-kind");
+      seg.querySelectorAll("button").forEach(function (b) {
+        b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+      });
+      renderChips();
+      renderRubric();
+    });
+
+    renderChips();
+    renderRubric();
+
+    /* ---------- stop widget ---------- */
+    var ids = ["in-round", "in-budget", "in-usd", "in-maxusd", "in-turns", "in-maxturns", "in-sig"];
+    var gatesEl = document.getElementById("stopGates");
+    var stopVerdict = document.getElementById("stopVerdict");
+    var stopVerdictText = document.getElementById("stopVerdictText");
+
+    function num(id) { return parseFloat(document.getElementById(id).value || "0"); }
+
+    function renderStop() {
+      var sameSig = document.getElementById("in-sig").checked;
+      var round_ = num("in-round");
+      var budget = num("in-budget");
+      var usd = num("in-usd");
+      var maxUsd = num("in-maxusd");
+      var turns = num("in-turns");
+      var maxTurns = num("in-maxturns");
+
+      var gates = [
+        { label: "signature == previous_signature", hit: sameSig, reason: "same signature two rounds running" },
+        { label: "usd >= max_usd", hit: usd >= maxUsd, reason: "cost budget spent" },
+        { label: "turns >= max_turns", hit: turns >= maxTurns, reason: "max turns" },
+        { label: "round_ + 1 >= budget", hit: round_ + 1 >= budget, reason: "budget spent" }
+      ];
+
+      var fired = -1;
+      gates.forEach(function (g, i) { if (fired === -1 && g.hit) { fired = i; } });
+
+      gatesEl.innerHTML = "";
+      gates.forEach(function (g, i) {
+        var row = document.createElement("div");
+        row.className = "gate" + (i === fired ? " fires" : (fired === -1 || i < fired ? " passed" : ""));
+        var state = i === fired ? "returns" : (fired !== -1 && i > fired ? "not reached" : "false");
+        row.innerHTML =
+          '<span class="ord">' + (i + 1) + '</span>' +
+          '<span>' + g.label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</span>' +
+          '<span class="state">' + state + '</span>';
+        gatesEl.appendChild(row);
+      });
+
+      if (fired === -1) {
+        stopVerdict.className = "verdict ok";
+        stopVerdictText.textContent = 'stop: false  //  the loop may take another round';
+      } else {
+        stopVerdict.className = "verdict no";
+        stopVerdictText.textContent = 'stop: true  //  "' + gates[fired].reason + '"';
+      }
+    }
+
+    ids.forEach(function (id) {
+      var el = document.getElementById(id);
+      el.addEventListener("input", renderStop);
+      el.addEventListener("change", renderStop);
+    });
+    renderStop();
+  })();
+</script>
+</body>
+</html>

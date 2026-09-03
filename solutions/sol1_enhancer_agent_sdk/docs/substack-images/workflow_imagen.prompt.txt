@@ -1,0 +1,44 @@
+REGENERATION FEEDBACK
+The prior image failed fidelity. Render exactly one visible box or diamond for every source label. Do not duplicate "Agent SDK judge turn" or "Mark needs-human". Preserve these transitions exactly: Ticket available? No goes directly to Return. Ticket available? Yes goes to Agent SDK judge turn, then check_fields, then Ready?. Ready? Yes goes to Human LGTM?. Human LGTM? Yes goes to Python updates issue and labels, then Return. Human LGTM? No goes to waiting for LGTM, then Return. Ready? No goes to Agent SDK doer turn, Store candidate, check_stop, then Stop?. Stop? Yes goes to Mark needs-human, then Return. Stop? No goes to waiting, still missing fields, then Return. Do not add a direct connection from either waiting state to Python updates issue and labels. Use all and only the source labels below as visible diagram text.
+
+FRAMING
+This is a article diagram for a technical presentation about one-poll ticket enhancer state machine. Render an illustration of the concept below.
+
+STYLE
+White presentation canvas with crisp deep-navy outlined cards and arrows. Use a restrained orange dashed boundary for tools and a soft green outlined target repository. Prefer simple thin-line symbols only when they clarify a role. Plenty of whitespace. No gradients or shadows. Boxes, arrows, and labels. Labels at least 24 pixels at article scale. Arrows 2 to 3 px. Horizontal text. Landscape layout unless the structure is a tall flowchart. Article density. Clear labels. Limited node count. Key path visually dominant. Still simplified for editorial layout. The image must look like a professionally designed technical illustration, not a diagramming-tool screenshot.
+
+PALETTE
+Background #F8FAFD. Surface #FFFFFF. Primary #0B2E6B with text #FFFFFF. Accent #F97316. Secondary accent #EAF0FF. Success #2F6B2D. Ink arrows #0B2E6B. Muted #667085. Text contrast at least 4.5:1.
+
+NEGATIVE LIST
+gradients or drop shadows filled orange cards except a clearly marked tool boundary mermaid or plantuml source syntax ASCII art tiny labels watermarks or logos node IDs as visible labels Do not invent or duplicate nodes. Do not reroute edges. Keep horizontal text. Do not print node IDs as labels. No mermaid syntax such as graph LR, -->, subgraph. No plantuml syntax such as @startuml. No ASCII art. No watermarks or logos. No em dash characters in labels. Do not expose source notation.
+
+DIAGRAM TYPE
+flowchart
+
+LAYOUT HINTS
+Use the following source only as guidance for structure. Convert the visual boxes, arrows, and labels.
+```
+flowchart TD
+    Start([One poll]) --> Open["open_tickets"]
+    Open --> Choose{{"Ticket available?"}}
+    Choose -- No --> End([Return])
+    Choose -- Yes --> Inspect["Agent SDK judge turn"]
+    Inspect --> Fields["check_fields"]
+    Fields --> Ready{{"Ready?"}}
+    Ready -- Yes --> LGTM{{"Human LGTM?"}}
+    LGTM -- Yes --> Publish["Python updates issue and labels"]
+    LGTM -- No --> Wait["waiting for LGTM"]
+    Ready -- No --> Candidate["Agent SDK doer turn"]
+    Candidate --> Persist["Store candidate"]
+    Persist --> Gate["check_stop"]
+    Gate --> Decision{{"Stop?"}}
+    Decision -- No --> Wait2["waiting, still missing fields"]
+    Decision -- Yes --> Escalate["Mark needs-human"]
+    Publish --> End
+    Wait --> End
+    Wait2 --> End
+    Escalate --> End
+```
+
+Convert the visual boxes, arrows, and labels. The image must show a finished diagram, not Mermaid or PlantUML code.

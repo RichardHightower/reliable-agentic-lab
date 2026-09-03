@@ -1,0 +1,16 @@
+flowchart TB
+  subgraph fence1 ["Fence 1. Tool list"]
+    T["tools = Read, Glob, Grep"]
+    NW["NO_WRITE strips Edit, Write, NotebookEdit, Bash"]
+  end
+  subgraph fence2 ["Fence 2. PreToolUse hook"]
+    H["roles.scope_hook"]
+    D["deny uses hookSpecificOutput"]
+  end
+  Call["SDK tool call"] --> T
+  T --> NW
+  NW -->|"write tool still present"| H
+  H --> D
+  NW -->|"no write tool"| Safe["Judge path: nothing to hook"]
+  classDef f fill:#FEF7E0,stroke:#B06000,color:#202124
+  class T,NW,H,D f

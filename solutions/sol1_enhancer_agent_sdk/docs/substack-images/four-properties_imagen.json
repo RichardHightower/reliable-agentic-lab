@@ -1,0 +1,20 @@
+{
+  "source": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/four-properties.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "a19c9b692bfeaa239614f42c493c539fb96f8b10b0572786ba4d17df3e430958",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "1 Explicit state<br/>Start from disk",
+    "2 Bounded authority<br/>Declared write scope",
+    "3 Observable evidence<br/>A trace and a file",
+    "4 External transition<br/>Pass / retry / escalate"
+  ],
+  "edges": 3,
+  "png": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/four-properties_imagen.png",
+  "prompt": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/four-properties_imagen.prompt.txt"
+}

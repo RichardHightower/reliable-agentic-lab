@@ -1,0 +1,10 @@
+flowchart LR
+  P["Perceive<br/>Trigger"] --> R["Reason<br/>Plan"]
+  R --> A["Act<br/>Tool or write"]
+  A --> O["Observe<br/>Tests, files, scores"]
+  O --> D["Decide<br/>Pass, retry, escalate"]
+  D -->|retry| R
+  classDef inner fill:#E8F0FE,stroke:#174EA6,color:#202124
+  classDef outer fill:#FCE8D5,stroke:#B06000,color:#202124
+  class R,A,O inner
+  class P,D outer

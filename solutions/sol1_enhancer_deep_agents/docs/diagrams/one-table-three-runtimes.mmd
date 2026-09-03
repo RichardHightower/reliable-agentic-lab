@@ -1,0 +1,10 @@
+flowchart LR
+    Table["Role table<br/>orchestrator, doer, judge<br/>tools and paths, as data"]
+
+    Table --> Python["Plain Python<br/>enforces by a missing method"]
+    Table --> SDK["Claude Agent SDK<br/>enforces by tool list and a hook"]
+    Table --> Deep["Deep Agents<br/>enforces by per-subagent tool list"]
+
+    Python --> Same["Same answer:<br/>judge writes nothing<br/>doer writes tickets only"]
+    SDK --> Same
+    Deep --> Same

@@ -1,0 +1,13 @@
+{
+  "pass": true,
+  "nodes": [
+    "+repo: Path\n        +budget: dict\n        +run(task): RunResult",
+    "+name: str\n        +tools: tuple\n        +allow: tuple\n        +deny: tuple",
+    "+poll(ticket): Outcome[",
+    "+judge(path): DoerResult\n        +draft(ticket): DoerResult",
+    "+id: str\n        +kind: str\n        +criteria: Criterion["
+  ],
+  "edges": 4,
+  "misses": [],
+  "note": "Mechanical checks only. A vision pass must confirm every source label is readable text and that no source syntax is visible."
+}
