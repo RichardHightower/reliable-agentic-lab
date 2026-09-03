@@ -145,6 +145,14 @@ TOPIC="how MCP servers authenticate" PROFILE=paper task run --
 `--profile paper` is 4000 words, 20 questions, 60 verified claims, $40.
 `--profile whitepaper` is 6000 words, 32 questions, 100 verified claims, $80.
 
+`--ingest-brain` is off by default. When you pass it a brain knowledge
+directory that is a git worktree on a branch other than `main`, the run
+copies the RKC bundle there and opens a PR. It refuses `main`.
+
+```bash
+TOPIC="loop engineering exit criteria" CLI_ARGS="--ingest-brain /path/to/brain/knowledge" task run --
+```
+
 Stop after the outline judge and read `outline.md` before any research spend:
 
 ```bash

@@ -247,7 +247,8 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
 
 Then the knowledge bundle is written, whatever the gate said. A run that
 escalated still found sources and checked claims, and throwing that away means
-the next attempt pays for it again.
+the next attempt pays for it again. `--ingest-brain` is opt-in. It copies the
+bundle into a brain git worktree and opens a PR. It refuses `main`.
 
 ### Where the money is checked
 
