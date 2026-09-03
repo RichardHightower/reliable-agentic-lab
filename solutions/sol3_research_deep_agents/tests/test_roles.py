@@ -48,7 +48,7 @@ def test_reviewer_holds_no_custom_tools(fake_langchain):
 def test_only_the_researcher_gets_search(fake_langchain):
     specs = by_name(roles.subagents_for(None, "paper", backend=Boundary(), repo=Path(".")))
     assert "search" in names(specs["researcher"])
-    for role in ("planner", "diagrammer", "writer", "reviewer"):
+    for role in ("planner", "diagrammer", "writer", "reviewer", "outline-judge"):
         assert "search" not in names(specs[role]), role
 
 
@@ -68,14 +68,14 @@ def test_only_the_verifier_gets_docs(fake_langchain):
         )
     )
     assert "check_docs" in names(specs["verifier"])
-    for role in ("researcher", "planner", "writer", "reviewer", "diagrammer"):
+    for role in ("researcher", "planner", "writer", "reviewer", "diagrammer", "outline-judge"):
         assert "check_docs" not in names(specs[role]), role
 
 
 def test_only_the_planner_gets_the_brain(fake_langchain):
     specs = by_name(roles.subagents_for(None, "paper", repo=Path(".")))
     assert "recall" in names(specs["planner"])
-    for role in ("researcher", "verifier", "writer", "reviewer", "diagrammer"):
+    for role in ("researcher", "verifier", "writer", "reviewer", "diagrammer", "outline-judge"):
         assert "recall" not in names(specs[role]), role
 
 
@@ -83,7 +83,7 @@ def test_researcher_and_verifier_hold_corpus_search(fake_langchain):
     specs = by_name(roles.subagents_for(None, "paper", repo=Path(".")))
     assert "corpus_search" in names(specs["researcher"])
     assert "corpus_search" in names(specs["verifier"])
-    for role in ("planner", "writer", "reviewer", "diagrammer"):
+    for role in ("planner", "writer", "reviewer", "diagrammer", "outline-judge"):
         assert "corpus_search" not in names(specs[role]), role
 
 
@@ -230,7 +230,15 @@ def test_build_agent_binds_the_bounded_model_to_writer_only(
 def test_build_paper_agents_compiles_one_direct_graph_per_role(fake_langchain, fake_deepagents, tmp_path):
     agents = roles.build_paper_agents(None, loop="paper", repo=tmp_path)
 
-    assert set(agents) == {"planner", "researcher", "verifier", "diagrammer", "writer", "reviewer"}
+    assert set(agents) == {
+        "planner",
+        "outline_judge",
+        "researcher",
+        "verifier",
+        "diagrammer",
+        "writer",
+        "reviewer",
+    }
 
 
 def test_build_agent_leaves_parent_debug_off_by_default(fake_langchain, fake_deepagents, tmp_path):

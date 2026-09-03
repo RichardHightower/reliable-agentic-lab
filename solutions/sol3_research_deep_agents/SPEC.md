@@ -28,6 +28,8 @@ This folder imports no shared engine. Every module below is a copy, and
 | `brief.py` | Citation arithmetic and the em dash sweep |
 | `adapter.py` | Deep Agents results into a `DoerResult` |
 | `mcp_tools.py` | `.mcp.json`, and the fallbacks under it |
+| `corpus.py` | Second-brain search, pack, and opt-in ingest |
+| `outline.py` | Outline validator, stamp, and plan lift |
 | `evidence.py` | `SourceDocument`, `Claim`, `Finding`, and corroboration |
 | `paper.py` | The nine stage pipeline and the three exits |
 | `stages.py` | Each stage's gate |
@@ -42,6 +44,7 @@ This folder imports no shared engine. Every module below is a copy, and
 role              writes  scope
 orchestrator      no      nothing
 planner           yes     plan.json
+outline_judge     no      nothing
 researcher        no      nothing
 verifier          yes     evidence/**   (denied: paper/**)
 diagrammer        yes     diagrams/*.mmd, diagrams/*.puml   (denied: paper/**, evidence/**)

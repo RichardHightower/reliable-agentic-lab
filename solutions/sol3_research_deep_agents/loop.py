@@ -84,6 +84,8 @@ def run_paper(args) -> int:
         publish=args.publish,
         debug=args.debug,
         ingest_brain=Path(args.ingest_brain) if args.ingest_brain else None,
+        require_approval=args.approve,
+        resume=args.resume,
     )
     try:
         return run.run()
@@ -126,6 +128,16 @@ def main(argv: list[str] | None = None) -> int:
         "--ingest-brain",
         default=None,
         help="opt-in: copy the knowledge bundle into a brain git worktree. Never writes main.",
+    )
+    paper_args.add_argument(
+        "--approve",
+        action="store_true",
+        help="stop after the outline judge (exit 3) with outline.md",
+    )
+    paper_args.add_argument(
+        "--resume",
+        action="store_true",
+        help="re-judge outline.json if it changed, then stamp outline.approved.json",
     )
     paper_args.add_argument(
         "--debug",

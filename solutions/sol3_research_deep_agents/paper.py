@@ -32,6 +32,7 @@ from pathlib import Path
 
 import evidence
 import gates
+import outline as outlines
 import research
 import stages
 import state as pstate
@@ -71,6 +72,10 @@ def section_body(text: str, heading: str) -> str:
     """
     pattern = rf"\A\s*(?:#{{1,6}}\s*)?{re.escape(heading)}\s*(?:\n+|\Z)"
     return re.sub(pattern, "", text, count=1, flags=re.IGNORECASE).strip()
+
+
+class AwaitingApproval(RuntimeError):
+    """`--approve` stops here. The operator edits outline.json, then `--resume`."""
 
 
 class BudgetSpent(RuntimeError):
@@ -307,6 +312,8 @@ class Paper:
     quiet: bool = False
     brains: list = field(default_factory=list)
     ingest_brain: Path | None = None
+    require_approval: bool = False
+    resume: bool = False
 
     state: pstate.PaperState = field(init=False)
     ledger: evidence.Ledger = field(init=False)
@@ -419,7 +426,12 @@ class Paper:
             if stop["stop"]:
                 return self._escalate(name, f"the {stop['reason']} budget is spent")
 
-            decision = self._run_stage(name)
+            try:
+                decision = self._run_stage(name)
+            except AwaitingApproval as exc:
+                self.say(f"  outline    awaiting approval ({exc})")
+                self.state.save()
+                return 3
             if decision is not None:
                 return decision
 
@@ -534,6 +546,7 @@ class Paper:
         self.plan = stages.normalize_plan(self.plan)
         stages.plan_gate(self.plan)
         path.write_text(json.dumps(self.plan, indent=2), encoding="utf-8")
+        usd += self._approve_outline()
         self.state.record("plan", path)
         return StageResult(
             "plan",
@@ -542,6 +555,52 @@ class Paper:
             summary=f"{len(self.plan['questions'])} questions, "
             f"{len(self.plan['diagrams'])} figures planned",
         )
+
+    def _approve_outline(self) -> float:
+        """Validate, judge, and stamp the outline. `--approve` stops before research."""
+        dest = self.work_dir / "outline.json"
+        judged_path = self.work_dir / "outline-judged.json"
+        stamped = self.work_dir / "outline.approved.json"
+        usd = 0.0
+        if dest.exists():
+            drafted = json.loads(dest.read_text(encoding="utf-8"))
+        else:
+            drafted = outlines.outline_from_plan(self.plan)
+        errors = outlines.validate(drafted, word_target_total=drafted.get("word_target_total") or 2000)
+        if errors:
+            raise GateFailed(outlines.retry_note(errors), ("outline",))
+        dest.write_text(json.dumps(drafted, indent=2) + "\n", encoding="utf-8")
+        (self.work_dir / "outline.md").write_text(outlines.to_markdown(drafted), encoding="utf-8")
+
+        if not judged_path.exists() or self.resume:
+            reply = self._ask(
+                "outline_judge",
+                "Grade this outline against logical flow, completeness, titles, "
+                "and corpus_fit. Do not re-litigate Python's validator.\n"
+                + json.dumps(drafted, indent=2)[:8000],
+            )
+            usd = reply.usd
+            verdict = self._json_reply("outline_judge", reply)
+            (self.work_dir / "outline-verdict.json").write_text(
+                json.dumps(verdict, indent=2) + "\n", encoding="utf-8"
+            )
+            if not verdict.get("passed"):
+                raise GateFailed(
+                    "the outline judge rejected the outline: "
+                    + (verdict.get("summary") or "failed"),
+                    outlines.judge_signature(verdict),
+                )
+            judged_path.write_text(json.dumps(drafted, indent=2) + "\n", encoding="utf-8")
+
+        if self.require_approval and not self.resume:
+            raise AwaitingApproval(self.work_dir / "outline.md")
+
+        approved_by = "operator" if self.resume else "judge"
+        stamped.write_text(
+            json.dumps(outlines.stamp(drafted, approved_by=approved_by), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return usd
 
     # -- 2. search ---------------------------------------------------------
 
