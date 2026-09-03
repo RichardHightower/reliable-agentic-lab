@@ -504,7 +504,7 @@ def test_the_writer_was_actually_reached(run_dir, stub_renderer):
     run = priced_run(run_dir, 3.00)
     run.run()
     done = [n for n, s in run.state.stages.items() if s.status == pstate.COMPLETE]
-    assert done == ["plan", "search", "verify", "outline", "diagram"], done
+    assert done == ["corpus", "plan", "search", "verify", "outline", "diagram"], done
 
 
 def test_the_run_says_which_call_it_could_not_afford(run_dir, stub_renderer, capsys):

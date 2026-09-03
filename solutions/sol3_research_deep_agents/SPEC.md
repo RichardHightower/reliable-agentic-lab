@@ -89,7 +89,7 @@ agent writes anywhere it likes.
 | 5 | diagram | yes | At most twelve nodes, alt text present, and the pinned plugin judge accepts a `*_imagen.png` |
 | 6 | write | yes | A section cites only the numbers its claims support, and carries real prose rather than a restated claim list |
 | 7 | review | yes | Every rubric row passes, including `depth` |
-| 8 | assemble | no | Every hard gate in `paper_check`, including that the paper has a body and clears 1800 words |
+| 8 | assemble | no | Every hard gate in `paper_check`, including that the paper has a body and clears 2000 words |
 | 9 | publish | no | The gates passed. Opt-in only |
 
 ## Three exits, and no fourth
