@@ -53,6 +53,17 @@
       }
     }
   },
+  "outline_judge": {
+    "Grade this outline": {
+      "data": {
+        "passed": true,
+        "score": 1.0,
+        "blocking_issues": [],
+        "actionable_changes": [],
+        "summary": "offline outline judge: validator already ran"
+      }
+    }
+  },
   "researcher": {
     "What three exits does this repo's paper loop check, and in what order?": {
       "data": {

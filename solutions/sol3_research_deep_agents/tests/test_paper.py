@@ -152,6 +152,15 @@ def test_the_live_planner_file_is_the_plan_not_its_tool_receipt(offline, run_dir
         name = "deep_agents"
 
         def ask(self, role, prompt):
+            if role == "outline_judge":
+                return paper.Reply(
+                    data={
+                        "passed": True,
+                        "score": 1.0,
+                        "blocking_issues": [],
+                        "actionable_changes": [],
+                    }
+                )
             assert role == "planner"
             (run_dir / "plan.json").write_text(json.dumps(expected), encoding="utf-8")
             return paper.Reply(text="wrote plan.json")
@@ -449,6 +458,7 @@ class Priced(paper.FixtureRunner):
 
     PRICE: ClassVar[dict] = {
         "planner": 0.05,
+        "outline_judge": 0.05,
         "researcher": 0.05,
         "verifier": 0.05,
         "diagrammer": 0.05,

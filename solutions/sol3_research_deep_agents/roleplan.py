@@ -40,6 +40,7 @@ LOOPS = {
     "paper": (
         "orchestrator",
         "planner",
+        "outline_judge",
         "researcher",
         "verifier",
         "diagrammer",
@@ -71,17 +72,21 @@ PURPOSE = {
         "Grades the draft against the rubric and returns verdicts. "
         "Holds no write path, so it cannot fix its own complaint."
     ),
+    "outline_judge": (
+        "Scores the outline before any research spend. Holds no write path."
+    ),
 }
 
 # Roles that hold no tool that writes. The separation is the tool list, not a
 # rule in a prompt, so there is nothing for a model to talk its way past.
-READERS = ("orchestrator", "judge", "researcher", "reviewer")
+READERS = ("orchestrator", "judge", "researcher", "reviewer", "outline_judge")
 
 TOOLS_FOR_READER = {
     "orchestrator": ("Task",),
     "judge": (*READ_TOOLS, "Bash"),
     "researcher": (*READ_TOOLS, "WebSearch"),
     "reviewer": (*READ_TOOLS,),
+    "outline_judge": (*READ_TOOLS,),
 }
 
 # Where a role may write when `.loop.yml` says nothing about it. A target repo
