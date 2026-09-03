@@ -33,6 +33,7 @@ Book-gen's five rows, then the white-paper rows.
 | `figures_earned` | Every figure is earned by the section abstract. No chart lacks a data source in `data_needed`. |
 | `word_budget` | Word targets fit the audience and the paper total. A 200-word architecture section in a 4000-word paper fails. |
 | `limitations` | A limitations section exists and names what the paper will not cover. |
+| `corpus_fit` | A section that ignores a corpus claim that contradicts its `claims_to_support` fails. Read the pack. A section that cites a corpus key for a claim the pack actually supports passes. |
 
 ## Rules
 

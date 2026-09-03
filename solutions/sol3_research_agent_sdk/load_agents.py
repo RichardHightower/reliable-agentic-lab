@@ -109,6 +109,7 @@ _SECTION_SCHEMA = _schema(
         "word_target": {"type": "integer"},
         "figures": {"type": "array", "items": _FIGURE_SCHEMA},
         "depends_on": _STRINGS,
+        "corpus_refs": _STRINGS,
     },
     [
         "id",

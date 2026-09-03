@@ -4,7 +4,7 @@ Ten phases, in a list, in order. The list is the dispatch order and the number
 is only a state key, which is what lets a phase slot in later without
 renumbering the run records that already exist on disk.
 
-    0 prior_art   read the second brain     -> prior-art.md
+    0 corpus_pack read the configured brains   -> corpus/brain-pack.md
     1 outline     two-level outline, judged -> outline.approved.json
     2 research    answers and claims        -> sources.json, claims.json
     3 verify      an independent second look-> verdicts.json
@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import checks
+import corpus
 import diagrams
 import gates
 import outline as outlines
@@ -181,6 +182,8 @@ class Run:
     word_target_total: int = MAX_WORDS
     theme: str = diagrams.DEFAULT_THEME
     brain: Path | None = BRAIN
+    brains: list = field(default_factory=list)
+    corpus_subjects: list | None = None
     brief: str = ""
     should_publish: bool = False
     require_approval: bool = False
@@ -196,6 +199,13 @@ class Run:
 
     def file(self, name: str) -> Path:
         return Path(self.work_dir) / name
+
+    def corpus_roots(self) -> list[Path]:
+        if self.brains:
+            return [Path(path) for path in self.brains]
+        if self.brain:
+            return [Path(self.brain)]
+        return []
 
     def read_json(self, name: str) -> dict:
         return json.loads(self.file(name).read_text(encoding="utf-8"))
@@ -270,57 +280,43 @@ def attempt(run: Run, *, kind: str, do, attempts: int = 2):
 # Phases 0 to 4. Each runs once, and skips when its output already exists.
 
 
-def prior_art(run: Run) -> dict:
-    """Read the second brain for established terminology and earlier conclusions.
+def corpus_pack(run: Run) -> dict:
+    """Build the topic's corpus pack before any model call.
 
-    Read-only, and optional. The brain is a sibling repository that an attendee
-    will not have. A missing brain is a thinner plan, not a failed run.
-
-    Nothing here is treated as verified. It tells the planner what words this
-    body of work already uses, so the paper does not rename a concept that
-    already has a name. Anything time-sensitive still goes on the question list.
+    Read-only, and optional. A missing brain is a thinner outline, not a
+    failed run. Nothing here is treated as verified. It tells the outliner
+    what words this body of work already uses, and which corpus keys a
+    section may cite.
     """
-    brain = Path(run.brain) if run.brain else None
-    if brain is None or not brain.exists():
-        run.file("prior-art.md").write_text(
-            "No second brain was found. Planned from the topic alone.\n", encoding="utf-8"
-        )
-        return {"hits": 0, "brain": str(brain) if brain else ""}
-
-    words = [w for w in slugify(run.topic).split("-") if len(w) > 3]
-    hits: list[str] = []
-    seen: set[str] = set()
-    for path in sorted((brain / "research").rglob("*.md")) if (brain / "research").exists() else []:
-        if len(hits) >= MAX_PRIOR_ART_HITS:
-            break
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        lowered = text.lower()
-        if not all(word in lowered for word in words[:2]) or path.stem in seen:
-            continue
-        seen.add(path.stem)
-        title = next(
-            (
-                line[7:].strip().strip('"')
-                for line in text.splitlines()
-                if line.startswith("title:")
-            ),
-            path.stem,
-        )
-        body = "\n".join(
-            line for line in text.split("---", 2)[-1].strip().splitlines() if line.strip()
-        )
-        hits.append(f"- **{title}** ({path.parent.name})\n  {body[:280]}")
-
-    run.file("prior-art.md").write_text(
-        f"# Prior art on {run.topic}\n\n"
-        "Read for terminology and for what was already concluded. Not verified.\n\n"
-        + ("\n".join(hits) if hits else "Nothing in the brain matched this topic.\n"),
-        encoding="utf-8",
+    dest = run.file("corpus")
+    packed = corpus.pack(
+        run.topic,
+        run.corpus_roots(),
+        dest,
+        limit=MAX_PRIOR_ART_HITS * 4,
+        subjects=run.corpus_subjects,
     )
-    return {"hits": len(hits), "brain": str(brain)}
+    return {
+        "hits": len(packed["hits"]),
+        "brains": packed["roots"],
+        "missing": packed["missing"],
+        "corpus_thin": packed["corpus_thin"],
+        "subjects": packed["subjects"],
+    }
+
+
+# Old name. Tests and greps that still say prior_art keep working.
+prior_art = corpus_pack
+
+
+def _pack_keys(run: Run) -> list[str]:
+    path = run.file("corpus/brain-pack.json")
+    if not path.exists():
+        return []
+    try:
+        return list(json.loads(path.read_text(encoding="utf-8")).get("keys") or [])
+    except (OSError, json.JSONDecodeError):
+        return []
 
 
 def plan(run: Run) -> dict:
@@ -344,14 +340,18 @@ def _budget_for(run: Run) -> dict:
 
 
 def _call_outliner(run: Run, note: str) -> dict:
-    prior = run.file("prior-art.md")
-    prior_text = prior.read_text(encoding="utf-8") if prior.exists() else ""
+    pack_path = run.file("corpus/brain-pack.md")
+    prior_text = pack_path.read_text(encoding="utf-8") if pack_path.exists() else ""
     args = (run.topic, prior_text, _budget_for(run), note)
     method = getattr(run.turns, "outline", run.turns.plan)
     drafted = method(*args, brief=run.brief) if run.brief else method(*args)
     if not isinstance(drafted, dict):
         raise RunFailed("the outliner returned no outline object")
-    errors = outlines.validate(drafted, word_target_total=run.word_target_total)
+    errors = outlines.validate(
+        drafted,
+        word_target_total=run.word_target_total,
+        corpus_keys=_pack_keys(run),
+    )
     if errors:
         raise RunFailed(outlines.retry_note(errors))
     return drafted
@@ -889,7 +889,7 @@ def review(run: Run) -> dict:
 # The driver.
 
 LINEAR = [
-    (0, "prior_art", "prior-art.md", prior_art),
+    (0, "corpus_pack", "corpus/brain-pack.json", corpus_pack),
     (1, "outline", "outline.approved.json", do_outline),
     (2, "research", "claims.json", do_research),
     (3, "verify", "verdicts.json", verify),

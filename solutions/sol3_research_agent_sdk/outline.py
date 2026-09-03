@@ -83,7 +83,7 @@ def _cycle(ids: list[str], edges: dict[str, list[str]]) -> str | None:
     return None
 
 
-def validate(outline: dict, *, word_target_total: int | None = None) -> list[str]:
+def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys: list[str] | None = None) -> list[str]:
     """Return human-readable errors. Empty means the outline is usable.
 
     The exact strings are the retry instruction handed back to the outliner.
@@ -188,6 +188,18 @@ def validate(outline: dict, *, word_target_total: int | None = None) -> list[str
                     f"chart figure {figure.get('name')!r} in section {sid!r} has empty "
                     "data_needed. Name the table or series the chart will plot."
                 )
+        refs = section.get("corpus_refs") or []
+        if refs and not isinstance(refs, list):
+            errors.append(f"section {sid!r} corpus_refs must be an array of corpus keys")
+            refs = []
+        if corpus_keys is not None:
+            allowed = set(corpus_keys)
+            for ref in refs:
+                if not isinstance(ref, str) or ref not in allowed:
+                    errors.append(
+                        f"section {sid!r} corpus_refs names unknown key {ref!r}. "
+                        "Use keys from corpus/brain-pack.json."
+                    )
 
     return errors
 

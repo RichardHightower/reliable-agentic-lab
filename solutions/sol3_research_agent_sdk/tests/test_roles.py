@@ -110,6 +110,7 @@ def test_the_allowlist_covers_every_tool_the_cast_holds(fake_sdk, work, monkeypa
             assert tool in options.allowed_tools, f"{role.name} would be denied {tool}"
     assert "mcp__perplexity__perplexity_search" in options.allowed_tools
     assert "mcp__perplexity__perplexity_ask" in options.allowed_tools
+    assert "mcp__corpus__corpus_search" in options.allowed_tools
     assert "Write" in options.allowed_tools
 
 
@@ -202,7 +203,7 @@ def test_the_folder_declares_its_own_search_boundary(fake_sdk, work, monkeypatch
     monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
     fake_sdk()
     options = roles.options_for(work)
-    assert set(options.mcp_servers) == {"context7", "perplexity"}
+    assert set(options.mcp_servers) == {"context7", "perplexity", "corpus"}
     assert options.mcp_servers["context7"]["url"].startswith("https://mcp.context7.com")
     assert options.mcp_servers["perplexity"]["env"]["PERPLEXITY_API_KEY"] == "test-key"
     assert options.mcp_servers["perplexity"]["args"] == ["-yq", "@perplexity-ai/mcp-server"]
@@ -215,7 +216,7 @@ def test_perplexity_is_left_out_when_its_key_is_not_set(fake_sdk, work, monkeypa
     monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
     monkeypatch.setattr(roles, "DOTENV_PATHS", ())
     fake_sdk()
-    assert set(roles.options_for(work).mcp_servers) == {"context7"}
+    assert set(roles.options_for(work).mcp_servers) == {"context7", "corpus"}
 
 
 def test_a_nearby_dotenv_supplies_the_perplexity_key(fake_sdk, work, monkeypatch, tmp_path):

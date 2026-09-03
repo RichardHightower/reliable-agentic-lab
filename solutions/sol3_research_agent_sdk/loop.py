@@ -67,7 +67,7 @@ def cast(contract=None) -> dict[str, roleplan.RolePlan]:
     return roleplan.plan(contract, LOOP)
 
 
-def build(work_dir, max_usd=None):
+def build(work_dir, max_usd=None, brains=None):
     """This runtime's configuration for the cast.
 
     Needs `claude-agent-sdk` installed. `cast()` and the role table do not,
@@ -75,7 +75,7 @@ def build(work_dir, max_usd=None):
     """
     import roles as sdk  # noqa: PLC0415  (keeps --table-only free of the SDK)
 
-    return sdk.options_for(work_dir, max_usd=max_usd, loop=LOOP)
+    return sdk.options_for(work_dir, max_usd=max_usd, loop=LOOP, brains=brains)
 
 
 def pick_turns(
@@ -84,6 +84,7 @@ def pick_turns(
     max_usd: float | None,
     on_cost,
     fixture: Path = FIXTURE,
+    brains=None,
 ):
     """Choose a runtime for the six model turns.
 
@@ -101,7 +102,7 @@ def pick_turns(
             from adapter import AgentSdkBackend  # noqa: PLC0415
 
             return t.SdkTurns(
-                backend=AgentSdkBackend(build(work_dir, max_usd)),
+                backend=AgentSdkBackend(build(work_dir, max_usd, brains=brains)),
                 work_dir=work_dir,
                 on_cost=on_cost,
             )
@@ -175,6 +176,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="require the paper to teach done, then cost, then max turns. E2E only.",
     )
+    parser.add_argument(
+        "--brain",
+        action="append",
+        type=Path,
+        dest="brains",
+        help="corpus root (repeatable). Default: sibling loop_eng_2nd_brain/knowledge",
+    )
+    parser.add_argument(
+        "--corpus-subjects",
+        default=None,
+        help="comma-separated subject globs, e.g. seminar-*,harness-ch03",
+    )
     parser.add_argument("--publish", action="store_true", help="push the paper to a private gist")
     parser.add_argument("--fresh", action="store_true", help="delete the work directory first")
     args = parser.parse_args(argv)
@@ -185,8 +198,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args.topic:
         parser.error("--topic is required unless you pass --table-only")
 
+    import os  # noqa: PLC0415
     import shutil  # noqa: PLC0415  (nothing above --table-only needs these)
 
+    import corpus as corpus_mod  # noqa: PLC0415
     import paper  # noqa: PLC0415
     from turns import slugify  # noqa: PLC0415
 
@@ -216,6 +231,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.word_target is not None:
         profile["word_target_total"] = args.word_target
 
+    brains = corpus_mod.default_roots(
+        extra=args.brains,
+        env=os.environ.get("RESEARCH_BRAINS"),
+    )
+    subjects = None
+    if args.corpus_subjects:
+        subjects = [item.strip() for item in args.corpus_subjects.split(",") if item.strip()]
+
     state = paper.State.load_or_new(work, args.topic)
     run = paper.Run(
         topic=args.topic,
@@ -228,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
             profile["max_usd"],
             lambda usd: run.spend(usd),
             args.fixture or FIXTURE,
+            brains=brains,
         ),  # noqa: PLW0108
         state=state,
         area=args.area or paper.DEFAULT_AREA,
@@ -243,6 +267,9 @@ def main(argv: list[str] | None = None) -> int:
         resume=args.resume,
         enforce_research_policy=True,
         enforce_loop_doctrine=args.enforce_loop_doctrine,
+        brain=brains[0] if brains else None,
+        brains=brains,
+        corpus_subjects=subjects,
     )
 
     print()

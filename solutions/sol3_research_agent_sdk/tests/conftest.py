@@ -93,6 +93,21 @@ def make_sdk_module(messages=None):
     module.query = query
     module.last_prompt = None
     module.last_options = None
+
+    def tool(name, description, schema):
+        def decorator(fn):
+            fn.mcp_name = name
+            fn.mcp_description = description
+            fn.mcp_schema = schema
+            return fn
+
+        return decorator
+
+    def create_sdk_mcp_server(*, name, version="1.0.0", tools=()):
+        return {"type": "sdk", "name": name, "version": version, "tools": list(tools)}
+
+    module.tool = tool
+    module.create_sdk_mcp_server = create_sdk_mcp_server
     return module
 
 
