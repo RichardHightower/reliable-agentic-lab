@@ -5,14 +5,16 @@ flowchart TD
     Choose -- Yes --> Inspect["Agent SDK judge turn"]
     Inspect --> Fields["check_fields"]
     Fields --> Ready{"Ready?"}
-    Ready -- No --> Candidate["Agent SDK doer turn"]
-    Candidate --> Persist["Store candidate and events"]
-    Persist --> Inspect
     Ready -- Yes --> LGTM{"Human LGTM?"}
-    LGTM -- Yes --> Publish["Orchestrator writes issue and labels"]
-    LGTM -- No --> Gate["check_stop"]
-    Gate --> Decision{"Retry?"}
-    Decision -- Yes --> Candidate
-    Decision -- No --> Escalate["Mark needs-human"]
+    LGTM -- Yes --> Publish["Python updates issue and labels"]
+    LGTM -- No --> Wait["waiting for LGTM"]
+    Ready -- No --> Candidate["Agent SDK doer turn"]
+    Candidate --> Persist["Store candidate"]
+    Persist --> Gate["check_stop"]
+    Gate --> Decision{"Stop?"}
+    Decision -- No --> Wait2["waiting, still missing fields"]
+    Decision -- Yes --> Escalate["Mark needs-human"]
     Publish --> End
+    Wait --> End
+    Wait2 --> End
     Escalate --> End

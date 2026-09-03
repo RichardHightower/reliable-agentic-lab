@@ -1,0 +1,32 @@
+{
+  "source": "../reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/diagrams/workflow.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "28e94aba245e18f2498f1ef98e95e7af8eb258dfab9c6673e602d7dee34c0db3",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "One poll",
+    "open_tickets",
+    "Ticket available?",
+    "Return",
+    "Agent SDK judge turn",
+    "check_fields",
+    "Ready?",
+    "Human LGTM?",
+    "Python updates issue and labels",
+    "waiting for LGTM",
+    "Agent SDK doer turn",
+    "Store candidate",
+    "check_stop",
+    "Stop?",
+    "waiting, still missing fields",
+    "Mark needs-human"
+  ],
+  "edges": 19,
+  "png": "../reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/workflow_imagen.png",
+  "prompt": "../reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/workflow_imagen.prompt.txt"
+}

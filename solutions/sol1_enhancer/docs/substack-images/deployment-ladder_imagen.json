@@ -1,0 +1,24 @@
+{
+  "source": "docs/diagrams/deployment-ladder.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "f099bfaf0ed28c27e2e8948a65bdce51437b9aad915116be59fecf837731b33b",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "Four ways to start one poll",
+    "Terminal<br/>sleep loop",
+    "cron<br/>a clock",
+    "GitHub Actions<br/>the ticket changed",
+    "Webhook receiver<br/>ngrok or a Droplet",
+    "One poll<br/>judge, doer, judge",
+    "check_fields and check_stop<br/>the same scripts every time",
+    "passed, waiting, or escalated"
+  ],
+  "edges": 6,
+  "png": "docs/substack-images/deployment-ladder_imagen.png",
+  "prompt": "docs/substack-images/deployment-ladder_imagen.prompt.txt"
+}

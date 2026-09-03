@@ -1,0 +1,24 @@
+{
+  "pass": true,
+  "nodes": [
+    "One poll",
+    "open_tickets",
+    "Ticket available?",
+    "Return",
+    "Agent SDK judge turn",
+    "check_fields",
+    "Ready?",
+    "Human LGTM?",
+    "Python updates issue and labels",
+    "waiting for LGTM",
+    "Agent SDK doer turn",
+    "Store candidate",
+    "check_stop",
+    "Stop?",
+    "waiting, still missing fields",
+    "Mark needs-human"
+  ],
+  "edges": 19,
+  "misses": [],
+  "note": "Mechanical checks only. A vision pass must confirm every source label is readable text and that no source syntax is visible."
+}

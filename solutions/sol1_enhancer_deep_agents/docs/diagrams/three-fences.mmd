@@ -1,0 +1,14 @@
+flowchart TB
+    subgraph Profile["Fence 3: harness profile, what the runtime itself supplies"]
+        subgraph Tools["Fence 2: tool list, what this subagent was handed"]
+            subgraph Path["Fence 1: path check, inside the write tool"]
+                Write["One write call"]
+            end
+        end
+    end
+
+    Doer["Doer subagent"] --> Write
+    Write --> Allowed["tickets only, the candidate lands"]
+    Path -.->|refused| Outside["Any other path"]
+    Tools -.->|judge holds no write tool| NoTool["Nothing to call"]
+    Profile -.->|default subagent turned off| NoShovel["No unscoped filesystem tools"]

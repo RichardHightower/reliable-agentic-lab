@@ -1,0 +1,21 @@
+{
+  "source": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/diagrams/model.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "ab394599dd65052aecc54a61f812aeb691599945e2092564b296f5d3c673bd2b",
+  "kind": "class",
+  "language": "mermaid",
+  "nodes": [
+    "+repo: Path\n        +budget: dict\n        +run(task): RunResult",
+    "+name: str\n        +tools: tuple\n        +allow: tuple\n        +deny: tuple",
+    "+poll(ticket): Outcome[",
+    "+judge(path): DoerResult\n        +draft(ticket): DoerResult",
+    "+id: str\n        +kind: str\n        +criteria: Criterion["
+  ],
+  "edges": 4,
+  "png": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/model_imagen.png",
+  "prompt": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/model_imagen.prompt.txt"
+}

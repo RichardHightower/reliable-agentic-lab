@@ -1,0 +1,18 @@
+{
+  "pass": true,
+  "nodes": [
+    "Operator",
+    "Human",
+    "SDK",
+    "GitHub",
+    "Poll",
+    "Publish",
+    "Human",
+    "SDK",
+    "Judge",
+    "Draft"
+  ],
+  "edges": 6,
+  "misses": [],
+  "note": "Mechanical checks only. A vision pass must confirm every source label is readable text and that no source syntax is visible."
+}

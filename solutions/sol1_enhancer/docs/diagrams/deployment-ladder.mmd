@@ -1,0 +1,15 @@
+flowchart LR
+    subgraph Triggers["Four ways to start one poll"]
+        A["Terminal<br/>sleep loop"]
+        B["cron<br/>a clock"]
+        C["GitHub Actions<br/>the ticket changed"]
+        D["Webhook receiver<br/>ngrok or a Droplet"]
+    end
+
+    A --> Poll
+    B --> Poll
+    C --> Poll
+    D --> Poll
+
+    Poll["One poll<br/>judge, doer, judge"] --> Gates["check_fields and check_stop<br/>the same scripts every time"]
+    Gates --> Out["passed, waiting, or escalated"]

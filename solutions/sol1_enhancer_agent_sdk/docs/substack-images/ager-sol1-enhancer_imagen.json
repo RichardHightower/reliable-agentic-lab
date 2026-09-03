@@ -1,0 +1,23 @@
+{
+  "source": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/ager-sol1-enhancer.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "ea8bb2dab3f787073f8afe2ebff11b5562a7f7abf3825cb7945f5608e986828f",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "AgentGraph sol1-enhancer",
+    "OrchestratorAgent enhancer-loop",
+    "WorkerAgent enhancer-doer",
+    "JudgeAgent enhancer-judge",
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "edges": 9,
+  "png": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/ager-sol1-enhancer_imagen.png",
+  "prompt": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/ager-sol1-enhancer_imagen.prompt.txt"
+}

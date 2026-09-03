@@ -1,0 +1,15 @@
+{
+  "pass": true,
+  "nodes": [
+    "ticket",
+    "ticket",
+    "L",
+    "E",
+    "A",
+    "C",
+    "G"
+  ],
+  "edges": 6,
+  "misses": [],
+  "note": "Mechanical checks only. A vision pass must confirm every source label is readable text and that no source syntax is visible."
+}

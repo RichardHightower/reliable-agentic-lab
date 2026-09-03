@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><style>
+:root{--canvas:#F8FAFD;--surface:#FFFFFF;--ink:#0B2E6B;--accent:#F97316;--success:#2F6B2D;--rule:#C9D6EA}
+*{box-sizing:border-box}body{margin:0;background:var(--canvas)}
+.wrap{width:1376px;padding:56px 64px}
+h2{margin:0 0 28px;font:700 34px/1.2 -apple-system,"Helvetica Neue",sans-serif;color:var(--ink);letter-spacing:-.01em}
+table{width:100%;border-collapse:collapse;font:400 21px/1.45 -apple-system,"Helvetica Neue",sans-serif;color:var(--ink)}
+thead th{text-align:left;font-weight:700;font-size:19px;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);padding:0 18px 14px;border-bottom:3px solid var(--accent)}
+tbody td{background:var(--surface);padding:18px;vertical-align:top;border-bottom:1px solid var(--rule)}
+tbody tr td:nth-child(2){font-weight:600}
+.icon{width:1px;padding-right:0;font-size:25px}
+code{font:500 19px/1.4 ui-monospace,Menlo,monospace;color:var(--ink)}
+</style>
+<div class="wrap"><h2>Three ways to deny one role a write tool</h2>
+<table><thead><tr><th></th><th>Platform</th><th>How the judge is denied</th><th>What actually refuses</th></tr></thead><tbody>
+<tr><td class="icon">📝</td><td>Claude Code</td><td>Frontmatter allowlist, plus deny globs in <code>settings.json</code></td><td>The platform, which hands over three read tools and no others</td></tr>
+<tr><td class="icon">🚫</td><td>Grok Build</td><td>Allowlist, plus an explicit <code>disallowedTools</code> denylist</td><td>The platform, which also refuses the spawn tools by name</td></tr>
+<tr><td class="icon">🛡️</td><td>Codex</td><td>No tool list. The process runs in a read-only sandbox</td><td>A platform sandbox, Seatbelt or bubblewrap, that never read the prompt</td></tr>
+</tbody></table></div>

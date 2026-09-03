@@ -1,0 +1,13 @@
+{
+  "pass": true,
+  "nodes": [
+    "Perceive<br/>Trigger",
+    "Reason<br/>Plan",
+    "Act<br/>Tool or write",
+    "Observe<br/>Tests, files, scores",
+    "Decide<br/>Pass, retry, escalate"
+  ],
+  "edges": 5,
+  "misses": [],
+  "note": "Mechanical checks only. A vision pass must confirm every source label is readable text and that no source syntax is visible."
+}

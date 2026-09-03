@@ -1,0 +1,12 @@
+flowchart LR
+    Trigger["Trigger<br/>one poll, from outside the model"]
+    Action["Action<br/>one scoped job, done by the worker"]
+    Verify["Verify<br/>a checker that is not the worker"]
+    Memory["Memory<br/>files a later process can read"]
+    Exit["Exit<br/>pass, retry, or escalate"]
+
+    Trigger --> Action --> Verify --> Exit
+    Action --> Memory
+    Verify --> Memory
+    Exit -->|retry, same run| Action
+    Memory -.->|restore point| Trigger

@@ -1,0 +1,18 @@
+{
+  "pass": true,
+  "nodes": [
+    "loop.py or Task",
+    "Python loop",
+    "Contract and role plan",
+    "Enhancer state machine",
+    "Agent SDK backend",
+    "PreToolUse scope hook",
+    "Orchestrator, doer, judge",
+    "check_fields and check_stop",
+    "GitHub CLI or API",
+    "Target tickets and state"
+  ],
+  "edges": 9,
+  "misses": [],
+  "note": "Mechanical checks only. A vision pass must confirm every source label is readable text and that no source syntax is visible."
+}

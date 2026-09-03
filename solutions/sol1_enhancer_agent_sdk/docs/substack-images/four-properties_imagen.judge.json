@@ -1,0 +1,12 @@
+{
+  "pass": true,
+  "nodes": [
+    "1 Explicit state<br/>Start from disk",
+    "2 Bounded authority<br/>Declared write scope",
+    "3 Observable evidence<br/>A trace and a file",
+    "4 External transition<br/>Pass / retry / escalate"
+  ],
+  "edges": 3,
+  "misses": [],
+  "note": "Mechanical checks only. A vision pass must confirm every source label is readable text and that no source syntax is visible."
+}

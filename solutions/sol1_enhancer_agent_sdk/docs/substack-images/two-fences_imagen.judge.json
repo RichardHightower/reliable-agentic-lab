@@ -1,0 +1,16 @@
+{
+  "pass": true,
+  "nodes": [
+    "Fence 1. Tool list",
+    "tools = Read, Glob, Grep",
+    "NO_WRITE strips Edit, Write, NotebookEdit, Bash",
+    "Fence 2. PreToolUse hook",
+    "roles.scope_hook",
+    "deny uses hookSpecificOutput",
+    "SDK tool call",
+    "Judge path: nothing to hook"
+  ],
+  "edges": 5,
+  "misses": [],
+  "note": "Mechanical checks only. A vision pass must confirm every source label is readable text and that no source syntax is visible."
+}

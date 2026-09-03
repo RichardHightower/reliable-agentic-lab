@@ -1,0 +1,26 @@
+{
+  "source": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/diagrams/architecture.mmd",
+  "theme": "agent-control",
+  "density": "article",
+  "aspect": "16:9",
+  "backend": "imagen",
+  "policy": "imagen-cli-vars",
+  "hash": "58a3e6e65d31bcfb1b48a2bf3f49cae361eace9f3deffe7f5eaae87db300c18c",
+  "kind": "flowchart",
+  "language": "mermaid",
+  "nodes": [
+    "loop.py or Task",
+    "Python loop",
+    "Contract and role plan",
+    "Enhancer state machine",
+    "Agent SDK backend",
+    "PreToolUse scope hook",
+    "Orchestrator, doer, judge",
+    "check_fields and check_stop",
+    "GitHub CLI or API",
+    "Target tickets and state"
+  ],
+  "edges": 9,
+  "png": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/architecture_imagen.png",
+  "prompt": "/Users/richardhightower/clients/spillwave/src/seminar_harness_loop_graph_engineering/reliable-agentic-lab/solutions/sol1_enhancer_agent_sdk/docs/substack-images/architecture_imagen.prompt.txt"
+}
