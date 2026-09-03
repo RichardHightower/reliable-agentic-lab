@@ -359,6 +359,34 @@ def test_the_offline_outline_includes_the_exit_doctrine_question(work):
     assert t.EXIT_DOCTRINE_QUESTION not in backend.prompts[0][0]
 
 
+def test_the_offline_outline_reads_as_prose():
+    """The topic is the title, not a template hole.
+
+    Interpolating 'how MCP servers authenticate' into 'Describe how {topic}
+    works' produced 'how how MCP servers authenticate works'. Section
+    objectives and questions have to be English on their own.
+    """
+    import outline as outlines  # noqa: PLC0415
+
+    offline = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
+    topic = "how MCP servers authenticate"
+    drafted = offline.outline(topic, "")
+    rendered = outlines.to_markdown(drafted).lower()
+    assert "how how" not in rendered
+    assert drafted["title"].lower().startswith("how mcp")
+    assert topic in drafted["thesis"]
+    for section in drafted["sections"]:
+        objective = section["objective"]
+        assert objective[0].isupper(), objective
+        assert topic not in objective, objective
+        assert not objective.lower().startswith("describe how how")
+        assert not objective.lower().startswith("state what how")
+        for question in section["key_questions"]:
+            assert "how how" not in question.lower(), question
+            assert not question.lower().startswith(topic), question
+            assert question[0].isupper() or question[0].isdigit(), question
+
+
 def test_bind_exit_doctrine_still_exists_for_the_commissioning_brief():
     """Removed from the normal outline path. Reachable for E2E via the brief."""
     plan = {

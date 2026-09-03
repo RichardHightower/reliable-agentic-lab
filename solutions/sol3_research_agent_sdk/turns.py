@@ -468,14 +468,17 @@ class OfflineTurns(Turns):
             {
                 "id": "problem",
                 "heading": "The problem",
-                "objective": f"State what {topic} must solve.",
+                "objective": (
+                    "Name the failure a stop condition left to a model produces, "
+                    "and the reader who pays for it."
+                ),
                 "abstract": (
-                    f"{topic} fails when a stop condition is left to a model's own "
-                    "judgment. This section names the failure and the reader who pays for it."
+                    "A loop fails when a stop condition is left to a model's own "
+                    "judgment. This section names that failure and the reader who pays for it."
                 ),
                 "key_questions": [
                     EXIT_DOCTRINE_QUESTION,
-                    f"What failure mode does {topic} have to prevent?",
+                    "What failure mode does a production loop have to prevent?",
                 ],
                 "claims_to_support": [
                     "A reliable loop computes done from a rubric in code.",
@@ -490,14 +493,14 @@ class OfflineTurns(Turns):
             {
                 "id": "approach",
                 "heading": "The approach",
-                "objective": f"Describe how {topic} works.",
+                "objective": "Describe the mechanism that separates evidence from prose.",
                 "abstract": (
                     "Independent research and verification, a scoped writer, and a "
                     "deterministic gate separate evidence from prose."
                 ),
                 "key_questions": [
-                    f"{topic} common mistake",
-                    f"How does {topic} separate research from writing?",
+                    "What is the common mistake when research and writing share a context?",
+                    "How does this pipeline separate research from writing?",
                 ],
                 "claims_to_support": [
                     "The researcher cannot write the paper.",
@@ -526,14 +529,14 @@ class OfflineTurns(Turns):
             {
                 "id": "limits",
                 "heading": "Limitations",
-                "objective": f"State where {topic} stops working.",
+                "objective": "State where the pipeline stops working.",
                 "abstract": (
                     "The pipeline does not verify every claim past the budget, and it "
                     "does not invent a source when retrieval is empty."
                 ),
                 "key_questions": [
-                    f"{topic} how to verify",
-                    f"Where does {topic} refuse to guess?",
+                    "How does verification work under a finite budget?",
+                    "Where does this pipeline refuse to guess?",
                 ],
                 "claims_to_support": [
                     "Unverified claims are stated qualitatively or dropped.",
