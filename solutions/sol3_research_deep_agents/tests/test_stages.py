@@ -637,3 +637,43 @@ def test_plan_requires_the_repo_exit_order_question_first():
     plan["questions"][0]["question"] = "Which exit happens first?"
     with pytest.raises(stages.GateFailed, match="first question"):
         stages.plan_gate(plan)
+
+
+def test_review_gate_never_attaches_a_note_to_the_wrong_row():
+    """This string becomes the writer's revision instruction.
+
+    A live run stalled with `scope_honest` labelled "evidence_matches is now
+    fixed": one extra note shifted every pairing after it, the real defect was
+    described to nobody, and the row failed again (#326).
+    """
+    with pytest.raises(stages.GateFailed) as exc:
+        stages.review_gate(
+            {
+                "failed_rows": ["scope_honest"],
+                "notes": [
+                    "evidence_matches is now fixed",
+                    "the scope claim outruns its evidence",
+                ],
+            }
+        )
+    message = str(exc.value)
+    assert "scope_honest: evidence_matches is now fixed" not in message
+    assert "not matched up" in message
+    assert "the scope claim outruns its evidence" in message, "no note may be dropped"
+    assert exc.value.signature == ("scope_honest",)
+
+
+def test_review_gate_pairs_when_the_counts_agree():
+    with pytest.raises(stages.GateFailed) as exc:
+        stages.review_gate(
+            {"failed_rows": ["voice", "depth"], "notes": ["a hook", "no mechanism"]}
+        )
+    assert "voice: a hook" in str(exc.value)
+    assert "depth: no mechanism" in str(exc.value)
+
+
+def test_review_gate_still_reports_rows_with_no_notes():
+    with pytest.raises(stages.GateFailed) as exc:
+        stages.review_gate({"failed_rows": ["depth"], "notes": []})
+    assert "depth" in str(exc.value)
+    assert exc.value.signature == ("depth",)
