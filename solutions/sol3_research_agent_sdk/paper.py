@@ -41,6 +41,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import adapter
 import checks
 import charts
 import corpus
@@ -56,8 +57,9 @@ from turns import Escalate, TurnFailed, slugify
 FOLDER = Path(__file__).resolve().parent
 
 # The second brain is a sibling repo, not part of this one. It is read-only
-# prior art, and a run must not need it.
-BRAIN = FOLDER.parents[2] / "loop_eng_2nd_brain" / "knowledge"
+# prior art, and a run must not need it. One definition, in `corpus`, or the
+# two drift and a run reads a different brain than the one it reports.
+BRAIN = corpus.DEFAULT_BRAIN
 
 DEFAULT_AREA = "loop-engineering"
 MAX_ITERATIONS = 3
@@ -135,6 +137,12 @@ class State:
     iteration: int = 0
     previous_signature: list[str] | None = None
     phases: dict[str, dict] = field(default_factory=dict)
+    # Live position. A run killed mid-phase leaves these pointing at the turn
+    # that was in flight, instead of at the last phase that finished cleanly.
+    phase: str = ""
+    role: str = ""
+    last_turn: dict | None = None
+    query_timeout_s: int = 0
 
     @staticmethod
     def path(work_dir: Path) -> Path:
@@ -221,9 +229,44 @@ class Run:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
-    def spend(self, usd: float) -> None:
+    def spend(self, usd: float | None, **detail) -> None:
+        """Record one turn: the running total, the state file, and the turn log.
+
+        Every model call in this port funnels through here. Flushing the state
+        on the phase boundary instead left a ten-minute outline phase looking
+        dead from outside the process, and a killed run reporting the phase
+        before the one it died in.
+        """
         self.state.total_usd += float(usd or 0.0)
         self.state.turns += 1
+        row = {
+            "turn": self.state.turns,
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "phase": self.state.phase,
+            "iteration": self.state.iteration,
+            # Null, never zero. A zero here reads as a free turn and hides a
+            # cost field the runtime never reported.
+            "usd": None if usd is None else round(float(usd), 6),
+            "total_usd": round(self.state.total_usd, 6),
+            **detail,
+        }
+        self.state.role = str(detail.get("role") or "")
+        self.state.last_turn = row
+        self.append_turn(row)
+        try:
+            self.state.save(self.work_dir)
+        except OSError:
+            pass  # telemetry never fails a run
+
+    def append_turn(self, row: dict) -> None:
+        """One JSON object per line, append only, beside the state file."""
+        path = Path(self.work_dir) / ".harness" / "turns.jsonl"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row) + "\n")
+        except OSError:
+            pass  # telemetry never fails a run
 
     def exhausted(self) -> str | None:
         if self.max_usd is not None and self.state.total_usd >= self.max_usd:
@@ -1203,6 +1246,7 @@ CYCLE_OUTPUT = ("sections",)
 def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
     work = Path(run.work_dir)
     work.mkdir(parents=True, exist_ok=True)
+    run.state.query_timeout_s = adapter.QUERY_TIMEOUT_SECONDS
 
     for number, name, output, phase in LINEAR:
         if run.file(output).exists():
@@ -1211,6 +1255,11 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
             continue
         run.log(f"  {number} {name:<10} ...")
         before = run.state.total_usd
+        # Write the in-flight phase before it starts. A run killed here must
+        # report the phase it died in, not the last one that finished.
+        run.state.phase = name
+        run.state.mark(name, "running")
+        run.state.save(work)
         try:
             meta = phase(run)
         except AwaitingApproval:
@@ -1245,6 +1294,9 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
         run.log(f"  attempt {iteration} of {run.max_iterations}")
         for number, name, phase in CYCLE:
             before = run.state.total_usd
+            run.state.phase = name
+            run.state.mark(name, "running")
+            run.state.save(work)
             meta = phase(run)
             run.state.mark(name, "complete", usd=round(run.state.total_usd - before, 4))
             run.state.save(work)
