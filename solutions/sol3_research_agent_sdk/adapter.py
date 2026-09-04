@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
+import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,7 +29,16 @@ from write_scope import WriteScope
 
 _TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
 _COST_STOP = {"error_max_budget_usd", "error_max_budget"}
-QUERY_TIMEOUT_SECONDS = 180
+
+# One outline query against a real 48-hit corpus took about 600 seconds. The old
+# 180-second ceiling killed every live run before the first phase finished, so a
+# default nobody can reach was itself the defect. Read at import so a test can
+# still patch the module attribute.
+QUERY_TIMEOUT_SECONDS = int(os.environ.get("SOL3_QUERY_TIMEOUT_SECONDS", "900"))
+
+# How often a running query says it is still alive. A query that hangs emits no
+# events, which is exactly when an operator needs a line on stderr.
+HEARTBEAT_SECONDS = 15
 
 # Directories a write check should never walk. `.cache` holds a clone of the
 # diagram renderer, and walking it on every turn is thousands of stats for a
@@ -43,6 +55,14 @@ class TurnResult:
     structured: dict | None = None
     stop_reason: str | None = None
     raw_output: str = ""
+    # Telemetry. `cost_reported` separates "the turn cost nothing" from "the SDK
+    # never told us", which a bare 0.0 hides.
+    cost_reported: bool = False
+    elapsed_s: float = 0.0
+    prompt_chars: int = 0
+    events: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class Backend:
@@ -79,14 +99,19 @@ def _changed(before: dict, after: dict) -> list[str]:
     return sorted(name for name, value in after.items() if before.get(name) != value)
 
 
-def _from_message(message) -> tuple[str, float, dict | None, bool | None, str | None]:
-    """Pull text, cost, structured output, error flag, and stop reason."""
+def _from_message(message) -> tuple[str, float | None, dict | None, bool | None, str | None]:
+    """Pull text, cost, structured output, error flag, and stop reason.
+
+    The cost is `None` when the SDK reported no cost field at all. A caller that
+    logs 0.0 there cannot tell a free turn from a broken cost path.
+    """
     if isinstance(message, str):
-        return message, 0.0, None, None, None
+        return message, None, None, None, None
     text = getattr(message, "result", None)
     if text is None:
         text = ""
-    usd = float(getattr(message, "total_cost_usd", None) or 0.0)
+    raw_cost = getattr(message, "total_cost_usd", None)
+    usd = None if raw_cost is None else float(raw_cost)
     structured = getattr(message, "structured_output", None)
     if structured is not None and not isinstance(structured, dict):
         structured = None
@@ -99,11 +124,40 @@ def _from_message(message) -> tuple[str, float, dict | None, bool | None, str | 
         reason = "cost budget spent"
     if text or usd or structured is not None or is_error is not None or reason:
         return str(text or ""), usd, structured, is_error, reason
-    return str(message), 0.0, None, None, None
+    return str(message), None, None, None, None
 
 
 def _raw_event(message) -> str:
     return f"## {type(message).__name__}\n\n{message!r}\n"
+
+
+def _tokens(message) -> tuple[int, int]:
+    """Input and output token counts, when the SDK reports a usage block."""
+    usage = getattr(message, "usage", None)
+    if not isinstance(usage, dict):
+        return 0, 0
+    try:
+        return int(usage.get("input_tokens") or 0), int(usage.get("output_tokens") or 0)
+    except (TypeError, ValueError):
+        return 0, 0
+
+
+async def _heartbeat(progress: dict, role: str) -> None:
+    """Say the query is still running, about every `HEARTBEAT_SECONDS`.
+
+    This runs as its own task rather than inside the event loop body. A query
+    that stalls waiting on the model produces no events, and a heartbeat driven
+    by events would go quiet in the one case it exists for.
+    """
+    while True:
+        await asyncio.sleep(HEARTBEAT_SECONDS)
+        print(
+            f"[sol3] t+{time.monotonic() - progress['started']:.0f}s role={role} "
+            f"events={progress['events']} last={progress['last']} "
+            f"usd={progress['usd']:.2f}",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 class AgentSdkBackend(Backend):
@@ -137,42 +191,77 @@ class AgentSdkBackend(Backend):
                 options = dataclasses.replace(options, **overlay)
 
             raw_events: list[str] = []
+            # `role` rides in on `extra` and is filtered out of the options
+            # overlay below, because it is not a field of the SDK options.
+            role = str(extra.get("role") or "?")
+            progress = {"started": time.monotonic(), "events": 0, "last": "-", "usd": 0.0}
 
-            async def collect() -> tuple[str, float, dict | None, bool, str | None]:
+            async def collect() -> tuple[str, float, bool, dict | None, bool, str | None, int, int]:
                 result_text = ""
                 usd = 0.0
+                reported = False
                 structured = None
                 ok = True
                 reason = None
-                async for message in query(prompt=prompt, options=options):
-                    raw_events.append(_raw_event(message))
-                    if not isinstance(message, (ResultMessage, str)):
-                        continue
-                    text, cost, parsed, error, stop = _from_message(message)
-                    if parsed is not None:
-                        structured = parsed
-                    if text:
-                        result_text = text
-                    if cost:
-                        usd = cost
-                    if error is True:
-                        ok = False
-                    if stop:
-                        reason = stop
-                        ok = False
-                return result_text, usd, structured, ok, reason
+                tokens_in = tokens_out = 0
+                beat = asyncio.ensure_future(_heartbeat(progress, role))
+                try:
+                    async for message in query(prompt=prompt, options=options):
+                        raw_events.append(_raw_event(message))
+                        progress["events"] += 1
+                        progress["last"] = type(message).__name__
+                        got_in, got_out = _tokens(message)
+                        tokens_in += got_in
+                        tokens_out += got_out
+                        if not isinstance(message, (ResultMessage, str)):
+                            continue
+                        text, cost, parsed, error, stop = _from_message(message)
+                        if parsed is not None:
+                            structured = parsed
+                        if text:
+                            result_text = text
+                        if cost is not None:
+                            usd = cost
+                            reported = True
+                            progress["usd"] = cost
+                        if error is True:
+                            ok = False
+                        if stop:
+                            reason = stop
+                            ok = False
+                finally:
+                    beat.cancel()
+                return result_text, usd, reported, structured, ok, reason, tokens_in, tokens_out
 
+            started = time.monotonic()
             try:
-                output, usd, structured, ok, reason = asyncio.run(
-                    asyncio.wait_for(collect(), timeout=QUERY_TIMEOUT_SECONDS)
-                )
+                (
+                    output,
+                    usd,
+                    reported,
+                    structured,
+                    ok,
+                    reason,
+                    tokens_in,
+                    tokens_out,
+                ) = asyncio.run(asyncio.wait_for(collect(), timeout=QUERY_TIMEOUT_SECONDS))
             except asyncio.TimeoutError:
+                elapsed = time.monotonic() - started
                 return TurnResult(
                     ok=False,
-                    output=f"agent sdk query timed out after {QUERY_TIMEOUT_SECONDS} seconds",
+                    output=(
+                        f"agent sdk query timed out after {QUERY_TIMEOUT_SECONDS} seconds "
+                        f"(role={role}, elapsed={elapsed:.0f}s, events={len(raw_events)}, "
+                        f"prompt={len(prompt)} chars). Raise SOL3_QUERY_TIMEOUT_SECONDS "
+                        f"or shrink the prompt."
+                    ),
                     stop_reason="query timeout",
                     raw_output="\n".join(raw_events),
+                    elapsed_s=elapsed,
+                    prompt_chars=len(prompt),
+                    events=len(raw_events),
                 )
+            elapsed = time.monotonic() - started
             wrote = [path for path in _changed(before, _snapshot(root)) if scope.permits(path)]
             return TurnResult(
                 wrote=wrote,
@@ -182,6 +271,12 @@ class AgentSdkBackend(Backend):
                 structured=structured,
                 stop_reason=reason,
                 raw_output="\n".join(raw_events),
+                cost_reported=reported,
+                elapsed_s=elapsed,
+                prompt_chars=len(prompt),
+                events=len(raw_events),
+                input_tokens=tokens_in,
+                output_tokens=tokens_out,
             )
         except Exception as exc:  # graceful failure. Never claim a write it did not make.
             return TurnResult(ok=False, output=f"agent sdk backend failed: {exc}")
