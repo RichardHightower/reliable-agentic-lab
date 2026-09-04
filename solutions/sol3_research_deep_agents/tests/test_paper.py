@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import ClassVar
 
 import paper
@@ -657,3 +658,80 @@ def test_live_search_records_the_repo_question_without_a_model_query(offline):
         finding.subject == first["subject"] and finding.claim_ids
         for finding in offline.ledger.findings.values()
     )
+
+
+# -- the money exit, and the turn log ---------------------------------------
+
+
+class TokenOnly(paper.FixtureRunner):
+    """Recorded replies whose usage metadata carries tokens and no dollars.
+
+    This is what LangChain actually returns. The old `last_usd` looked only for
+    a cost key, summed to zero on every call, and left the money exit
+    unreachable: the run could stop on turns or on the rubric, never on spend.
+    """
+
+    TOKENS: ClassVar[dict] = {"writer": (200_000, 60_000)}
+
+    def ask(self, role, prompt):
+        import adapter  # noqa: PLC0415
+
+        reply = super().ask(role, prompt)
+        tokens_in, tokens_out = self.TOKENS.get(role, (10_000, 2_000))
+        result = {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": reply.text,
+                    "usage_metadata": {"input_tokens": tokens_in, "output_tokens": tokens_out},
+                }
+            ]
+        }
+        priced = paper._reply_from(adapter, reply.text, result)
+        priced.data = reply.data
+        return priced
+
+
+def test_token_only_replies_still_fire_the_money_exit(run_dir, stub_renderer):
+    """Proof the cost exit is reachable at all. It was not before this (#303)."""
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    run = build_run(run_dir, runner=TokenOnly(FIXTURES / "replies.json"), max_usd=3.00)
+    assert run.run() == 2
+    stage, why = stopped_at(run)
+    assert stage == "write", f"the run must reach the writer, it stopped at {stage}"
+    assert "call needs" in why, why
+    assert run.state.total_cost_usd > 0.0, "priced tokens must move the total"
+    assert run.state.total_cost_usd <= 3.00, f"spent ${run.state.total_cost_usd:.2f} of $3.00"
+
+
+def test_every_call_writes_a_turn_row_and_flushes_the_state(run_dir, stub_renderer):
+    """A stage that makes six calls used to leave the checkpoint stale for all six."""
+    run = priced_run(run_dir, 3.00)
+    run.run()
+
+    rows = [
+        json.loads(line)
+        for line in (Path(run_dir) / ".harness" / "turns.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == run.state.total_calls - run.state.search_calls
+    assert [row["turn"] for row in rows] == sorted(row["turn"] for row in rows)
+    assert {row["role"] for row in rows} >= {"planner", "writer"}
+    assert all(row["stage"] for row in rows)
+    assert all(row["elapsed_s"] >= 0 for row in rows)
+
+    saved = json.loads((Path(run_dir) / pstate.STATE_FILE).read_text())
+    assert saved["current_role"] == rows[-1]["role"]
+    assert saved["last_turn"]["turn"] == rows[-1]["turn"]
+
+
+def test_a_call_with_no_reported_cost_logs_null_not_zero(run_dir, stub_renderer):
+    """A zero reads as a free call and hides a dead cost path."""
+    run = priced_run(run_dir, 3.00)
+    run._record_turn("writer", paper.Reply(text="x", usd=0.0), 1.5, 400)
+    row = json.loads((Path(run_dir) / ".harness" / "turns.jsonl").read_text().splitlines()[-1])
+    assert row["usd"] is None
+
+    run._record_turn("writer", paper.Reply(text="x", usd=0.0, cost_reported=True), 1.5, 400)
+    row = json.loads((Path(run_dir) / ".harness" / "turns.jsonl").read_text().splitlines()[-1])
+    assert row["usd"] == 0.0
