@@ -481,26 +481,63 @@ def _judge_loop(run: Run, drafted: dict) -> dict:
         note = gates.retry_instruction(decision, issues or list(signature))
         if changes:
             note += "\nApply these actionable changes:\n" + "\n".join(f"- {c}" for c in changes)
-        faulted = {
-            item.get("section")
-            for item in (verdict.get("blocking_issues") or [])
-            if isinstance(item, dict) and item.get("section")
-        }
-        known = {section.get("id") for section in current.get("sections") or []}
-        targets = faulted & known
-        note += _revision_note(current, targets)
-        revised = _draft_valid_outline_with_note(run, note)
-        current = _merge_revision(current, revised, targets)
-        errors = outlines.validate(
-            current, word_target_total=run.word_target_total, corpus_keys=_pack_keys(run)
-        )
-        if errors:
-            # The splice produced something the validator rejects. The model's
-            # own draft already passed, so keep that rather than hand the judge
-            # an outline Python knows is invalid.
-            current = revised
+        current = _edit_outline(run, current, note, verdict)
         run.write_json("outline.json", current)
     raise RunFailed(f"outline judge: {rounds} rounds exhausted")
+
+
+def _edit_outline(run: Run, current: dict, note: str, verdict: dict) -> dict:
+    """Send a failed outline to the editor, not back to the outliner.
+
+    The outliner plans. It holds no write tool and no diff path, so asking it
+    to fix three fields meant re-emitting five sections from scratch. Five live
+    runs did that and hovered at two or three objections without reaching zero,
+    trading each named defect for a new one somewhere else.
+
+    The editor changes only what the judge named. It is Opus at high effort,
+    matching the judge, because a Sonnet outliner could not keep pace with an
+    Opus grader tracing individual corpus keys.
+
+    A port with no editor keeps the old behavior, so the offline twin and any
+    caller with a smaller `Turns` still runs.
+    """
+    faulted = {
+        item.get("section")
+        for item in (verdict.get("blocking_issues") or [])
+        if isinstance(item, dict) and item.get("section")
+    }
+    known = {section.get("id") for section in current.get("sections") or []}
+    targets = faulted & known
+
+    editor = getattr(run.turns, "edit_outline", None)
+    if editor is None:
+        # No editor. Fall back to the outliner, and keep #329's splice so a
+        # re-emit cannot disturb a section the judge did not fault.
+        revised = _draft_valid_outline_with_note(run, note + _revision_note(current, targets))
+        merged = _merge_revision(current, revised, targets)
+        errors = outlines.validate(
+            merged, word_target_total=run.word_target_total, corpus_keys=_pack_keys(run)
+        )
+        return revised if errors else merged
+
+    def once(ignored: str) -> dict:
+        edited = editor(current, note)
+        if not isinstance(edited, dict):
+            raise TurnFailed("the outline editor returned no outline object")
+        errors = outlines.validate(
+            edited, word_target_total=run.word_target_total, corpus_keys=_pack_keys(run)
+        )
+        if errors:
+            raise TurnFailed(outlines.retry_note(errors))
+        return edited
+
+    try:
+        return attempt(run, kind="outline-edit", do=once)
+    except UnitFailed:
+        # The editor could not produce a valid outline. The outline in hand
+        # already validates, so hand it back rather than lose the round.
+        run.log("    outline editor failed; keeping the judged outline")
+        return current
 
 
 def _merge_revision(previous: dict, revised: dict, targets: set) -> dict:

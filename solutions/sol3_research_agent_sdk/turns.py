@@ -132,6 +132,9 @@ class Turns:
     def judge_outline(self, drafted: dict, note: str = "") -> dict:
         raise NotImplementedError
 
+    def edit_outline(self, drafted: dict, note: str = "") -> dict:
+        raise NotImplementedError
+
     def plan(
         self, topic: str, prior_art: str, budget: dict | None = None, note: str = "", brief: str = ""
     ) -> dict:
@@ -282,6 +285,20 @@ class SdkTurns(Turns):
             "half-researched. Section word_targets must sum to word_target_total "
             "within ten percent."
         )
+        # A deterrent, and it is not literally true: nothing deletes the
+        # outline. Duplication is the single most expensive defect this loop
+        # has. `redundancy` failed in six of eight judge rounds on one live
+        # run, and every one of those rounds cost a full re-emit. Stating a
+        # hard consequence up front is cheaper than paying for the rounds.
+        no_duplicates = (
+            "One claim belongs to one section. If two sections argue the same "
+            "claim, or one section states the same claim twice, the outline is "
+            "destroyed and you start over from nothing. Check every "
+            "claims_to_support entry against every other section before you "
+            "return. The same rule covers key_questions and required_evidence: "
+            "two questions that a single source answers the same way are one "
+            "question."
+        )
         commissioning = (
             "\n\nThe commissioning brief below is binding. Satisfy its required sections, "
             "questions, sources, and figures without exceeding the stated budget.\n"
@@ -291,7 +308,7 @@ class SdkTurns(Turns):
         )
         return self._json(
             "research-outliner",
-            f"Outline a technical white paper on: {topic}\n\n{limits}{commissioning}\n\n{known}\n"
+            f"Outline a technical white paper on: {topic}\n\n{limits}\n{no_duplicates}{commissioning}\n\n{known}\n"
             f"{note}\n\n{GROUNDING}",
             OUTLINE_SCHEMA,
         )
@@ -304,6 +321,26 @@ class SdkTurns(Turns):
             "validator. Do not re-litigate those rows. Score only what a script "
             f"cannot.\n\n{payload}\n{note}",
             OUTLINE_VERDICT_SCHEMA,
+        )
+
+    def edit_outline(self, drafted: dict, note: str = "") -> dict:
+        """Repair a judged outline in place, rather than planning a new one.
+
+        The outliner cannot do this. It has no write tool and no diff path, so
+        asking it to fix three fields means re-emitting every section from
+        scratch, and five live runs showed the result: three named defects
+        traded for three new ones, hovering without converging.
+        """
+        payload = json.dumps(drafted, indent=2)
+        return self._json(
+            "research-outline-editor",
+            "Edit this white paper outline so it clears the objections below. "
+            "Make the fewest edits that do it. Every field the judge did not "
+            "name comes back exactly as you received it, and a section the "
+            "judge did not fault is returned unchanged. Do not rewrite, "
+            "reorder, or renumber anything.\n\n"
+            f"The outline:\n{payload}\n\nThe objections:\n{note}",
+            OUTLINE_SCHEMA,
         )
 
     def plan(
@@ -739,6 +776,12 @@ class OfflineTurns(Turns):
             "word_target_total": words,
             "sections": sections,
         }
+
+    def edit_outline(self, drafted: dict, note: str = "") -> dict:
+        """Hand it back. The offline judge always passes, so nothing calls this
+        in a fixture run, and inventing edits here would be a lie about what a
+        model would do."""
+        return drafted
 
     def judge_outline(self, drafted: dict, note: str = "") -> dict:
         """Agree. An offline judge that invented rubric opinions would be the

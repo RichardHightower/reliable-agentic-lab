@@ -49,6 +49,7 @@ LOOPS = {
         "orchestrator",
         "outliner",
         "outline_judge",
+        "outline_editor",
         "researcher",
         "verifier",
         "section_judge",
@@ -69,6 +70,7 @@ PURPOSE = {
     "planner": "Writes steps.jsonl. Runs in its own context and returns a summary.",
     "outliner": "Turns the topic into a two-level outline. Returns it; Python writes the file.",
     "outline_judge": "Scores the outline. Reads it and returns a verdict. Holds no write path.",
+    "outline_editor": "Edits a judged outline against its objections. Returns it; Python writes the file.",
     "test_implementer": "Writes the failing tests. Nothing else.",
     "code_implementer": "Writes the code until the tests pass. Cannot touch tests.",
     "researcher": "Calls the corpus first, then the live tool boundary, and returns findings. Writes nothing.",
@@ -143,6 +145,26 @@ OVERRIDES: dict[tuple[str, str], dict] = {
     },
     ("research", "outline_judge"): {
         "purpose": "Scores the outline. Reads it and returns a verdict. Holds no write path.",
+        "tools": READ_TOOLS,
+        "allow": (),
+        "deny": ("**",),
+        "model": "claude-opus-5",
+        "effort": "high",
+    },
+    ("research", "outline_editor"): {
+        "purpose": (
+            "Edits a judged outline against its objections. Returns it; Python "
+            "writes the file."
+        ),
+        # No write tool, same as the outliner. The edited outline comes back as
+        # schema-checked structured output.
+        #
+        # Opus because the judge is Opus at high effort. A Sonnet outliner
+        # re-emitting five sections from scratch could not keep up with an Opus
+        # grader tracing individual corpus keys: five live runs hovered at two
+        # or three objections without reaching zero. The editor changes only
+        # what the judge named, so the model doing the fixing now matches the
+        # model finding the fault.
         "tools": READ_TOOLS,
         "allow": (),
         "deny": ("**",),

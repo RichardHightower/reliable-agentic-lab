@@ -20,11 +20,12 @@ def test_the_orchestrator_only_spawns(loop):
     assert not orchestrator.can_write
 
 
-def test_the_research_cast_is_eleven_roles():
+def test_the_research_cast_is_twelve_roles():
     assert roleplan.LOOPS["research"] == (
         "orchestrator",
         "outliner",
         "outline_judge",
+        "outline_editor",
         "researcher",
         "verifier",
         "section_judge",

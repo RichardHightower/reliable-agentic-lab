@@ -722,3 +722,117 @@ def test_the_judge_loop_keeps_the_section_the_judge_did_not_fault(work):
         "the outliner rewrote an unfaulted section and Python let it through"
     )
     assert by_id["fix"]["heading"].startswith("Fixed"), "the faulted section must be replaced"
+
+
+# -- the outline editor -----------------------------------------------------
+#
+# The outliner plans. It has no write tool and no diff path, so asking it to
+# fix three fields meant re-emitting five sections from scratch. Five live runs
+# hovered at two or three objections without reaching zero, trading each named
+# defect for a new one. The editor changes only what the judge named, and it is
+# Opus at high effort to match the judge.
+
+
+class EditingTurns:
+    """Records which role each round used, and what the editor was handed."""
+
+    def __init__(self, verdicts):
+        self.verdicts = list(verdicts)
+        self.calls: list[str] = []
+        self.edit_notes: list[str] = []
+        self.edited: list[dict] = []
+
+    def outline(self, topic, prior_art, budget=None, note="", brief=""):
+        self.calls.append("outliner")
+        return two_section_outline()
+
+    plan = outline
+
+    def judge_outline(self, drafted, note=""):
+        return self.verdicts.pop(0) if self.verdicts else {"passed": True, "score": 1.0}
+
+    def edit_outline(self, drafted, note=""):
+        self.calls.append("editor")
+        self.edit_notes.append(note)
+        self.edited.append(drafted)
+        fixed = json.loads(json.dumps(drafted))
+        fixed["sections"][1]["heading"] = "Repaired"
+        return fixed
+
+
+def blocked(rule="depth", section="fix"):
+    return {
+        "passed": False,
+        "score": 0.5,
+        "blocking_issues": [{"section": section, "rule": rule, "description": f"{rule} is wrong"}],
+        "actionable_changes": [f"{section}.claims_to_support[0]: fix the {rule}"],
+    }
+
+
+def test_a_failed_outline_goes_to_the_editor_not_the_outliner(work):
+    turns = EditingTurns([blocked(), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, two_section_outline())
+    assert turns.calls == ["editor"], f"the outliner must not re-plan: {turns.calls}"
+
+
+def test_the_editor_receives_the_outline_and_the_objections(work):
+    turns = EditingTurns([blocked("redundancy"), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, two_section_outline())
+
+    assert turns.edited[0]["sections"][0]["heading"] == "Keep me", "it must get the real outline"
+    note = turns.edit_notes[0]
+    assert "redundancy is wrong" in note, "the blocking issue must reach the editor"
+    assert "fix the redundancy" in note, "the actionable change must reach it too"
+
+
+def test_the_editors_repair_is_what_the_judge_sees_next(work):
+    turns = EditingTurns([blocked(), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    final = paper._judge_loop(run, two_section_outline())
+    by_id = {section["id"]: section for section in final["sections"]}
+    assert by_id["fix"]["heading"] == "Repaired"
+    assert by_id["keep"]["heading"] == "Keep me", "the editor left the clean section alone"
+
+
+def test_an_invalid_edit_keeps_the_outline_in_hand(work):
+    """The outline already validates. Losing the round to a bad edit is worse."""
+
+    class BrokenEditor(EditingTurns):
+        def edit_outline(self, drafted, note=""):
+            self.calls.append("editor")
+            return {"sections": "not an array"}
+
+    turns = BrokenEditor([blocked(), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    final = paper._judge_loop(run, two_section_outline())
+    assert [section["id"] for section in final["sections"]] == ["keep", "fix"]
+
+
+def test_a_turns_with_no_editor_still_runs(work):
+    """The offline twin and any smaller `Turns` keep the old path, with #329."""
+    verdict = blocked()
+    turns = RewritingTurns([verdict, {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    final = paper._judge_loop(run, two_section_outline())
+    by_id = {section["id"]: section for section in final["sections"]}
+    assert by_id["keep"]["heading"] == "Keep me", "the splice must still protect a clean section"
+
+
+def test_the_outliner_is_told_duplicates_destroy_the_outline():
+    """`redundancy` failed six of eight judge rounds on one live run, and every
+    round cost a full re-emit. The threat is cheaper than the rounds."""
+    sent = {}
+
+    class Backend:
+        def run(self, **kwargs):
+            sent["prompt"] = kwargs["prompt"]
+            raise RuntimeError("stop here")
+
+    import turns as turns_mod  # noqa: PLC0415
+
+    with pytest.raises(Exception):
+        turns_mod.SdkTurns(backend=Backend(), work_dir=".").outline("a topic", "")
+    assert "the outline is destroyed and you start over" in sent["prompt"]
+    assert "One claim belongs to one section" in sent["prompt"]
