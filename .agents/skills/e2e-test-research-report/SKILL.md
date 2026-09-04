@@ -16,25 +16,29 @@ requests local-only output, set `PUBLISH=false` before any Gist call.
 
 ## The two ports do not offer the same tasks
 
-Every task named below belongs to the Agent SDK port. The Deep Agents port
-runs the same loop and ships a different command surface. Check the folder's
-own `Taskfile.yml` before you name a task, and never assume a task exists
-because the other port has it.
+Both ports produce a paper, export a PDF, and publish a secret gist. They do
+not agree on how a run is started or validated. Check the folder's own
+`Taskfile.yml` before you name a task, and never assume a task exists because
+the other port has it.
 
 | Lane | `sol3_research_agent_sdk` | `sol3_research_deep_agents` |
 | --- | --- | --- |
 | Live run | `task e2e-live` | `task live` |
 | Recorded run | `task e2e-fixture` | `task paper` (fixture backend) |
-| Acceptance report | `e2e-report.json` | none |
-| PDF export | `task pdf` | none |
-| Gist publication | `task publish-report` | none |
+| Acceptance report | `e2e-report.json` | `gates.json` |
+| Paper file | `paper.md` | `whitepaper.md` |
+| PDF export | `REPORT_DIR=... task pdf` | `REPORT_DIR=... task pdf` |
+| Gist publication | `REPORT_DIR=... task publish-report` | `REPORT_DIR=... task publish-report` |
 
-PDF export and Gist publication are Agent SDK only. The Deep Agents port has
-`export_pdf.py` and `publish.py`, and their flags differ from the Agent SDK
-versions, so the Agent SDK tasks do not transfer. When the user names the Deep
-Agents port, run `task test`, `task checks`, and `task paper` or `task live`,
-then report that the PDF and publication steps are not available there. Do not
-invent a wrapper task, and do not report a step you did not run.
+The Deep Agents port also keeps `task publish`, a raw passthrough to
+`publish.py` for the flags `publish-report` does not expose.
+
+Two differences survive and both matter. The Agent SDK port validates a run
+through `e2e-report.json`, which the Deep Agents port does not write; read its
+`gates.json` instead. The two ports name the paper differently, so a path that
+works in one is wrong in the other.
+
+Do not invent a wrapper task, and do not report a step you did not run.
 
 ## Prepare and prove the folder
 
@@ -125,11 +129,20 @@ gh auth status
 REPORT_DIR=work/e2e-loop-engineering-live task publish-report
 ```
 
+The Deep Agents port publishes the same way, from its own work directory:
+
+```bash
+REPORT_DIR=work/paper/<slug> task pdf
+REPORT_DIR=work/paper/<slug> task publish-report
+```
+
 The GitHub token needs the `gist` scope. The publisher must never pass
-`--public`; it creates or updates a secret Gist and uploads `paper.md`,
-`paper.pdf`, and the flattened figure files. If authentication or scope is
-missing, keep all local artifacts, report `renderer: ready` and
-`publisher: missing`, and stop without inventing a Gist URL.
+`--public`; it creates or updates a secret Gist and uploads the paper, the
+PDF, and the flattened figure files. Both ports refuse to publish a paper that
+failed its own gates, and both refuse without a PDF when `--require-pdf` is
+set. If authentication or scope is missing, keep all local artifacts, report
+`renderer: ready` and `publisher: missing`, and stop without inventing a Gist
+URL.
 
 ## Verify and report
 
@@ -146,6 +159,5 @@ Inspect these durable artifacts:
 
 Report the port, the lane, provider, spend, source count, figure count, PDF
 pages, PDF path, Gist URL or fail-closed publisher status, and the exact failed
-gate. Do not describe a fixture lane as live, do not describe an unrendered
-prompt sidecar as an image, and do not report a PDF or a Gist for the Deep
-Agents port, which has neither.
+gate. Do not describe a fixture lane as live, and do not describe an unrendered
+prompt sidecar as an image.

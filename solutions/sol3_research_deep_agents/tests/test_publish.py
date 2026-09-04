@@ -215,3 +215,45 @@ def test_a_persistent_failure_gives_up(monkeypatch):
     monkeypatch.setattr(publish.time, "sleep", lambda s: None)
     with pytest.raises(publish.PublishFailed):
         publish._retry(["gh", "x"], what="x")
+
+
+# -- the PDF ---------------------------------------------------------------
+#
+# `task pdf` writes `whitepaper.pdf` beside the paper. The gist carries it
+# because `sync` pushes through git, which is binary safe. Before this the
+# Deep Agents port had no `pdf` task at all, and its gist held only markdown
+# and figures while the Agent SDK port's held a PDF (#309).
+
+
+def test_the_pdf_is_published_when_there_is_one(ready, tmp_path):
+    (ready / "whitepaper.pdf").write_bytes(b"%PDF-1.4 fake")
+    out = tmp_path / "staged"
+    result = publish.push(ready, dry_run=True, out_dir=out, require_pdf=True)
+    names = [path.name for path in result.staged]
+    assert names[0] == "whitepaper.md", "a gist shows its first file"
+    assert "whitepaper.pdf" in names
+    assert (out / "whitepaper.pdf").read_bytes() == b"%PDF-1.4 fake"
+
+
+def test_a_run_with_no_pdf_still_publishes_the_report(ready, tmp_path):
+    """The markdown and the figures are the report. The PDF is an extra."""
+    result = publish.push(ready, dry_run=True, out_dir=tmp_path / "staged")
+    names = [path.name for path in result.staged]
+    assert names[0] == "whitepaper.md"
+    assert "whitepaper.pdf" not in names
+    assert len([n for n in names if n.endswith(".png")]) == 2
+
+
+def test_require_pdf_refuses_a_run_that_never_exported_one(ready):
+    with pytest.raises(publish.PublishRefused) as exc:
+        publish.push(ready, dry_run=True, require_pdf=True)
+    assert "whitepaper.pdf" in str(exc.value)
+    assert "task pdf" in str(exc.value), "name the command that fixes it"
+
+
+def test_require_pdf_still_checks_the_gates_first(ready):
+    """A failed paper is refused for the gate, not for the missing PDF."""
+    (ready / "gates.json").write_text(json.dumps({"passed": False, "failures": ["grounded"]}))
+    with pytest.raises(publish.PublishRefused) as exc:
+        publish.push(ready, dry_run=True, require_pdf=True)
+    assert "grounded" in str(exc.value)

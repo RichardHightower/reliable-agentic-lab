@@ -46,6 +46,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ID_MAP = HERE / "gist-ids.tsv"
 PAPER_NAME = "whitepaper.md"
+PDF_NAME = "whitepaper.pdf"
 GATES_NAME = "gates.json"
 
 OWNER_FALLBACK = "RichardHightower"
@@ -147,6 +148,17 @@ def rewrite_images(body: str, mapping: dict[str, str], owner: str, gist_id: str)
     return IMAGE.sub(swap, body)
 
 
+def check_pdf(work_dir: Path) -> Path:
+    """The PDF, or a refusal. `task pdf` writes it beside the paper."""
+    path = Path(work_dir) / PDF_NAME
+    if not path.exists():
+        raise PublishRefused(
+            f"no {PDF_NAME} in {work_dir}. Run `REPORT_DIR={work_dir} task pdf` "
+            "first, or publish without --require-pdf."
+        )
+    return path
+
+
 def check_gates(work_dir: Path) -> None:
     """Refuse a paper that failed its own gates. This is the whole point."""
     path = work_dir / GATES_NAME
@@ -189,6 +201,15 @@ def stage(work_dir: Path | str, out_dir: Path | str, *, gist_id: str, owner: str
         shutil.copy2(source, target)
         mapping[name] = target.name
         written.append(target)
+
+    # The PDF when there is one. `sync` pushes through git, which is binary
+    # safe, so this needs no encoding. A run that never exported one still
+    # publishes: the markdown and the figures are the report.
+    pdf = work_dir / PDF_NAME
+    if pdf.exists():
+        pdf_target = out_dir / PDF_NAME
+        shutil.copy2(pdf, pdf_target)
+        written.insert(0, pdf_target)
 
     target = out_dir / PAPER_NAME
     target.write_text(rewrite_images(body, mapping, owner, gist_id), encoding="utf-8")
@@ -315,11 +336,14 @@ def push(  # noqa: PLR0913  (the CLI surface, one keyword per flag)
     out_dir: Path | str | None = None,
     gist_id: str = "",
     id_map: Path = ID_MAP,
+    require_pdf: bool = False,
 ) -> Published:
     """Stage the paper and push it. `dry_run` stages and stops."""
     work_dir = Path(work_dir)
     slug = slug or work_dir.name
     check_gates(work_dir)
+    if require_pdf:
+        check_pdf(work_dir)
 
     known = read_ids(id_map)
     gist_id = gist_id or known.get(slug, "")
@@ -363,6 +387,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--slug", default=None, help="the paper slug under work/paper/")
     parser.add_argument("--title", default="", help="the gist description")
     parser.add_argument("--dry-run", action="store_true", help="stage only, no gh and no git")
+    parser.add_argument(
+        "--require-pdf",
+        action="store_true",
+        help=f"refuse to publish unless {PDF_NAME} is beside the paper",
+    )
     parser.add_argument("--out", default=None, help="where a dry run stages its files")
     args = parser.parse_args(argv)
 
@@ -380,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
             title=args.title,
             dry_run=args.dry_run,
             out_dir=args.out,
+            require_pdf=args.require_pdf,
         )
     except (PublishRefused, PublishFailed) as exc:
         print(f"refused: {exc}" if isinstance(exc, PublishRefused) else f"failed: {exc}")
