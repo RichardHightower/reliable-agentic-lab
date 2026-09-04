@@ -14,6 +14,28 @@ The default workflow uses live research and attempts publication. A secret
 Gist is unlisted, not access controlled. Its URL is a credential. If the user
 requests local-only output, set `PUBLISH=false` before any Gist call.
 
+## The two ports do not offer the same tasks
+
+Every task named below belongs to the Agent SDK port. The Deep Agents port
+runs the same loop and ships a different command surface. Check the folder's
+own `Taskfile.yml` before you name a task, and never assume a task exists
+because the other port has it.
+
+| Lane | `sol3_research_agent_sdk` | `sol3_research_deep_agents` |
+| --- | --- | --- |
+| Live run | `task e2e-live` | `task live` |
+| Recorded run | `task e2e-fixture` | `task paper` (fixture backend) |
+| Acceptance report | `e2e-report.json` | none |
+| PDF export | `task pdf` | none |
+| Gist publication | `task publish-report` | none |
+
+PDF export and Gist publication are Agent SDK only. The Deep Agents port has
+`export_pdf.py` and `publish.py`, and their flags differ from the Agent SDK
+versions, so the Agent SDK tasks do not transfer. When the user names the Deep
+Agents port, run `task test`, `task checks`, and `task paper` or `task live`,
+then report that the PDF and publication steps are not available there. Do not
+invent a wrapper task, and do not report a step you did not run.
+
 ## Prepare and prove the folder
 
 1. Read the solution's `Taskfile.yml`, `HOW_TO_RUN.md`, and `SPEC.md`.
@@ -29,6 +51,14 @@ requests local-only output, set `PUBLISH=false` before any Gist call.
    `PERPLEXITY_API_KEY` through the solution's documented environment lookup.
    Use the fixture lane when the user asks for it or credentials are absent,
    and report clearly that it did not test live research.
+6. Confirm the live lane can find a corpus brain. A brain is prior art in
+   another repository, not part of this one, and the run reads it read-only.
+   The Agent SDK port looks in `BRAIN`, then `RESEARCH_BRAINS`, then a
+   `loop_eng_2nd_brain/knowledge` sibling of the checkout. A clone, a worktree,
+   or a scratchpad usually has no sibling, and the outline rubric has rows that
+   cannot pass against an empty pack. Pass `BRAIN=<path>` when the default is
+   absent. `ALLOW_THIN_CORPUS=1` runs without one, and you must then report the
+   run as thin-corpus and expect a rubric failure.
 
 ## Generate the report
 
@@ -38,8 +68,14 @@ From `solutions/sol3_research_agent_sdk`:
 task setup
 task test
 task checks
-LIVE_E2E_MAX_USD=10 task e2e-live
+BRAIN=/path/to/loop_eng_2nd_brain/knowledge LIVE_E2E_MAX_USD=10 task e2e-live
 ```
+
+The live lane streams the run to the terminal and to `run.log` in the work
+directory, and emits a heartbeat every 15 seconds. Silence for longer than that
+means the process is gone, not that a phase is slow. Set
+`SOL3_QUERY_TIMEOUT_SECONDS` to change the per-query ceiling; the default is
+900 seconds.
 
 For recorded research with real figure rendering:
 
@@ -48,9 +84,13 @@ task e2e-fixture
 ```
 
 Do not rerun a failed live lane before reading
-`work/e2e-loop-engineering-live/e2e-report.json`. Preserve the cost cap and
-classify the failure as credentials, provider, renderer, generated document,
-or publication gate.
+`work/e2e-loop-engineering-live/e2e-report.json` and
+`work/e2e-loop-engineering-live/.harness/turns.jsonl`. The report names the
+phase and role that were in flight; the turn log gives one row per model call
+with its role, elapsed time, cost, and token counts. A row whose `usd` is
+`null` means the runtime reported no cost, which is not the same as a free
+call. Preserve the cost cap and classify the failure as credentials, provider,
+renderer, corpus, generated document, or publication gate.
 
 ## Require one visual system
 
@@ -95,13 +135,17 @@ missing, keep all local artifacts, report `renderer: ready` and
 
 Inspect these durable artifacts:
 
-- `e2e-report.json`: `passed: true`, bounded spend, required claims and sources
+- `e2e-report.json`: `passed: true`, bounded spend, required claims and sources,
+  plus the brain, the corpus hit count, and the query timeout the run used
+- `.harness/turns.jsonl`: one row per model call, append only
+- `run.log`: the streamed output of the run
 - `diagrams/*_imagen.json`: Arctic Fox, article density, correct backend policy
 - `diagrams/*_imagen.judge.json`: fidelity pass with no misses
 - `paper.pdf.json`: Arctic Fox theme, page count, figure inventory, byte count
 - `gist.json`: secret Gist URL, topic, and uploaded files when publishing ran
 
-Report the lane, provider, spend, source count, figure count, PDF pages, PDF
-path, Gist URL or fail-closed publisher status, and the exact failed gate. Do
-not describe a fixture lane as live and do not describe an unrendered prompt
-sidecar as an image.
+Report the port, the lane, provider, spend, source count, figure count, PDF
+pages, PDF path, Gist URL or fail-closed publisher status, and the exact failed
+gate. Do not describe a fixture lane as live, do not describe an unrendered
+prompt sidecar as an image, and do not report a PDF or a Gist for the Deep
+Agents port, which has neither.
