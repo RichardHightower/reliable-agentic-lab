@@ -287,6 +287,42 @@ def docs_tool(backend, budget=None):
     return check_docs
 
 
+def _grep_terms(root: Path, query: str, limit: int = 12) -> str:
+    """Lines mentioning the query's terms, for brain files that are not claims.
+
+    Every term must appear on the line. A phrase match is too strict for a
+    question, and an any-term match returns the word "the".
+    """
+    import re  # noqa: PLC0415
+
+    import corpus  # noqa: PLC0415
+
+    # `corpus.STOP` already knows which words carry no signal here. Without it
+    # a question word like "what" is a required term, and a line that answers
+    # the question fails to match because it does not repeat the question.
+    words = [
+        word
+        for word in re.findall(r"[a-z0-9]+", query.lower())
+        if len(word) > 3 and word not in corpus.STOP
+    ]
+    terms = [re.compile(re.escape(word), re.I) for word in words]
+    if not terms:
+        return f"no prior research mentions {query!r}"
+    hits = []
+    for path in sorted(root.rglob("*.md")):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for line in text.split("\n"):
+            if all(term.search(line) for term in terms):
+                hits.append(f"{path.name}: {line.strip()[:200]}")
+                break
+        if len(hits) >= limit:
+            break
+    return "\n".join(hits) if hits else f"no prior research mentions {query!r}"
+
+
 def second_brain_tool(root: Path | None):
     """Prior knowledge, read only, from the second brain when it is present.
 
@@ -301,22 +337,22 @@ def second_brain_tool(root: Path | None):
         """Search prior research in the second brain. Read only. Returns excerpts."""
         if root is None or not Path(root).is_dir():
             return "NO BRAIN. The second brain is not available here. Continue without it."
-        import re  # noqa: PLC0415
+        import corpus  # noqa: PLC0415
 
-        pattern = re.compile(re.escape(query), re.I)
-        hits = []
-        for path in sorted(Path(root).rglob("*.md")):
-            try:
-                text = path.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            for line in text.split("\n"):
-                if pattern.search(line):
-                    hits.append(f"{path.name}: {line.strip()[:200]}")
-                    break
-            if len(hits) >= 12:
-                break
-        return "\n".join(hits) if hits else f"no prior research mentions {query!r}"
+        # The curated claims first, scored by term. A literal whole-phrase grep
+        # was the old behaviour and it failed on the way the planner is told to
+        # use this tool: `recall("agent loop exit conditions")` found nothing
+        # while `corpus.search` on the same root and query returned 40 hits. The
+        # planner then reported no brain and planned around a corpus the run had
+        # already packed.
+        scored = corpus.search(query, [Path(root)], limit=12)
+        if scored:
+            return corpus.format_hits(scored)
+
+        # Anything else in the brain, matched on terms rather than the phrase.
+        # `corpus.search` reads claim files only, and a brain also holds notes,
+        # specs, and tickets worth recalling.
+        return _grep_terms(Path(root), query)
 
     return recall
 
