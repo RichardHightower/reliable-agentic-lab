@@ -8,6 +8,7 @@ but `outline.approved.json`.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import re
@@ -193,14 +194,68 @@ def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys
             errors.append(f"section {sid!r} corpus_refs must be an array of corpus keys")
             refs = []
         if corpus_keys is not None:
-            allowed = set(corpus_keys)
-            for ref in refs:
-                if not isinstance(ref, str) or ref not in allowed:
-                    errors.append(
-                        f"section {sid!r} corpus_refs names unknown key {ref!r}. "
-                        "Use keys from corpus/brain-pack.json."
-                    )
+            errors.extend(_check_refs(section, sid, refs, corpus_keys))
 
+    return errors
+
+
+def resolve_ref(ref: str, corpus_keys: list[str]) -> tuple[str | None, list[str]]:
+    """One corpus reference, resolved against the pack keys.
+
+    Returns the full key and the candidates that matched. A pack key is
+    `knowledge:claim.<subject>.<ULID>` and a model writes the bare ULID, so an
+    exact-match-only check rejected 21 references that were all real keys in
+    suffix form. `corpus.resolve` already accepts a claim id suffix, so this
+    follows a rule the port had.
+
+    A suffix only counts on a segment boundary. Matching anywhere in the string
+    would let a short id collide with the middle of an unrelated ULID.
+    """
+    if ref in corpus_keys:
+        return ref, [ref]
+    matches = [key for key in corpus_keys if key.endswith((f".{ref}", f":{ref}"))]
+    if len(matches) == 1:
+        return matches[0], matches
+    return None, matches
+
+
+def _check_refs(section: dict, sid, refs: list, corpus_keys: list[str]) -> list[str]:
+    """Resolve every reference in place, and report the ones that will not."""
+    errors: list[str] = []
+    resolved: list = []
+    for ref in refs:
+        if not isinstance(ref, str):
+            errors.append(
+                f"section {sid!r} corpus_refs names unknown key {ref!r}. "
+                "Use keys from corpus/brain-pack.json."
+            )
+            resolved.append(ref)
+            continue
+        full, candidates = resolve_ref(ref, corpus_keys)
+        if full is not None:
+            resolved.append(full)
+            continue
+        if len(candidates) > 1:
+            errors.append(
+                f"section {sid!r} corpus_refs names {ref!r}, which matches "
+                f"{len(candidates)} keys: {', '.join(sorted(candidates))}. "
+                "Use the full key."
+            )
+        else:
+            near = difflib.get_close_matches(ref, corpus_keys, n=2, cutoff=0.5)
+            hint = (
+                f" The closest key in the pack is {near[0]!r}."
+                if near
+                else " The pack has no key like it."
+            )
+            errors.append(
+                f"section {sid!r} corpus_refs names unknown key {ref!r}. Keys are "
+                f"`knowledge:claim.<subject>.<ULID>`, from corpus/brain-pack.json."
+                f"{hint}"
+            )
+        resolved.append(ref)
+    if resolved != refs:
+        section["corpus_refs"] = resolved
     return errors
 
 

@@ -262,7 +262,9 @@ class SdkTurns(Turns):
             f"The corpus pack for this topic is in corpus/brain-pack.md. Read it first.\n"
             f"Per key question, name whether the pack already answers it and which "
             f"corpus reference key does. Put those keys on corpus_refs[]. Only keys "
-            f"from the pack are valid.\n{prior_art[:2000]}"
+            f"from the pack are valid, and a key is the whole "
+            f"`<root>:claim.<subject>.<ULID>` string. A bare ULID is not a key.\n"
+            f"{prior_art[:2000]}"
             if prior_art
             else "There is no corpus pack for this topic. Outline from the topic alone."
         )
