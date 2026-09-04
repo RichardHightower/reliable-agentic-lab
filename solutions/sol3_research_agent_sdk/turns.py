@@ -338,7 +338,11 @@ class SdkTurns(Turns):
             "Make the fewest edits that do it. Every field the judge did not "
             "name comes back exactly as you received it, and a section the "
             "judge did not fault is returned unchanged. Do not rewrite, "
-            "reorder, or renumber anything.\n\n"
+            "reorder, or renumber anything. Python revalidates before the "
+            "judge sees this: every section keeps at least two key_questions, "
+            "word targets still sum to word_target_total within ten percent, "
+            "ids stay unique, and every corpus key still exists. A rejected "
+            "edit wastes the round.\n\n"
             f"The outline:\n{payload}\n\nThe objections:\n{note}",
             OUTLINE_SCHEMA,
         )

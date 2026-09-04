@@ -35,6 +35,24 @@ The actionable changes are precise on purpose. When one says to move corpus key
 `X` from `mechanism.corpus_refs` into `conclusion.corpus_refs`, move that key.
 Do not substitute your own repair.
 
+## Rules Python enforces before the judge sees your edit
+
+Break one of these and the edit is rejected, you are asked again, and the round
+is wasted. One live edit returned a `conclusion` with a single key question and
+lost its round twice.
+
+- Every section needs at least two `key_questions`.
+- Section `word_target` values sum to `word_target_total` within ten percent.
+  Move words between sections rather than adding them.
+- Section `id` values are unique, and `depends_on` names only an earlier
+  section. No cycles.
+- Every `corpus_refs` key exists in the pack.
+- A `chart` figure needs a non-empty `data_needed`.
+
+Deleting a key question to satisfy a `redundancy` row is the common trap. Merge
+the two questions into one and add a different one instead, or leave both and
+fix the duplication in `claims_to_support`.
+
 ## Conflicts
 
 Two objections can pull against each other. A `word_budget` row says a section
