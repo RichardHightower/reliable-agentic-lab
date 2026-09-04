@@ -357,9 +357,20 @@ def run(
     # Stream, never capture. `capture_output=True` shows the operator nothing
     # until the process exits, which made a ten-minute phase look like a hang no
     # amount of unbuffered output inside the child could fix.
-    out.mkdir(parents=True, exist_ok=True)
+    #
+    # Stage the log outside `out`. The child runs with `--fresh`, which rmtrees
+    # that directory, and a handle opened inside it before that survives only as
+    # an unlinked inode: every write succeeds and no file ever appears. The log
+    # moves into the work directory once the child is done with it.
+    out.parent.mkdir(parents=True, exist_ok=True)
+    staged = out.parent / f".{out.name}.run.log"
+    returncode = _stream(command, staged)
     log_path = out / "run.log"
-    returncode = _stream(command, log_path)
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        staged.replace(log_path)
+    except OSError:
+        log_path = staged
 
     report = validate(out, max_usd=max_usd) if returncode == 0 else {
         "work_dir": str(out),

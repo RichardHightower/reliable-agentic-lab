@@ -260,11 +260,16 @@ def main(argv: list[str] | None = None) -> int:
         work_dir=work,
         # The lambda is not redundant. `run` does not exist yet, so the cost
         # callback has to close over the name and resolve it when it fires.
+        #
+        # `**detail` is not optional either. `SdkTurns._ask` sends the role, the
+        # elapsed time, and the token counts as keywords. A one-argument lambda
+        # here type-errors on the first live turn and on no offline one, because
+        # the fixture runtime never calls this at all.
         turns=pick_turns(
             args.backend,
             work,
             profile["max_usd"],
-            lambda usd: run.spend(usd),
+            lambda usd, **detail: run.spend(usd, **detail),
             args.fixture or FIXTURE,
             brains=brains,
         ),  # noqa: PLW0108

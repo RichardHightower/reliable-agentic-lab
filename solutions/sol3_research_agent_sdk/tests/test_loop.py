@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -101,3 +102,45 @@ def test_asking_for_the_agent_with_no_sdk_installed_raises(monkeypatch, work):
     with pytest.raises(ImportError):
         loop.pick_turns("agent", work, None, None)
     assert type(loop.pick_turns("auto", work, None, None)).__name__ == "OfflineTurns"
+
+
+def test_the_live_wiring_records_a_turn(fake_sdk, tmp_path):
+    """Drive the seam `main` builds, not each side of it separately (#319).
+
+    387 tests passed while the live lane could not complete one turn.
+    `test_research_and_turns.py` gave `SdkTurns` its own correct callback,
+    `test_paper.py` called `Run.spend` with correct arguments, and every
+    offline lane uses `OfflineTurns`, which never calls the callback at all.
+    Nothing ran the one-argument lambda in `loop.py` against the keywords
+    `SdkTurns._ask` sends it, so a `TypeError` reached only the live path.
+
+    The outliner reply here is deliberately unusable. The run fails, and it
+    must fail on the reply rather than on the callback, with the turn counted.
+    """
+    from conftest import FakeResultMessage  # noqa: PLC0415
+
+    fake_sdk([FakeResultMessage(result="not an outline", total_cost_usd=0.4)])
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering",
+            "--out", str(work),
+            "--backend", "agent",
+            "--brain", str(FOLDER / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code != 0, "an unusable outline reply must fail the run"
+
+    state = json.loads((work / ".harness" / "state.json").read_text())
+    assert state["turns"] >= 1, "the cost callback never fired"
+    assert state["total_usd"] > 0, "the callback fired but recorded no spend"
+    assert state["phase"] == "outline"
+
+    rows = [
+        json.loads(line)
+        for line in (work / ".harness" / "turns.jsonl").read_text().splitlines()
+    ]
+    assert rows[0]["role"] == "research-outliner"
+    assert rows[0]["usd"] == 0.4
+    assert "elapsed_s" in rows[0]
