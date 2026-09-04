@@ -536,3 +536,62 @@ def test_the_resume_path_rejects_an_unknown_key(tmp_path):
     run = paper.Run(topic="a topic", work_dir=work, turns=object(), state=paper.State())
     with pytest.raises(paper.RunFailed, match="unknown key"):
         paper.do_outline(run)
+
+
+# -- the judge loop revises, it does not re-draft ---------------------------
+#
+# Two live runs escalated at the outline judge, six rounds, zero convergence.
+# The failing rows changed between rounds rather than shrinking, because the
+# outliner was handed the topic and a list of complaints about an outline it
+# could not see, and answered by writing a different one (#327).
+
+
+class NotingTurns:
+    """A `Turns` that records the note each outline round receives."""
+
+    def __init__(self, verdicts):
+        self.notes: list[str] = []
+        self.verdicts = list(verdicts)
+        self.round = 0
+
+    def outline(self, topic, prior_art, budget=None, note="", brief=""):
+        self.notes.append(note)
+        self.round += 1
+        return sample_outline(
+            sections=[sample_section(sid="s1", heading=f"Draft {self.round}")],
+            word_target_total=400,
+        )
+
+    plan = outline
+
+    def judge_outline(self, drafted, note=""):
+        return self.verdicts.pop(0) if self.verdicts else {"passed": True, "score": 1.0}
+
+
+def failing_verdict(rule):
+    return {
+        "passed": False,
+        "score": 0.5,
+        "blocking_issues": [{"section": "s1", "rule": rule, "description": f"{rule} is wrong"}],
+        "actionable_changes": [f"s1.claims_to_support[0]: fix the {rule}"],
+    }
+
+
+def test_a_later_round_is_handed_the_outline_it_must_revise(work, monkeypatch):
+    turns = NotingTurns([failing_verdict("corpus_fit"), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, turns.outline("a topic", ""))
+
+    assert len(turns.notes) >= 2, "the judge must have forced a second round"
+    revision = turns.notes[-1]
+    assert "This is the outline you are revising" in revision
+    assert '"heading": "Draft 1"' in revision, "the outliner never saw the outline it must fix"
+    assert "fix the corpus_fit" in revision, "the actionable change must survive too"
+
+
+def test_the_first_round_is_not_a_revision(work):
+    """Nothing exists to revise yet. A note there would be a lie."""
+    turns = NotingTurns([{"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, turns.outline("a topic", ""))
+    assert "This is the outline you are revising" not in turns.notes[0]

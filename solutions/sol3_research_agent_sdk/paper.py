@@ -473,9 +473,30 @@ def _judge_loop(run: Run, drafted: dict) -> dict:
         note = gates.retry_instruction(decision, issues or list(signature))
         if changes:
             note += "\nApply these actionable changes:\n" + "\n".join(f"- {c}" for c in changes)
+        note += _revision_note(current)
         current = _draft_valid_outline_with_note(run, note)
         run.write_json("outline.json", current)
     raise RunFailed("outline judge: three rounds exhausted")
+
+
+def _revision_note(current: dict) -> str:
+    """Hand the outliner the outline it is being asked to fix.
+
+    Without it the round is a fresh draft, not a revision. The outliner was
+    given the topic, the corpus pack, the budget, and a list of complaints
+    about a document it could not see, so it avoided the named problems by
+    writing something different, and the new draft had new problems. Two live
+    runs failed that way, with the judge's rows changing between rounds rather
+    than shrinking (#327).
+
+    An instruction like "tradeoffs.claims_to_support[0]: split the claim in
+    two" is unusable unless the outliner is holding that array.
+    """
+    return (
+        "\n\nThis is the outline you are revising. Keep every part the judge did "
+        "not fault, change only what the notes above name, and return the whole "
+        "outline.\n" + json.dumps(current, indent=2)
+    )
 
 
 def _draft_valid_outline_with_note(run: Run, note: str) -> dict:
