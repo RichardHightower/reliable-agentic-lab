@@ -142,6 +142,36 @@ def plan_gate(plan: dict) -> None:
         raise GateFailed(" ".join(misses), tuple(sorted({m.split()[0] for m in misses})))
 
 
+# What the three structural sections are for. A planner does not write these,
+# because `normalize_plan` is what puts them there.
+STRUCTURAL = {
+    "abstract": "State the thesis, the evidence behind it, and the limit, in one paragraph.",
+    "introduction": "Name the problem, who has it, and what this paper settles about it.",
+    "references": "List every source the body cites, in citation order.",
+}
+
+
+def plan_heading(item) -> str:
+    """A plan section is an object with a heading. An older plan is a string."""
+    if isinstance(item, dict):
+        return str(item.get("heading") or "").strip()
+    return str(item or "").strip()
+
+
+def as_section(item, objective: str = "") -> dict:
+    """One plan section, in object form.
+
+    A string still parses, and carries no objective. The outline validator then
+    names the missing field, which is a readable failure rather than a crash on
+    an old plan.
+    """
+    if isinstance(item, dict):
+        entry = dict(item)
+        entry["heading"] = plan_heading(item)
+        return entry
+    return {"heading": plan_heading(item), "objective": objective}
+
+
 def normalize_plan(plan: dict) -> dict:
     """Fill the defaults a later stage relies on, so it never reads a missing key."""
     plan.setdefault("title", "Untitled")
@@ -152,7 +182,7 @@ def normalize_plan(plan: dict) -> dict:
         question.setdefault("id", f"q{index + 1}")
         question.setdefault("subject", evidence.slug(question.get("question", "topic"), 30))
         question.setdefault("important", False)
-    sections = [s for s in plan.get("sections", []) if s.strip()]
+    sections = [entry for entry in map(as_section, plan.get("sections", [])) if entry["heading"]]
     # Every white paper opens with an abstract and an introduction and closes
     # with references. A plan that omits one produces a paper that fails the
     # section gate at stage 8, four stages and several dollars too late.
@@ -160,14 +190,20 @@ def normalize_plan(plan: dict) -> dict:
     # Position matters as much as presence. Inserting a missing Introduction at
     # the front of a plan that already has an Abstract puts the introduction
     # first, which is a different paper.
-    lowered = [s.lower() for s in sections]
+    #
+    # Python inserts these three, so Python states their objective. Leaving it
+    # blank would make the outline validator report a missing field against a
+    # section the planner never wrote.
+    lowered = [entry["heading"].lower() for entry in sections]
     if "abstract" not in lowered:
-        sections.insert(0, "Abstract")
+        sections.insert(0, as_section("Abstract", STRUCTURAL["abstract"]))
         lowered.insert(0, "abstract")
     if "introduction" not in lowered:
-        sections.insert(lowered.index("abstract") + 1, "Introduction")
+        sections.insert(
+            lowered.index("abstract") + 1, as_section("Introduction", STRUCTURAL["introduction"])
+        )
     if "references" not in lowered:
-        sections.append("References")
+        sections.append(as_section("References", STRUCTURAL["references"]))
     plan["sections"] = sections
     return plan
 
@@ -420,7 +456,7 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
     if not sections:
         raise GateFailed("the outline has no sections.", ("no_sections",))
 
-    required = {name.lower() for name in plan.get("sections", [])}
+    required = {plan_heading(item).lower() for item in plan.get("sections", [])}
     present = {str(section.get("heading", "")).lower() for section in sections}
     for name in ("abstract", "introduction", "references"):
         if name in required and not any(name in heading for heading in present):

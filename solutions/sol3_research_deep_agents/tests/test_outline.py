@@ -64,7 +64,16 @@ def test_unknown_corpus_refs_fail():
     assert any("unknown key" in item for item in errors)
 
 
-def test_plan_lifts_into_the_outline_schema():
+def planned_section(heading, objective, first, second):
+    return {
+        "heading": heading,
+        "objective": objective,
+        "abstract": f"Two sentences about {heading.lower()}. A third names the stake.",
+        "key_questions": [first, second],
+    }
+
+
+def sample_plan(**over):
     plan = {
         "title": "Exits",
         "audience": "engineers",
@@ -72,11 +81,31 @@ def test_plan_lifts_into_the_outline_schema():
             {"id": "q1", "question": "what three exits", "check": "done then cost"},
             {"id": "q2", "question": "what happens with no exit", "check": "a runtime limit"},
         ],
-        "sections": ["Abstract", "Exit conditions", "Limitations", "References"],
+        "sections": [
+            "Abstract",
+            planned_section(
+                "Exit conditions",
+                "Show the three exits, in order, and why the order is that one.",
+                "what three exits",
+                "what happens with no exit",
+            ),
+            planned_section(
+                "Limitations",
+                "Name what this design does not solve.",
+                "where the cost estimate stops being accurate",
+                "what a green rubric fails to prove",
+            ),
+            "References",
+        ],
         "diagrams": [{"name": "three-exits", "kind": "mermaid", "shows": "the order"}],
         "notes": ["the doctrine is local"],
     }
-    drafted = outlines.outline_from_plan(plan, word_target_total=2000)
+    plan.update(over)
+    return plan
+
+
+def test_plan_lifts_into_the_outline_schema():
+    drafted = outlines.outline_from_plan(sample_plan(), word_target_total=2000)
     assert drafted["title"] == "Exits"
     assert {section["heading"] for section in drafted["sections"]} == {
         "Exit conditions",
@@ -84,6 +113,71 @@ def test_plan_lifts_into_the_outline_schema():
     }
     assert outlines.validate(drafted, word_target_total=2000) == []
     assert outlines.diagrams(drafted)
+
+
+# -- the planner writes the section, Python does not invent it --------------
+#
+# The live plan judge scored 0.35 three times with "Section headings and their
+# key_questions/claims are systematically mismatched." Two causes: every
+# objective read `Explain <heading>.`, and questions were assigned to headings
+# by round robin (#306).
+
+
+def test_the_planner_objective_survives_the_lift():
+    drafted = outlines.outline_from_plan(sample_plan(), word_target_total=2000)
+    by_heading = {section["heading"]: section for section in drafted["sections"]}
+    assert by_heading["Exit conditions"]["objective"] == (
+        "Show the three exits, in order, and why the order is that one."
+    )
+    assert "Explain Exit conditions." not in [s["objective"] for s in drafted["sections"]]
+
+
+def test_every_section_keeps_its_own_questions():
+    """Round robin gave section two the question that belonged to section one."""
+    drafted = outlines.outline_from_plan(sample_plan(), word_target_total=2000)
+    by_heading = {section["heading"]: section for section in drafted["sections"]}
+    assert by_heading["Exit conditions"]["key_questions"] == [
+        "what three exits",
+        "what happens with no exit",
+    ]
+    assert by_heading["Limitations"]["key_questions"] == [
+        "where the cost estimate stops being accurate",
+        "what a green rubric fails to prove",
+    ]
+
+
+def test_an_objective_that_echoes_its_heading_fails_validation():
+    drafted = outlines.outline_from_plan(
+        sample_plan(
+            sections=[
+                planned_section("Exit conditions", "Explain Exit conditions.", "one", "two"),
+                planned_section("Limitations", "Explain limitations", "three", "four"),
+            ]
+        ),
+        word_target_total=2000,
+    )
+    errors = outlines.validate(drafted, word_target_total=2000)
+    assert len(errors) == 2
+    assert all("restates its heading" in item for item in errors), errors
+
+
+def test_a_string_section_fails_with_the_missing_field_named():
+    """An old plan still parses. It does not crash, and it does not pass."""
+    drafted = outlines.outline_from_plan(
+        sample_plan(sections=["Abstract", "Exit conditions", "References"]),
+        word_target_total=2000,
+    )
+    errors = outlines.validate(drafted, word_target_total=2000)
+    assert any("has no objective" in item for item in errors), errors
+    assert any("has no abstract" in item for item in errors), errors
+    assert any("key_questions" in item for item in errors), errors
+
+
+def test_a_plan_with_only_structural_sections_still_lifts():
+    drafted = outlines.outline_from_plan(
+        sample_plan(sections=["Abstract", "References"]), word_target_total=2000
+    )
+    assert [section["heading"] for section in drafted["sections"]] == ["The approach"]
 
 
 def test_approve_stops_before_research(run_dir, stub_renderer):

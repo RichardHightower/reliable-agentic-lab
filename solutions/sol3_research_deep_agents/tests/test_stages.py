@@ -122,22 +122,55 @@ def test_a_plan_cannot_make_more_than_six_questions_block_the_paper():
     assert "at most 6" in str(exc.value)
 
 
+def headings(plan):
+    return [stages.plan_heading(item) for item in plan["sections"]]
+
+
 def test_normalize_adds_the_sections_every_paper_has():
     """Otherwise the section gate fails at stage 8, four stages too late."""
     out = stages.normalize_plan({"questions": [], "sections": ["Body"]})
-    assert out["sections"] == ["Abstract", "Introduction", "Body", "References"]
+    assert headings(out) == ["Abstract", "Introduction", "Body", "References"]
 
 
 def test_a_missing_introduction_lands_after_the_abstract():
     """Inserting it at the front would put the introduction first, which is a
     different paper."""
     out = stages.normalize_plan({"questions": [], "sections": ["Abstract", "Body", "References"]})
-    assert out["sections"] == ["Abstract", "Introduction", "Body", "References"]
+    assert headings(out) == ["Abstract", "Introduction", "Body", "References"]
 
 
 def test_normalize_leaves_a_complete_plan_alone():
     given = ["Abstract", "Introduction", "Method", "Limitations", "References"]
-    assert stages.normalize_plan({"questions": [], "sections": list(given)})["sections"] == given
+    assert headings(stages.normalize_plan({"questions": [], "sections": list(given)})) == given
+
+
+def test_a_planner_section_object_keeps_its_objective_and_questions():
+    """The planner writes these now. Nothing may flatten them back to a heading."""
+    written = {
+        "heading": "Exit conditions",
+        "objective": "Show why a loop with no cost exit runs until the budget is gone.",
+        "abstract": "Three exits, in order, and what each one costs to check.",
+        "key_questions": ["what are the three exits", "what happens with no cost exit"],
+    }
+    out = stages.normalize_plan({"questions": [], "sections": [written]})
+    kept = [item for item in out["sections"] if item["heading"] == "Exit conditions"][0]
+    assert kept == written
+
+
+def test_the_structural_sections_carry_their_own_objective():
+    """Python inserts them, so Python states what they are for."""
+    out = stages.normalize_plan({"questions": [], "sections": ["Body"]})
+    by_heading = {item["heading"]: item for item in out["sections"]}
+    assert by_heading["Abstract"]["objective"] == stages.STRUCTURAL["abstract"]
+    assert by_heading["Introduction"]["objective"] == stages.STRUCTURAL["introduction"]
+    assert by_heading["References"]["objective"] == stages.STRUCTURAL["references"]
+
+
+def test_an_old_string_plan_still_parses(): 
+    """It parses, and carries no objective. The outline validator names that."""
+    out = stages.normalize_plan({"questions": [], "sections": ["Body"]})
+    body = [item for item in out["sections"] if item["heading"] == "Body"][0]
+    assert body["objective"] == ""
 
 
 # -- 2. search -------------------------------------------------------------

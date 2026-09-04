@@ -28,12 +28,60 @@
           }
         ],
         "sections": [
-          "Abstract",
-          "Introduction",
-          "Exit conditions",
-          "Independent verification",
-          "Limitations",
-          "References"
+          {
+            "heading": "Abstract",
+            "objective": "State the thesis, the evidence behind it, and the limit, in one paragraph.",
+            "abstract": "One paragraph: three exits, in order, and what an independent checker adds.",
+            "key_questions": [
+              "what does this paper claim about exit order",
+              "what evidence supports that order"
+            ]
+          },
+          {
+            "heading": "Introduction",
+            "objective": "Name the problem, who has it, and what this paper settles about it.",
+            "abstract": "Teams run agent loops against real budgets and discover the cost after the bill.",
+            "key_questions": [
+              "who runs an agent loop against a real budget",
+              "what goes wrong when nobody defines the exit"
+            ]
+          },
+          {
+            "heading": "Exit conditions",
+            "objective": "Show the three exits this loop checks, in order, and why the order is that one.",
+            "abstract": "Done, then cost, then max turns. Each one is arithmetic, not a model's opinion.",
+            "key_questions": [
+              "What three exits does this repo's paper loop check, and in what order?",
+              "What happens when a graph has no explicit exit condition?"
+            ]
+          },
+          {
+            "heading": "Independent verification",
+            "objective": "Show what a separate checker catches that the maker cannot catch alone.",
+            "abstract": "A maker and a checker hold different tool scopes, and the split is what makes the check independent.",
+            "key_questions": [
+              "How does a maker and checker split change reliability?",
+              "what does the checker need that the maker must not have"
+            ]
+          },
+          {
+            "heading": "Limitations",
+            "objective": "Name what this design does not solve and where the evidence runs out.",
+            "abstract": "Priced tokens are an estimate, and a rubric only checks what somebody wrote down.",
+            "key_questions": [
+              "where does the cost estimate stop being accurate",
+              "what does a green rubric fail to prove"
+            ]
+          },
+          {
+            "heading": "References",
+            "objective": "List every source the body cites, in citation order.",
+            "abstract": "Generated from the evidence ledger.",
+            "key_questions": [
+              "which sources does the body cite",
+              "which of them are primary"
+            ]
+          }
         ],
         "diagrams": [
           {
@@ -294,7 +342,9 @@
       "data": {
         "passed": true,
         "failed_rows": [],
-        "notes": ["offline section judge: check already ran"]
+        "notes": [
+          "offline section judge: check already ran"
+        ]
       }
     }
   },
