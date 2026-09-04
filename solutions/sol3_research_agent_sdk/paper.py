@@ -481,13 +481,58 @@ def _judge_loop(run: Run, drafted: dict) -> dict:
         note = gates.retry_instruction(decision, issues or list(signature))
         if changes:
             note += "\nApply these actionable changes:\n" + "\n".join(f"- {c}" for c in changes)
-        note += _revision_note(current)
-        current = _draft_valid_outline_with_note(run, note)
+        faulted = {
+            item.get("section")
+            for item in (verdict.get("blocking_issues") or [])
+            if isinstance(item, dict) and item.get("section")
+        }
+        known = {section.get("id") for section in current.get("sections") or []}
+        targets = faulted & known
+        note += _revision_note(current, targets)
+        revised = _draft_valid_outline_with_note(run, note)
+        current = _merge_revision(current, revised, targets)
+        errors = outlines.validate(
+            current, word_target_total=run.word_target_total, corpus_keys=_pack_keys(run)
+        )
+        if errors:
+            # The splice produced something the validator rejects. The model's
+            # own draft already passed, so keep that rather than hand the judge
+            # an outline Python knows is invalid.
+            current = revised
         run.write_json("outline.json", current)
     raise RunFailed(f"outline judge: {rounds} rounds exhausted")
 
 
-def _revision_note(current: dict) -> str:
+def _merge_revision(previous: dict, revised: dict, targets: set) -> dict:
+    """Keep every section the judge did not fault.
+
+    One model call rewrote the whole outline each round, so a repair in one
+    section disturbed another. A live run sat at two failing rows for three
+    rounds with different rows each time: round 5 limitations and word_budget,
+    round 6 limitations and redundancy, round 7 completeness and evidence_fit.
+    Each revision fixed what was named and broke something else (#329).
+
+    The prompt asks the outliner to leave the rest alone. This enforces it,
+    because a prompt is not a gate.
+    """
+    if not targets:
+        return revised
+    by_id = {section.get("id"): section for section in revised.get("sections") or []}
+    merged = [
+        by_id[section.get("id")]
+        if section.get("id") in targets and section.get("id") in by_id
+        else section
+        for section in previous.get("sections") or []
+    ]
+    # A judge may ask for a section that did not exist. Keep new ones.
+    seen = {section.get("id") for section in merged}
+    merged.extend(section for sid, section in by_id.items() if sid not in seen)
+    out = dict(revised)
+    out["sections"] = merged
+    return out
+
+
+def _revision_note(current: dict, targets: set | None = None) -> str:
     """Hand the outliner the outline it is being asked to fix.
 
     Without it the round is a fresh draft, not a revision. The outliner was
@@ -500,10 +545,16 @@ def _revision_note(current: dict) -> str:
     An instruction like "tradeoffs.claims_to_support[0]: split the claim in
     two" is unusable unless the outliner is holding that array.
     """
+    scope = (
+        f" Change only these sections: {', '.join(sorted(targets))}. Return every "
+        "other section exactly as it is below."
+        if targets
+        else ""
+    )
     return (
         "\n\nThis is the outline you are revising. Keep every part the judge did "
         "not fault, change only what the notes above name, and return the whole "
-        "outline.\n" + json.dumps(current, indent=2)
+        f"outline.{scope}\n" + json.dumps(current, indent=2)
     )
 
 

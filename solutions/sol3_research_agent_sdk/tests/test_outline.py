@@ -626,3 +626,99 @@ def test_the_loop_honours_a_raised_round_count(work, monkeypatch):
     run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
     paper._judge_loop(run, turns.outline("a topic", ""))
     assert turns.round >= 5, "a raised budget must buy more revision rounds"
+
+
+# -- a repair must not disturb a neighbour ----------------------------------
+#
+# One model call rewrote the whole outline each round. A live run sat at two
+# failing rows for three rounds with different rows each time: limitations and
+# word_budget, then limitations and redundancy, then completeness and
+# evidence_fit. Each revision fixed what was named and broke something else,
+# so the loop hovered instead of converging (#329).
+
+
+def two_section_outline(first_heading="Keep me", second_heading="Fix me"):
+    return sample_outline(
+        word_target_total=800,
+        sections=[
+            sample_section(sid="keep", heading=first_heading),
+            sample_section(sid="fix", heading=second_heading),
+        ],
+    )
+
+
+def test_only_the_faulted_section_is_replaced():
+    previous = two_section_outline()
+    revised = two_section_outline("Model rewrote this too", "Genuinely fixed")
+    merged = paper._merge_revision(previous, revised, {"fix"})
+    by_id = {section["id"]: section for section in merged["sections"]}
+    assert by_id["keep"]["heading"] == "Keep me", "an untouched section must survive"
+    assert by_id["fix"]["heading"] == "Genuinely fixed"
+
+
+def test_section_order_is_preserved():
+    previous = two_section_outline()
+    revised = two_section_outline("x", "y")
+    merged = paper._merge_revision(previous, revised, {"fix"})
+    assert [section["id"] for section in merged["sections"]] == ["keep", "fix"]
+
+
+def test_a_section_the_judge_asked_for_is_kept():
+    previous = two_section_outline()
+    revised = two_section_outline()
+    revised["sections"].append(sample_section(sid="added", heading="Limitations"))
+    merged = paper._merge_revision(previous, revised, {"fix"})
+    assert "added" in {section["id"] for section in merged["sections"]}
+
+
+def test_no_target_means_the_model_draft_stands():
+    """A paper-level fault is not a section fault. Replace the whole thing."""
+    previous = two_section_outline()
+    revised = two_section_outline("all", "new")
+    assert paper._merge_revision(previous, revised, set()) == revised
+
+
+def test_the_note_names_the_sections_to_change():
+    note = paper._revision_note(two_section_outline(), {"fix"})
+    assert "Change only these sections: fix" in note
+    assert "Return every other section exactly as it is" in note
+
+
+class RewritingTurns:
+    """An outliner that rewrites every section, the way a real one does."""
+
+    def __init__(self, verdicts):
+        self.verdicts = list(verdicts)
+        self.round = 0
+
+    def outline(self, topic, prior_art, budget=None, note="", brief=""):
+        self.round += 1
+        return two_section_outline(f"Rewritten {self.round}", f"Fixed {self.round}")
+
+    plan = outline
+
+    def judge_outline(self, drafted, note=""):
+        return self.verdicts.pop(0) if self.verdicts else {"passed": True, "score": 1.0}
+
+
+def test_the_judge_loop_keeps_the_section_the_judge_did_not_fault(work):
+    """Proof the loop splices. Testing `_merge_revision` alone proved nothing.
+
+    Removing the splice from `_judge_loop` left the helper tests green, which
+    is how a stage that stopped calling its helper hides.
+    """
+    verdict = {
+        "passed": False,
+        "score": 0.5,
+        "blocking_issues": [{"section": "fix", "rule": "depth", "description": "thin"}],
+        "actionable_changes": ["fix: add a mechanism"],
+    }
+    turns = RewritingTurns([verdict, {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+
+    final = paper._judge_loop(run, two_section_outline())
+    by_id = {section["id"]: section for section in final["sections"]}
+    assert by_id["keep"]["heading"] == "Keep me", (
+        "the outliner rewrote an unfaulted section and Python let it through"
+    )
+    assert by_id["fix"]["heading"].startswith("Fixed"), "the faulted section must be replaced"
