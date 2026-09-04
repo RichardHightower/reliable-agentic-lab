@@ -32,6 +32,7 @@ from load_agents import (
     LEDGER_SCHEMA,
     OUTLINE_SCHEMA,
     OUTLINE_VERDICT_SCHEMA,
+    SOURCE_ALLOWLIST_SCHEMA,
     RESEARCH_SCHEMA,
     REVIEW_SCHEMA,
     SECTION_VERDICT_SCHEMA,
@@ -135,6 +136,9 @@ class Turns:
     def edit_outline(self, drafted: dict, note: str = "") -> dict:
         raise NotImplementedError
 
+    def source_allowlist(self, topic: str, headings: list, prior_art: str = "") -> dict:
+        raise NotImplementedError
+
     def plan(
         self, topic: str, prior_art: str, budget: dict | None = None, note: str = "", brief: str = ""
     ) -> dict:
@@ -218,6 +222,10 @@ class SdkTurns(Turns):
     backend: object
     work_dir: Path
     on_cost: object = None
+    # This run's admitted search domains. `paper.source_allowlist` sets it after
+    # the librarian turn. Until then the seed applies, so a turn built by hand
+    # still searches something.
+    allowed_domains: tuple = source_policy.SEED_ALLOWLIST
 
     def _ask(self, agent: str, instruction: str, *, schema=None, allow=()) -> object:
         result = self.backend.run(
@@ -323,6 +331,27 @@ class SdkTurns(Turns):
             OUTLINE_VERDICT_SCHEMA,
         )
 
+    def source_allowlist(self, topic: str, headings: list, prior_art: str = "") -> dict:
+        """Ask which domains this topic's evidence lives on.
+
+        One turn for the whole run. The librarian holds no search tool, so it
+        cannot search to decide where to search, and Python admits the result.
+        """
+        sections = "\n".join(f"- {heading}" for heading in headings if heading)
+        known = f"\n\nHosts the curated corpus already cites:\n{prior_art[:1500]}" if prior_art else ""
+        return self._json(
+            "research-source-librarian",
+            f"Name the domains this paper should search.\n\nTopic: {topic}\n\n"
+            f"Sections:\n{sections}\n\n"
+            f"At most {source_policy.MAX_PERPLEXITY_DOMAINS} entries. Each needs a "
+            "host and an org_type from the schema enum. Name hosts, not journal "
+            "titles. `.gov`, `.edu`, and `.int` may be whole top level domains; "
+            "no other TLD is admitted. Cable news and encyclopedias are dropped "
+            "under every type. Fewer good hosts beats a padded list."
+            f"{known}",
+            SOURCE_ALLOWLIST_SCHEMA,
+        )
+
     def edit_outline(self, drafted: dict, note: str = "") -> dict:
         """Repair a judged outline in place, rather than planning a new one.
 
@@ -356,13 +385,15 @@ class SdkTurns(Turns):
         result = self._json(
             "research-researcher",
             f"Answer this research question from primary sources: {question}\n"
+            f"Search only these domains, which Python admitted for this run: "
+            f"{', '.join(self.allowed_domains)}\n"
             f"{note}\n\n{GROUNDING}",
             RESEARCH_SCHEMA,
         )
         domains = (
             ("github.com/RichardHightower",)
             if question.strip() == EXIT_DOCTRINE_QUESTION
-            else source_policy.SEED_ALLOWLIST
+            else self.allowed_domains
         )
         sources = source_policy.filter_sources(result.get("sources", []), allowed_domains=domains)
         source_urls = {source["url"] for source in sources}
@@ -780,6 +811,10 @@ class OfflineTurns(Turns):
             "word_target_total": words,
             "sections": sections,
         }
+
+    def source_allowlist(self, topic: str, headings: list, prior_art: str = "") -> dict:
+        """No proposal. The offline twin has no network, so the seed is honest."""
+        return {"domains": []}
 
     def edit_outline(self, drafted: dict, note: str = "") -> dict:
         """Hand it back. The offline judge always passes, so nothing calls this

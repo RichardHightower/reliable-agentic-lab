@@ -291,6 +291,7 @@ def test_every_role_gets_its_prompt_from_the_plugin(fake_sdk, work):
         "research-outliner",
         "research-outline-judge",
         "research-outline-editor",
+        "research-source-librarian",
         "research-researcher",
         "research-verifier",
         "research-section-judge",
