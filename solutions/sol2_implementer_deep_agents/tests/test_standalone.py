@@ -6,15 +6,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+FORBIDDEN = r"^from loops|^import loops|^from solutions|^import solutions|from \.\."
+
+
 def test_no_shared_loop_imports():
-    hit = subprocess.run(
-        ["grep", "-rn", r"^from loops\|^import loops\|^from solutions import\|^from \.\.", str(ROOT)],
-        text=True,
+    """CLAUDE.md forbids a shared library. Duplication is the point, because a
+    five hour audience should not have to learn an abstraction first.
+
+    Scope matters as much as the pattern. `task setup` builds a `.venv` in
+    this folder, and an unscoped walk reads every installed package, where
+    `from ..` is an ordinary relative import. That made this assertion fail
+    on the dependencies rather than on this folder's own source.
+    """
+    out = subprocess.run(
+        ["grep", "-rnE", FORBIDDEN, "--include=*.py",
+         "--exclude-dir=.venv", "--exclude-dir=.cache", "--exclude-dir=work", "."],
+        cwd=ROOT,
         capture_output=True,
+        text=True,
         check=False,
     )
-    lines = [ln for ln in (hit.stdout or "").splitlines() if "/tests/" not in ln]
-    assert lines == []
+    hits = [line for line in out.stdout.split("\n") if line and "/tests/" not in line]
+    assert not hits, "\n".join(hits)
 
 
 def test_no_two_modules_are_byte_identical():
