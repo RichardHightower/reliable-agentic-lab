@@ -51,7 +51,7 @@ tasks:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} loop.py --table-only'
+      - '{{.PY}} -u loop.py --table-only'
 
   checks:
     desc: Run the deterministic modules against their own assertions.
@@ -113,9 +113,9 @@ tasks:
     cmds:
       - |
         if [ -x "{{.RUN_PY}}" ]; then
-          "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain
+          "{{.RUN_PY}}" -u loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain
         else
-          {{.PY}} loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain
+          {{.PY}} -u loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain
         fi
 
   e2e-fixture:
@@ -127,7 +127,7 @@ tasks:
           echo "run task setup first. It creates .venv and installs the renderer."
           exit 1
         fi
-        "{{.RUN_PY}}" e2e.py --mode fixture --out "{{.E2E_OUT | default .FIXTURE_REPORT}}"
+        "{{.RUN_PY}}" -u e2e.py --mode fixture --out "{{.E2E_OUT | default .FIXTURE_REPORT}}"
 
   e2e-live:
     desc: Run the bounded live Agent SDK acceptance test. Needs ANTHROPIC_API_KEY and PERPLEXITY_API_KEY.
@@ -138,7 +138,7 @@ tasks:
           echo "run task setup first. It creates .venv and installs the renderer."
           exit 1
         fi
-        "{{.RUN_PY}}" e2e.py --mode live --out "{{.E2E_OUT | default .LIVE_REPORT}}" --max-usd "{{.LIVE_E2E_MAX_USD | default "10"}}" \
+        "{{.RUN_PY}}" -u e2e.py --mode live --out "{{.E2E_OUT | default .LIVE_REPORT}}" --max-usd "{{.LIVE_E2E_MAX_USD | default "10"}}" \
           {{if .BRAIN}}--brain "{{.BRAIN}}"{{end}} {{if .ALLOW_THIN_CORPUS}}--allow-thin-corpus{{end}}
 
   pdf:
@@ -172,7 +172,7 @@ tasks:
           echo "run task setup first. It creates .venv in this folder and installs claude-agent-sdk."
           exit 1
         fi
-        "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" --profile "{{.PROFILE | default "demo"}}" {{.CLI_ARGS}}
+        "{{.RUN_PY}}" -u loop.py --topic "{{.TOPIC}}" --profile "{{.PROFILE | default "demo"}}" {{.CLI_ARGS}}
 
   publish:
     desc: Run, then push the paper and its figures to a secret gist.
@@ -183,7 +183,7 @@ tasks:
           echo "run task setup first. It creates .venv in this folder and installs claude-agent-sdk."
           exit 1
         fi
-        "{{.RUN_PY}}" loop.py --topic "{{.TOPIC}}" --publish {{.CLI_ARGS}}
+        "{{.RUN_PY}}" -u loop.py --topic "{{.TOPIC}}" --publish {{.CLI_ARGS}}
 
   clean:
     desc: Delete every run under work/. The renderer clone in .cache/ stays.
