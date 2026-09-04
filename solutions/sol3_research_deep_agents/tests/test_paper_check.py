@@ -116,6 +116,15 @@ def test_svg_and_plain_png_figure_fallbacks_block_publication():
         assert "figure_assets" in gate(body, URLS).signature()
 
 
+def test_charts_png_is_a_publication_asset():
+    body = GOOD.replace(
+        "![A flowchart of the three exits](figures/exits_imagen.png)",
+        "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
+        "![the three exits](charts/three-exits.png)",
+    )
+    assert "figure_assets" not in gate(body, URLS).signature()
+
+
 def test_a_figure_is_not_an_uncited_claim():
     """An image paragraph asserts nothing, so demanding a citation on it would
     fail every paper that has a figure."""

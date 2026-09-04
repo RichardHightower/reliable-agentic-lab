@@ -57,6 +57,7 @@ tasks:
       - '{{.PY}} publish.py --demo'
       - '{{.PY}} mcp_tools.py --demo'
       - '{{.PY}} corpus.py --demo'
+      - '{{.PY}} charts.py --demo'
 
   brief:
     desc: The Saturday artifact. A question in, a cited brief out.

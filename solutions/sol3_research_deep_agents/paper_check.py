@@ -127,8 +127,16 @@ def figures_without_alt(body: str) -> list[str]:
 
 
 def non_publication_figures(body: str) -> list[str]:
-    """Only plugin-produced ``*_imagen.png`` assets may enter the paper."""
-    return [target for _alt, target in figures(body) if not target.endswith("_imagen.png")]
+    """Diagrams must be judged `*_imagen.png`. Charts live under `charts/`."""
+    bad = []
+    for _alt, target in figures(body):
+        if target.endswith("_imagen.png"):
+            continue
+        normalized = target.replace("\\", "/")
+        if normalized.startswith("charts/") or "/charts/" in normalized:
+            continue
+        bad.append(target)
+    return bad
 
 
 def visible_source_syntax(body: str) -> list[str]:
@@ -340,6 +348,7 @@ def check(
     required=REQUIRED_SECTIONS,
     min_words: int | None = None,
     min_section_words: int | None = None,
+    charts=None,
 ) -> PaperScore:
     """Score a white paper. Every check here is arithmetic."""
     words_needed = MIN_WORDS if min_words is None else min_words
@@ -481,7 +490,38 @@ def check(
         )
     )
 
+    rendered = [item for item in (charts or []) if item.get("path")]
+    if rendered:
+        import charts as charts_mod  # noqa: PLC0415
+
+        blob = _ledger_blob(ledger) + "\n" + "\n".join(sources or [])
+        failures = charts_mod.charted_failures(body, rendered, blob)
+        checks.append(
+            Check(
+                "charted",
+                not failures,
+                "every plotted value is in the corpus"
+                if not failures
+                else f"charted: {failures[:3]}",
+            )
+        )
+
     return PaperScore(checks=checks)
+
+
+def _ledger_blob(ledger) -> str:
+    if ledger is None:
+        return ""
+    parts = []
+    claims = getattr(ledger, "claims", None)
+    if isinstance(claims, dict):
+        for claim in claims.values():
+            parts.append(getattr(claim, "text", "") or "")
+    if hasattr(ledger, "bibliography"):
+        for source in ledger.bibliography():
+            parts.append(getattr(source, "title", "") or "")
+            parts.append(getattr(source, "url", "") or "")
+    return "\n".join(parts)
 
 
 def demo() -> None:
