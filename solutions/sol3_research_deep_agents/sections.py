@@ -104,6 +104,41 @@ def section_done(work_dir: Path, section_id: str) -> bool:
     return any(entry.get("section_id") == section_id for entry in load_ledger(work_dir))
 
 
+BODY_PROMPT_CHARS = 24000
+
+
+def whole(body: str, limit: int | None = None) -> str:
+    """A section body a gate can grade, and a ledger can read.
+
+    Both call sites used `body[:6000]`. The only section in a live run over
+    that ceiling was the only one the judge rejected, on `depth`,
+    `objective_met`, and `no_filler`, which is precisely how a section cut
+    mid-sentence reads. The judge graded what it was handed (#324).
+
+    The ledger call was worse. It is not a gate, so every claim, number, and
+    term past the cut vanished from `paper_ledger.json` with no error, and
+    `ledger_consistency` is a hard row that reads that ledger.
+
+    When a ceiling is unavoidable, cut on a paragraph boundary and say how much
+    went, so a reader knows the text ended early rather than inferring that the
+    writer stopped there.
+
+    The limit is read at call time, never as a default argument. A default binds
+    once at definition, and a test that lowers it would change nothing.
+    """
+    limit = BODY_PROMPT_CHARS if limit is None else limit
+    if len(body) <= limit:
+        return body
+
+    kept = body[:limit].rsplit("\n\n", 1)[0] or body[:limit]
+    dropped = len(body) - len(kept)
+    return (
+        f"{kept}\n\n[The section continues for {dropped} more characters, "
+        "withheld for length. It is not truncated in the paper. Do not fail "
+        "depth, objective_met, or no_filler for the withheld text.]"
+    )
+
+
 def _paragraphs(body: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
 
@@ -337,7 +372,7 @@ def close_section(paper, section: dict, body: str, *, force: bool = False) -> fl
         "section_judge",
         "Grade this section against its outline row. Do not re-litigate Python's check.\n"
         f"Heading: {heading}\nPurpose: {section.get('purpose') or section.get('objective') or ''}\n"
-        f"Body:\n{body[:6000]}",
+        f"Body:\n{whole(body)}",
     )
     usd += reply.usd
     verdict = paper._json_reply("section_judge", reply)
@@ -353,7 +388,7 @@ def close_section(paper, section: dict, body: str, *, force: bool = False) -> fl
     ledger_reply = paper._ask(
         "ledger",
         "Extract the ledger entry from this finished section. Add no facts.\n"
-        f"section_id: {sid}\nheading: {heading}\n\n{body[:6000]}",
+        f"section_id: {sid}\nheading: {heading}\n\n{whole(body)}",
     )
     usd += ledger_reply.usd
     try:

@@ -45,3 +45,12 @@ you started.
 Return the failing row names, and one sentence per row saying where and why.
 Quote at most 15 words of the offending text. When every row passes, return an
 empty list.
+
+```json
+{"failed_rows": ["depth"], "notes": ["Anatomy restates its claims without naming a mechanism."]}
+```
+
+`notes` carries exactly one sentence per entry in `failed_rows`, in the same
+order. Write nothing else there. A note about a row that now passes shifts every
+pairing after it, and the writer is then told a row failed for another row's
+reason. Report only what is still wrong.

@@ -96,6 +96,40 @@ tasks:
     cmds:
       - '{{.PY}} publish.py {{.CLI_ARGS}}'
 
+  pdf:
+    desc: Export an existing paper and its figures as an Arctic Fox PDF.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ -z "{{.REPORT_DIR}}" ]; then
+          echo "set REPORT_DIR to the run you want, for example:"
+          echo "  REPORT_DIR=work/paper/<slug> task pdf"
+          exit 1
+        fi
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It installs the PDF dependencies in this folder."
+          exit 1
+        fi
+        "{{.RUN_PY}}" export_pdf.py "{{.REPORT_DIR}}/whitepaper.md" \
+          --out "{{.PDF_OUT | default (printf "%s/whitepaper.pdf" .REPORT_DIR)}}" \
+          --theme arctic-fox
+
+  publish-report:
+    desc: Publish an existing paper, PDF, and figures to its secret GitHub Gist.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ -z "{{.REPORT_DIR}}" ]; then
+          echo "set REPORT_DIR to the run you want, for example:"
+          echo "  REPORT_DIR=work/paper/<slug> task publish-report"
+          exit 1
+        fi
+        if [ ! -x "{{.RUN_PY}}" ]; then
+          echo "run task setup first. It creates the folder-local runtime."
+          exit 1
+        fi
+        "{{.RUN_PY}}" publish.py --work-dir "{{.REPORT_DIR}}" --title "{{.TOPIC}}" --require-pdf
+
   # -- setup ----------------------------------------------------------------
 
   setup:
@@ -105,6 +139,9 @@ tasks:
       - test -x "{{.RUN_PY}}" || "{{.PY}}" -m venv "{{.VENV}}"
       - '"{{.RUN_PY}}" -m pip install --quiet --upgrade pip'
       - '"{{.RUN_PY}}" -m pip install --quiet pytest "deepagents>=0.7.0" "langchain>=1.0.0" "langchain-mcp-adapters>=0.1.0" httpx'
+      # The PDF export path. ReportLab stays out of the runtime imports on
+      # purpose, so `task pdf` was the one task setup did not equip.
+      - '"{{.RUN_PY}}" -m pip install --quiet reportlab pypdf'
       - task: renderer
       - task: image-gen
 

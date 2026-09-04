@@ -536,3 +536,303 @@ def test_the_resume_path_rejects_an_unknown_key(tmp_path):
     run = paper.Run(topic="a topic", work_dir=work, turns=object(), state=paper.State())
     with pytest.raises(paper.RunFailed, match="unknown key"):
         paper.do_outline(run)
+
+
+# -- the judge loop revises, it does not re-draft ---------------------------
+#
+# Two live runs escalated at the outline judge, six rounds, zero convergence.
+# The failing rows changed between rounds rather than shrinking, because the
+# outliner was handed the topic and a list of complaints about an outline it
+# could not see, and answered by writing a different one (#327).
+
+
+class NotingTurns:
+    """A `Turns` that records the note each outline round receives."""
+
+    def __init__(self, verdicts):
+        self.notes: list[str] = []
+        self.verdicts = list(verdicts)
+        self.round = 0
+
+    def outline(self, topic, prior_art, budget=None, note="", brief=""):
+        self.notes.append(note)
+        self.round += 1
+        return sample_outline(
+            sections=[sample_section(sid="s1", heading=f"Draft {self.round}")],
+            word_target_total=400,
+        )
+
+    plan = outline
+
+    def judge_outline(self, drafted, note=""):
+        return self.verdicts.pop(0) if self.verdicts else {"passed": True, "score": 1.0}
+
+
+def failing_verdict(rule):
+    return {
+        "passed": False,
+        "score": 0.5,
+        "blocking_issues": [{"section": "s1", "rule": rule, "description": f"{rule} is wrong"}],
+        "actionable_changes": [f"s1.claims_to_support[0]: fix the {rule}"],
+    }
+
+
+def test_a_later_round_is_handed_the_outline_it_must_revise(work, monkeypatch):
+    turns = NotingTurns([failing_verdict("corpus_fit"), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, turns.outline("a topic", ""))
+
+    assert len(turns.notes) >= 2, "the judge must have forced a second round"
+    revision = turns.notes[-1]
+    assert "This is the outline you are revising" in revision
+    assert '"heading": "Draft 1"' in revision, "the outliner never saw the outline it must fix"
+    assert "fix the corpus_fit" in revision, "the actionable change must survive too"
+
+
+def test_the_first_round_is_not_a_revision(work):
+    """Nothing exists to revise yet. A note there would be a lie."""
+    turns = NotingTurns([{"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, turns.outline("a topic", ""))
+    assert "This is the outline you are revising" not in turns.notes[0]
+
+
+def test_the_outline_judge_rounds_read_the_environment(monkeypatch):
+    """Every other budget in this port is a flag. This one was a bare 3."""
+    import importlib  # noqa: PLC0415
+
+    monkeypatch.setenv("SOL3_OUTLINE_JUDGE_ROUNDS", "7")
+    reloaded = importlib.reload(paper)
+    try:
+        assert reloaded.OUTLINE_JUDGE_ROUNDS == 7
+    finally:
+        monkeypatch.delenv("SOL3_OUTLINE_JUDGE_ROUNDS")
+        importlib.reload(paper)
+
+
+def test_the_default_round_count_is_unchanged():
+    assert paper.OUTLINE_JUDGE_ROUNDS == 3
+
+
+def test_the_loop_honours_a_raised_round_count(work, monkeypatch):
+    """Each round must fail a different row, or the stall detector stops first.
+
+    That guard is correct and separate: a repeated signature is not progress
+    however large the budget is.
+    """
+    verdicts = [failing_verdict(rule) for rule in ("corpus_fit", "depth", "redundancy", "voice")]
+    turns = NotingTurns([*verdicts, {"passed": True, "score": 1.0}])
+    monkeypatch.setattr(paper, "OUTLINE_JUDGE_ROUNDS", 5)
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, turns.outline("a topic", ""))
+    assert turns.round >= 5, "a raised budget must buy more revision rounds"
+
+
+# -- a repair must not disturb a neighbour ----------------------------------
+#
+# One model call rewrote the whole outline each round. A live run sat at two
+# failing rows for three rounds with different rows each time: limitations and
+# word_budget, then limitations and redundancy, then completeness and
+# evidence_fit. Each revision fixed what was named and broke something else,
+# so the loop hovered instead of converging (#329).
+
+
+def two_section_outline(first_heading="Keep me", second_heading="Fix me"):
+    return sample_outline(
+        word_target_total=800,
+        sections=[
+            sample_section(sid="keep", heading=first_heading),
+            sample_section(sid="fix", heading=second_heading),
+        ],
+    )
+
+
+def test_only_the_faulted_section_is_replaced():
+    previous = two_section_outline()
+    revised = two_section_outline("Model rewrote this too", "Genuinely fixed")
+    merged = paper._merge_revision(previous, revised, {"fix"})
+    by_id = {section["id"]: section for section in merged["sections"]}
+    assert by_id["keep"]["heading"] == "Keep me", "an untouched section must survive"
+    assert by_id["fix"]["heading"] == "Genuinely fixed"
+
+
+def test_section_order_is_preserved():
+    previous = two_section_outline()
+    revised = two_section_outline("x", "y")
+    merged = paper._merge_revision(previous, revised, {"fix"})
+    assert [section["id"] for section in merged["sections"]] == ["keep", "fix"]
+
+
+def test_a_section_the_judge_asked_for_is_kept():
+    previous = two_section_outline()
+    revised = two_section_outline()
+    revised["sections"].append(sample_section(sid="added", heading="Limitations"))
+    merged = paper._merge_revision(previous, revised, {"fix"})
+    assert "added" in {section["id"] for section in merged["sections"]}
+
+
+def test_no_target_means_the_model_draft_stands():
+    """A paper-level fault is not a section fault. Replace the whole thing."""
+    previous = two_section_outline()
+    revised = two_section_outline("all", "new")
+    assert paper._merge_revision(previous, revised, set()) == revised
+
+
+def test_the_note_names_the_sections_to_change():
+    note = paper._revision_note(two_section_outline(), {"fix"})
+    assert "Change only these sections: fix" in note
+    assert "Return every other section exactly as it is" in note
+
+
+class RewritingTurns:
+    """An outliner that rewrites every section, the way a real one does."""
+
+    def __init__(self, verdicts):
+        self.verdicts = list(verdicts)
+        self.round = 0
+
+    def outline(self, topic, prior_art, budget=None, note="", brief=""):
+        self.round += 1
+        return two_section_outline(f"Rewritten {self.round}", f"Fixed {self.round}")
+
+    plan = outline
+
+    def judge_outline(self, drafted, note=""):
+        return self.verdicts.pop(0) if self.verdicts else {"passed": True, "score": 1.0}
+
+
+def test_the_judge_loop_keeps_the_section_the_judge_did_not_fault(work):
+    """Proof the loop splices. Testing `_merge_revision` alone proved nothing.
+
+    Removing the splice from `_judge_loop` left the helper tests green, which
+    is how a stage that stopped calling its helper hides.
+    """
+    verdict = {
+        "passed": False,
+        "score": 0.5,
+        "blocking_issues": [{"section": "fix", "rule": "depth", "description": "thin"}],
+        "actionable_changes": ["fix: add a mechanism"],
+    }
+    turns = RewritingTurns([verdict, {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+
+    final = paper._judge_loop(run, two_section_outline())
+    by_id = {section["id"]: section for section in final["sections"]}
+    assert by_id["keep"]["heading"] == "Keep me", (
+        "the outliner rewrote an unfaulted section and Python let it through"
+    )
+    assert by_id["fix"]["heading"].startswith("Fixed"), "the faulted section must be replaced"
+
+
+# -- the outline editor -----------------------------------------------------
+#
+# The outliner plans. It has no write tool and no diff path, so asking it to
+# fix three fields meant re-emitting five sections from scratch. Five live runs
+# hovered at two or three objections without reaching zero, trading each named
+# defect for a new one. The editor changes only what the judge named, and it is
+# Opus at high effort to match the judge.
+
+
+class EditingTurns:
+    """Records which role each round used, and what the editor was handed."""
+
+    def __init__(self, verdicts):
+        self.verdicts = list(verdicts)
+        self.calls: list[str] = []
+        self.edit_notes: list[str] = []
+        self.edited: list[dict] = []
+
+    def outline(self, topic, prior_art, budget=None, note="", brief=""):
+        self.calls.append("outliner")
+        return two_section_outline()
+
+    plan = outline
+
+    def judge_outline(self, drafted, note=""):
+        return self.verdicts.pop(0) if self.verdicts else {"passed": True, "score": 1.0}
+
+    def edit_outline(self, drafted, note=""):
+        self.calls.append("editor")
+        self.edit_notes.append(note)
+        self.edited.append(drafted)
+        fixed = json.loads(json.dumps(drafted))
+        fixed["sections"][1]["heading"] = "Repaired"
+        return fixed
+
+
+def blocked(rule="depth", section="fix"):
+    return {
+        "passed": False,
+        "score": 0.5,
+        "blocking_issues": [{"section": section, "rule": rule, "description": f"{rule} is wrong"}],
+        "actionable_changes": [f"{section}.claims_to_support[0]: fix the {rule}"],
+    }
+
+
+def test_a_failed_outline_goes_to_the_editor_not_the_outliner(work):
+    turns = EditingTurns([blocked(), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, two_section_outline())
+    assert turns.calls == ["editor"], f"the outliner must not re-plan: {turns.calls}"
+
+
+def test_the_editor_receives_the_outline_and_the_objections(work):
+    turns = EditingTurns([blocked("redundancy"), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, two_section_outline())
+
+    assert turns.edited[0]["sections"][0]["heading"] == "Keep me", "it must get the real outline"
+    note = turns.edit_notes[0]
+    assert "redundancy is wrong" in note, "the blocking issue must reach the editor"
+    assert "fix the redundancy" in note, "the actionable change must reach it too"
+
+
+def test_the_editors_repair_is_what_the_judge_sees_next(work):
+    turns = EditingTurns([blocked(), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    final = paper._judge_loop(run, two_section_outline())
+    by_id = {section["id"]: section for section in final["sections"]}
+    assert by_id["fix"]["heading"] == "Repaired"
+    assert by_id["keep"]["heading"] == "Keep me", "the editor left the clean section alone"
+
+
+def test_an_invalid_edit_keeps_the_outline_in_hand(work):
+    """The outline already validates. Losing the round to a bad edit is worse."""
+
+    class BrokenEditor(EditingTurns):
+        def edit_outline(self, drafted, note=""):
+            self.calls.append("editor")
+            return {"sections": "not an array"}
+
+    turns = BrokenEditor([blocked(), {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    final = paper._judge_loop(run, two_section_outline())
+    assert [section["id"] for section in final["sections"]] == ["keep", "fix"]
+
+
+def test_a_turns_with_no_editor_still_runs(work):
+    """The offline twin and any smaller `Turns` keep the old path, with #329."""
+    verdict = blocked()
+    turns = RewritingTurns([verdict, {"passed": True, "score": 1.0}])
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    final = paper._judge_loop(run, two_section_outline())
+    by_id = {section["id"]: section for section in final["sections"]}
+    assert by_id["keep"]["heading"] == "Keep me", "the splice must still protect a clean section"
+
+
+def test_the_outliner_is_told_duplicates_destroy_the_outline():
+    """`redundancy` failed six of eight judge rounds on one live run, and every
+    round cost a full re-emit. The threat is cheaper than the rounds."""
+    sent = {}
+
+    class Backend:
+        def run(self, **kwargs):
+            sent["prompt"] = kwargs["prompt"]
+            raise RuntimeError("stop here")
+
+    import turns as turns_mod  # noqa: PLC0415
+
+    with pytest.raises(Exception):
+        turns_mod.SdkTurns(backend=Backend(), work_dir=".").outline("a topic", "")
+    assert "the outline is destroyed and you start over" in sent["prompt"]
+    assert "One claim belongs to one section" in sent["prompt"]

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pathlib
+
 import roles
 
 
@@ -137,6 +139,46 @@ def test_recall_finds_prior_research(fake_langchain, tmp_path):
     (tmp_path / "area.md").write_text("# Loop Engineering\nexit conditions matter\n")
     out = roles.second_brain_tool(tmp_path)("exit conditions")
     assert "area.md" in out
+
+
+def test_recall_answers_a_question_not_just_a_keyword(fake_langchain, tmp_path):
+    """The planner asks questions. A literal phrase match never matches one.
+
+    `recall("agent loop exit conditions")` returned nothing against a brain
+    where `corpus.search` on the same root returned 40 hits. The planner then
+    reported no brain and planned around a corpus the run had already packed,
+    and the outline judge rejected the contradiction three times (#322).
+    """
+    (tmp_path / "area.md").write_text(
+        "# Loop Engineering\nA loop checks its exit conditions in order.\n"
+    )
+    out = roles.second_brain_tool(tmp_path)("what are the loop exit conditions")
+    assert "area.md" in out, out
+    assert not out.startswith("no prior research")
+
+
+def test_recall_prefers_the_curated_claims(fake_langchain, tmp_path):
+    """A claim carries a key, a quote, and a source. A grep line carries none."""
+    import corpus  # noqa: PLC0415
+
+    brain = pathlib.Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "brain"
+    query = "exit conditions"
+    assert corpus.search(query, [brain], limit=12), "the fixture brain must have claims"
+    out = roles.second_brain_tool(brain)(query)
+    assert ":claim." in out, out
+    assert "[source_supported]" in out, "a claim carries its epistemic state"
+
+
+def test_recall_still_says_so_when_nothing_matches(fake_langchain, tmp_path):
+    (tmp_path / "area.md").write_text("# Unrelated\nnothing to see\n")
+    out = roles.second_brain_tool(tmp_path)("quantum tunnelling in badgers")
+    assert out.startswith("no prior research mentions")
+
+
+def test_recall_does_not_match_on_one_common_word(fake_langchain, tmp_path):
+    """Every term must appear. An any-term match returns the word "the"."""
+    (tmp_path / "area.md").write_text("# Notes\nthe loop is fine\n")
+    assert roles.second_brain_tool(tmp_path)("the badger loop").startswith("no prior research")
 
 
 def test_permissions_deny_a_reader_everything():

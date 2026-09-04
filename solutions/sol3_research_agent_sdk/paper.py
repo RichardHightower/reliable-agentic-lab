@@ -73,7 +73,14 @@ MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
 MAX_CLAIMS = 40
 MAX_WORDS = 2000
-OUTLINE_JUDGE_ROUNDS = 3
+# Every other budget in this port is a flag. This one was a bare constant, and
+# the Deep Agents port has `--attempts` for the same job. Three rounds is not
+# enough for a real corpus: a live run fixed `accuracy_recency` and
+# `limitations` in round two and ran out of rounds with five rows left, all of
+# them carried over rather than newly invented, which is a loop converging too
+# slowly rather than a loop stuck. Read at import so a test can still patch the
+# module attribute.
+OUTLINE_JUDGE_ROUNDS = int(os.environ.get("SOL3_OUTLINE_JUDGE_ROUNDS", "3"))
 
 # A ceiling on verification, for the same reason. Four good questions produced
 # a hundred and eleven claims on one live run, and every claim is a turn. The
@@ -435,7 +442,8 @@ def _judge_loop(run: Run, drafted: dict) -> dict:
         run.write_json("outline-verdict.json", verdict)
         return current
 
-    for round_no in range(1, OUTLINE_JUDGE_ROUNDS + 1):
+    rounds = OUTLINE_JUDGE_ROUNDS
+    for round_no in range(1, rounds + 1):
         spent = run.exhausted()
         if spent and round_no > 1:
             raise RunFailed(f"outline judge: {spent}")
@@ -455,7 +463,7 @@ def _judge_loop(run: Run, drafted: dict) -> dict:
         decision = gates.decide(
             passed=False,
             iteration=round_no,
-            budget=OUTLINE_JUDGE_ROUNDS,
+            budget=rounds,
             signature=signature,
             previous_signature=previous,
             usd_left=0.0 if run.exhausted() else 1.0,
@@ -473,9 +481,118 @@ def _judge_loop(run: Run, drafted: dict) -> dict:
         note = gates.retry_instruction(decision, issues or list(signature))
         if changes:
             note += "\nApply these actionable changes:\n" + "\n".join(f"- {c}" for c in changes)
-        current = _draft_valid_outline_with_note(run, note)
+        current = _edit_outline(run, current, note, verdict)
         run.write_json("outline.json", current)
-    raise RunFailed("outline judge: three rounds exhausted")
+    raise RunFailed(f"outline judge: {rounds} rounds exhausted")
+
+
+def _edit_outline(run: Run, current: dict, note: str, verdict: dict) -> dict:
+    """Send a failed outline to the editor, not back to the outliner.
+
+    The outliner plans. It holds no write tool and no diff path, so asking it
+    to fix three fields meant re-emitting five sections from scratch. Five live
+    runs did that and hovered at two or three objections without reaching zero,
+    trading each named defect for a new one somewhere else.
+
+    The editor changes only what the judge named. It is Opus at high effort,
+    matching the judge, because a Sonnet outliner could not keep pace with an
+    Opus grader tracing individual corpus keys.
+
+    A port with no editor keeps the old behavior, so the offline twin and any
+    caller with a smaller `Turns` still runs.
+    """
+    faulted = {
+        item.get("section")
+        for item in (verdict.get("blocking_issues") or [])
+        if isinstance(item, dict) and item.get("section")
+    }
+    known = {section.get("id") for section in current.get("sections") or []}
+    targets = faulted & known
+
+    editor = getattr(run.turns, "edit_outline", None)
+    if editor is None:
+        # No editor. Fall back to the outliner, and keep #329's splice so a
+        # re-emit cannot disturb a section the judge did not fault.
+        revised = _draft_valid_outline_with_note(run, note + _revision_note(current, targets))
+        merged = _merge_revision(current, revised, targets)
+        errors = outlines.validate(
+            merged, word_target_total=run.word_target_total, corpus_keys=_pack_keys(run)
+        )
+        return revised if errors else merged
+
+    def once(ignored: str) -> dict:
+        edited = editor(current, note)
+        if not isinstance(edited, dict):
+            raise TurnFailed("the outline editor returned no outline object")
+        errors = outlines.validate(
+            edited, word_target_total=run.word_target_total, corpus_keys=_pack_keys(run)
+        )
+        if errors:
+            raise TurnFailed(outlines.retry_note(errors))
+        return edited
+
+    try:
+        return attempt(run, kind="outline-edit", do=once)
+    except UnitFailed:
+        # The editor could not produce a valid outline. The outline in hand
+        # already validates, so hand it back rather than lose the round.
+        run.log("    outline editor failed; keeping the judged outline")
+        return current
+
+
+def _merge_revision(previous: dict, revised: dict, targets: set) -> dict:
+    """Keep every section the judge did not fault.
+
+    One model call rewrote the whole outline each round, so a repair in one
+    section disturbed another. A live run sat at two failing rows for three
+    rounds with different rows each time: round 5 limitations and word_budget,
+    round 6 limitations and redundancy, round 7 completeness and evidence_fit.
+    Each revision fixed what was named and broke something else (#329).
+
+    The prompt asks the outliner to leave the rest alone. This enforces it,
+    because a prompt is not a gate.
+    """
+    if not targets:
+        return revised
+    by_id = {section.get("id"): section for section in revised.get("sections") or []}
+    merged = [
+        by_id[section.get("id")]
+        if section.get("id") in targets and section.get("id") in by_id
+        else section
+        for section in previous.get("sections") or []
+    ]
+    # A judge may ask for a section that did not exist. Keep new ones.
+    seen = {section.get("id") for section in merged}
+    merged.extend(section for sid, section in by_id.items() if sid not in seen)
+    out = dict(revised)
+    out["sections"] = merged
+    return out
+
+
+def _revision_note(current: dict, targets: set | None = None) -> str:
+    """Hand the outliner the outline it is being asked to fix.
+
+    Without it the round is a fresh draft, not a revision. The outliner was
+    given the topic, the corpus pack, the budget, and a list of complaints
+    about a document it could not see, so it avoided the named problems by
+    writing something different, and the new draft had new problems. Two live
+    runs failed that way, with the judge's rows changing between rounds rather
+    than shrinking (#327).
+
+    An instruction like "tradeoffs.claims_to_support[0]: split the claim in
+    two" is unusable unless the outliner is holding that array.
+    """
+    scope = (
+        f" Change only these sections: {', '.join(sorted(targets))}. Return every "
+        "other section exactly as it is below."
+        if targets
+        else ""
+    )
+    return (
+        "\n\nThis is the outline you are revising. Keep every part the judge did "
+        "not fault, change only what the notes above name, and return the whole "
+        f"outline.{scope}\n" + json.dumps(current, indent=2)
+    )
 
 
 def _draft_valid_outline_with_note(run: Run, note: str) -> dict:

@@ -370,7 +370,17 @@ def run_section(run, section: dict) -> dict:
     try:
         import paper as paper_mod  # noqa: PLC0415
 
-        approved = paper_mod.approved_outline(run)
+        full = paper_mod.approved_outline(run)
+        # The paper's header, and this section only. Handing the writer every
+        # section's full spec overflowed the 8000 character slot by 24489
+        # characters, so `_cut` dropped 75% of the outline mid-structure and
+        # the section stage escalated three attempts running (#330). A writer
+        # working on one section does not need the other four specs; it gets
+        # their prose through the `previous` slot.
+        approved = {
+            **{key: value for key, value in full.items() if key != "sections"},
+            "sections": [section],
+        }
     except Exception:
         pass
 

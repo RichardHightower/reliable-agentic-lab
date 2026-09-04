@@ -654,12 +654,33 @@ def define_acronym_once(sections: dict[str, str], phrase: str, acronym: str) -> 
 
 
 def review_gate(verdict: dict) -> None:
+    """Fail the draft on the reviewer's rows, and never mislabel one.
+
+    This string becomes the writer's revision instruction, so a wrong pairing
+    is not cosmetic: the writer is told a row failed for a reason belonging to
+    another row, the real defect is described to nobody, and the row fails
+    again. A live run stalled that way with `scope_honest` labelled
+    "evidence_matches is now fixed" (#326).
+
+    The reviewer skill asks for one sentence per row, so pair them when the
+    counts agree. When they do not, report both lists plainly rather than
+    guessing which sentence belongs to which row.
+    """
     rows = verdict.get("failed_rows") or []
-    if rows:
-        notes = verdict.get("notes") or []
-        pairs = zip(rows, notes, strict=False)
-        detail = " ".join(f"{row}: {note}" for row, note in pairs) or ", ".join(rows)
-        raise GateFailed(f"the reviewer failed these rows. {detail}", tuple(sorted(rows)))
+    if not rows:
+        return
+    notes = [str(note) for note in (verdict.get("notes") or []) if str(note).strip()]
+    if len(notes) == len(rows):
+        detail = " ".join(f"{row}: {note}" for row, note in zip(rows, notes, strict=True))
+    else:
+        listed = ", ".join(rows)
+        detail = f"failed rows: {listed}."
+        if notes:
+            detail += (
+                f" The reviewer returned {len(notes)} notes for {len(rows)} rows, so"
+                " they are not matched up. All of them: " + " ".join(notes)
+            )
+    raise GateFailed(f"the reviewer failed these rows. {detail}", tuple(sorted(rows)))
 
 
 # -- 8. assemble ----------------------------------------------------------

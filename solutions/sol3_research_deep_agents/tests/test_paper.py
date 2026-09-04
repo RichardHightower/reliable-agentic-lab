@@ -735,3 +735,88 @@ def test_a_call_with_no_reported_cost_logs_null_not_zero(run_dir, stub_renderer)
     run._record_turn("writer", paper.Reply(text="x", usd=0.0, cost_reported=True), 1.5, 400)
     row = json.loads((Path(run_dir) / ".harness" / "turns.jsonl").read_text().splitlines()[-1])
     assert row["usd"] == 0.0
+
+
+class Recorder(paper.FixtureRunner):
+    """Recorded replies, plus the prompt each role was actually handed."""
+
+    def __init__(self, path):
+        super().__init__(path)
+        self.prompts: list[tuple[str, str]] = []
+
+    def ask(self, role, prompt):
+        self.prompts.append((role, prompt))
+        return super().ask(role, prompt)
+
+
+def test_the_outline_judge_is_handed_parseable_json(run_dir, stub_renderer):
+    """The stage must use `for_judge`. Testing `for_judge` alone proved nothing.
+
+    `paper.py` sliced the outline with `json.dumps(...)[:8000]`, which cut a
+    9,114 character outline mid-key. The judge got malformed JSON and 6 of 7
+    sections, reported it as truncated, and failed two live runs (#323). A test
+    on the helper does not catch a stage that stopped calling the helper.
+    """
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    runner = Recorder(FIXTURES / "replies.json")
+    run = build_run(run_dir, runner=runner)
+    run.run()
+
+    judged = [prompt for role, prompt in runner.prompts if role == "outline_judge"]
+    assert judged, "the outline judge was never asked"
+    for prompt in judged:
+        body = prompt[prompt.index("{"):]
+        parsed = json.loads(body)
+        assert parsed["sections"], "the judge must see at least one section"
+
+    assert "withheld" not in judged[0], "nothing was cut, so nothing to declare"
+
+
+def test_a_cut_outline_reaches_the_judge_whole_and_labelled(run_dir, stub_renderer, monkeypatch):
+    """Proof the stage calls `for_judge` rather than slicing the JSON itself.
+
+    Squeeze the ceiling until the outline cannot fit. The prompt must still
+    parse, and it must say how many sections were withheld. A raw slice would
+    fail both.
+    """
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    monkeypatch.setattr(paper.outlines, "JUDGE_PROMPT_CHARS", 600)
+    runner = Recorder(FIXTURES / "replies.json")
+    build_run(run_dir, runner=runner).run()
+
+    prompt = next(p for role, p in runner.prompts if role == "outline_judge")
+    body = json.loads(prompt[prompt.index("{"):])
+    assert body["sections"], "at least one section always survives"
+    assert "are withheld for length" in prompt
+    assert "do not fail completeness for the withheld" in prompt
+
+
+def test_a_gate_failure_during_revise_escalates_instead_of_crashing(run_dir, stub_renderer):
+    """`stage_revise` runs from inside the handler that is already handling a
+    GateFailed. An unguarded raise there escapes both and kills the run with a
+    traceback: no attempt accounting, no escalation, no reason to read.
+
+    One model turn returning prose instead of JSON ended a live run that had
+    cleared every stage up to review (#325).
+    """
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    run = build_run(run_dir, runner=Recorder(FIXTURES / "replies.json"))
+
+    def always_fails(extra, targets=None):
+        raise stages.GateFailed("the reply held no JSON object.", ("not_json",))
+
+    def review_never_passes(extra):
+        raise stages.GateFailed("the reviewer failed these rows. no_filler", ("no_filler",))
+
+    run.stage_revise = always_fails
+    run.stage_review = review_never_passes
+
+    code = run.run()
+
+    assert code == 2, "a run that cannot revise must escalate, not raise"
+    failed = [name for name, entry in run.state.stages.items() if entry.status == pstate.FAILED]
+    assert "review" in failed, failed
+    assert (Path(run_dir) / pstate.STATE_FILE).exists(), "state must survive for --resume"

@@ -222,6 +222,46 @@ def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys
     return errors
 
 
+JUDGE_PROMPT_CHARS = 24000
+
+
+def for_judge(drafted: dict, limit: int | None = None) -> str:
+    """The outline as the judge should see it: parseable, and honest about cuts.
+
+    A raw `json.dumps(...)[:8000]` cut a 9,114 character outline mid-key. The
+    judge received malformed JSON ending in `"depends_on": [], "c`, saw 6 of 7
+    sections, and reported the outline as truncated and incomplete. It was
+    right, and the harness had done it. Two live runs escalated that way (#323).
+
+    Drop whole sections from the end when a ceiling is unavoidable, and say how
+    many went, so the judge knows what it did not see instead of inferring a
+    gap that is not in the document.
+    """
+    # Read the module constant here, not as a default argument. A default is
+    # bound once at definition, so a test that lowers the ceiling would change
+    # nothing and pass for the wrong reason.
+    limit = JUDGE_PROMPT_CHARS if limit is None else limit
+    body = json.dumps(drafted, indent=2)
+    if len(body) <= limit:
+        return body
+
+    sections = list(drafted.get("sections") or [])
+    kept = list(sections)
+    while len(kept) > 1:
+        kept.pop()
+        trial = dict(drafted, sections=kept)
+        body = json.dumps(trial, indent=2)
+        if len(body) <= limit:
+            break
+    withheld = len(sections) - len(kept)
+    return (
+        f"This outline has {len(sections)} sections. The last {withheld} are "
+        f"withheld for length and are NOT missing from the paper. Grade the "
+        f"{len(kept)} below, and do not fail completeness for the withheld "
+        f"sections.\n{body}"
+    )
+
+
 def retry_note(errors: list[str]) -> str:
     return "The outline failed validation. Fix every item:\n" + "\n".join(
         f"- {item}" for item in errors
