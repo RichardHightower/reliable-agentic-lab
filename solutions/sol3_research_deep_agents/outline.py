@@ -225,7 +225,7 @@ def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys
 JUDGE_PROMPT_CHARS = 24000
 
 
-def for_judge(drafted: dict, limit: int = JUDGE_PROMPT_CHARS) -> str:
+def for_judge(drafted: dict, limit: int | None = None) -> str:
     """The outline as the judge should see it: parseable, and honest about cuts.
 
     A raw `json.dumps(...)[:8000]` cut a 9,114 character outline mid-key. The
@@ -237,6 +237,10 @@ def for_judge(drafted: dict, limit: int = JUDGE_PROMPT_CHARS) -> str:
     many went, so the judge knows what it did not see instead of inferring a
     gap that is not in the document.
     """
+    # Read the module constant here, not as a default argument. A default is
+    # bound once at definition, so a test that lowers the ceiling would change
+    # nothing and pass for the wrong reason.
+    limit = JUDGE_PROMPT_CHARS if limit is None else limit
     body = json.dumps(drafted, indent=2)
     if len(body) <= limit:
         return body
