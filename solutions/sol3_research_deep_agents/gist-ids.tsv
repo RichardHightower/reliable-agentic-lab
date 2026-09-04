@@ -2,3 +2,4 @@
 # publish.py appends a row on the first push. Commit this file so the
 # URL stays stable forever.
 exit-conditions-in-production-agent-loops	932f35e14312b540da8a49c376c2dc1a
+loop-engineering-best-practices	8d4827b3253e07fd54c5a19fa159cc73
