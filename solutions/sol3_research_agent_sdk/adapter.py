@@ -151,10 +151,15 @@ async def _heartbeat(progress: dict, role: str) -> None:
     """
     while True:
         await asyncio.sleep(HEARTBEAT_SECONDS)
+        # `?`, not `0.00`, before the first cost arrives. Everywhere else in
+        # this port an unreported cost is null rather than zero, and a
+        # heartbeat that reads `usd=0.00` for ten minutes says "free so far"
+        # when it means "nothing has told us yet".
+        usd = progress["usd"]
         print(
             f"[sol3] t+{time.monotonic() - progress['started']:.0f}s role={role} "
             f"events={progress['events']} last={progress['last']} "
-            f"usd={progress['usd']:.2f}",
+            f"usd={'?' if usd is None else format(usd, '.2f')}",
             file=sys.stderr,
             flush=True,
         )
@@ -194,7 +199,7 @@ class AgentSdkBackend(Backend):
             # `role` rides in on `extra` and is filtered out of the options
             # overlay below, because it is not a field of the SDK options.
             role = str(extra.get("role") or "?")
-            progress = {"started": time.monotonic(), "events": 0, "last": "-", "usd": 0.0}
+            progress = {"started": time.monotonic(), "events": 0, "last": "-", "usd": None}
 
             async def collect() -> tuple[str, float, bool, dict | None, bool, str | None, int, int]:
                 result_text = ""
