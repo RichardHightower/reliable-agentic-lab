@@ -163,3 +163,27 @@ def test_the_docs_name_only_tasks_that_exist():
         prose = (FOLDER / name).read_text(encoding="utf-8")
         for named in re.findall(r"task ([a-z][a-z0-9-]*)", prose):
             assert named in declared, f"{name} names `task {named}`, the Taskfile does not"
+
+
+def test_the_word_floor_in_the_spec_matches_the_code():
+    """One floor, not three. The wiki said 2000, 4000, and 6000 (#307).
+
+    `loop.py` profiles set `word_target_total`, which is what the outline
+    commissions. `checks.MIN_WORDS` is what the length row enforces, and it is
+    the same number for every profile. Nothing tied the sentence to the
+    constant, so the two were free to drift.
+    """
+    import checks  # noqa: PLC0415
+
+    spec = (FOLDER / "SPEC.md").read_text(encoding="utf-8")
+    assert f"Length is hard at {checks.MIN_WORDS} words" in spec
+    assert "never the check floor" in spec
+
+
+def test_the_spec_names_every_profile_the_code_has():
+    import loop  # noqa: PLC0415
+
+    spec = (FOLDER / "SPEC.md").read_text(encoding="utf-8")
+    for name, profile in loop.PROFILES.items():
+        assert f"`--profile {name}`" in spec, f"SPEC.md does not name --profile {name}"
+        assert str(profile["word_target_total"]) in spec, name
