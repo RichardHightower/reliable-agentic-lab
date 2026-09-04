@@ -213,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--topic is required unless you pass --table-only")
 
     import os  # noqa: PLC0415
+    import sys  # noqa: PLC0415
     import shutil  # noqa: PLC0415  (nothing above --table-only needs these)
 
     import corpus as corpus_mod  # noqa: PLC0415
@@ -286,6 +287,14 @@ def main(argv: list[str] | None = None) -> int:
         corpus_subjects=subjects,
         ingest_brain=args.ingest_brain,
     )
+
+    # Line buffered even through a pipe, so an operator watching a live run
+    # sees each phase as it starts.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True)
+        except (AttributeError, ValueError):
+            pass
 
     print()
     print(f"topic:   {args.topic}")

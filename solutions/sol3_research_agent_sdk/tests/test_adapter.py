@@ -132,3 +132,74 @@ def test_a_hung_query_times_out(fake_sdk, work, monkeypatch):
     assert result.stop_reason == "query timeout"
     assert "timed out" in result.output
     assert "never reached" not in result.output
+
+
+def test_the_timeout_names_the_role_the_elapsed_time_and_the_event_count(
+    fake_sdk, work, monkeypatch
+):
+    """A timeout that says only "timed out" leaves nothing to diagnose (#305)."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result="partial")
+        await adapter.asyncio.sleep(1)
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 0.05)
+    result = adapter.AgentSdkBackend(object()).run(
+        root=work, prompt="a long prompt", allow=[], role="outliner"
+    )
+    assert result.stop_reason == "query timeout"
+    assert "role=outliner" in result.output
+    assert "events=1" in result.output
+    assert f"prompt={len('a long prompt')} chars" in result.output
+    assert result.events == 1
+    assert result.elapsed_s > 0
+    assert result.prompt_chars == len("a long prompt")
+    # The diagnostics carry the shape of the prompt, never the prompt itself.
+    assert "a long prompt" not in result.output
+
+
+def test_a_slow_query_writes_a_heartbeat(fake_sdk, work, monkeypatch, capsys):
+    """A query that stalls emits no events, which is when a heartbeat matters."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        await adapter.asyncio.sleep(0.12)
+        yield FakeResultMessage(result="done", total_cost_usd=0.5)
+
+    module.query = query
+    monkeypatch.setattr(adapter, "HEARTBEAT_SECONDS", 0.02)
+    result = adapter.AgentSdkBackend(object()).run(
+        root=work, prompt="p", allow=[], role="outliner"
+    )
+    assert result.output == "done"
+    assert "[sol3] t+" in capsys.readouterr().err
+
+
+def test_the_query_timeout_reads_the_environment(monkeypatch):
+    """Without an override the next live run is another ten minutes of guessing."""
+    import importlib  # noqa: PLC0415
+
+    monkeypatch.setenv("SOL3_QUERY_TIMEOUT_SECONDS", "1234")
+    reloaded = importlib.reload(adapter)
+    try:
+        assert reloaded.QUERY_TIMEOUT_SECONDS == 1234
+    finally:
+        monkeypatch.delenv("SOL3_QUERY_TIMEOUT_SECONDS")
+        importlib.reload(adapter)
+
+
+def test_the_default_timeout_clears_one_real_outline_query():
+    """180 seconds killed every live run before the first phase finished (#301)."""
+    assert adapter.QUERY_TIMEOUT_SECONDS >= 900
+
+
+def test_a_missing_cost_field_is_not_a_free_turn(fake_sdk, work):
+    fake_sdk([FakeResultMessage(result="x")])
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    assert result.cost_reported is False
+    fake_sdk([FakeResultMessage(result="x", total_cost_usd=0.0)])
+    reported = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    assert reported.cost_reported is True
+    assert reported.usd == 0.0
