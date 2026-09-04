@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import pathlib
 from pathlib import Path
 
 import outline as outlines
 import paper
 import pytest
+import stages
 
 
 def sample_section(sid="s1", heading="The problem", **over):
@@ -282,3 +284,144 @@ def test_a_single_section_is_never_dropped():
     shown = outlines.for_judge(big_outline(), limit=10)
     body = json.loads(shown[shown.index("{"):])
     assert len(body["sections"]) == 1
+
+
+# -- the outline editor -----------------------------------------------------
+#
+# The planner plans. Sending a failed outline back to it produces a different
+# plan with different defects, which is how a loop hovers instead of
+# converging. The editor changes only what the judge named. Backfilled from the
+# Agent SDK port, where it turned a hovering loop into a falling one.
+
+
+class EditorRunner(paper.FixtureRunner):
+    """Records what the editor was asked, and answers with a narrow repair."""
+
+    def __init__(self, path, *, reply=None, boom=False):
+        super().__init__(path)
+        self.asked: list[tuple[str, str]] = []
+        self.reply = reply
+        self.boom = boom
+
+    def ask(self, role, prompt):
+        self.asked.append((role, prompt))
+        if role != "outline_editor":
+            return super().ask(role, prompt)
+        if self.boom:
+            raise RuntimeError("the editor is unavailable")
+        return paper.Reply(text="", data=self.reply, usd=0.25)
+
+
+def judged_outline(run_dir):
+    """One validated outline on disk, as `_approve_outline` leaves it."""
+    plan = json.loads((pathlib.Path(run_dir) / "plan.json").read_text())
+    return outlines.outline_from_plan(plan)
+
+
+def failing_verdict():
+    return {
+        "passed": False,
+        "summary": "the outline restates one claim twice",
+        "blocking_issues": ["limitations/redundancy: the claim appears in two sections"],
+        "actionable_changes": ["limitations.claims_to_support[1]: delete the duplicate"],
+    }
+
+
+def test_the_editor_gets_the_outline_and_the_objections(run_dir, stub_renderer):
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    runner = EditorRunner(FIXTURES / "replies.json")
+    run = build_run(run_dir, runner=runner)
+    run.run()
+    # `outline.json` holds the writer's schema by the end of a run. The editor
+    # is handed the outliner's schema, which is what `outline_from_plan` makes.
+    drafted = judged_outline(run_dir)
+
+    runner.reply = drafted
+    edited, usd = run._edit_outline(drafted, failing_verdict())
+
+    role, prompt = runner.asked[-1]
+    assert role == "outline_editor"
+    assert "the claim appears in two sections" in prompt, "the objection must reach it"
+    assert "delete the duplicate" in prompt, "the actionable change must too"
+    assert "Do not rewrite, reorder, or renumber" in prompt
+    assert usd == 0.25
+    assert edited == drafted
+
+
+def test_an_invalid_edit_is_refused_and_the_outline_survives(run_dir, stub_renderer):
+    """The outline in hand already validates. Losing it to a bad edit is worse."""
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    runner = EditorRunner(FIXTURES / "replies.json", reply={"sections": "not an array"})
+    run = build_run(run_dir, runner=runner)
+    run.run()
+    drafted = judged_outline(run_dir)
+
+    edited, usd = run._edit_outline(drafted, failing_verdict())
+    assert edited is None
+    assert usd == 0.25, "the call still cost money and must be counted"
+
+
+def test_an_editor_that_raises_does_not_lose_the_round(run_dir, stub_renderer):
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    runner = EditorRunner(FIXTURES / "replies.json", boom=True)
+    run = build_run(run_dir, runner=runner)
+    run.run()
+    drafted = judged_outline(run_dir)
+
+    edited, usd = run._edit_outline(drafted, failing_verdict())
+    assert edited is None
+    assert usd == 0.0
+
+
+def test_the_editor_holds_no_write_path():
+    """Same separation as the judge. It returns JSON; Python writes the file."""
+    import roleplan  # noqa: PLC0415
+
+    editor = roleplan.plan(None, "paper")["outline_editor"]
+    assert not editor.can_write
+    assert "Write" not in editor.tools and "Edit" not in editor.tools
+
+
+def test_a_rejected_outline_is_edited_before_the_next_attempt(run_dir, stub_renderer):
+    """Proof `_approve_outline` calls the editor. Calling it directly proved nothing.
+
+    The offline judge always passes, so a fixture run never reaches this path.
+    Removing the call from `_approve_outline` left every other editor test
+    green, which is how a stage that stopped calling its helper hides.
+
+    The editor here reads the outline out of its own prompt, which also proves
+    the prompt carries the document rather than only the complaints.
+    """
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    class RejectingRunner(paper.FixtureRunner):
+        def __init__(self, path):
+            super().__init__(path)
+            self.roles: list[str] = []
+
+        def ask(self, role, prompt):
+            self.roles.append(role)
+            if role == "outline_judge":
+                return paper.Reply(text="", data=failing_verdict(), usd=0.1)
+            if role == "outline_editor":
+                body = prompt[prompt.index("The outline:") + len("The outline:") :]
+                drafted = json.loads(body[body.index("{") : body.rindex("}") + 1])
+                drafted["sections"][0]["objective"] = "Repaired by the editor."
+                return paper.Reply(text="", data=drafted, usd=0.25)
+            return super().ask(role, prompt)
+
+    runner = RejectingRunner(FIXTURES / "replies.json")
+    run = build_run(run_dir, runner=runner)
+    run.stage_corpus("")
+
+    with pytest.raises(stages.GateFailed):
+        run.stage_plan("")
+
+    assert "outline_editor" in runner.roles, "the judge failed and nobody edited"
+    written = json.loads((pathlib.Path(run_dir) / "outline.json").read_text())
+    assert written["sections"][0]["objective"] == "Repaired by the editor.", (
+        "the repair must be on disk for the next attempt to judge"
+    )

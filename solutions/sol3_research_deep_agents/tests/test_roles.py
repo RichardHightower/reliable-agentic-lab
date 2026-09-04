@@ -266,7 +266,14 @@ def test_build_agent_binds_the_bounded_model_to_writer_only(
     specs = by_name(fake_deepagents["subagents"])
     assert fake_deepagents["model"] is graph_model
     assert specs["writer"]["model"] is writer_model
-    assert all("model" not in specs[name] for name in specs if name != "writer")
+    # The editor also gets its own model, and a stronger one. It repairs what
+    # the judge faulted, so it has to keep pace with the judge.
+    assert specs["outline-editor"]["model"] is graph_model
+    assert all(
+        "model" not in specs[name]
+        for name in specs
+        if name not in ("writer", "outline-editor")
+    )
 
 
 def test_build_paper_agents_compiles_one_direct_graph_per_role(fake_langchain, fake_deepagents, tmp_path):
@@ -274,6 +281,7 @@ def test_build_paper_agents_compiles_one_direct_graph_per_role(fake_langchain, f
 
     assert set(agents) == {
         "planner",
+        "outline_editor",
         "outline_judge",
         "researcher",
         "verifier",

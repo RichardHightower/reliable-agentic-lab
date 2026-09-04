@@ -32,6 +32,13 @@ HERE = Path(__file__).resolve().parent
 SKILLS_DIR = HERE / "skills"
 MEMORY_FILE = HERE / "AGENTS.md"
 DEFAULT_MODEL = "anthropic:claude-sonnet-5"
+
+# The outline judge grades what the planner produced, and the editor repairs it.
+# Give the editor the stronger model: a Sonnet planner re-emitting every section
+# could not keep pace with a judge tracing individual corpus keys, and five live
+# runs in the sibling port hovered without converging until an Opus editor made
+# only the named edits.
+EDITOR_MODEL = "anthropic:claude-opus-5"
 # An unbounded provider response can hold a resumed run hostage. The graph
 # needs a sensible ceiling for plans and structured research, while a prose
 # section has a tighter contract of its own.
@@ -573,6 +580,8 @@ def build_agent(  # noqa: PLR0913  (one keyword per wiring point)
         item["permissions"] = _as_permissions(spec["permissions"])
         if spec["name"] == "writer":
             item["model"] = writer_model
+        elif spec["name"] == "outline-editor":
+            item["model"] = bounded_model(EDITOR_MODEL, max_tokens=GRAPH_MAX_TOKENS)
         subagents.append(item)
 
     memory = ["/memory/AGENTS.md"] if MEMORY_FILE.exists() else None
