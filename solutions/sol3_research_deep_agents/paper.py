@@ -726,7 +726,8 @@ class Paper:
         reply = self._ask(
             "writer",
             f"Title: {self.plan['title']}\nAudience: {self.plan['audience']}\n"
-            f"Sections the plan asked for: {', '.join(self.plan['sections'])}\n"
+            f"Sections the plan asked for: "
+            f"{', '.join(stages.plan_heading(item) for item in self.plan['sections'])}\n"
             f"Figures available: {[f['name'] for f in self.plan['diagrams']]}\n{extra}\n\n"
             "Bind each section to the claims it may use. Claims:\n"
             + "\n".join(usable)
