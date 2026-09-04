@@ -177,6 +177,24 @@ def test_a_slow_query_writes_a_heartbeat(fake_sdk, work, monkeypatch, capsys):
     assert "[sol3] t+" in capsys.readouterr().err
 
 
+def test_the_heartbeat_says_unknown_cost_not_zero(fake_sdk, work, monkeypatch, capsys):
+    """`usd=0.00` for ten minutes reads as free. It means nothing told us yet."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        await adapter.asyncio.sleep(0.08)
+        yield FakeResultMessage(result="done", total_cost_usd=0.5)
+        await adapter.asyncio.sleep(0.08)
+
+    module.query = query
+    monkeypatch.setattr(adapter, "HEARTBEAT_SECONDS", 0.02)
+    adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[], role="outliner")
+    beats = [line for line in capsys.readouterr().err.splitlines() if "[sol3] t+" in line]
+    assert any("usd=?" in line for line in beats), beats
+    assert any("usd=0.50" in line for line in beats), beats
+    assert not any("usd=0.00" in line for line in beats), beats
+
+
 def test_the_query_timeout_reads_the_environment(monkeypatch):
     """Without an override the next live run is another ten minutes of guessing."""
     import importlib  # noqa: PLC0415
