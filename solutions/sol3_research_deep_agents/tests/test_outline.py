@@ -208,3 +208,77 @@ def test_offline_run_stamps_the_outline(finished_paper):
     drafted = outlines.load_approved(stamped)
     assert drafted["sections"]
     assert stamped["approved_by"] == "judge"
+
+
+# -- what the judge is shown -----------------------------------------------
+#
+# `json.dumps(drafted, indent=2)[:8000]` cut a 9,114 character outline mid-key.
+# The judge received malformed JSON ending in `"depends_on": [], "c`, saw 6 of
+# 7 sections, and reported the outline as truncated and incomplete. It was
+# right, and the harness had done it. Two live runs escalated that way (#323).
+
+
+def big_outline(count=12):
+    sections = []
+    for index in range(count):
+        section = planned_section(
+            f"Section {index}",
+            f"Show what changes once a reader understands part {index}.",
+            f"what does part {index} do",
+            f"what breaks in part {index}",
+        )
+        section["id"] = f"s{index}"
+        section["word_target"] = 200
+        section["claims_to_support"] = ["A claim." + "x" * 400]
+        section["required_evidence"] = ["a primary specification"]
+        section["figures"] = []
+        section["depends_on"] = []
+        sections.append(section)
+    return {
+        "title": "On a topic",
+        "audience": "engineers",
+        "thesis": "A thesis.",
+        "word_target_total": 200 * count,
+        "sections": sections,
+    }
+
+
+def test_the_judge_sees_the_whole_outline_when_it_fits():
+    drafted = sample_outline()
+    shown = outlines.for_judge(drafted)
+    assert json.loads(shown) == drafted
+
+
+def test_the_judge_never_sees_malformed_json():
+    """The old slice ended mid-key. Nothing could parse what the judge got."""
+    drafted = big_outline()
+    shown = outlines.for_judge(drafted, limit=2000)
+    body = shown[shown.index("{"):]
+    assert json.loads(body), "the judge must be able to parse what it grades"
+
+
+def test_an_oversized_outline_drops_whole_sections_and_says_how_many():
+    drafted = big_outline()
+    shown = outlines.for_judge(drafted, limit=2000)
+    body = json.loads(shown[shown.index("{"):])
+    assert len(body["sections"]) < 12
+    assert len(body["sections"]) >= 1
+    withheld = 12 - len(body["sections"])
+    assert f"The last {withheld} are withheld" in shown
+    assert "do not fail completeness for the withheld" in shown
+
+
+def test_the_dropped_sections_come_off_the_end():
+    """A judge grades flow. Dropping from the middle would break the order."""
+    drafted = big_outline()
+    shown = outlines.for_judge(drafted, limit=2500)
+    body = json.loads(shown[shown.index("{"):])
+    headings = [section["heading"] for section in body["sections"]]
+    assert headings == [f"Section {i}" for i in range(len(headings))]
+
+
+def test_a_single_section_is_never_dropped():
+    """One section is the floor. An empty outline tells the judge nothing."""
+    shown = outlines.for_judge(big_outline(), limit=10)
+    body = json.loads(shown[shown.index("{"):])
+    assert len(body["sections"]) == 1

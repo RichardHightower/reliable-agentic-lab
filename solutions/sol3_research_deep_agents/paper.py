@@ -670,7 +670,7 @@ class Paper:
                 "outline_judge",
                 "Grade this outline against logical flow, completeness, titles, "
                 "and corpus_fit. Do not re-litigate Python's validator.\n"
-                + json.dumps(drafted, indent=2)[:8000],
+                + outlines.for_judge(drafted),
             )
             usd = reply.usd
             verdict = self._json_reply("outline_judge", reply)
