@@ -53,6 +53,7 @@ STAGE_ORDER = (
     "verify",
     "outline",
     "diagram",
+    "charts",
     "write",
     "review",
     "assemble",
@@ -654,6 +655,7 @@ def assemble(
     written: dict[str, str],
     figures: list,
     ledger: evidence.Ledger,
+    charts: list | None = None,
 ) -> str:
     """Stitch the paper. Pure Python, deterministic, no model call.
 
@@ -664,6 +666,7 @@ def assemble(
     _, urls = numbering(ledger)
     by_name = {figure.name: figure for figure in figures}
     used_figures: set[str] = set()
+    charts = [item for item in (charts or []) if item.get("path")]
 
     parts = [f"# {plan.get('title', 'Untitled')}", ""]
     for section in outline.get("sections", []):
@@ -676,6 +679,16 @@ def assemble(
         if body:
             parts.append(body)
             parts.append("")
+        sid = str(section.get("id") or "")
+        for chart in charts:
+            owner = chart.get("section") or ""
+            if owner not in (sid, heading):
+                continue
+            rel = f"charts/{Path(chart['path']).name}"
+            caption = chart.get("caption") or chart.get("name") or rel
+            if rel not in (body or ""):
+                parts.append(f"![{caption}]({rel})")
+                parts.append("")
         for name in section.get("figures", []) or []:
             figure = by_name.get(name)
             if figure is not None and name not in used_figures:
@@ -697,9 +710,9 @@ def assemble(
     return "\n".join(parts).replace("\n\n\n", "\n\n")
 
 
-def assemble_gate(body: str, ledger: evidence.Ledger) -> paper_check.PaperScore:
+def assemble_gate(body: str, ledger: evidence.Ledger, charts: list | None = None) -> paper_check.PaperScore:
     _, urls = numbering(ledger)
-    score = paper_check.check(body, urls, ledger=ledger)
+    score = paper_check.check(body, urls, ledger=ledger, charts=charts)
     if not score.passed:
         raise GateFailed(
             "the paper failed its hard gates.\n" + score.report(),

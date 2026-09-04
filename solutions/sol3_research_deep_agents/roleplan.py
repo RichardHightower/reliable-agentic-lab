@@ -34,9 +34,9 @@ LOOPS = {
     ),
     "research": ("orchestrator", "researcher", "writer", "judge"),
     "fixer": ("orchestrator", "code_implementer", "judge"),
-    # The white paper cast. Seven roles, and each one earns its separation by
-    # holding a different tool list. A role that would hold the same tools as
-    # its neighbour is not a role, it is a prompt, and it belongs in a skill.
+    # The white paper cast. Each one earns its separation by holding a
+    # different tool list. A role that would hold the same tools as its
+    # neighbour is not a role, it is a prompt, and it belongs in a skill.
     "paper": (
         "orchestrator",
         "planner",
@@ -46,6 +46,7 @@ LOOPS = {
         "section_judge",
         "ledger",
         "diagrammer",
+        "chartist",
         "writer",
         "reviewer",
     ),
@@ -69,6 +70,10 @@ PURPOSE = {
     "diagrammer": (
         "Draws mermaid and plantuml sources for the concepts the plan flagged. "
         "Writes diagram sources only, so it cannot put a claim into the prose."
+    ),
+    "chartist": (
+        "Returns a chart spec from data tables. Python renders the pixels. "
+        "Holds no write path."
     ),
     "reviewer": (
         "Grades the draft against the rubric and returns verdicts. "
@@ -96,6 +101,7 @@ READERS = (
     "outline_judge",
     "section_judge",
     "ledger",
+    "chartist",
 )
 
 TOOLS_FOR_READER = {
@@ -106,6 +112,7 @@ TOOLS_FOR_READER = {
     "outline_judge": (*READ_TOOLS,),
     "section_judge": (*READ_TOOLS,),
     "ledger": (*READ_TOOLS,),
+    "chartist": (*READ_TOOLS,),
 }
 
 # Where a role may write when `.loop.yml` says nothing about it. A target repo

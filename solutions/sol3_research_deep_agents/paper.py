@@ -322,6 +322,7 @@ class Paper:
     outline: dict = field(default_factory=dict, init=False)
     written: dict = field(default_factory=dict, init=False)
     figures: list = field(default_factory=list, init=False)
+    charts: list = field(default_factory=list, init=False)
     budget: research.Budget = field(init=False)
     # Diagram names the complexity gate rejected, so a retry redraws only those.
     _redraw: set = field(default_factory=set, init=False)
@@ -831,6 +832,76 @@ class Paper:
             summary=f"{accepted} judged imagen-diagrams PNGs",
         )
 
+    # -- 5b. charts --------------------------------------------------------
+
+    def stage_charts(self, extra: str = "") -> StageResult:
+        """Render `kind: chart` figures. Python plots; the chartist only specs.
+
+        A chart with no rows is skipped with `no data`, not with a phase-skip
+        log. No model touches the pixels.
+        """
+        import charts as charts_mod  # noqa: PLC0415
+
+        if not self.outline:
+            path = self.work_dir / "outline.json"
+            if path.exists():
+                self.outline = json.loads(path.read_text(encoding="utf-8"))
+        if not self.outline:
+            self.state.mark_skipped("charts", "no outline")
+            return StageResult("charts", summary="no outline")
+        planned = outlines.charts(self.outline)
+        dest = self.work_dir / "charts"
+        dest.mkdir(parents=True, exist_ok=True)
+        rendered = []
+        skipped = []
+        usd = 0.0
+        ledger = _paper_ledger(self.work_dir)
+        for figure in planned:
+            name = figure.get("name") or "chart"
+            rows = charts_mod.collect(self.work_dir, figure, ledger)
+            if not rows:
+                self.say(f"    skipping chart {name!r}: no data")
+                skipped.append(name)
+                continue
+            spec = {}
+            try:
+                reply = self._ask(
+                    "chartist",
+                    "Return a chart spec. Do not invent a number. Empty rows "
+                    "means an empty spec.\n"
+                    + json.dumps({"figure": figure, "rows": rows[:40]}, indent=2)
+                    + (f"\n{extra}" if extra else ""),
+                )
+                usd += reply.usd
+                parsed = stages.parse_json(reply.text) if reply.text else {}
+                if isinstance(parsed, dict):
+                    spec = parsed
+            except BudgetSpent:
+                raise
+            except Exception:
+                spec = {}
+            if not spec.get("x"):
+                spec = charts_mod.default_spec(figure, rows)
+            spec.setdefault("section", figure.get("section") or "")
+            spec.setdefault("name", name)
+            record = charts_mod.render(spec, rows, dest)
+            record["section"] = figure.get("section") or spec.get("section") or ""
+            rendered.append(record)
+            self.say(f"    chart {name}: {len(record.get('values') or [])} values")
+        self.charts = rendered
+        (self.work_dir / "charts.json").write_text(
+            json.dumps({"charts": rendered, "skipped": skipped}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if not planned:
+            self.state.mark_skipped("charts", "the outline asked for no charts")
+        return StageResult(
+            "charts",
+            usd=usd,
+            artifacts={"rendered": len(rendered), "skipped": len(skipped)},
+            summary=f"{len(rendered)} charts, {len(skipped)} skipped",
+        )
+
     # -- 6. write ----------------------------------------------------------
 
     def stage_write(self, extra: str = "") -> StageResult:
@@ -1040,13 +1111,15 @@ class Paper:
         if normalized != self.written:
             self.written = normalized
             self._save_sections()
-        body = stages.assemble(self.plan, self.outline, self.written, self.figures, self.ledger)
+        body = stages.assemble(
+            self.plan, self.outline, self.written, self.figures, self.ledger, charts=self._loaded_charts()
+        )
         # The em dash sweep is mechanical and runs before the gate that checks
         # for em dashes. Arguing with a model about punctuation costs a turn.
         import brief  # noqa: PLC0415
 
         body = brief.strip_em_dashes(body)
-        score = stages.assemble_gate(body, self.ledger)
+        score = stages.assemble_gate(body, self.ledger, charts=self._loaded_charts())
         self.paper_path.write_text(body, encoding="utf-8")
         # A warning is not a failure. Filing both under one key made a short
         # paper look like it had failed a gate, and `publish` reads this file to
@@ -1127,6 +1200,19 @@ class Paper:
                 self.diagram_src, self.figure_dir, self.topic, theme_name=self.theme
             )
 
+    def _loaded_charts(self) -> list:
+        if self.charts:
+            return self.charts
+        path = self.work_dir / "charts.json"
+        if not path.exists():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        self.charts = [item for item in payload.get("charts") or [] if item.get("path")]
+        return self.charts
+
 
 FENCE = re.compile(r"\A```[\w]*\n(.*?)\n?```\Z", re.S)
 
@@ -1135,6 +1221,19 @@ def _strip_fence(text: str) -> str:
     """Diagram source, without the fence a model adds however often you ask."""
     match = FENCE.match(text.strip())
     return (match.group(1) if match else text).strip() + "\n"
+
+
+def _paper_ledger(work_dir: Path) -> dict:
+    path = Path(work_dir) / "paper_ledger.json"
+    if not path.exists():
+        return {"entries": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"entries": []}
+    if isinstance(payload, list):
+        return {"entries": payload}
+    return payload
 
 
 def build(

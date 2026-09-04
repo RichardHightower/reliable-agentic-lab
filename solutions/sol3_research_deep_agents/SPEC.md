@@ -31,8 +31,9 @@ This folder imports no shared engine. Every module below is a copy, and
 | `corpus.py` | Second-brain search, pack, and opt-in ingest |
 | `outline.py` | Outline validator, stamp, and plan lift |
 | `sections.py` | Per-section check, judge, and ledger |
+| `charts.py` | Python-rendered data charts and the charted row |
 | `evidence.py` | `SourceDocument`, `Claim`, `Finding`, and corroboration |
-| `paper.py` | The nine stage pipeline and the three exits |
+| `paper.py` | The pipeline and the three exits |
 | `stages.py` | Each stage's gate |
 | `state.py` | The resumable checkpoint |
 | `diagrams.py` | Mermaid and PlantUML into figures |
@@ -51,6 +52,7 @@ verifier          yes     evidence/**   (denied: paper/**)
 section_judge     no      nothing
 ledger            no      nothing
 diagrammer        yes     diagrams/*.mmd, diagrams/*.puml   (denied: paper/**, evidence/**)
+chartist          no      nothing
 writer            yes     brief.md, paper/**, work/research/**, sections/**   (denied: evidence/**)
 reviewer          no      nothing
 ```
@@ -84,7 +86,7 @@ Layer 3 is the one people skip. The default general-purpose subagent ships with
 the harness filesystem tools, so leaving it enabled is how a carefully scoped
 agent writes anywhere it likes.
 
-## The nine stages
+## The stages
 
 | # | Stage | Model? | Its gate |
 | --- | --- | --- | --- |
@@ -93,10 +95,11 @@ agent writes anywhere it likes.
 | 3 | verify | yes | Every important claim has a decided truth state, and anything past the cap says it was skipped |
 | 4 | outline | yes | Every body section names claim ids that exist and may be used |
 | 5 | diagram | yes | At most twelve nodes, alt text present, and the pinned plugin judge accepts a `*_imagen.png` |
-| 6 | write | yes | A section cites only the numbers its claims support, and carries real prose rather than a restated claim list |
-| 7 | review | yes | Every rubric row passes, including `depth` |
-| 8 | assemble | no | Every hard gate in `paper_check`, including that the paper has a body and clears 2000 words |
-| 9 | publish | no | The gates passed. Opt-in only |
+| 6 | charts | spec only | Chartist returns a spec. Python renders. `charted` fails an invented number |
+| 7 | write | yes | A section cites only the numbers its claims support, and carries real prose rather than a restated claim list |
+| 8 | review | yes | Every rubric row passes, including `depth` |
+| 9 | assemble | no | Every hard gate in `paper_check`, including that the paper has a body and clears 2000 words |
+| 10 | publish | no | The gates passed. Opt-in only |
 
 ## Three exits, and no fourth
 
@@ -104,7 +107,7 @@ Checked before every stage, in this order:
 
 | Exit | When |
 | --- | --- |
-| `done` | Stage 8 finished and every hard gate is green |
+| `done` | Assemble finished and every hard gate is green |
 | `cost` | The money budget is spent |
 | `max turns` | A stage exhausted its retries |
 
@@ -142,7 +145,9 @@ redraw because the diagrammer can simplify or restore a missing label.
 folder's disposable `.cache/`. Only `imagen-diagrams` handles `.mmd` and
 `.puml`. `image-gen` is reserved for cover and non-diagram art. Deep Agents no
 longer shells out to mermaid-cli or the PlantUML JAR, and neither an SVG nor a
-plain PNG can enter the assembled paper, PDF, or publication gate.
+plain PNG can enter the assembled paper, PDF, or publication gate. Charts are
+a different artifact: they plot numbers, so they live under `charts/` and the
+`charted` row checks every plotted value against the ledger.
 
 A missing plugin or image backend is not a redraw. The renderer keeps
 `<stem>_imagen.prompt.txt`, raises `ImageBackendUnavailable`, and the command

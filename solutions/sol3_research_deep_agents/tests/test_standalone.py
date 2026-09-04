@@ -45,7 +45,7 @@ def test_every_module_imports_with_no_sdk():
 def test_the_check_scripts_pass_their_own_assertions():
     """`task checks` runs these. A demo that drifts from the code is worse than
     no demo."""
-    for module in ("evidence", "paper_check", "publish", "diagrams", "mcp_tools"):
+    for module in ("evidence", "paper_check", "publish", "diagrams", "mcp_tools", "charts"):
         out = subprocess.run(
             ["python3", f"{module}.py", "--demo"],
             cwd=ROOT,
