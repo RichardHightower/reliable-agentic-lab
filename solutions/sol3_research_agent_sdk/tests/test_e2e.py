@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import struct
 from pathlib import Path
 
@@ -200,3 +201,51 @@ def test_the_fixture_lane_never_asks_for_a_brain(monkeypatch, tmp_path):
     monkeypatch.setattr(e2e.diagrams, "available", lambda: True)
     monkeypatch.setattr(e2e.shutil, "which", lambda binary: "/usr/bin/imagen")
     assert e2e._preflight("fixture") == []
+
+
+def test_the_run_log_survives_the_child_deleting_its_own_work_dir(tmp_path, monkeypatch):
+    """The child runs with `--fresh`, which rmtrees the directory the log is in.
+
+    A handle opened inside that directory keeps writing to an unlinked inode:
+    every write succeeds and no file appears. That is #318, and it cost the
+    first live run its whole log.
+    """
+    out = tmp_path / "work" / "live"
+    out.mkdir(parents=True)
+    (out / "stale.txt").write_text("from a previous run")
+
+    def fake_stream(command, log_path):
+        log_path.write_text("phase one\n")
+        shutil.rmtree(out, ignore_errors=True)   # what --fresh does
+        out.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("phase two\n")
+        return 0
+
+    monkeypatch.setattr(e2e, "_stream", fake_stream)
+    monkeypatch.setattr(e2e, "_preflight", lambda mode, **kw: [])
+    monkeypatch.setattr(e2e, "validate", lambda work_dir, **kw: {"passed": True, "failures": []})
+
+    assert e2e.run("live", out, "python3", 1.0) == 0
+    report = json.loads((out / "e2e-report.json").read_text())
+    assert (out / "run.log").read_text() == "phase one\nphase two\n"
+    assert report["run_log"] == str(out / "run.log")
+    assert "phase two" in report["log_tail"]
+    assert not (out / "stale.txt").exists(), "the fresh wipe must still happen"
+
+
+def test_the_staging_log_does_not_survive_beside_the_work_dir(tmp_path, monkeypatch):
+    """One log, in the documented place. A leftover sibling is litter."""
+    out = tmp_path / "work" / "live"
+
+    def fake_stream(command, log_path):
+        log_path.write_text("x\n")
+        return 0
+
+    monkeypatch.setattr(e2e, "_stream", fake_stream)
+    monkeypatch.setattr(e2e, "_preflight", lambda mode, **kw: [])
+    monkeypatch.setattr(e2e, "validate", lambda work_dir, **kw: {"passed": True, "failures": []})
+
+    e2e.run("live", out, "python3", 1.0)
+    assert (out / "run.log").exists()
+    assert list(out.parent.glob(".*.run.log")) == []
