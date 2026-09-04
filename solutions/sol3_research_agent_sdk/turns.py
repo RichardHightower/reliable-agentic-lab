@@ -222,9 +222,22 @@ class SdkTurns(Turns):
             prompt=f"Use the {agent} agent. {instruction}",
             allow=list(allow),
             output_format=schema,
+            role=agent,
         )
         if self.on_cost is not None:
-            self.on_cost(result.usd)
+            # `None`, not `0.0`, when the SDK reported no cost. The driver adds
+            # nothing either way; only the turn log can tell the two apart.
+            self.on_cost(
+                result.usd if getattr(result, "cost_reported", True) else None,
+                role=agent,
+                elapsed_s=getattr(result, "elapsed_s", 0.0),
+                prompt_chars=getattr(result, "prompt_chars", 0),
+                events=getattr(result, "events", 0),
+                input_tokens=getattr(result, "input_tokens", 0),
+                output_tokens=getattr(result, "output_tokens", 0),
+                stop_reason=result.stop_reason,
+                ok=result.ok,
+            )
         # A runtime ceiling is not a failed turn. Retrying it spends the rest of
         # the budget rediscovering the same ceiling.
         if result.stop_reason:
@@ -249,7 +262,9 @@ class SdkTurns(Turns):
             f"The corpus pack for this topic is in corpus/brain-pack.md. Read it first.\n"
             f"Per key question, name whether the pack already answers it and which "
             f"corpus reference key does. Put those keys on corpus_refs[]. Only keys "
-            f"from the pack are valid.\n{prior_art[:2000]}"
+            f"from the pack are valid, and a key is the whole "
+            f"`<root>:claim.<subject>.<ULID>` string. A bare ULID is not a key.\n"
+            f"{prior_art[:2000]}"
             if prior_art
             else "There is no corpus pack for this topic. Outline from the topic alone."
         )

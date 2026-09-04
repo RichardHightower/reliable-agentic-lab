@@ -24,9 +24,12 @@ same rows failing twice, which means the loop is not converging.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sys
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -107,14 +110,66 @@ def check_stop(*, done: bool, spent_usd: float, max_usd: float, exhausted: bool 
 
 @dataclass
 class Reply:
-    """One answer from a role. `usd` is what it cost, and zero means unknown."""
+    """One answer from a role. `usd` is what it cost.
+
+    `cost_reported` separates "the call cost nothing" from "nothing told us".
+    The turn log writes null for the second, because a zero there reads as a
+    free call and hides a broken cost path.
+    """
 
     text: str = ""
     data: dict | None = None
     usd: float = 0.0
+    cost_reported: bool = False
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     def json(self) -> dict:
         return self.data if self.data is not None else stages.parse_json(self.text)
+
+
+HEARTBEAT_SECONDS = 15
+
+
+@contextlib.contextmanager
+def _heartbeat(role: str, stage: str, started: float, quiet: bool):
+    """Say the call is still running, about every `HEARTBEAT_SECONDS`.
+
+    `runner.ask` is one blocking call with no events to hang a progress line
+    on, so the beat runs on its own daemon thread. A live outline call took ten
+    minutes and printed nothing for all of it.
+    """
+    if quiet:
+        yield
+        return
+    done = threading.Event()
+
+    def beat() -> None:
+        while not done.wait(HEARTBEAT_SECONDS):
+            print(
+                f"[sol3] t+{time.monotonic() - started:.0f}s stage={stage or '?'} role={role}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    worker = threading.Thread(target=beat, daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        done.set()
+
+
+def _reply_from(adapter, text: str, result) -> Reply:
+    """One reply, with its cost and its token counts."""
+    tokens_in, tokens_out = adapter.usage_tokens(result)
+    return Reply(
+        text=text,
+        usd=adapter.last_usd(result),
+        cost_reported=adapter.cost_is_reported(result),
+        input_tokens=tokens_in,
+        output_tokens=tokens_out,
+    )
 
 
 class Runner:
@@ -215,10 +270,10 @@ class DeepAgentsRunner(Runner):
             # visible to the writer and verifier whose output Python gates.
             direct_payload = {"messages": [{"role": "user", "content": prompt}]}
             result = self._run_direct(role, role_agent, direct_payload) if self.debug else role_agent.invoke(direct_payload)
-            return Reply(text=adapter.last_ai_text(result), usd=adapter.last_usd(result))
+            return _reply_from(adapter, adapter.last_ai_text(result), result)
         parent, delegated = self._run_subgraphs(role, payload, debug=self.debug)
         text = adapter.last_ai_text(delegated) if delegated is not None else adapter.last_agent_ai_text(parent, role)
-        return Reply(text=text, usd=adapter.last_usd(parent))
+        return _reply_from(adapter, text, parent)
 
     def _run_direct(self, role: str, agent, payload: dict):
         """Debug a compiled role graph without the parent-task event flood."""
@@ -349,7 +404,7 @@ class Paper:
 
     def say(self, line: str) -> None:
         if not self.quiet:
-            print(line)
+            print(line, flush=True)
 
     def _reserve_search(self, usd: float) -> None:
         """Checkpoint a provider call before the search tool makes it."""
@@ -402,10 +457,46 @@ class Paper:
                 f"the {role} call needs about ${headroom:.2f} and ${max(0.0, left):.2f} is left "
                 f"of the ${self.max_usd:.2f} cap"
             )
-        reply = self.runner.ask(role, prompt)
+        started = time.monotonic()
+        with _heartbeat(role, self.state.current_stage, started, self.quiet):
+            reply = self.runner.ask(role, prompt)
+        elapsed = time.monotonic() - started
+
         self.state.spend(reply.usd)
         self._worst[role] = max(self._worst.get(role, 0.0), reply.usd)
+        self._record_turn(role, reply, elapsed, len(prompt))
         return reply
+
+    def _record_turn(self, role: str, reply: Reply, elapsed: float, prompt_chars: int) -> None:
+        """Checkpoint one call: the state file and the append-only turn log.
+
+        Saving on the stage boundary was not enough. A stage that makes six
+        calls left the checkpoint stale for the whole stage, so a run killed in
+        the middle reported the role before the one it died in.
+        """
+        row = {
+            "turn": self.state.total_calls,
+            "at": pstate.now(),
+            "stage": self.state.current_stage,
+            "role": role,
+            "elapsed_s": round(elapsed, 3),
+            "prompt_chars": prompt_chars,
+            # Null, never zero. A zero reads as a free call.
+            "usd": round(reply.usd, 6) if reply.cost_reported else None,
+            "total_usd": round(self.state.total_cost_usd, 6),
+            "input_tokens": reply.input_tokens,
+            "output_tokens": reply.output_tokens,
+        }
+        self.state.current_role = role
+        self.state.last_turn = row
+        path = self.work_dir / ".harness" / "turns.jsonl"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row) + "\n")
+            self.state.save()
+        except OSError:
+            pass  # telemetry never fails a run
 
     # -- the loop ----------------------------------------------------------
 
