@@ -199,3 +199,45 @@ def test_default_roots_stack_flag_and_env_and_fall_back_to_sibling(tmp_path):
     assert corpus.default_roots(extra=[extra], env=str(env_root)) == [extra, env_root]
     assert corpus.default_roots(extra=None, env=str(env_root)) == [env_root]
     assert corpus.default_roots(extra=None, env=None) == [corpus.DEFAULT_BRAIN]
+
+
+# -- brain discovery --------------------------------------------------------
+#
+# The default brain is a sibling of the primary checkout. A clone, a worktree,
+# or a scratchpad has no such sibling, so the pack came back empty and the run
+# failed outline rubric rows that cannot pass against an empty pack (#308).
+
+
+def test_the_candidate_list_records_every_place_it_looked():
+    rows = corpus.brain_candidates()
+    sources = [row["source"] for row in rows]
+    assert "sibling of this folder" in sources
+    assert all("path" in row and "exists" in row for row in rows)
+    assert str(corpus.DEFAULT_BRAIN) in [row["path"] for row in rows]
+
+
+def test_a_named_brain_is_first_and_is_honored_even_when_absent(tmp_path):
+    """A typo the operator can see beats a silent fall back to another corpus."""
+    missing = tmp_path / "not-here"
+    rows = corpus.brain_candidates(extra=[missing])
+    assert rows[0] == {"source": "--brain", "path": str(missing), "exists": False}
+    assert corpus.default_roots(extra=[missing]) == [missing]
+
+
+def test_the_candidate_list_never_invents_a_brain_inside_the_clone(tmp_path):
+    before = set(p.name for p in Path(corpus.FOLDER).iterdir())
+    corpus.brain_candidates(extra=[tmp_path / "nope"])
+    assert set(p.name for p in Path(corpus.FOLDER).iterdir()) == before
+
+
+def test_a_checkout_with_no_sibling_brain_records_it_and_does_not_raise(monkeypatch, tmp_path):
+    monkeypatch.setattr(corpus, "DEFAULT_BRAIN", tmp_path / "absent" / "knowledge")
+    monkeypatch.setattr(corpus, "_git_toplevel", lambda start: tmp_path / "clone")
+    rows = corpus.brain_candidates()
+    assert [row["exists"] for row in rows] == [False, False]
+    assert corpus.default_roots() == [corpus.DEFAULT_BRAIN]
+
+
+def test_a_git_probe_that_fails_is_not_a_crash(monkeypatch):
+    monkeypatch.setattr(corpus, "_git_toplevel", lambda start: None)
+    assert corpus.brain_candidates()

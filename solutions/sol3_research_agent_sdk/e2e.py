@@ -22,6 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import corpus
 import diagrams
 import roles
 
@@ -246,7 +247,31 @@ def _write_report(work_dir: Path, report: dict) -> None:
     (work_dir / "e2e-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
 
-def _preflight(mode: str) -> list[str]:
+def _corpus_check(brain: str | None, allow_thin: bool) -> list[str]:
+    """Refuse a live run whose corpus pack would be empty.
+
+    The default brain is a sibling of the primary checkout. A clone, a
+    worktree, or a scratchpad has no such sibling, and the outline rubric has
+    rows that cannot pass against an empty pack. The first live attempt spent
+    $1.07 discovering that.
+    """
+    candidates = corpus.brain_candidates(
+        extra=[brain] if brain else None,
+        env=os.environ.get("RESEARCH_BRAINS"),
+    )
+    if any(row["exists"] for row in candidates) or allow_thin:
+        return []
+    tried = "\n".join(f"  {row['source']}: {row['path']}" for row in candidates)
+    return [
+        "no corpus brain was found, so the pack would be empty and the outline "
+        "rubric cannot pass. Tried:\n"
+        f"{tried}\n"
+        "  Pass BRAIN=<path>, set RESEARCH_BRAINS, or set ALLOW_THIN_CORPUS=1 "
+        "to run anyway."
+    ]
+
+
+def _preflight(mode: str, *, brain: str | None = None, allow_thin: bool = False) -> list[str]:
     missing = []
     if not diagrams.available():
         missing.append("the diagram renderer is absent; run `task setup`")
@@ -257,6 +282,7 @@ def _preflight(mode: str) -> list[str]:
             missing.append("ANTHROPIC_API_KEY is not set")
         if not roles.environment_value("PERPLEXITY_API_KEY"):
             missing.append("PERPLEXITY_API_KEY is not set")
+        missing.extend(_corpus_check(brain, allow_thin))
     return missing
 
 
@@ -279,10 +305,18 @@ def _stream(command: list[str], log_path: Path) -> int:
         return proc.wait()
 
 
-def run(mode: str, out: Path, python: str, max_usd: float) -> int:
+def run(
+    mode: str,
+    out: Path,
+    python: str,
+    max_usd: float,
+    *,
+    brain: str | None = None,
+    allow_thin: bool = False,
+) -> int:
     """Run one acceptance lane, then leave a report even when it fails."""
     out = Path(out)
-    missing = _preflight(mode)
+    missing = _preflight(mode, brain=brain, allow_thin=allow_thin)
     if missing:
         report = {"work_dir": str(out), "passed": False, "failures": missing, "mode": mode}
         _write_report(out, report)
@@ -317,6 +351,8 @@ def run(mode: str, out: Path, python: str, max_usd: float) -> int:
         command += ["--backend", "fixture", "--fixture", str(FIXTURE)]
     else:
         command += ["--backend", "agent", "--brief-file", str(SCENARIO)]
+    if brain:
+        command += ["--brain", brain]
 
     # Stream, never capture. `capture_output=True` shows the operator nothing
     # until the process exits, which made a ten-minute phase look like a hang no
@@ -357,9 +393,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--python", default=sys.executable, help="Python interpreter that owns the runtime")
     parser.add_argument("--max-usd", type=float, default=10.0, help="hard cap for this acceptance run")
+    parser.add_argument("--brain", help="a corpus root to read, in place of the discovered default")
+    parser.add_argument(
+        "--allow-thin-corpus",
+        action="store_true",
+        help="run the live lane with no brain. The outline rubric will probably fail.",
+    )
     args = parser.parse_args(argv)
     out = args.out or FOLDER / "work" / f"e2e-loop-engineering-{args.mode}"
-    return run(args.mode, out, args.python, args.max_usd)
+    return run(
+        args.mode,
+        out,
+        args.python,
+        args.max_usd,
+        brain=args.brain,
+        allow_thin=args.allow_thin_corpus or bool(os.environ.get("ALLOW_THIN_CORPUS")),
+    )
 
 
 if __name__ == "__main__":

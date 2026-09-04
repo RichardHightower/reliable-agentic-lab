@@ -138,7 +138,8 @@ tasks:
           echo "run task setup first. It creates .venv and installs the renderer."
           exit 1
         fi
-        "{{.RUN_PY}}" -u e2e.py --mode live --out "{{.E2E_OUT | default .LIVE_REPORT}}" --max-usd "{{.LIVE_E2E_MAX_USD | default "10"}}"
+        "{{.RUN_PY}}" -u e2e.py --mode live --out "{{.E2E_OUT | default .LIVE_REPORT}}" --max-usd "{{.LIVE_E2E_MAX_USD | default "10"}}" \
+          {{if .BRAIN}}--brain "{{.BRAIN}}"{{end}} {{if .ALLOW_THIN_CORPUS}}--allow-thin-corpus{{end}}
 
   pdf:
     desc: Export an existing paper and its figures as an Arctic Fox PDF.

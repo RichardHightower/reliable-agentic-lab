@@ -97,6 +97,21 @@ renderer, and an approved image backend. It never publishes a gist. The resultin
 have no fidelity misses, be embedded in the paper, and meet the resolution
 floor recorded in `e2e-report.json`.
 
+The live lane also needs a corpus brain. It looks for one in this order:
+`BRAIN`, then `RESEARCH_BRAINS`, then a `loop_eng_2nd_brain/knowledge` sibling
+of this checkout. A brain is prior art in another repository, and a clone or a
+worktree usually has no sibling. When it finds none, the preflight names every
+path it tried and stops before the first paid query, because the outline rubric
+has rows that cannot pass against an empty pack.
+
+```bash
+BRAIN=/path/to/loop_eng_2nd_brain/knowledge LIVE_E2E_MAX_USD=10 task e2e-live
+ALLOW_THIN_CORPUS=1 LIVE_E2E_MAX_USD=10 task e2e-live   # run anyway, expect a rubric failure
+```
+
+Set `SOL3_QUERY_TIMEOUT_SECONDS` to change the per-query ceiling. The default
+is 900 seconds.
+
 Both E2E lanes render article figures with imagen-diagrams' built-in
 `arctic-fox` theme. The acceptance report rejects a figure whose render sidecar
 records another theme.

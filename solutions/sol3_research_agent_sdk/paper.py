@@ -57,8 +57,9 @@ from turns import Escalate, TurnFailed, slugify
 FOLDER = Path(__file__).resolve().parent
 
 # The second brain is a sibling repo, not part of this one. It is read-only
-# prior art, and a run must not need it.
-BRAIN = FOLDER.parents[2] / "loop_eng_2nd_brain" / "knowledge"
+# prior art, and a run must not need it. One definition, in `corpus`, or the
+# two drift and a run reads a different brain than the one it reports.
+BRAIN = corpus.DEFAULT_BRAIN
 
 DEFAULT_AREA = "loop-engineering"
 MAX_ITERATIONS = 3
