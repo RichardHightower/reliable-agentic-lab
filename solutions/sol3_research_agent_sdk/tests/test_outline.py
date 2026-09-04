@@ -595,3 +595,34 @@ def test_the_first_round_is_not_a_revision(work):
     run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
     paper._judge_loop(run, turns.outline("a topic", ""))
     assert "This is the outline you are revising" not in turns.notes[0]
+
+
+def test_the_outline_judge_rounds_read_the_environment(monkeypatch):
+    """Every other budget in this port is a flag. This one was a bare 3."""
+    import importlib  # noqa: PLC0415
+
+    monkeypatch.setenv("SOL3_OUTLINE_JUDGE_ROUNDS", "7")
+    reloaded = importlib.reload(paper)
+    try:
+        assert reloaded.OUTLINE_JUDGE_ROUNDS == 7
+    finally:
+        monkeypatch.delenv("SOL3_OUTLINE_JUDGE_ROUNDS")
+        importlib.reload(paper)
+
+
+def test_the_default_round_count_is_unchanged():
+    assert paper.OUTLINE_JUDGE_ROUNDS == 3
+
+
+def test_the_loop_honours_a_raised_round_count(work, monkeypatch):
+    """Each round must fail a different row, or the stall detector stops first.
+
+    That guard is correct and separate: a repeated signature is not progress
+    however large the budget is.
+    """
+    verdicts = [failing_verdict(rule) for rule in ("corpus_fit", "depth", "redundancy", "voice")]
+    turns = NotingTurns([*verdicts, {"passed": True, "score": 1.0}])
+    monkeypatch.setattr(paper, "OUTLINE_JUDGE_ROUNDS", 5)
+    run = paper.Run(topic="a topic", work_dir=work, turns=turns, state=paper.State())
+    paper._judge_loop(run, turns.outline("a topic", ""))
+    assert turns.round >= 5, "a raised budget must buy more revision rounds"

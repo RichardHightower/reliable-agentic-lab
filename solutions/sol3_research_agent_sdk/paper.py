@@ -73,7 +73,14 @@ MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
 MAX_CLAIMS = 40
 MAX_WORDS = 2000
-OUTLINE_JUDGE_ROUNDS = 3
+# Every other budget in this port is a flag. This one was a bare constant, and
+# the Deep Agents port has `--attempts` for the same job. Three rounds is not
+# enough for a real corpus: a live run fixed `accuracy_recency` and
+# `limitations` in round two and ran out of rounds with five rows left, all of
+# them carried over rather than newly invented, which is a loop converging too
+# slowly rather than a loop stuck. Read at import so a test can still patch the
+# module attribute.
+OUTLINE_JUDGE_ROUNDS = int(os.environ.get("SOL3_OUTLINE_JUDGE_ROUNDS", "3"))
 
 # A ceiling on verification, for the same reason. Four good questions produced
 # a hundred and eleven claims on one live run, and every claim is a turn. The
@@ -435,7 +442,8 @@ def _judge_loop(run: Run, drafted: dict) -> dict:
         run.write_json("outline-verdict.json", verdict)
         return current
 
-    for round_no in range(1, OUTLINE_JUDGE_ROUNDS + 1):
+    rounds = OUTLINE_JUDGE_ROUNDS
+    for round_no in range(1, rounds + 1):
         spent = run.exhausted()
         if spent and round_no > 1:
             raise RunFailed(f"outline judge: {spent}")
@@ -455,7 +463,7 @@ def _judge_loop(run: Run, drafted: dict) -> dict:
         decision = gates.decide(
             passed=False,
             iteration=round_no,
-            budget=OUTLINE_JUDGE_ROUNDS,
+            budget=rounds,
             signature=signature,
             previous_signature=previous,
             usd_left=0.0 if run.exhausted() else 1.0,
@@ -476,7 +484,7 @@ def _judge_loop(run: Run, drafted: dict) -> dict:
         note += _revision_note(current)
         current = _draft_valid_outline_with_note(run, note)
         run.write_json("outline.json", current)
-    raise RunFailed("outline judge: three rounds exhausted")
+    raise RunFailed(f"outline judge: {rounds} rounds exhausted")
 
 
 def _revision_note(current: dict) -> str:
