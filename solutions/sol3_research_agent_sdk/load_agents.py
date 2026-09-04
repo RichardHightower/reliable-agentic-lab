@@ -201,6 +201,20 @@ DIAGRAM_SCHEMA = _schema(
     ["language", "source", "caption"],
 )
 
+CHART_SCHEMA = _schema(
+    {
+        "name": {"type": "string"},
+        "type": {"type": "string", "enum": ["bar", "line", "grouped_bar", "scatter"]},
+        "x": {"type": "string"},
+        "y": {"type": "string"},
+        "xlabel": {"type": "string"},
+        "ylabel": {"type": "string"},
+        "caption": {"type": "string"},
+        "section": {"type": "string"},
+    },
+    ["name", "type", "x", "y", "xlabel", "ylabel", "caption", "section"],
+)
+
 REVIEW_SCHEMA = _schema(
     {
         "done": {"type": "boolean"},

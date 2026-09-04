@@ -20,7 +20,7 @@ def test_the_orchestrator_only_spawns(loop):
     assert not orchestrator.can_write
 
 
-def test_the_research_cast_is_ten_roles():
+def test_the_research_cast_is_eleven_roles():
     assert roleplan.LOOPS["research"] == (
         "orchestrator",
         "outliner",
@@ -30,6 +30,7 @@ def test_the_research_cast_is_ten_roles():
         "section_judge",
         "ledger",
         "diagrammer",
+        "chartist",
         "writer",
         "judge",
     )
@@ -50,6 +51,7 @@ def test_the_research_cast_needs_no_contract():
         "section_judge",
         "ledger",
         "diagrammer",
+        "chartist",
         "judge",
     ],
 )
@@ -138,6 +140,7 @@ def test_the_table_names_the_scope():
     assert "writer" in table and "sections/**" in table
     assert "judge             no" in table
     assert "diagrammer        no" in table
+    assert "chartist          no" in table
     assert "outliner          no" in table
     assert "outline_judge     no" in table
     writers = [line for line in table.splitlines() if line.split()[1:2] == ["yes"]]

@@ -45,6 +45,7 @@ def test_a_reader_that_tries_to_write_is_denied(hook):
     for reader in (
         "research-outliner",
         "research-diagrammer",
+        "research-chartist",
         "research-judge",
         "research-outline-judge",
         "research-section-judge",
@@ -294,6 +295,7 @@ def test_every_role_gets_its_prompt_from_the_plugin(fake_sdk, work):
         "research-section-judge",
         "research-ledger",
         "research-diagrammer",
+        "research-chartist",
         "research-writer",
         "research-judge",
     }
@@ -312,6 +314,7 @@ def test_a_reader_carries_the_write_tools_as_a_deny_list(fake_sdk, work):
         "research-outliner",
         "research-outline-judge",
         "research-diagrammer",
+        "research-chartist",
         "research-section-judge",
         "research-ledger",
     ):

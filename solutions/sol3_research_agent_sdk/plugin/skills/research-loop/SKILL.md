@@ -25,6 +25,7 @@ One markdown file and its figures:
 ```
 work/<slug>/paper.md
 work/<slug>/diagrams/*.png
+work/<slug>/charts/*.png
 ```
 
 Plus the research record that produced them, as an RKC knowledge bundle under
@@ -42,6 +43,7 @@ Plus the research record that produced them, as an RKC knowledge bundle under
 | section_judge | read tools | nothing |
 | ledger | `Read` | nothing |
 | diagrammer | read tools | nothing |
+| chartist | read tools | nothing |
 | writer | read tools, `Write` | `sections/**` |
 | judge | read tools | nothing |
 
@@ -54,7 +56,8 @@ Everything else comes back as schema-checked structured output that Python
 writes. The outliner returns an outline and Python writes `outline.json`.
 The outline judge returns a verdict and Python writes `outline-verdict.json`.
 The diagrammer returns diagram source and Python writes it, renders it, and
-runs the fidelity judge.
+runs the fidelity judge. The chartist returns a chart spec and Python
+renders the pixels.
 
 No role holds `Bash`. The renderer is one subprocess with fixed arguments, and
 Python runs it. Handing a model a shell to save that would widen the blast
@@ -82,22 +85,26 @@ search and write can adjust the evidence to fit the paper.
    `sections/<id>.md`, and `paper_ledger.json`. A finished section is
    skipped on resume.
 3. **Diagram.** The diagrammer returns source for `kind: diagram` figures.
-   Python renders it and runs the fidelity judge. `kind: chart` figures are
-   logged and skipped in this phase.
-4. **Assemble.** Stitch the sections and append the reference list.
-5. **Check.** Run the deterministic rows: sources, hosts, doctrine, complete,
+   Python renders it and runs the fidelity judge.
+4. **Charts.** The chartist returns a spec for `kind: chart` figures. Python
+   renders `charts/<name>.png` and a sidecar naming every value and its
+   source. A chart whose data never arrived is skipped with `no data`.
+5. **Assemble.** Stitch the sections, embed rendered charts, and append the
+   reference list.
+6. **Check.** Run the deterministic rows: sources, hosts, doctrine, complete,
    outline_coverage, grounded, cited, sourced, images, style, ledger_consistency,
-   corpus_marked, gaps_stated, and, on a paper run, has_body and length. Length
-   is hard at 2000 words. Doctrine is
+   corpus_marked, gaps_stated, charted, and, on a paper run, has_body and length.
+   Length is hard at 2000 words. `charted` is hard when any chart was rendered.
+   Doctrine is
    scoped to the E2E lane. `outline_coverage` requires every approved section
    and every key question on the page. No model votes here.
-6. **Review.** The judge scores what a script cannot. It reads the ledger.
-7. **Edit.** Once, after the first green check. The writer rewrites for flow
+7. **Review.** The judge scores what a script cannot. It reads the ledger.
+8. **Edit.** Once, after the first green check. The writer rewrites for flow
    only. Python diffs for new specifics and reverts any the evidence does not
    contain. Then assemble, check, and review run again.
-8. **Publish.** Push the paper and its figures to a secret gist, on request,
+9. **Publish.** Push the paper and its figures to a secret gist, on request,
    and only after the paper passes.
-9. **Bundle.** Always. The run writes an RKC knowledge bundle under
+10. **Bundle.** Always. The run writes an RKC knowledge bundle under
    `knowledge/research/`. `--ingest-brain` is opt-in: it copies that bundle
    into a brain git worktree and opens a PR. It never writes `main`.
 

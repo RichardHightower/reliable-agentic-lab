@@ -1,13 +1,14 @@
 """The white paper driver. Python owns the phases, the budget, and the exits.
 
-Ten phases, in a list, in order. The list is the dispatch order and the number
-is only a state key, which is what lets a phase slot in later without
-renumbering the run records that already exist on disk.
+The list is the dispatch order and the number is only a state key, which is
+what lets a phase slot in later without renumbering the run records that
+already exist on disk.
 
     0 corpus_pack read the configured brains   -> corpus/brain-pack.md
     1 outline     two-level outline, judged -> outline.approved.json
     2 sections    per-section research/write -> sections/*.md, paper_ledger.json
     4 diagram     figures, rendered         -> diagrams.json
+    3 charts      data charts, Python-rendered -> charts.json
     5 write       retry rewrite             -> sections/*.md
     6 assemble    stitch and reference      -> paper.md
     7 check       deterministic rows        -> check.json
@@ -15,10 +16,11 @@ renumbering the run records that already exist on disk.
     8b edit       flow only, add no facts   -> sections/*.md (once)
     9 publish     a private gist, on request-> gist.json
 
-Phases 0 to 4 run once. Phases 5 to 8 are the retry cycle, because the only
-thing worth redoing on a failed check is the writing. Re-running the research
-because a paragraph lost its citation marker buys a bill, not a better paper.
-The edit pass runs once after the first green check and re-enters the cycle.
+The linear phases run once. Phases 5 to 8 are the retry cycle, because the
+only thing worth redoing on a failed check is the writing. Re-running the
+research because a paragraph lost its citation marker buys a bill, not a
+better paper. The edit pass runs once after the first green check and
+re-enters the cycle.
 
 Every phase writes a new named file and no phase mutates another's output. That
 one rule is what makes `--resume` need no bookkeeping: a phase whose file exists
@@ -40,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import checks
+import charts
 import corpus
 import diagrams
 import gates
@@ -675,12 +678,6 @@ def verify(run: Run) -> dict:
 def diagram(run: Run) -> dict:
     drafted = approved_outline(run)
     figures = []
-    skipped_charts = 0
-    for spec in outlines.charts(drafted):
-        skipped_charts += 1
-        run.log(
-            f"    skipping chart {spec.get('name')!r}: charts are not rendered in this phase"
-        )
     for spec in outlines.diagrams(drafted):
         figure = diagrams.draw(
             run.turns,
@@ -692,9 +689,44 @@ def diagram(run: Run) -> dict:
             theme=run.theme,
         )
         figures.append(figure.to_dict())
-    run.write_json("diagrams.json", {"figures": figures, "skipped_charts": skipped_charts})
+    run.write_json("diagrams.json", {"figures": figures})
     drawn = [f for f in figures if f["path"]]
-    return {"figures": len(figures), "rendered": len(drawn), "skipped_charts": skipped_charts}
+    return {"figures": len(figures), "rendered": len(drawn)}
+
+
+def do_charts(run: Run) -> dict:
+    """Render `kind: chart` figures from data tables and the ledger.
+
+    A chart with no rows is skipped with `no data`, not with a phase-skip
+    log. Python renders. The chartist only returns a spec.
+    """
+    drafted = approved_outline(run)
+    ledger = _ledger(run)
+    rendered = []
+    skipped = []
+    for figure in outlines.charts(drafted):
+        name = figure.get("name") or "chart"
+        rows = charts.collect(run.work_dir, figure, ledger)
+        if not rows:
+            run.log(f"    skipping chart {name!r}: no data")
+            skipped.append(name)
+            continue
+        spec = {}
+        if hasattr(run.turns, "chart_spec"):
+            try:
+                spec = run.turns.chart_spec(figure, rows) or {}
+            except (TurnFailed, Escalate):
+                spec = {}
+        if not spec.get("x"):
+            spec = charts.default_spec(figure, rows)
+        spec.setdefault("section", figure.get("section") or "")
+        spec.setdefault("name", name)
+        record = charts.render(spec, rows, run.file("charts"))
+        record["section"] = figure.get("section") or spec.get("section") or ""
+        rendered.append(record)
+        run.log(f"    chart {name}: {len(record.get('values') or [])} values")
+    run.write_json("charts.json", {"charts": rendered, "skipped": skipped})
+    return {"rendered": len(rendered), "skipped": len(skipped)}
 
 
 def do_sections(run: Run) -> dict:
@@ -946,6 +978,11 @@ def assemble(run: Run) -> dict:
         text, found = checks.take_flags(text)
         flags += [{"section": section["id"], "flag": flag} for flag in found]
         parts += [text.strip(), ""]
+        for chart in _charts_for(run, section["id"]):
+            rel = f"charts/{Path(chart['path']).name}"
+            caption = chart.get("caption") or chart.get("name") or rel
+            if rel not in text:
+                parts += [f"![{caption}]({rel})", ""]
     if references:
         parts += ["## References", ""]
         parts += [
@@ -962,6 +999,32 @@ def assemble(run: Run) -> dict:
     # "this run never looked".
     run.write_json("unresolved.json", {"flags": flags})
     return {"bytes": len(body), "references": len(references), "flags": len(flags)}
+
+
+def _charts_for(run: Run, section_id: str) -> list[dict]:
+    path = run.file("charts.json")
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [
+        item
+        for item in payload.get("charts") or []
+        if item.get("section") == section_id and item.get("path")
+    ]
+
+
+def _rendered_charts(run: Run) -> list[dict]:
+    path = run.file("charts.json")
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [item for item in payload.get("charts") or [] if item.get("path")]
 
 
 def corpus_for(run: Run) -> str:
@@ -1025,6 +1088,7 @@ def check(run: Run) -> dict:
         ledger=_ledger(run) if run.enforce_research_policy else None,
         gaps=_coverage_gaps(run) if run.enforce_research_policy else None,
         claims=claims if run.enforce_research_policy else None,
+        charts=_rendered_charts(run),
     )
     run.write_json("check.json", score.to_dict())
     return score.to_dict()
@@ -1107,6 +1171,7 @@ LINEAR = [
     (1, "outline", "outline.approved.json", do_outline),
     (2, "sections", "claims.json", do_sections),
     (4, "diagram", "diagrams.json", diagram),
+    (3, "charts", "charts.json", do_charts),
 ]
 
 CYCLE = [

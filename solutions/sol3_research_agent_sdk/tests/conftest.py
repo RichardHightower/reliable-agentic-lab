@@ -218,6 +218,14 @@ class RecordingTurns:
         self.asked.append(("diagram", name, concept, feedback))
         return {"language": "mermaid", "source": "flowchart LR\n  A[A] --> B[B]", "caption": "Cap."}
 
+    def chart_spec(self, figure, rows, note=""):
+        self.asked.append(("chart_spec", figure.get("name"), len(rows), note))
+        if not rows:
+            return {}
+        import charts as charts_mod  # noqa: PLC0415
+
+        return charts_mod.default_spec(figure, rows)
+
     def write(self, section, claims, figures, notes, path=""):
         self.asked.append(("write", section["id"], notes, path))
         lines = [f"## {section['heading']}", ""]

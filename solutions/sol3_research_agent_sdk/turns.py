@@ -25,6 +25,7 @@ from pathlib import Path
 import research
 import source_policy
 from load_agents import (
+    CHART_SCHEMA,
     DIAGRAM_SCHEMA,
     FINDINGS_SCHEMA,
     GROUNDING,
@@ -145,6 +146,9 @@ class Turns:
 
     def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
         raise NotImplementedError
+
+    def chart_spec(self, figure: dict, rows: list, note: str = "") -> dict:
+        return {}
 
     def write(
         self, section: dict, claims: list[dict], figures: list[dict], notes: str, path: str = ""
@@ -336,6 +340,15 @@ class SdkTurns(Turns):
             f"Draw the figure named {name}. It shows: {concept}{again}",
             DIAGRAM_SCHEMA,
             allow=[f"diagrams/{name}.mmd", f"diagrams/{name}.puml"],
+        )
+
+    def chart_spec(self, figure: dict, rows: list, note: str = "") -> dict:
+        payload = json.dumps({"figure": figure, "rows": rows[:40]}, indent=2)
+        return self._json(
+            "research-chartist",
+            "Return a chart spec. Do not invent a number. Empty rows means an "
+            f"empty spec.\n{payload}\n{note}",
+            CHART_SCHEMA,
         )
 
     def write(
@@ -792,6 +805,13 @@ class OfflineTurns(Turns):
             "source": source,
             "caption": f"The figure shows {concept}.",
         }
+
+    def chart_spec(self, figure: dict, rows: list, note: str = "") -> dict:
+        import charts as charts_mod  # noqa: PLC0415
+
+        if not rows:
+            return {}
+        return charts_mod.default_spec(figure, rows)
 
     def write(
         self, section: dict, claims: list[dict], figures: list[dict], notes: str, path: str = ""
