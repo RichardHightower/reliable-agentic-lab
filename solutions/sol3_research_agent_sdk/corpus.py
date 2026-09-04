@@ -29,7 +29,8 @@ from pathlib import Path
 
 FOLDER = Path(__file__).resolve().parent
 FIXTURE_BRAIN = FOLDER / "tests" / "fixtures" / "brain"
-DEFAULT_BRAIN = FOLDER.parents[2] / "loop_eng_2nd_brain" / "knowledge"
+BRAIN_DIR_NAME = "loop_eng_2nd_brain"
+DEFAULT_BRAIN = FOLDER.parents[2] / BRAIN_DIR_NAME / "knowledge"
 
 STOP = {
     "a",
@@ -551,31 +552,78 @@ def pack(
     return payload
 
 
-def default_roots(
+def _git_toplevel(start: Path) -> Path | None:
+    """The checkout `start` lives in, or None. Never raises."""
+    import subprocess  # noqa: PLC0415  (only this probe needs it)
+
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    line = (out.stdout or "").strip()
+    return Path(line) if out.returncode == 0 and line else None
+
+
+def brain_candidates(
     extra: list[Path | str] | None = None,
     env: str | None = None,
-) -> list[Path]:
-    """`--brain` paths, then `RESEARCH_BRAINS`, then the sibling default."""
-    roots: list[Path] = []
+) -> list[dict]:
+    """Every place this port looks for a brain, in order, with what it found.
+
+    The default brain is a sibling of the primary checkout. A clone, a
+    worktree, or a scratchpad has no such sibling, so the pack came back empty
+    and the run failed outline rubric rows that cannot pass against an empty
+    pack. It spent $1.07 finding that out. The candidate list is what makes the
+    absence readable before the first paid query.
+
+    Read only. A brain is prior art from another repository, and this never
+    invents one inside the clone.
+    """
+    found: list[dict] = []
     seen: set[str] = set()
 
-    def add(path: Path) -> None:
+    def add(source: str, path: Path) -> None:
         key = str(path)
         if key in seen:
             return
         seen.add(key)
-        roots.append(path)
+        found.append({"source": source, "path": str(path), "exists": path.is_dir()})
 
     for item in extra or []:
-        add(Path(item))
-    if env:
-        for part in env.split(":"):
-            part = part.strip()
-            if part:
-                add(Path(part))
-    if not roots:
-        add(DEFAULT_BRAIN)
-    return roots
+        add("--brain", Path(item))
+    for part in (env or "").split(":"):
+        part = part.strip()
+        if part:
+            add("RESEARCH_BRAINS", Path(part))
+    add("sibling of this folder", DEFAULT_BRAIN)
+    toplevel = _git_toplevel(FOLDER)
+    if toplevel is not None:
+        add("sibling of the git top level", toplevel.parent / BRAIN_DIR_NAME / "knowledge")
+    return found
+
+
+def default_roots(
+    extra: list[Path | str] | None = None,
+    env: str | None = None,
+) -> list[Path]:
+    """`--brain` paths, then `RESEARCH_BRAINS`, then the discovered defaults.
+
+    An explicit path is honored whether or not it exists, because a typo the
+    operator can see beats a silent fall back to a different corpus. A default
+    is used only when it is really there.
+    """
+    candidates = brain_candidates(extra, env)
+    asked = [row for row in candidates if row["source"] in ("--brain", "RESEARCH_BRAINS")]
+    if asked:
+        return [Path(row["path"]) for row in asked]
+    usable = [Path(row["path"]) for row in candidates if row["exists"]]
+    return usable or [DEFAULT_BRAIN]
 
 
 def demo() -> int:
