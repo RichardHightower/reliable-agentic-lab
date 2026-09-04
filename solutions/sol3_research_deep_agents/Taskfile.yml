@@ -45,7 +45,7 @@ tasks:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} loop.py --table-only --paper'
+      - '{{.PY}} -u loop.py --table-only --paper'
 
   checks:
     desc: Run every deterministic check script against its own assertions.
@@ -63,7 +63,7 @@ tasks:
     desc: The Saturday artifact. A question in, a cited brief out.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} loop.py --backend fixture {{.CLI_ARGS}}'
+      - '{{.PY}} -u loop.py --backend fixture {{.CLI_ARGS}}'
 
   # -- the pipeline ---------------------------------------------------------
 
@@ -77,7 +77,7 @@ tasks:
     desc: The nine stage pipeline. Fixture research is offline; figures require one image backend.
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - '{{.PY}} loop.py --paper --topic "{{.TOPIC}}" --backend {{.BACKEND}} {{.CLI_ARGS}}'
+      - '{{.PY}} -u loop.py --paper --topic "{{.TOPIC}}" --backend {{.BACKEND}} {{.CLI_ARGS}}'
 
   live:
     desc: A real run. Research uses filtered Perplexity, then Anthropic, OpenAI, and fixture; never Bing. Add -- --debug for subgraph traces.
@@ -88,7 +88,7 @@ tasks:
           echo "run task setup first. It creates .venv in this folder and installs Deep Agents."
           exit 1
         fi
-        "{{.RUN_PY}}" loop.py --paper --topic "{{.TOPIC}}" --backend auto {{.CLI_ARGS}}
+        "{{.RUN_PY}}" -u loop.py --paper --topic "{{.TOPIC}}" --backend auto {{.CLI_ARGS}}
 
   publish:
     desc: Push a finished paper to its stable secret gist. Never runs on its own.
