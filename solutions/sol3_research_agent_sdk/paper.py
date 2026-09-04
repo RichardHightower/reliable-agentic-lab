@@ -489,9 +489,17 @@ def do_outline(run: Run) -> dict:
     judged = run.file("outline-judged.json")
     if existing.exists() and judged.exists():
         drafted = run.read_json("outline.json")
-        errors = outlines.validate(drafted, word_target_total=run.word_target_total)
+        # The keys matter on resume too. Without them validation is silently
+        # weaker here than on the path that drafted the outline.
+        errors = outlines.validate(
+            drafted,
+            word_target_total=run.word_target_total,
+            corpus_keys=_pack_keys(run),
+        )
         if errors:
             raise RunFailed(outlines.retry_note(errors))
+        # `validate` rewrites suffix references to full keys in place.
+        run.write_json("outline.json", drafted)
         return _finish_outline(run, drafted)
 
     drafted = _draft_valid_outline(run)
