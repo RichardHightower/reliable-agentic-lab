@@ -14,7 +14,8 @@ def test_no_shared_engine_imports():
     """CLAUDE.md forbids a shared library. Duplication is the point, because a
     five hour audience should not have to learn an abstraction first."""
     out = subprocess.run(
-        ["grep", "-rnE", FORBIDDEN, "--include=*.py", "--exclude-dir=.venv", "."],
+        ["grep", "-rnE", FORBIDDEN, "--include=*.py",
+         "--exclude-dir=.venv", "--exclude-dir=.cache", "--exclude-dir=work", "."],
         cwd=ROOT,
         capture_output=True,
         text=True,
