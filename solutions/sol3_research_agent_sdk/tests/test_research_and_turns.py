@@ -405,9 +405,39 @@ def test_each_turn_declares_the_scope_it_may_write(work):
 
 def test_cost_is_reported_to_the_driver(work):
     spent = []
-    backend = Backend([result(usd=0.42, structured={"verdict": "supports"})])
-    t.SdkTurns(backend=backend, work_dir=work, on_cost=spent.append).verify("c")
-    assert spent == [0.42]
+    backend = Backend([result(usd=0.42, cost_reported=True, structured={"verdict": "supports"})])
+    t.SdkTurns(
+        backend=backend,
+        work_dir=work,
+        on_cost=lambda usd, **detail: spent.append((usd, detail)),
+    ).verify("c")
+    assert spent[0][0] == 0.42
+    assert spent[0][1]["role"] == "research-verifier"
+
+
+def test_a_turn_with_no_cost_field_reports_none_not_zero(work):
+    """A bare 0.0 reads as a free turn and hides a broken cost path (#303)."""
+    spent = []
+    backend = Backend([result(structured={"verdict": "supports"})])
+    t.SdkTurns(
+        backend=backend,
+        work_dir=work,
+        on_cost=lambda usd, **detail: spent.append(usd),
+    ).verify("c")
+    assert spent == [None]
+
+
+def test_the_turn_detail_names_the_role_and_the_elapsed_time(work):
+    seen = {}
+    backend = Backend([result(elapsed_s=12.5, prompt_chars=400, events=7, structured={"verdict": "supports"})])
+    t.SdkTurns(
+        backend=backend,
+        work_dir=work,
+        on_cost=lambda usd, **detail: seen.update(detail),
+    ).verify("c")
+    assert seen["elapsed_s"] == 12.5
+    assert seen["prompt_chars"] == 400
+    assert seen["events"] == 7
 
 
 # -- the offline twin -------------------------------------------------------

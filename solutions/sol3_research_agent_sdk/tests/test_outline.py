@@ -436,3 +436,103 @@ def test_doctrine_is_off_by_default(work, turns):
     names = [row["name"] for row in score["checks"]]
     assert "doctrine" not in names
     assert "outline_coverage" in names
+
+
+# -- corpus references ------------------------------------------------------
+#
+# The pack keys are `knowledge:claim.<subject>.<ULID>` and the model writes the
+# bare ULID. An exact-match-only check rejected 21 references that were all real
+# keys in suffix form, and the retry note never showed the required shape. That
+# run spent $4.44 over five turns and escalated (#302).
+
+KEY_A = "knowledge:claim.loop-engineering.01AAAAAAAAAAAAAAAAAAAAAAAA"
+KEY_B = "knowledge:claim.loop-engineering.01BBBBBBBBBBBBBBBBBBBBBBBB"
+KEY_C = "second:claim.other-subject.01AAAAAAAAAAAAAAAAAAAAAAAA"
+
+
+def refs_outline(*refs):
+    return sample_outline(sections=[sample_section(corpus_refs=list(refs))])
+
+
+def test_a_bare_ulid_resolves_to_the_full_key():
+    drafted = refs_outline("01AAAAAAAAAAAAAAAAAAAAAAAA")
+    assert outlines.validate(drafted, corpus_keys=[KEY_A, KEY_B]) == []
+    assert drafted["sections"][0]["corpus_refs"] == [KEY_A]
+
+
+def test_a_claim_id_without_the_root_resolves_too():
+    drafted = refs_outline("claim.loop-engineering.01BBBBBBBBBBBBBBBBBBBBBBBB")
+    assert outlines.validate(drafted, corpus_keys=[KEY_A, KEY_B]) == []
+    assert drafted["sections"][0]["corpus_refs"] == [KEY_B]
+
+
+def test_a_full_key_is_left_alone():
+    drafted = refs_outline(KEY_A)
+    assert outlines.validate(drafted, corpus_keys=[KEY_A, KEY_B]) == []
+    assert drafted["sections"][0]["corpus_refs"] == [KEY_A]
+
+
+def test_an_ambiguous_suffix_is_rejected_and_names_every_candidate():
+    """Two brains can carry the same claim id. Guessing picks the wrong one."""
+    drafted = refs_outline("01AAAAAAAAAAAAAAAAAAAAAAAA")
+    errors = outlines.validate(drafted, corpus_keys=[KEY_A, KEY_C])
+    assert len(errors) == 1
+    assert "matches 2 keys" in errors[0]
+    assert KEY_A in errors[0]
+    assert KEY_C in errors[0]
+    assert drafted["sections"][0]["corpus_refs"] == ["01AAAAAAAAAAAAAAAAAAAAAAAA"]
+
+
+def test_an_unknown_key_names_the_shape_and_the_closest_match():
+    drafted = refs_outline("knowledge:claim.loop-engineering.01AAAAAAAAAAAAAAAAAAAAAAAB")
+    errors = outlines.validate(drafted, corpus_keys=[KEY_A])
+    assert len(errors) == 1
+    assert "knowledge:claim.<subject>.<ULID>" in errors[0]
+    assert KEY_A in errors[0]
+
+
+def test_an_unknown_key_with_no_near_match_says_so():
+    drafted = refs_outline("made up")
+    errors = outlines.validate(drafted, corpus_keys=[KEY_A])
+    assert "The pack has no key like it." in errors[0]
+
+
+def test_a_partial_ulid_does_not_match_the_middle_of_a_key():
+    """A suffix only counts on a segment boundary, or a short id collides."""
+    assert outlines.resolve_ref("AAAAAAA", [KEY_A]) == (None, [])
+
+
+def test_a_reference_that_is_not_a_string_is_reported():
+    drafted = refs_outline(17)
+    errors = outlines.validate(drafted, corpus_keys=[KEY_A])
+    assert "unknown key 17" in errors[0]
+
+
+def test_the_resume_path_validates_against_the_pack(tmp_path, monkeypatch):
+    """Resume used to call validate with no keys, so it was silently weaker."""
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "corpus").mkdir()
+    (work / "corpus" / "brain-pack.json").write_text(json.dumps({"keys": [KEY_A]}))
+    drafted = refs_outline("01AAAAAAAAAAAAAAAAAAAAAAAA")
+    (work / "outline.json").write_text(json.dumps(drafted))
+    (work / "outline-judged.json").write_text(json.dumps({"passed": True}))
+
+    run = paper.Run(topic="a topic", work_dir=work, turns=object(), state=paper.State())
+    monkeypatch.setattr(paper, "_finish_outline", lambda run, drafted: {"ok": True})
+    assert paper.do_outline(run) == {"ok": True}
+    saved = json.loads((work / "outline.json").read_text())
+    assert saved["sections"][0]["corpus_refs"] == [KEY_A]
+
+
+def test_the_resume_path_rejects_an_unknown_key(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "corpus").mkdir()
+    (work / "corpus" / "brain-pack.json").write_text(json.dumps({"keys": [KEY_A]}))
+    (work / "outline.json").write_text(json.dumps(refs_outline("made up")))
+    (work / "outline-judged.json").write_text(json.dumps({"passed": True}))
+
+    run = paper.Run(topic="a topic", work_dir=work, turns=object(), state=paper.State())
+    with pytest.raises(paper.RunFailed, match="unknown key"):
+        paper.do_outline(run)

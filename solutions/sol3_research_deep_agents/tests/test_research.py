@@ -321,14 +321,27 @@ def test_run_fixture_writes_brief(tmp_path):
     assert "sources" in trace
 
 
+FORBIDDEN = r"^from loops|^import loops|^from solutions|^import solutions|from \.\."
+
+
 def test_no_loops_import():
+    """CLAUDE.md forbids a shared library. Duplication is the point, because a
+    five hour audience should not have to learn an abstraction first.
+
+    Scope matters as much as the pattern. `task setup` builds a `.venv` in
+    this folder, and an unscoped walk reads every installed package, where
+    `from ..` is an ordinary relative import. That made this assertion fail
+    on the dependencies rather than on this folder's own source.
+    """
     import subprocess  # noqa: PLC0415  (sys.path is set by conftest first)
 
-    hit = subprocess.run(
-        ["grep", "-rn", r"^from loops\|^import loops\|^from solutions import", str(ROOT)],
-        text=True,
+    out = subprocess.run(
+        ["grep", "-rnE", FORBIDDEN, "--include=*.py",
+         "--exclude-dir=.venv", "--exclude-dir=.cache", "--exclude-dir=work", "."],
+        cwd=ROOT,
         capture_output=True,
+        text=True,
         check=False,
     )
-    lines = [ln for ln in (hit.stdout or "").splitlines() if "/tests/" not in ln]
-    assert lines == []
+    hits = [line for line in out.stdout.split("\n") if line and "/tests/" not in line]
+    assert not hits, "\n".join(hits)

@@ -19,6 +19,12 @@ from pathlib import Path
 
 from write_scope import WriteScope
 
+# Sonnet class list prices, matching `roles.DEFAULT_MODEL`. LangChain never
+# emits a cost field, so the money exit is dead unless we price the token counts
+# ourselves. These numbers are the estimate the loop stops on, not a bill.
+INPUT_USD_PER_MTOK = 3.0
+OUTPUT_USD_PER_MTOK = 15.0
+
 
 @dataclass
 class DoerResult:
@@ -187,38 +193,84 @@ def has_agent_ai_message(result, agent_name: str) -> bool:
     )
 
 
-def last_usd(result) -> float:
-    """What the run cost, summed from usage metadata. Missing is zero.
+def _usage_usd(usage: dict) -> float:
+    """One message's cost. Vendor dollars first, then priced tokens."""
+    for key in ("total_cost", "total_cost_usd", "cost"):
+        if usage.get(key) is None:
+            continue
+        try:
+            return float(usage[key])
+        except (TypeError, ValueError):
+            continue
+    try:
+        inp = float(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+        out = float(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if inp <= 0 and out <= 0:
+        return 0.0
+    return (inp * INPUT_USD_PER_MTOK + out * OUTPUT_USD_PER_MTOK) / 1_000_000
 
-    Zero, not a guess. A budget built on estimated costs is wrong in whichever
-    direction is least convenient, and this number decides when the loop stops.
+
+def usage_tokens(result) -> tuple[int, int]:
+    """Input and output tokens across the messages of one call."""
+    tokens_in = tokens_out = 0
+    for usage in _usages(result):
+        try:
+            tokens_in += int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+            tokens_out += int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+        except (TypeError, ValueError):
+            continue
+    return tokens_in, tokens_out
+
+
+def _usages(result) -> list[dict]:
+    """Every usage block in a result.
 
     `usage_metadata` is not always a dict. Testing `key in usage` on an object
     raises, and a backend that raises takes the loop down with it.
     """
-    if isinstance(result, dict) and result.get("usd") is not None:
-        try:
-            return float(result["usd"])
-        except (TypeError, ValueError):
-            pass
-    total = 0.0
+    found = []
     for message in _messages(result) or []:
         usage = (
             message.get("usage_metadata")
             if isinstance(message, dict)
             else getattr(message, "usage_metadata", None)
         )
-        if not isinstance(usage, dict):
-            continue
-        for key in ("total_cost", "total_cost_usd", "cost"):
-            if usage.get(key) is None:
-                continue
-            try:
-                total += float(usage[key])
-            except (TypeError, ValueError):
-                continue
-            break
-    return total
+        if isinstance(usage, dict):
+            found.append(usage)
+    return found
+
+
+def cost_is_reported(result) -> bool:
+    """True when something in the result carried a real number to work from.
+
+    The caller logs `usd: null` when this is false. A bare 0.0 there reads as a
+    free call and hides exactly the defect this function exists to catch.
+    """
+    if isinstance(result, dict) and result.get("usd") is not None:
+        return True
+    return any(_usage_usd(usage) or usage for usage in _usages(result))
+
+
+def last_usd(result) -> float:
+    """What the run cost.
+
+    LangChain `usage_metadata` carries token counts and no cost field, so the
+    three key lookup this used to do always summed to zero. A zero total makes
+    the money exit unreachable: `paper.py` reads `max_usd - total_cost_usd` and
+    never sees the gap close, so a run can only ever stop on turns or on the
+    rubric. Price the tokens when the vendor gives no dollars.
+
+    The prices are Sonnet class list prices, matching `roles.DEFAULT_MODEL`.
+    They are the estimate the loop stops on, not a bill.
+    """
+    if isinstance(result, dict) and result.get("usd") is not None:
+        try:
+            return float(result["usd"])
+        except (TypeError, ValueError):
+            pass
+    return sum(_usage_usd(usage) for usage in _usages(result))
 
 
 class DeepAgentsBackend(Backend):
