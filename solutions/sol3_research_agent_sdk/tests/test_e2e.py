@@ -159,3 +159,44 @@ def test_the_fixture_turns_can_use_a_scenario_specific_corpus(work, tmp_path):
     chosen = loop.pick_turns("fixture", work, None, None, fixture)
 
     assert chosen.backend.path == fixture
+
+
+# -- the live preflight -----------------------------------------------------
+#
+# The first live attempt spent $1.07 failing outline rubric rows that cannot
+# pass against an empty pack, because the clone had no sibling brain (#308).
+
+
+def no_brain(monkeypatch, tmp_path):
+    monkeypatch.setattr(e2e.corpus, "DEFAULT_BRAIN", tmp_path / "absent" / "knowledge")
+    monkeypatch.setattr(e2e.corpus, "_git_toplevel", lambda start: tmp_path / "clone")
+    monkeypatch.delenv("RESEARCH_BRAINS", raising=False)
+
+
+def test_the_live_preflight_refuses_a_run_with_no_brain(monkeypatch, tmp_path):
+    no_brain(monkeypatch, tmp_path)
+    missing = e2e._corpus_check(None, allow_thin=False)
+    assert len(missing) == 1
+    assert "no corpus brain was found" in missing[0]
+    assert "sibling of this folder" in missing[0]
+    assert "ALLOW_THIN_CORPUS" in missing[0]
+
+
+def test_allow_thin_corpus_lets_the_run_start_anyway(monkeypatch, tmp_path):
+    no_brain(monkeypatch, tmp_path)
+    assert e2e._corpus_check(None, allow_thin=True) == []
+
+
+def test_a_named_brain_that_exists_satisfies_the_preflight(monkeypatch, tmp_path):
+    no_brain(monkeypatch, tmp_path)
+    brain = tmp_path / "brain"
+    brain.mkdir()
+    assert e2e._corpus_check(str(brain), allow_thin=False) == []
+
+
+def test_the_fixture_lane_never_asks_for_a_brain(monkeypatch, tmp_path):
+    """`task e2e-fixture` reads a recorded corpus. A missing brain is not its problem."""
+    no_brain(monkeypatch, tmp_path)
+    monkeypatch.setattr(e2e.diagrams, "available", lambda: True)
+    monkeypatch.setattr(e2e.shutil, "which", lambda binary: "/usr/bin/imagen")
+    assert e2e._preflight("fixture") == []

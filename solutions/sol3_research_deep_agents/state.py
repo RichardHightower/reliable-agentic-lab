@@ -90,6 +90,11 @@ class PaperState:
     search_calls: int = 0
     total_retries: int = 0
     backend: str = ""
+    # Live position, written every call rather than every stage. A stage that
+    # makes six calls used to leave the checkpoint stale for the whole stage,
+    # so a killed run reported the role before the one it died in.
+    current_role: str = ""
+    last_turn: dict | None = None
     stages: dict[str, StageStatus] = field(default_factory=dict)
     artifacts: dict[str, str] = field(default_factory=dict)
 
@@ -195,6 +200,8 @@ class PaperState:
             "search_calls": self.search_calls,
             "total_retries": self.total_retries,
             "backend": self.backend,
+            "current_role": self.current_role,
+            "last_turn": self.last_turn,
             "stages": {name: entry.to_dict() for name, entry in self.stages.items()},
             "artifacts": self.artifacts,
         }
@@ -234,6 +241,8 @@ class PaperState:
             search_calls=int(data.get("search_calls", 0)),
             total_retries=int(data.get("total_retries", 0)),
             backend=data.get("backend", ""),
+            current_role=data.get("current_role", ""),
+            last_turn=data.get("last_turn"),
             artifacts=dict(data.get("artifacts", {})),
         )
         for name, entry in data.get("stages", {}).items():

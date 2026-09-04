@@ -71,7 +71,9 @@ class FakeClaudeAgentOptions:
 @dataclass
 class FakeResultMessage:
     result: str = ""
-    total_cost_usd: float = 0.0
+    # `None`, not 0.0. The real SDK omits the field on messages that carry no
+    # cost, and a fake that always supplies one hides a dead cost path.
+    total_cost_usd: float | None = None
     structured_output: dict | None = None
     is_error: bool = False
     subtype: str = "success"

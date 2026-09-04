@@ -299,6 +299,70 @@ def test_the_state_file_records_every_phase(work, turns, no_renderer):
     assert state["slug"] == "a-topic"
 
 
+def test_every_turn_flushes_the_state_and_appends_a_turn_row(work, turns):
+    """A ten-minute phase looked dead because state only landed on a boundary."""
+    run = make_run(work, turns())
+    run.state.phase = "outline"
+    run.spend(0.42, role="outliner", elapsed_s=612.0, events=9)
+
+    state = json.loads(paper.State.path(work).read_text())
+    assert state["phase"] == "outline"
+    assert state["role"] == "outliner"
+    assert state["turns"] == 1
+    assert state["last_turn"]["elapsed_s"] == 612.0
+
+    rows = [
+        json.loads(line)
+        for line in (Path(work) / ".harness" / "turns.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == 1
+    assert rows[0]["role"] == "outliner"
+    assert rows[0]["phase"] == "outline"
+    assert rows[0]["usd"] == 0.42
+    assert rows[0]["total_usd"] == 0.42
+
+
+def test_a_turn_with_no_cost_logs_null_not_zero(work, turns):
+    """A zero reads as a free turn and hides a missing cost path (#303)."""
+    run = make_run(work, turns())
+    run.spend(None, role="outliner")
+    row = json.loads((Path(work) / ".harness" / "turns.jsonl").read_text().splitlines()[0])
+    assert row["usd"] is None
+    assert run.state.total_usd == 0.0
+
+
+def test_the_turn_log_is_append_only(work, turns):
+    run = make_run(work, turns())
+    for _ in range(3):
+        run.spend(0.1, role="researcher")
+    rows = (Path(work) / ".harness" / "turns.jsonl").read_text().splitlines()
+    assert [json.loads(row)["turn"] for row in rows] == [1, 2, 3]
+
+
+def test_a_run_killed_mid_phase_names_the_phase_it_died_in(work, turns, no_renderer):
+    """The report must not name the last phase that finished cleanly."""
+
+    def die(run):
+        raise RuntimeError("killed")
+
+    original = [entry for entry in paper.LINEAR]
+    patched = [
+        (number, name, output, die if name == "outline" else phase)
+        for number, name, output, phase in original
+    ]
+    paper.LINEAR[:] = patched
+    try:
+        with pytest.raises(RuntimeError, match="killed"):
+            paper.run_paper(make_run(work, turns()))
+    finally:
+        paper.LINEAR[:] = original
+
+    state = json.loads(paper.State.path(work).read_text())
+    assert state["phase"] == "outline"
+    assert state["phases"]["outline"]["status"] == "failed"
+    assert state["query_timeout_s"] >= 900
+
+
 def test_the_state_write_is_atomic(work, turns):
     """A kill between the open and the write must leave the previous state."""
     state = paper.State.load_or_new(work, "a topic")

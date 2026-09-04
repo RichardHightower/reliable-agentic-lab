@@ -58,6 +58,24 @@ Aim for six to ten sections, including Abstract, Introduction, a mechanism or
 architecture section, tradeoffs, Limitations, and References. A white paper
 earns its length with evidence under those headings, not with extra headings.
 
+Every section is an object, never a bare heading string. Write four fields:
+
+| Field | What it holds |
+| --- | --- |
+| `heading` | the section title |
+| `objective` | what a reader knows after this section that they did not know before it |
+| `abstract` | two or three sentences saying what the section argues |
+| `key_questions` | at least two of your own questions, the ones this section answers |
+
+The objective must not restate the heading. "Explain exit conditions." fails a
+deterministic check, because it says nothing the heading did not already say.
+Write the point instead: "Show the three exits this loop checks, in order, and
+why the order is that one."
+
+Put each question under the section that answers it. Nothing reassigns them
+later, and a question filed under an unrelated heading is what the plan judge
+reports as a systematic mismatch.
+
 ## Diagrams
 
 List concepts under `diagrams` only when a picture carries what prose cannot: a
@@ -79,7 +97,14 @@ Write `plan.json` exactly:
   "questions": [
     {"id": "q1", "subject": "short-slug", "question": "...", "check": "...", "important": true}
   ],
-  "sections": ["Abstract", "Introduction", "...", "Limitations"],
+  "sections": [
+    {
+      "heading": "Exit conditions",
+      "objective": "Show the three exits this loop checks, in order, and why the order is that one.",
+      "abstract": "Done, then cost, then max turns. Each one is arithmetic, not a model's opinion.",
+      "key_questions": ["what three exits does the loop check", "what happens when none is set"]
+    }
+  ],
   "diagrams": [{"name": "kebab-name", "kind": "mermaid", "shows": "..."}],
   "notes": ["what the second brain already knew, or that it was absent"]
 }

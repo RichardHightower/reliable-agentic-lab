@@ -22,6 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import corpus
 import diagrams
 import roles
 
@@ -208,12 +209,69 @@ def validate(work_dir: Path, *, max_usd: float | None = None) -> dict:
     return report
 
 
+def _telemetry(work_dir: Path) -> dict:
+    """What the run recorded about itself, for the report.
+
+    Read from the state file rather than recomputed, so a crashed run still
+    reports the phase it died in and the turn that was in flight.
+    """
+    state_path = Path(work_dir) / ".harness" / "state.json"
+    turns_path = Path(work_dir) / ".harness" / "turns.jsonl"
+    found = {"turns_log": str(turns_path) if turns_path.is_file() else None}
+    try:
+        state = _read_json(state_path)
+    except (OSError, ValueError):
+        return found
+    corpus_phase = (state.get("phases") or {}).get("corpus_pack") or {}
+    found.update(
+        {
+            "phase": state.get("phase") or "",
+            "role": state.get("role") or "",
+            "turns": state.get("turns", 0),
+            "total_usd": state.get("total_usd", 0.0),
+            "query_timeout_s": state.get("query_timeout_s", 0),
+            "last_turn": state.get("last_turn"),
+            "phases": state.get("phases") or {},
+            "brain": corpus_phase.get("brains"),
+            "corpus_hits": corpus_phase.get("hits"),
+            "corpus_thin": corpus_phase.get("corpus_thin"),
+        }
+    )
+    return found
+
+
 def _write_report(work_dir: Path, report: dict) -> None:
+    work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    report = {**report, **_telemetry(work_dir)}
     (work_dir / "e2e-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
 
-def _preflight(mode: str) -> list[str]:
+def _corpus_check(brain: str | None, allow_thin: bool) -> list[str]:
+    """Refuse a live run whose corpus pack would be empty.
+
+    The default brain is a sibling of the primary checkout. A clone, a
+    worktree, or a scratchpad has no such sibling, and the outline rubric has
+    rows that cannot pass against an empty pack. The first live attempt spent
+    $1.07 discovering that.
+    """
+    candidates = corpus.brain_candidates(
+        extra=[brain] if brain else None,
+        env=os.environ.get("RESEARCH_BRAINS"),
+    )
+    if any(row["exists"] for row in candidates) or allow_thin:
+        return []
+    tried = "\n".join(f"  {row['source']}: {row['path']}" for row in candidates)
+    return [
+        "no corpus brain was found, so the pack would be empty and the outline "
+        "rubric cannot pass. Tried:\n"
+        f"{tried}\n"
+        "  Pass BRAIN=<path>, set RESEARCH_BRAINS, or set ALLOW_THIN_CORPUS=1 "
+        "to run anyway."
+    ]
+
+
+def _preflight(mode: str, *, brain: str | None = None, allow_thin: bool = False) -> list[str]:
     missing = []
     if not diagrams.available():
         missing.append("the diagram renderer is absent; run `task setup`")
@@ -224,13 +282,41 @@ def _preflight(mode: str) -> list[str]:
             missing.append("ANTHROPIC_API_KEY is not set")
         if not roles.environment_value("PERPLEXITY_API_KEY"):
             missing.append("PERPLEXITY_API_KEY is not set")
+        missing.extend(_corpus_check(brain, allow_thin))
     return missing
 
 
-def run(mode: str, out: Path, python: str, max_usd: float) -> int:
+def _stream(command: list[str], log_path: Path) -> int:
+    """Run the child, tee its output to the terminal and to `log_path`."""
+    with log_path.open("w", encoding="utf-8") as log:
+        proc = subprocess.Popen(
+            command,
+            cwd=FOLDER,
+            text=True,
+            bufsize=1,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            log.write(line)
+            log.flush()
+        return proc.wait()
+
+
+def run(
+    mode: str,
+    out: Path,
+    python: str,
+    max_usd: float,
+    *,
+    brain: str | None = None,
+    allow_thin: bool = False,
+) -> int:
     """Run one acceptance lane, then leave a report even when it fails."""
     out = Path(out)
-    missing = _preflight(mode)
+    missing = _preflight(mode, brain=brain, allow_thin=allow_thin)
     if missing:
         report = {"work_dir": str(out), "passed": False, "failures": missing, "mode": mode}
         _write_report(out, report)
@@ -240,6 +326,9 @@ def run(mode: str, out: Path, python: str, max_usd: float) -> int:
 
     command = [
         python,
+        # Unbuffered, so the stream below is live rather than a batch that
+        # arrives when the run is already over.
+        "-u",
         str(FOLDER / "loop.py"),
         "--topic",
         TOPIC,
@@ -262,20 +351,32 @@ def run(mode: str, out: Path, python: str, max_usd: float) -> int:
         command += ["--backend", "fixture", "--fixture", str(FIXTURE)]
     else:
         command += ["--backend", "agent", "--brief-file", str(SCENARIO)]
+    if brain:
+        command += ["--brain", brain]
 
-    proc = subprocess.run(command, cwd=FOLDER, text=True, capture_output=True, check=False)
-    report = validate(out, max_usd=max_usd) if proc.returncode == 0 else {
+    # Stream, never capture. `capture_output=True` shows the operator nothing
+    # until the process exits, which made a ten-minute phase look like a hang no
+    # amount of unbuffered output inside the child could fix.
+    out.mkdir(parents=True, exist_ok=True)
+    log_path = out / "run.log"
+    returncode = _stream(command, log_path)
+
+    report = validate(out, max_usd=max_usd) if returncode == 0 else {
         "work_dir": str(out),
         "passed": False,
-        "failures": [f"loop.py exited {proc.returncode}"],
+        "failures": [f"loop.py exited {returncode}"],
     }
+    try:
+        tail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+    except OSError:
+        tail = ""
     report.update(
         {
             "mode": mode,
             "command": command,
-            "returncode": proc.returncode,
-            "stdout_tail": proc.stdout[-4000:],
-            "stderr_tail": proc.stderr[-4000:],
+            "returncode": returncode,
+            "run_log": str(log_path),
+            "log_tail": tail,
         }
     )
     _write_report(out, report)
@@ -292,9 +393,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--python", default=sys.executable, help="Python interpreter that owns the runtime")
     parser.add_argument("--max-usd", type=float, default=10.0, help="hard cap for this acceptance run")
+    parser.add_argument("--brain", help="a corpus root to read, in place of the discovered default")
+    parser.add_argument(
+        "--allow-thin-corpus",
+        action="store_true",
+        help="run the live lane with no brain. The outline rubric will probably fail.",
+    )
     args = parser.parse_args(argv)
     out = args.out or FOLDER / "work" / f"e2e-loop-engineering-{args.mode}"
-    return run(args.mode, out, args.python, args.max_usd)
+    return run(
+        args.mode,
+        out,
+        args.python,
+        args.max_usd,
+        brain=args.brain,
+        allow_thin=args.allow_thin_corpus or bool(os.environ.get("ALLOW_THIN_CORPUS")),
+    )
 
 
 if __name__ == "__main__":

@@ -165,6 +165,24 @@ def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys
 
     for section in sections:
         sid = section.get("id")
+        heading = str(section.get("heading") or "").strip()
+        objective = str(section.get("objective") or "").strip()
+        abstract = str(section.get("abstract") or "").strip()
+        if not objective:
+            errors.append(
+                f"section {sid!r} has no objective. Say what a reader knows after "
+                "this section that they did not know before it."
+            )
+        elif _echoes(objective, heading):
+            errors.append(
+                f"section {sid!r} has an objective that restates its heading: "
+                f"{objective!r}. Name the point the section makes, not its title."
+            )
+        if not abstract:
+            errors.append(
+                f"section {sid!r} has no abstract. Two or three sentences saying "
+                "what this section argues."
+            )
         questions = section.get("key_questions") or []
         if not isinstance(questions, list):
             errors.append(f"section {sid!r} key_questions must be an array of strings")
@@ -360,26 +378,63 @@ def to_markdown(outline: dict) -> str:
     return "\n".join(lines)
 
 
+SKIP_HEADINGS = {"abstract", "references", "summary", "bibliography"}
+
+
+def _question_text(question) -> str:
+    if isinstance(question, dict):
+        return str(question.get("question") or question.get("text") or "").strip()
+    return str(question or "").strip()
+
+
+def _as_entry(item) -> dict:
+    """One plan section, with the four fields this lift reads."""
+    if not isinstance(item, dict):
+        return {"heading": str(item or "").strip(), "objective": "", "abstract": "",
+                "key_questions": []}
+    return {
+        "heading": str(item.get("heading") or "").strip(),
+        "objective": str(item.get("objective") or "").strip(),
+        "abstract": str(item.get("abstract") or "").strip(),
+        "key_questions": list(item.get("key_questions") or []),
+    }
+
+
+def _echoes(objective: str, heading: str) -> bool:
+    """True when the objective says nothing the heading did not already say.
+
+    `Explain <heading>.` was what the old lift wrote for every section, and the
+    plan judge called the result systematically mismatched. Stripping the filler
+    words catches the same sentence however it is punctuated.
+    """
+    if not heading:
+        return False
+    words = re.sub(r"[^a-z0-9 ]+", " ", objective.lower())
+    stripped = re.sub(
+        r"^(this section |explain |describe |cover |discuss |introduce )+", "", words
+    ).strip()
+    return stripped == re.sub(r"[^a-z0-9 ]+", " ", heading.lower()).strip()
+
+
 def outline_from_plan(plan: dict, *, word_target_total: int = 2000) -> dict:
     """Lift a Deep Agents plan.json into the outline schema.
 
-    This port still plans as questions-plus-headings. The stamp, the judge,
-    and `--approve` need the two-level outline the SDK port already uses.
-    Python does the lift so the planner fixture and the later stages keep
-    working. A later pass can have the planner return this shape directly.
+    The planner writes each section's objective, abstract, and key questions,
+    so this carries them through. It used to fill them from the heading, which
+    produced `Explain <heading>.` for every section and assigned questions to
+    headings by round robin. The live plan judge scored 0.35 three times with
+    "Section headings and their key_questions/claims are systematically
+    mismatched." The round robin was that complaint.
+
+    A section that arrives as a plain string still parses, with empty fields.
+    `validate` then names the missing field, which beats a crash on an old plan.
     """
-    headings = [item for item in (plan.get("sections") or []) if isinstance(item, str)]
-    skip = {"abstract", "references", "summary", "bibliography"}
-    body = [heading for heading in headings if heading.strip().lower() not in skip] or [
-        "The approach"
-    ]
-    questions = list(plan.get("questions") or [])
+    entries = [_as_entry(item) for item in (plan.get("sections") or [])]
+    body = [entry for entry in entries if entry["heading"].lower() not in SKIP_HEADINGS]
+    if not body:
+        body = [{"heading": "The approach", "objective": "", "abstract": "", "key_questions": []}]
     figures = list(plan.get("diagrams") or [])
-    buckets: dict[str, list] = {heading: [] for heading in body}
-    for index, question in enumerate(questions):
-        text = question.get("question") if isinstance(question, dict) else str(question)
-        if text:
-            buckets[body[index % len(body)]].append(text)
+    questions = list(plan.get("questions") or [])
     per = max(80, int(word_target_total) // max(len(body), 1))
     leftover_figures = list(figures)
     checks = [
@@ -388,11 +443,10 @@ def outline_from_plan(plan: dict, *, word_target_total: int = 2000) -> dict:
         if isinstance(item, dict) and item.get("check")
     ]
     sections = []
-    for index, heading in enumerate(body):
+    for index, entry in enumerate(body):
+        heading = entry["heading"]
         sid = re.sub(r"[^a-z0-9]+", "-", heading.lower()).strip("-") or f"s{index + 1}"
-        qs = buckets[heading] or [f"what is {heading.lower()}", f"what fails in {heading.lower()}"]
-        if len(qs) < 2:
-            qs.append(f"why {heading.lower()} matters")
+        qs = [text for text in map(_question_text, entry["key_questions"]) if text]
         figs = []
         if leftover_figures:
             figure = leftover_figures.pop(0)
@@ -407,8 +461,8 @@ def outline_from_plan(plan: dict, *, word_target_total: int = 2000) -> dict:
             {
                 "id": sid,
                 "heading": heading,
-                "objective": f"Explain {heading}.",
-                "abstract": f"This section covers {heading} with mechanism and limit.",
+                "objective": entry["objective"],
+                "abstract": entry["abstract"],
                 "key_questions": qs[:4],
                 "claims_to_support": (checks[index : index + 1] or ["A structural claim holds."]),
                 "required_evidence": ["a primary specification"],

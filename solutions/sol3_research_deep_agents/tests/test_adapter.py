@@ -151,9 +151,35 @@ def test_cost_sums_across_messages():
 
 
 def test_missing_usage_metadata_is_zero_not_a_guess():
-    """A budget built on estimated costs is wrong in whichever direction is
-    least convenient, and this number decides when the loop stops."""
+    """Nothing to price and nothing reported. The caller logs null, not zero."""
     assert adapter.last_usd(state(ai("no metadata"))) == 0.0
+    assert adapter.cost_is_reported(state(ai("no metadata"))) is False
+
+
+def test_token_counts_are_priced_when_there_is_no_cost_field():
+    """LangChain emits tokens, not dollars. Price them or the money exit never fires."""
+    result = state(ai("x", {"input_tokens": 1_000_000, "output_tokens": 1_000_000}))
+    assert adapter.last_usd(result) == adapter.INPUT_USD_PER_MTOK + adapter.OUTPUT_USD_PER_MTOK
+    assert adapter.cost_is_reported(result) is True
+
+
+def test_a_cost_key_wins_over_token_counts():
+    result = state(ai("x", {"cost": 0.5, "input_tokens": 1_000_000, "output_tokens": 1_000_000}))
+    assert adapter.last_usd(result) == 0.5
+
+
+def test_priced_tokens_sum_across_messages():
+    result = state(
+        ai("first", {"input_tokens": 1_000_000, "output_tokens": 0}),
+        ai("second", {"input_tokens": 0, "output_tokens": 1_000_000}),
+    )
+    assert adapter.last_usd(result) == adapter.INPUT_USD_PER_MTOK + adapter.OUTPUT_USD_PER_MTOK
+
+
+def test_token_counts_come_back_for_the_turn_log():
+    result = state(ai("x", {"input_tokens": 120, "output_tokens": 40}))
+    assert adapter.usage_tokens(result) == (120, 40)
+    assert adapter.usage_tokens(state(ai("x"))) == (0, 0)
 
 
 def test_a_non_dict_usage_metadata_does_not_raise():
