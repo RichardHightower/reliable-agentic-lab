@@ -572,17 +572,34 @@ class Paper:
                     return self._escalate(name, decision.reason, str(failure))
                 previous = signature
                 extra = gates.retry_instruction(decision, list(signature)) + "\n" + str(failure)
-                if name == "review":
-                    revised = self.stage_revise(extra)
-                    self.say(f"  revise     {revised.summary}")
-                elif name == "assemble" and "cited" in signature:
-                    # This gate names a mechanical, local defect.  Send only
-                    # the offending sections back to the maker; a full rewrite
-                    # would risk the reviewer-approved prose just to add a
-                    # traceable source marker.
-                    targets = self._uncited_section_headings()
-                    revised = self.stage_revise(extra, targets=targets or None)
-                    self.say(f"  revise     {revised.summary}")
+                # A failure inside the recovery path is a failure of this
+                # attempt, never a crash. These two calls run from inside the
+                # handler that is already handling a GateFailed, so an
+                # unguarded raise here escapes both and kills the run with a
+                # traceback: no attempt accounting, no escalation, no reason
+                # for the operator to read. One model turn returning prose
+                # instead of JSON used to end a run that had cleared every
+                # stage up to review.
+                try:
+                    if name == "review":
+                        revised = self.stage_revise(extra)
+                        self.say(f"  revise     {revised.summary}")
+                    elif name == "assemble" and "cited" in signature:
+                        # This gate names a mechanical, local defect.  Send only
+                        # the offending sections back to the maker; a full
+                        # rewrite would risk the reviewer-approved prose just to
+                        # add a traceable source marker.
+                        targets = self._uncited_section_headings()
+                        revised = self.stage_revise(extra, targets=targets or None)
+                        self.say(f"  revise     {revised.summary}")
+                except GateFailed as revise_failure:
+                    self.say(
+                        f"  revise     failed: "
+                        f"{', '.join(revise_failure.signature) or 'unknown'}"
+                    )
+                    previous = revise_failure.signature
+                    extra = f"{extra}\nThe revision also failed: {revise_failure}"
+                    self.state.save()
                 continue
 
             self.state.mark_complete(name, cost_usd=result.usd, **result.artifacts)

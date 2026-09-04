@@ -791,3 +791,32 @@ def test_a_cut_outline_reaches_the_judge_whole_and_labelled(run_dir, stub_render
     assert body["sections"], "at least one section always survives"
     assert "are withheld for length" in prompt
     assert "do not fail completeness for the withheld" in prompt
+
+
+def test_a_gate_failure_during_revise_escalates_instead_of_crashing(run_dir, stub_renderer):
+    """`stage_revise` runs from inside the handler that is already handling a
+    GateFailed. An unguarded raise there escapes both and kills the run with a
+    traceback: no attempt accounting, no escalation, no reason to read.
+
+    One model turn returning prose instead of JSON ended a live run that had
+    cleared every stage up to review (#325).
+    """
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    run = build_run(run_dir, runner=Recorder(FIXTURES / "replies.json"))
+
+    def always_fails(extra, targets=None):
+        raise stages.GateFailed("the reply held no JSON object.", ("not_json",))
+
+    def review_never_passes(extra):
+        raise stages.GateFailed("the reviewer failed these rows. no_filler", ("no_filler",))
+
+    run.stage_revise = always_fails
+    run.stage_review = review_never_passes
+
+    code = run.run()
+
+    assert code == 2, "a run that cannot revise must escalate, not raise"
+    failed = [name for name, entry in run.state.stages.items() if entry.status == pstate.FAILED]
+    assert "review" in failed, failed
+    assert (Path(run_dir) / pstate.STATE_FILE).exists(), "state must survive for --resume"
