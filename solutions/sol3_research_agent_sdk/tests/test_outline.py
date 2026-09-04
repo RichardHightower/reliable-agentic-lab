@@ -327,7 +327,7 @@ def test_outline_coverage_passes_when_questions_are_named():
     assert score.passed, score.report()
 
 
-def test_a_chart_is_skipped_with_a_log(work, turns):
+def test_a_chart_with_no_data_is_skipped(work, turns):
     class Charted(turns):
         def outline(self, topic, prior_art, budget=None, note="", brief=""):
             drafted = super().outline(topic, prior_art, budget, note, brief)
@@ -353,9 +353,53 @@ def test_a_chart_is_skipped_with_a_log(work, turns):
     paper.do_outline(run)
     paper.do_research(run)
     paper.verify(run)
-    meta = paper.diagram(run)
-    assert meta["skipped_charts"] == 1
-    assert any("skipping chart" in str(item) for item in notes)
+    meta = paper.do_charts(run)
+    assert meta["skipped"] == 1
+    assert meta["rendered"] == 0
+    assert any("no data" in str(item) for item in notes)
+    assert not any("not rendered in this phase" in str(item) for item in notes)
+
+
+def test_a_chart_with_data_is_rendered(work, turns):
+    class Charted(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            drafted["sections"][0]["figures"] = [
+                {
+                    "name": "three-exits",
+                    "kind": "chart",
+                    "shows": "the three exits",
+                    "data_needed": "exit order",
+                }
+            ]
+            return drafted
+
+    notes = []
+    run = make_run(work, Charted(), log=notes.append)
+    paper.prior_art(run)
+    paper.do_outline(run)
+    data = run.file("data")
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "three-exits.json").write_text(
+        json.dumps(
+            {
+                "name": "three-exits",
+                "columns": ["exit", "order"],
+                "rows": [["done", 1], ["cost", 2], ["max turns", 3]],
+                "source": "paper.py",
+            }
+        ),
+        encoding="utf-8",
+    )
+    meta = paper.do_charts(run)
+    assert meta["rendered"] == 1
+    assert meta["skipped"] == 0
+    png = run.file("charts") / "three-exits.png"
+    sidecar = run.file("charts") / "three-exits.json"
+    assert png.exists() and png.stat().st_size > 32
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert len(payload["values"]) == 3
+    assert payload["values"][0]["y"] == 1
 
 
 def test_an_invalid_outline_is_retried_with_the_validator_text(work, turns):

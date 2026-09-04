@@ -18,13 +18,14 @@ on disk as a knowledge bundle.
 - `section_judge`
 - `ledger`
 - `diagrammer`
+- `chartist`
 - `writer`
 - `judge`
 
 `roleplan.py` is where that list lives. Read it there. Do not restate a scope in
 this folder.
 
-Ten roles is more than the other three loops need, and each one is here
+Eleven roles is more than the other three loops need, and each one is here
 because it holds a tool set or a context no other role holds. The researcher
 searches and cannot write, because a searcher that can write can edit the
 evidence to fit the paper. The verifier searches again and is never shown the
@@ -34,7 +35,7 @@ not a second opinion.
 Exactly one role writes. The writer holds `Write`, scoped to `sections/**`,
 because a section is long prose and returning it through a message invites
 truncation. Everything else comes back as schema-checked structured output that
-Python writes: the outline, the diagram source, the verdicts. Two of those roles
+Python writes: the outline, the diagram source, the chart spec, the verdicts. Two of those roles
 held `Write` in an earlier draft and never used it, which made the hook below
 decorative.
 
@@ -146,7 +147,7 @@ task test
 
 Those checks need no SDK, no API key, and no network. They assert:
 
-- The cast is ten roles, and the judge writes nothing in every loop.
+- The cast is eleven roles, and the judge writes nothing in every loop.
 - Every tool the cast holds appears in `allowed_tools`, so no role is denied a
   tool its own list grants.
 - One writer, one hook, and no reader can write through it.

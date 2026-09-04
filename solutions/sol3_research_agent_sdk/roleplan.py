@@ -4,7 +4,7 @@ Three runtimes enforce write scope three different ways. Plain Python uses a
 missing method. The Claude Agent SDK uses a tool list and a PreToolUse hook.
 Deep Agents uses a per-subagent tool list. All three read the same table.
 
-Four loops, four casts. The research cast is the largest, at ten roles. A
+Four loops, four casts. The research cast is the largest, at eleven roles. A
 role earns a line here by holding a tool set no other role holds, never by
 being another name for work an existing role already does. The researcher
 searches and cannot write. The verifier searches a second time and never sees
@@ -54,6 +54,7 @@ LOOPS = {
         "section_judge",
         "ledger",
         "diagrammer",
+        "chartist",
         "writer",
         "judge",
     ),
@@ -75,6 +76,7 @@ PURPOSE = {
     "section_judge": "Grades one section against its outline row. Holds no write path.",
     "ledger": "Extracts the section's facts and terms. Python appends the ledger. Holds no write path.",
     "diagrammer": "Draws the figures and runs the renderer. Writes diagrams only.",
+    "chartist": "Returns a chart spec from data tables. Python renders. Holds no write path.",
     "writer": "Assembles the paper from verified claims. Writes prose only.",
     "judge": "Scores the attempt. Reads reports and the diff. Holds no write path.",
 }
@@ -90,6 +92,7 @@ READERS = (
     "outline_judge",
     "section_judge",
     "ledger",
+    "chartist",
 )
 
 TOOLS_FOR_READER = {
@@ -101,6 +104,7 @@ TOOLS_FOR_READER = {
     "outline_judge": READ_TOOLS,
     "section_judge": READ_TOOLS,
     "ledger": ("Read",),
+    "chartist": READ_TOOLS,
 }
 
 
@@ -173,6 +177,13 @@ OVERRIDES: dict[tuple[str, str], dict] = {
         # shell has widened its blast radius from "a wrong paper" to "anything
         # this machine can run", and it bought nothing: the renderer is one
         # subprocess with fixed arguments.
+        "tools": READ_TOOLS,
+        "allow": (),
+        "deny": ("**",),
+        "model": "claude-sonnet-5",
+    },
+    ("research", "chartist"): {
+        "purpose": "Returns a chart spec. Python renders the pixels. Holds no write path.",
         "tools": READ_TOOLS,
         "allow": (),
         "deny": ("**",),

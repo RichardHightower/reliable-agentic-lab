@@ -24,6 +24,7 @@ def test_the_table_prints_as_a_subprocess_with_no_sdk():
     )
     assert proc.returncode == 0, proc.stderr
     assert "diagrammer" in proc.stdout
+    assert "chartist          no" in proc.stdout
     assert "judge             no" in proc.stdout
 
 

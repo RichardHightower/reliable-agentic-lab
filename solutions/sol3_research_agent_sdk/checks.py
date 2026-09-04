@@ -15,6 +15,7 @@ what needs judgement.
     ledger_consistency a number or term disagrees with itself, or a forward ref is open
     corpus_marked a model-written corpus brief is labelled in the reference list
     gaps_stated   a coverage gap is named in Limitations
+    charted       every plotted value is in the corpus and the caption cites
 
 `complete` looks redundant and is not. Without it a paper with no body at all
 passes every other row: the abstract is exempt from `cited`, the reference list
@@ -337,13 +338,18 @@ def unresolved_images(body: str, base_dir: Path | str | None) -> list[str]:
 
 
 def non_publication_images(body: str) -> list[str]:
-    """Diagram publication accepts only imagen-diagrams' named PNG output."""
-    return [
-        target
-        for target in IMAGE.findall(body)
-        if not target.startswith(("http://", "https://", "data:"))
-        and not target.endswith("_imagen.png")
-    ]
+    """Diagrams must be judged `*_imagen.png`. Charts live under `charts/`."""
+    bad = []
+    for target in IMAGE.findall(body):
+        if target.startswith(("http://", "https://", "data:")):
+            continue
+        if target.endswith("_imagen.png"):
+            continue
+        normalized = target.replace("\\", "/")
+        if normalized.startswith("charts/") or "/charts/" in normalized:
+            continue
+        bad.append(target)
+    return bad
 
 
 def doctrine_failure(body: str) -> str | None:
@@ -415,6 +421,7 @@ def check(
     ledger=None,
     gaps=None,
     claims=None,
+    charts=None,
 ) -> Score:
     """Score a paper. No model call."""
     checks: list[Check] = []
@@ -563,6 +570,21 @@ def check(
                 "every coverage gap is named"
                 if not unnamed
                 else f"unnamed gaps: {unnamed[:2]}",
+            )
+        )
+
+    rendered = [c for c in (charts or []) if c.get("path")]
+    if rendered:
+        import charts as charts_mod  # noqa: PLC0415
+
+        failures = charts_mod.charted_failures(body, rendered, corpus or "")
+        checks.append(
+            Check(
+                "charted",
+                not failures,
+                "every plotted value is in the corpus"
+                if not failures
+                else f"charted: {failures[:3]}",
             )
         )
 

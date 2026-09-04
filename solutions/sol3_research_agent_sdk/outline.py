@@ -244,7 +244,7 @@ def questions(outline: dict) -> list[dict]:
 
 
 def diagrams(outline: dict) -> list[dict]:
-    """kind: diagram only. Charts are skipped by the caller with a log line."""
+    """kind: diagram only. Charts are a separate phase."""
     out = []
     for section in outline.get("sections") or []:
         for figure in section.get("figures") or []:

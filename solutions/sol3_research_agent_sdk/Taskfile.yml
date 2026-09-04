@@ -62,6 +62,7 @@ tasks:
       - '{{.PY}} publish.py --demo'
       - '{{.PY}} rkc.py --demo'
       - '{{.PY}} corpus.py --demo'
+      - '{{.PY}} charts.py --demo'
 
   # -- setup ----------------------------------------------------------------
 
