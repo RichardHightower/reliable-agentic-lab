@@ -340,6 +340,24 @@ def test_the_live_edit_prompt_carries_the_writers_contract(work):
     assert "knowledge:claim.x.01M0" not in prompt, prompt
 
 
+def test_the_judge_prompt_carries_the_number_to_source_map(work):
+    """The judge received raw findings while everyone else held numbered claims.
+
+    It saw `[2]` in the body with nothing saying which source `2` is, so it
+    could not check one against the other.
+    """
+    bound = [
+        {"id": "s1-f1", "text": "A claim.", "source_url": "https://a.invalid",
+         "number": 2, "status": "verified"},
+    ]
+    backend = Backend([result(output="{}", structured={"passed": True})])
+    turn = t.SdkTurns(backend=backend, work_dir=work)
+    turn.judge_section({"id": "s1", "heading": "One"}, "A claim [2].", bound)
+    prompt = backend.prompts[0][0]
+    assert '"number": 2' in prompt, prompt
+    assert "https://a.invalid" in prompt, prompt
+
+
 def test_structured_output_is_the_happy_path(work):
     backend = Backend([result(output="", structured={"verdict": "supports"})])
     turn = t.SdkTurns(backend=backend, work_dir=work)

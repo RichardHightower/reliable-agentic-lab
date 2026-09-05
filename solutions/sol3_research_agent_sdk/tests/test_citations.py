@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import checks
 import citations
 import paper
 import pytest
@@ -136,3 +137,264 @@ def test_a_bare_number_never_binds_to_a_finding_id_that_ends_in_it(work):
         findings=[{"id": "s1-1", "number": 7}],
     )
     assert "grounded" in score.signature(), "a bare number matched an id suffix"
+
+
+# -- the production wiring, not the helpers (#355 review finding 6) -----------
+
+
+def test_the_whole_pipeline_binds_every_citation_to_its_own_source(work, turns, monkeypatch):
+    """`do_sections` to reload to `assemble` to `check`, reading `paper.md`.
+
+    Every helper test in this file calls `_claims_for_writer` or `_numbered`
+    directly, so both of these mutations left all 489 tests green:
+
+        bound = _claims_for_writer(findings, verdicts, sid)   # drop `numbers`
+        _numbered(claims, planned)                            # drop `run.work_dir`
+
+    The helpers were tested. The wiring was not. This test fails under either.
+    """
+    import diagrams  # noqa: PLC0415
+
+    monkeypatch.setattr(diagrams, "available", lambda: False)
+    seen: list[dict] = []
+
+    a, b, c = "https://a.invalid", "https://b.invalid", "https://c.invalid"
+    # Section one meets A then B. Section two meets B, then a new source C,
+    # then A. Local numbering would tell section two to cite B as [1], and the
+    # paper's [1] is A.
+    # `d` is contradicted, so it reserves number 1 and never reaches the paper.
+    # The reference list then legitimately starts at 2, and rebuilding the
+    # numbers from assembly order would hand A the number the registry gave D.
+    d = "https://d.invalid"
+    per_section = {
+        "s1": [(d, "s1-f0"), (a, "s1-f1"), (b, "s1-f2")],
+        "s2": [(b, "s2-f1"), (c, "s2-f2"), (a, "s2-f3")],
+    }
+    contradicted = {"s1-f0"}
+
+    class Numbered(turns):
+        """A writer that cites exactly the numbers it was handed."""
+
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            base = super().outline(topic, prior_art, budget, note, brief)
+            first = base["sections"][0]
+            half = int(first.get("word_target") or 400) // 2
+            base["sections"] = [
+                {**first, "id": "s1", "heading": "One", "word_target": half},
+                {**first, "id": "s2", "heading": "Two", "word_target": half,
+                 "depends_on": ["s1"]},
+            ]
+            return base
+
+        def research_section(self, section, questions, note=""):
+            rows = per_section[section["id"]]
+            return {
+                "findings": [
+                    {
+                        "id": fid,
+                        "claim": f"A claim from {url}.",
+                        "quote": "",
+                        "answers_question": checks.question_text(questions[0]) if questions else "",
+                        "source": {"kind": "web", "url_or_path": url, "tier": 1},
+                    }
+                    for url, fid in rows
+                ],
+                "queries": [],
+            }
+
+        def write(self, section, claims, figures, notes, path=""):
+            seen.append({c["id"]: (c["number"], c["source_url"]) for c in claims})
+            named = ". ".join(section.get("key_questions") or ["what failed"])
+            cites = " ".join(f"Claim {c['id']} [{c['number']}]." for c in claims)
+            body = f"{named} {cites} " + ("word " * max(int(section.get("word_target") or 0), 60))
+            target = Path(self.root) / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
+            return body
+
+        def judge_section(self, section, body, findings, note=""):
+            return {"passed": True, "failed_rows": []}
+
+        def verify(self, claim):
+            if "d.invalid" in claim:
+                return {"verdict": "contradicts", "source_url": "", "excerpt": "no"}
+            return {"verdict": "supports", "source_url": "", "excerpt": "yes"}
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=Numbered(root=work),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=False,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    # A resume: a second process, holding nothing from the first.
+    reloaded = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=Numbered(root=work),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=False,
+    )
+    paper.diagram(reloaded)
+    paper.assemble(reloaded)
+
+    body = (Path(work) / "paper.md").read_text(encoding="utf-8")
+    biblio = {}
+    for line in body.splitlines():
+        parts = line.split(". ", 1)
+        if len(parts) == 2 and parts[0].strip().isdigit():
+            biblio[int(parts[0])] = parts[1].strip()
+    assert biblio, body
+
+    registry = citations.load(work)
+    assert registry, "the run wrote no registry"
+
+    # Every marker in the paper resolves to the source its claim came from.
+    import re  # noqa: PLC0415
+
+    assert registry[d] < registry[a], "the contradicted source did not take a number first"
+    assert d not in biblio.values(), "a contradicted source reached the reference list"
+
+    checked = 0
+    for section_map in seen:
+        for cid, (number, url) in section_map.items():
+            match = re.search(rf"Claim {re.escape(cid)} \[(\d+)\]", body)
+            if not match:
+                continue
+            printed = int(match.group(1))
+            assert printed in biblio, f"{cid} cites [{printed}], absent from the reference list"
+            assert biblio[printed] == url, (
+                f"{cid} cites [{printed}], which the paper gives to {biblio[printed]}, not {url}"
+            )
+            assert registry[url] == printed, f"{cid} cites [{printed}], registry says {registry[url]}"
+            checked += 1
+    assert checked >= 2, f"only {checked} citations reached the paper"
+
+
+def test_a_sparse_reference_list_is_not_read_as_a_fabrication():
+    """A contradicted source or a resume leaves a legitimate gap.
+
+    Positional numbering assumed `1..len(sources)`, so with reference 2 alone
+    on the page it rejected `[2]` and accepted `[1]`. Wrong twice.
+    """
+    assert checks.ungrounded_citations("A [2].", ["https://b.invalid"], [2]) == []
+    assert checks.ungrounded_citations("A [1].", ["https://b.invalid"], [2]) == ["[1]"]
+    # With no map, the old positional rule stands for a caller that has none.
+    assert checks.ungrounded_citations("A [1].", ["https://b.invalid"]) == []
+
+
+def test_the_paper_gate_accepts_a_sparse_reference_list():
+    """The `grounded` row inside `check`, not the helper it calls.
+
+    Testing `ungrounded_citations` alone left the `check` call site free to
+    keep passing positional numbers.
+    """
+    body = (
+        "# T\n\n## Abstract\n\nAn abstract.\n\n## One\n\n"
+        "A grounded claim [2].\n\n## References\n\n2. https://b.invalid\n"
+    )
+    with_map = checks.check(body, ["https://b.invalid"], reference_numbers=[2])
+    assert "grounded" not in with_map.signature(), with_map.to_dict()["checks"]
+    ungrounded = checks.check(body.replace("[2]", "[1]"), ["https://b.invalid"],
+                              reference_numbers=[2])
+    assert "grounded" in ungrounded.signature()
+
+
+def test_the_rendered_pdf_keeps_the_reference_numbers(tmp_path):
+    """The renderer, not the parser. Reverting the renderer left the parser test green."""
+    import pdf_report  # noqa: PLC0415
+
+    story = pdf_report.markdown_blocks(
+        "1. step one\n2. step two\n\n## References\n\n1. https://a.invalid\n"
+        "3. https://c.invalid\n"
+    )
+    rendered = []
+    for block in story:
+        if block.kind == "numbered":
+            rendered.append(block.level)
+    assert rendered == [1, 2, 1, 3], rendered
+
+    source = tmp_path / "paper.md"
+    source.write_text(
+        "# T\n\n## Abstract\n\nAn abstract.\n\n## References\n\n"
+        "1. https://a.invalid\n3. https://c.invalid\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "paper.pdf"
+    pdf_report.build_pdf(source, out)
+
+    # The delivered PDF, not the parser. Reverting the renderer left a
+    # parser-only assertion green.
+    from pypdf import PdfReader  # noqa: PLC0415
+
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(str(out)).pages)
+    assert "3." in text, text
+    assert "2. https://c.invalid" not in text, "the renderer renumbered the reference list"
+
+
+def test_assembly_refuses_a_source_the_registry_never_numbered(work):
+    """Falling back for one url gave two sources the same number, silently."""
+    citations.register(work, ["https://a.invalid"])
+    registry = citations.load(work)
+    (Path(work) / ".harness" / citations.FILE).write_text(
+        json.dumps({"sources": {"https://a.invalid": 2}}), encoding="utf-8"
+    )
+    claims = [
+        {"id": "s1-f1", "text": "A", "source_url": "https://a.invalid",
+         "section": "s1", "status": "verified"},
+        {"id": "s1-f2", "text": "B", "source_url": "https://b.invalid",
+         "section": "s1", "status": "verified"},
+    ]
+    with pytest.raises(paper.RunFailed, match="never registered"):
+        paper._numbered(claims, {"sections": [{"id": "s1"}]}, work)
+
+
+def test_a_registry_number_must_be_a_positive_integer(work):
+    path = Path(work) / ".harness"
+    path.mkdir(parents=True, exist_ok=True)
+    for bad in ({"https://a.invalid": True}, {"https://a.invalid": 1.5},
+                {"https://a.invalid": 0}, {"https://a.invalid": -1}):
+        (path / citations.FILE).write_text(json.dumps({"sources": bad}), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="positive integer"):
+            citations.load(work)
+
+
+def test_two_sources_may_not_share_a_number(work):
+    path = Path(work) / ".harness"
+    path.mkdir(parents=True, exist_ok=True)
+    (path / citations.FILE).write_text(
+        json.dumps({"sources": {"https://a.invalid": 1, "https://b.invalid": 1}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="one number to two sources"):
+        citations.load(work)
+
+
+def test_the_pdf_keeps_the_number_the_reference_list_carries():
+    """The parser discarded the label and the renderer invented a counter.
+
+    References numbered 1 and 3 became 1 and 2, so every `[3]` in the prose
+    pointed at the wrong entry. A numbered list earlier in the paper moved the
+    counter too.
+    """
+    import pdf_report  # noqa: PLC0415
+
+    blocks = pdf_report.markdown_blocks(
+        "1. step one\n2. step two\n\n## References\n\n1. https://a.invalid\n"
+        "3. https://c.invalid\n"
+    )
+    labels = [(b.level, b.text) for b in blocks if b.kind == "numbered"]
+    assert labels == [
+        (1, "step one"),
+        (2, "step two"),
+        (1, "https://a.invalid"),
+        (3, "https://c.invalid"),
+    ], labels

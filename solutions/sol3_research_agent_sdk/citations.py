@@ -43,7 +43,25 @@ def load(work_dir) -> dict[str, int]:
             f"{path} is unreadable. Every section already written cites numbers "
             "from it. Repair the file or start a fresh work directory."
         ) from None
-    return {str(url): int(number) for url, number in (payload.get("sources") or {}).items()}
+    raw = payload.get("sources") or {}
+    out: dict[str, int] = {}
+    for url, number in raw.items():
+        # A bool is an int in Python, and a float coerces without complaint.
+        # Either one in this file means the map was written by something other
+        # than `register`, and a wrong number is worse than a missing one.
+        if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+            raise RuntimeError(
+                f"{path} gives {url!r} the number {number!r}. A citation number "
+                "is a positive integer. Repair the file or start a fresh work "
+                "directory."
+            )
+        out[str(url)] = number
+    if len(set(out.values())) != len(out):
+        raise RuntimeError(
+            f"{path} gives one number to two sources. Every section already "
+            "written cites from it. Repair the file or start a fresh run."
+        )
+    return out
 
 
 def register(work_dir, urls) -> dict[str, int]:
@@ -63,9 +81,13 @@ def register(work_dir, urls) -> dict[str, int]:
         next_number += 1
     path = _path(work_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    # Atomic. A half-written registry on a kill is a run whose written sections
+    # cite numbers the file no longer agrees with.
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(
         json.dumps({"sources": known}, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    temp.replace(path)
     return known
 
 

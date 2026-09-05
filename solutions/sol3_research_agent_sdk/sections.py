@@ -496,10 +496,12 @@ def run_section(run, section: dict) -> dict:
                 path.write_text(existing, encoding="utf-8")
             else:
                 # Attempt one produced nothing and there is no draft to keep.
-                # Leave the file absent rather than writing a blank one, so the
-                # next attempt writes instead of editing emptiness, and
-                # `_section_done` does not read this as finished work.
+                # The writer holds `Write` on this path, so it can have landed
+                # a whitespace file before answering with nothing. Remove it:
+                # the next attempt reads a whitespace file as a draft and edits
+                # emptiness, and `_section_done` reads it as finished work.
                 run.log(f"    {sid}: the writer produced nothing on the first attempt.")
+                path.unlink(missing_ok=True)
         body = path.read_text(encoding="utf-8") if path.exists() else ""
         last_score = checks.section_check(
             body,
@@ -525,7 +527,11 @@ def run_section(run, section: dict) -> dict:
             # way it no longer was.
             judge_note = last_score.report() if last_score else ""
             try:
-                last_verdict = run.turns.judge_section(section, body, findings, note=judge_note)
+                # The numbered claims, the same list the writer and the
+                # deterministic check hold. Handing the judge the raw findings
+                # showed it numeric citations with no map from number to
+                # source, so it could not check one against the other.
+                last_verdict = run.turns.judge_section(section, body, bound, note=judge_note)
             except (TurnFailed, Escalate):
                 last_verdict = {
                     "passed": False,

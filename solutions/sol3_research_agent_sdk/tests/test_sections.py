@@ -747,6 +747,40 @@ def _integrity_loop(work, turns_cls, **kwargs):
     return recorder
 
 
+def test_the_stage_hands_the_judge_the_numbered_claims(work, turns):
+    """The judge received raw findings while everyone else held `bound`.
+
+    A turn-level test stayed green when the stage reverted to `findings`,
+    because it passed `bound` in by hand.
+    """
+    seen: list[list] = []
+
+    class Watch(_Integrity):
+        def judge_section(self, section, body, findings, note=""):
+            seen.append(findings)
+            return super().judge_section(section, body, findings, note=note)
+
+    recorder = Watch(turns(root=work), work)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+    assert seen, "the judge never ran"
+    handed = seen[0]
+    assert handed, "the judge got an empty evidence list"
+    assert all("number" in item for item in handed), handed
+    assert all("source_url" in item for item in handed), handed
+
+
 def test_a_repair_reaches_the_judge_and_the_ledger_in_order(work, turns):
     recorder = _integrity_loop(work, turns)
     kinds = [c[0] for c in recorder.calls]
@@ -836,8 +870,42 @@ def test_an_empty_first_write_leaves_no_file_to_mistake_for_finished_work(work, 
     with contextlib.suppress(Escalate, paper.RunFailed):
         paper.do_sections(run)
     path = Path(work) / "sections" / "s1.md"
-    assert not path.exists() or not path.read_text().strip(), path.read_text()
+    # Strict absence. A whitespace file is truthy as `existing` on the next
+    # attempt, so the loop edits emptiness, and `_section_done` reads it as
+    # finished work.
+    assert not path.exists(), repr(path.read_text())
     assert [c[0] for c in recorder.calls].count("write") > 1, recorder.calls
+
+
+def test_a_writer_that_lands_whitespace_and_answers_with_nothing_leaves_no_file(work, turns):
+    """The writer holds `Write` on this path and can land `" \n"` before failing."""
+
+    class Whitespace(_Integrity):
+        def write(self, section, claims, figures, notes, path=""):
+            self.calls.append(("write", section["id"]))
+            target = Path(self.root) / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(" \n", encoding="utf-8")
+            return ""
+
+    recorder = Whitespace(turns(root=work), work)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+    path = Path(work) / "sections" / "s1.md"
+    assert not path.exists(), repr(path.read_text())
+    # Every attempt writes. None of them edits whitespace.
+    assert "edit_section" not in [c[0] for c in recorder.calls], recorder.calls
 
 
 def test_a_judge_that_never_ran_is_not_recorded_as_a_judge_that_agreed(work, turns):

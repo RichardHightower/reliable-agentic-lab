@@ -182,9 +182,21 @@ def strip_em_dashes(text: str) -> str:
     return masked
 
 
-def ungrounded_citations(body: str, sources: list[str]) -> list[str]:
-    """Citation markers that point at a source which was never retrieved."""
-    available = set(range(1, len(sources) + 1))
+def ungrounded_citations(body: str, sources: list[str], numbers=None) -> list[str]:
+    """Citation markers that point at a source the paper never listed.
+
+    `numbers` is the run's citation registry, the numbers the reference list
+    actually carries. Deriving them from position assumed `1..len(sources)`,
+    and the registry is append-only, so a contradicted source or a resume
+    leaves a legitimate gap. With reference 2 alone on the page, position
+    rejected `[2]` and accepted `[1]`, which is the wrong answer twice.
+
+    `None` keeps the positional rule for a caller that has no registry.
+    """
+    if numbers:
+        available = {int(n) for n in numbers if int(n) > 0}
+    else:
+        available = set(range(1, len(sources) + 1))
     used = {int(marker) for marker in CITATION.findall(_mask_code(body))}
     return [f"[{n}]" for n in sorted(used - available)]
 
@@ -422,6 +434,7 @@ def sections_without_prose(body: str, min_words: int) -> list[str]:
 def check(
     body: str,
     sources: list[str],
+    reference_numbers: list[int] | None = None,
     *,
     base_dir: Path | str | None = None,
     corpus: str = "",
@@ -488,7 +501,7 @@ def check(
             )
         )
 
-    dangling = ungrounded_citations(body, sources)
+    dangling = ungrounded_citations(body, sources, reference_numbers)
     checks.append(
         Check(
             "grounded",
