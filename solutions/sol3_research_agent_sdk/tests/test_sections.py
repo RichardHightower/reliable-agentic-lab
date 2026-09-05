@@ -969,6 +969,122 @@ def test_a_section_that_is_not_moving_still_stalls_at_two(work, turns):
     assert "not converging" in recorder.escalation, recorder.escalation
 
 
+def test_clip_drops_trailing_paragraphs_and_never_a_heading():
+    body = "\n\n".join(f"Paragraph {n} " + "word " * 30 + "[1]." for n in range(10))
+    clipped = checks.clip_to_ceiling(body, 250)
+    assert checks.word_count(clipped) <= 250
+    assert clipped.startswith("Paragraph 0")
+    # A heading is never the thing dropped.
+    headed = "## One\n\n" + "word " * 100 + "[1].\n\n## Two"
+    assert checks.clip_to_ceiling(headed, 50) == headed
+
+
+def test_the_last_attempt_clips_a_small_overrun_instead_of_escalating(work, turns):
+    """Run 13: eight writer turns, 215 words shed, the last one 24 over.
+
+    A paragraph is not a model call. The clip runs only on the final attempt,
+    only when `length` is the sole red row, and only if the re-check passes.
+    """
+
+    class Creeping(_Recorder):
+        def write(self, section, claims, figures, notes, path=""):
+            self.calls.append(("write", section["id"]))
+            return self._body(section)
+
+        def edit_section(self, section, body, verdict, path="", note="", claims=None):
+            self.calls.append(("edit_section", section["id"]))
+            return self._body(section)
+
+        def judge_section(self, section, body, findings, note=""):
+            self.calls.append(("judge_section", section["id"]))
+            return {"passed": True, "failed_rows": []}
+
+        def _body(self, section):
+            # Over the ceiling every attempt, closing a little each time so the
+            # stall holds off, in three paragraphs with the overrun in the last.
+            attempt = len(self.calls)
+            target = int(section.get("word_target") or 0)
+            named = ". ".join(section.get("key_questions") or [])
+            high = int(target * 1.25)
+            body = (
+                f"{named} [1]. " + ("word " * (high - 30)) + "\n\n"
+                "Middle [1]. " + ("word " * 10) + "\n\n"
+                "Tail [1]. " + ("word " * max(60 - 15 * attempt, 22))
+            )
+            path = Path(self.root) / f"sections/{section['id']}.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            return body
+
+    recorder = Creeping(turns(root=work), work)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)  # must not raise
+    assert "judge_section" in [c[0] for c in recorder.calls], recorder.calls
+    check = json.loads((Path(work) / "knowledge" / "s1" / "section-check.json").read_text())
+    assert check["signature"] == [], check
+    body = (Path(work) / "sections" / "s1.md").read_text()
+    assert "Tail" not in body, "the overrun paragraph survived"
+
+
+def test_a_clip_that_would_break_coverage_is_discarded(work, turns):
+    """The re-check guards the clip. A cut that removes a key question stays out."""
+
+    class Backloaded(_Recorder):
+        def write(self, section, claims, figures, notes, path=""):
+            self.calls.append(("write", section["id"]))
+            return self._body(section)
+
+        def edit_section(self, section, body, verdict, path="", note="", claims=None):
+            self.calls.append(("edit_section", section["id"]))
+            return self._body(section)
+
+        def _body(self, section):
+            # The lead alone fits under the ceiling. The tail carries the only
+            # mention of the key questions and pushes the total over. Dropping
+            # the tail satisfies `length` and breaks `coverage`, which is the
+            # exact trade the re-check must refuse. Creeps so the stall holds.
+            attempt = len(self.calls)
+            target = int(section.get("word_target") or 0)
+            named = ". ".join(section.get("key_questions") or [])
+            body = (
+                "Lead [1]. " + "word " * (int(target * 1.25) - 20) + "\n\n"
+                + f"{named} [1]. " + "word " * max(60 - 15 * attempt, 30)
+            )
+            path = Path(self.root) / f"sections/{section['id']}.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            return body
+
+    recorder = Backloaded(turns(root=work), work)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+    body = (Path(work) / "sections" / "s1.md").read_text()
+    for question in (json.loads((Path(work) / "outline.approved.json").read_text())
+                     .get("outline", {}).get("sections", [{}])[0].get("key_questions") or []):
+        assert checks.question_text(question).lower() in body.lower(), "the clip removed a key question"
+
+
 def test_the_stage_hands_the_judge_the_numbered_claims(work, turns):
     """The judge received raw findings while everyone else held `bound`.
 

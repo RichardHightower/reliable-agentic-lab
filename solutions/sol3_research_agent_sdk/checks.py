@@ -809,6 +809,32 @@ def unstated_gaps(body: str, gaps: list) -> list[str]:
     return unnamed
 
 
+def clip_to_ceiling(body: str, ceiling: int) -> str:
+    """Drop trailing paragraphs until the body fits under `ceiling` words.
+
+    Eight writer turns at about a dollar each shed 215 words, roughly 36 per
+    attempt, and the last one landed 24 words over. An editor told to make the
+    fewest edits takes that literally. Twenty-four words is a paragraph, and a
+    paragraph is not a model call.
+
+    Paragraph boundaries only, from the end, never a heading. A cut that lands
+    under the floor or removes a heading returns the body unchanged, so the
+    caller sees no change and does not pretend it clipped.
+    """
+    paragraphs = _paragraphs(body)
+    if word_count(body) <= ceiling or len(paragraphs) < 2:
+        return body
+    kept = list(paragraphs)
+    while len(kept) > 1 and word_count("\n\n".join(kept)) > ceiling:
+        last = kept[-1]
+        if last.startswith("#"):
+            return body
+        kept.pop()
+    if word_count("\n\n".join(kept)) > ceiling:
+        return body
+    return "\n\n".join(kept) + "\n"
+
+
 def _paragraphs(body: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
 

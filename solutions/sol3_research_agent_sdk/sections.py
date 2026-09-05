@@ -536,14 +536,42 @@ def run_section(run, section: dict) -> dict:
                 run.log(f"    {sid}: the writer produced nothing on the first attempt.")
                 path.unlink(missing_ok=True)
         body = path.read_text(encoding="utf-8") if path.exists() else ""
-        last_score = checks.section_check(
-            body,
-            section=section,
-            findings=bound,
-            evidence=_evidence_blob(run, sid, findings),
-            word_target=int(section.get("word_target") or 0),
-            figures_given=figures,
-        )
+        target_words = int(section.get("word_target") or 0)
+
+        def _check(text: str):
+            return checks.section_check(
+                text,
+                section=section,
+                findings=bound,
+                evidence=_evidence_blob(run, sid, findings),
+                word_target=target_words,
+                figures_given=figures,
+            )
+
+        last_score = _check(body)
+        # On the last attempt, when `length` is the only deterministic row
+        # still red and the section is over, drop trailing paragraphs instead
+        # of escalating. Eight writer turns shed 215 words at about 36 per
+        # attempt and the last one landed 24 over. A paragraph is not a model
+        # call. The clip is kept only when the re-check stays green: a cut that
+        # removes a key question or a cited paragraph is discarded.
+        if (
+            iteration == SECTION_ATTEMPTS
+            and last_score.signature() == ("length",)
+            and target_words
+            and checks.word_count(body) > int(1.25 * target_words)
+        ):
+            clipped = checks.clip_to_ceiling(body, int(1.25 * target_words))
+            if clipped != body:
+                rescored = _check(clipped)
+                if rescored.passed:
+                    run.log(
+                        f"    {sid}: clipped {checks.word_count(body) - checks.word_count(clipped)} "
+                        "words on the last attempt instead of escalating"
+                    )
+                    path.write_text(clipped, encoding="utf-8")
+                    body = clipped
+                    last_score = rescored
         (knowledge / "section-check.json").write_text(
             json.dumps(last_score.to_dict(), indent=2) + "\n", encoding="utf-8"
         )
