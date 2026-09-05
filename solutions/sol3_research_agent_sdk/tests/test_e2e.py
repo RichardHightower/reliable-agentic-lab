@@ -151,6 +151,17 @@ def test_a_figure_with_the_wrong_theme_is_not_publication_ready(tmp_path):
     assert any("publication theme" in failure for failure in report["failures"])
 
 
+def test_the_live_lane_commissions_the_paper_profile(tmp_path):
+    """Six claims in a 2000-word demo cannot clear word_budget. The live lane
+    uses `--profile paper` so each section has room for the claims e2e asks for.
+    The fixture lane stays on demo: its recorded paper is that size (#328).
+    """
+    live = e2e._child_command("live", tmp_path / "live", "python3", 30.0)
+    assert live[live.index("--profile") + 1] == "paper"
+    fixture = e2e._child_command("fixture", tmp_path / "fix", "python3", 1.0)
+    assert "--profile" not in fixture
+
+
 def test_the_fixture_turns_can_use_a_scenario_specific_corpus(work, tmp_path):
     fixture = tmp_path / "scenario.json"
     fixture.write_text("{}")
