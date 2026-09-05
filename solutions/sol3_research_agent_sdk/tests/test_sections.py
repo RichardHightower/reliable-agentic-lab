@@ -94,6 +94,33 @@ def test_section_check_cited_does_not_take_a_markdown_link_for_a_citation():
     assert "cited" in score.signature()
 
 
+def test_section_check_style_allows_a_question_used_as_a_heading():
+    """The outline hands the writer key questions. `coverage` demands it name them.
+
+    The writer names them as subheadings. This row read those as rhetoric, so
+    removing the heading failed `coverage` and keeping it failed `style`. A
+    live run escalated on that with seven of eight checks passing.
+    """
+    body = (
+        "### What failed, and under what load?\n\n"
+        "what failed is named [1]. " + ("word " * 40) + "\n\n"
+        "### Why did it fail?\n\n"
+        "why it failed is named [1]. " + ("word " * 40)
+    )
+    score = checks.section_check(
+        body, section=_section(word_target=80), findings=[{"number": 1}]
+    )
+    assert "style" not in score.signature(), score.to_dict()["checks"]
+
+
+def test_section_check_style_still_fails_a_rhetorical_question_in_prose():
+    body = "The thing failed [1]. " + ("word " * 80) + "\n\nBut is that the whole story?"
+    score = checks.section_check(
+        body, section=_section(word_target=80), findings=[{"number": 1}]
+    )
+    assert "style" in score.signature()
+
+
 def test_section_check_cited_fails_on_an_uncited_specific():
     body = "Python 3.13 shipped. " + ("word " * 80)
     score = checks.section_check(
