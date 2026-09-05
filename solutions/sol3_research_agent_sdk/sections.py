@@ -34,7 +34,29 @@ LIVE_SEARCHES_PER_SECTION = 8
 # rows, and had one left when the judge finally named `evidence_matches` and
 # `voice`. The outline gate gets fourteen rounds by comparison and converges.
 # The default stays 3, so a run changes nothing unless it opts in.
-SECTION_ATTEMPTS = int(os.environ.get("SOL3_SECTION_ATTEMPTS", "3"))
+def _attempts(raw: str) -> int:
+    """The attempt budget, refused rather than silently useless.
+
+    `range(1, 0 + 1)` is empty, so a zero or negative budget skipped the write
+    loop entirely. `last_verdict` then stayed at its optimistic default, the
+    ledger step still ran, and a section nobody wrote or checked was stamped
+    as finished work. A resume with a retained draft made that permanent.
+    """
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"SOL3_SECTION_ATTEMPTS must be a positive integer, not {raw!r}"
+        ) from None
+    if value < 1:
+        raise ValueError(
+            f"SOL3_SECTION_ATTEMPTS must be at least 1, not {value}. A budget of "
+            "zero writes no section and stamps it anyway."
+        )
+    return value
+
+
+SECTION_ATTEMPTS = _attempts(os.environ.get("SOL3_SECTION_ATTEMPTS", "3"))
 
 # Named slots, in priority order. Cut from the tail of a slot, never from a
 # higher-priority slot, and log what went.
