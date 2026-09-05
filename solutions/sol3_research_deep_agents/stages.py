@@ -49,6 +49,7 @@ CITATION = re.compile(r"\[(\d+)\]")
 STAGE_ORDER = (
     "corpus",
     "plan",
+    "sources",
     "search",
     "verify",
     "outline",
@@ -211,7 +212,13 @@ def normalize_plan(plan: dict) -> dict:
 # -- 2. search ------------------------------------------------------------
 
 
-def record_findings(ledger: evidence.Ledger, question: dict, reply: dict) -> evidence.Finding:
+def record_findings(
+    ledger: evidence.Ledger,
+    question: dict,
+    reply: dict,
+    *,
+    seed: tuple[str, ...] | None = None,
+) -> evidence.Finding:
     """Turn one researcher reply into source, claim, and finding records.
 
     A claim with no source id is dropped here rather than carried forward. It
@@ -220,7 +227,9 @@ def record_findings(ledger: evidence.Ledger, question: dict, reply: dict) -> evi
     """
     subject = question.get("subject", "topic")
     supplied_urls = [str(item.get("url", "")) for item in reply.get("sources", [])]
-    allowlist = source_policy.merge_allowlist(supplied_urls)
+    allowlist = source_policy.merge_allowlist(
+        supplied_urls, seed=seed if seed is not None else source_policy.SEED_ALLOWLIST
+    )
     source_ids = []
     for item in reply.get("sources", []):
         url = str(item.get("url", "")).strip()
@@ -767,9 +776,16 @@ def assemble(
     return "\n".join(parts).replace("\n\n\n", "\n\n")
 
 
-def assemble_gate(body: str, ledger: evidence.Ledger, charts: list | None = None) -> paper_check.PaperScore:
+def assemble_gate(
+    body: str,
+    ledger: evidence.Ledger,
+    charts: list | None = None,
+    allowed_domains: tuple[str, ...] | None = None,
+) -> paper_check.PaperScore:
     _, urls = numbering(ledger)
-    score = paper_check.check(body, urls, ledger=ledger, charts=charts)
+    score = paper_check.check(
+        body, urls, ledger=ledger, charts=charts, allowed_domains=allowed_domains
+    )
     if not score.passed:
         raise GateFailed(
             "the paper failed its hard gates.\n" + score.report(),

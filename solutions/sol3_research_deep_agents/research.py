@@ -506,6 +506,7 @@ class PerplexityBackend(Backend):
     def __init__(self, config: dict | None = None):
         self.config = config
         self.transport = ""
+        self.allowlist = source_policy.SEED_ALLOWLIST
 
     def available(self) -> bool:
         return bool(os.environ.get("PERPLEXITY_API_KEY"))
@@ -519,8 +520,9 @@ class PerplexityBackend(Backend):
         from mcp_tools import TransportUnavailable, ask_perplexity, search_perplexity  # noqa: PLC0415
 
         try:
-            scout = self._call(search_perplexity, question, source_policy.SEED_ALLOWLIST, reserve)
-            allowlist = source_policy.merge_allowlist(scout.citations)
+            seed = tuple(self.allowlist) or source_policy.SEED_ALLOWLIST
+            scout = self._call(search_perplexity, question, seed, reserve)
+            allowlist = source_policy.merge_allowlist(scout.citations, seed=seed)
             retrieved = self._call(search_perplexity, question, allowlist, reserve)
         except TransportUnavailable as exc:
             return Finding(
@@ -567,6 +569,7 @@ class AnthropicBackend(Backend):
 
     name = "anthropic"
     cost_per_call = 0.02
+    allowlist = source_policy.SEED_ALLOWLIST
 
     def available(self) -> bool:
         return bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -596,7 +599,7 @@ class AnthropicBackend(Backend):
                             "type": "web_search_20260209",
                             "name": "web_search",
                             "max_uses": 1,
-                            "allowed_domains": list(source_policy.provider_domains(source_policy.SEED_ALLOWLIST)),
+                            "allowed_domains": list(source_policy.provider_domains(self.allowlist)),
                         }
                     ],
                 },
@@ -611,7 +614,7 @@ class AnthropicBackend(Backend):
             for block in payload.get("content", [])
             if isinstance(block, dict) and block.get("type") == "text"
         )
-        citations = source_policy.filter_urls(_urls_in(payload), source_policy.SEED_ALLOWLIST)
+        citations = source_policy.filter_urls(_urls_in(payload), self.allowlist)
         return _filtered_finding(question, text, citations, self.name, self.cost_per_call)
 
 
@@ -620,6 +623,7 @@ class OpenAIBackend(Backend):
 
     name = "openai"
     cost_per_call = 0.02
+    allowlist = source_policy.SEED_ALLOWLIST
 
     def available(self) -> bool:
         return bool(os.environ.get("OPENAI_API_KEY"))
@@ -644,7 +648,7 @@ class OpenAIBackend(Backend):
                             "type": "web_search",
                             "filters": {
                                 "allowed_domains": list(
-                                    source_policy.provider_domains(source_policy.SEED_ALLOWLIST)
+                                    source_policy.provider_domains(self.allowlist)
                                 )
                             },
                         }
@@ -660,7 +664,7 @@ class OpenAIBackend(Backend):
         text = str(payload.get("output_text") or "")
         if not text:
             text = "\n".join(_texts_in(payload))
-        citations = source_policy.filter_urls(_urls_in(payload), source_policy.SEED_ALLOWLIST)
+        citations = source_policy.filter_urls(_urls_in(payload), self.allowlist)
         return _filtered_finding(question, text, citations, self.name, self.cost_per_call)
 
 
@@ -768,6 +772,14 @@ class FallbackBackend(Backend):
     def __init__(self, candidates: list[Backend]):
         self.candidates = candidates
         self.last_backend: Backend | None = None
+        self.allowlist = source_policy.SEED_ALLOWLIST
+
+    def set_allowlist(self, allowlist: tuple[str, ...]) -> None:
+        """Push this run's admitted domains onto every candidate that searches."""
+        self.allowlist = allowlist
+        for candidate in self.candidates:
+            if hasattr(candidate, "allowlist"):
+                candidate.allowlist = allowlist
 
     @property
     def active_name(self) -> str:

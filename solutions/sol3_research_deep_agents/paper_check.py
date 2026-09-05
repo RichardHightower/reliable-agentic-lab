@@ -349,6 +349,7 @@ def check(
     min_words: int | None = None,
     min_section_words: int | None = None,
     charts=None,
+    allowed_domains=None,
 ) -> PaperScore:
     """Score a white paper. Every check here is arithmetic."""
     words_needed = MIN_WORDS if min_words is None else min_words
@@ -421,7 +422,11 @@ def check(
     )
 
     urls = list(dict.fromkeys([*sources, *reference_urls(body)]))
-    allowlist = source_policy.merge_allowlist(urls)
+    allowlist = (
+        tuple(allowed_domains)
+        if allowed_domains is not None
+        else source_policy.merge_allowlist(urls)
+    )
     blocked = source_policy.unallowed_urls(urls, allowlist)
     checks.append(
         Check(
