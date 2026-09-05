@@ -39,6 +39,7 @@ Plus the research record that produced them, as an RKC knowledge bundle under
 | outliner | read tools | nothing |
 | outline_judge | read tools | nothing |
 | outline_editor | read tools | nothing |
+| source_librarian | read tools | nothing |
 | researcher | read tools, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
 | verifier | `Read`, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
 | section_judge | read tools | nothing |

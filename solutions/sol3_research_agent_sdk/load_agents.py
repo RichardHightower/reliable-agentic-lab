@@ -29,6 +29,9 @@ AGENTS = PLUGIN / "agents"
 DEFAULT_MAX_TURNS = 12
 
 
+import source_policy  # noqa: E402
+
+
 def _schema(properties: dict, required: list[str]) -> dict:
     return {
         "type": "json_schema",
@@ -144,6 +147,29 @@ _ISSUE_SCHEMA = _schema(
     },
     ["section", "rule", "description"],
 )["schema"]
+
+# The enum is the wall's first gate. A closed set here means the model cannot
+# invent `blog` or `cable_news`, and `source_policy.admit` drops anything that
+# still arrives with a type outside it.
+SOURCE_ALLOWLIST_SCHEMA = _schema(
+    {
+        "domains": {
+            "type": "array",
+            "items": _schema(
+                {
+                    "host": {"type": "string"},
+                    "org_type": {
+                        "type": "string",
+                        "enum": list(source_policy.ORG_TYPES),
+                    },
+                    "why": {"type": "string"},
+                },
+                ["host", "org_type", "why"],
+            )["schema"],
+        }
+    },
+    ["domains"],
+)
 
 OUTLINE_VERDICT_SCHEMA = _schema(
     {

@@ -227,27 +227,39 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
    questions, and truncating that to four questions left a paper with two
    sections and five orphaned headings. An outliner that knows the ceiling
    writes a whole paper under it.
-3. **Sections.** For each approved section, in outline order: ask the
+3. **Sources.** One turn names this topic's search domains, and Python admits
+   them. The provider takes twenty domains for the whole run, and the seed is
+   vendor documentation, which is right for a paper about those vendors and
+   close to useless for one about oncology or monetary policy. The
+   `source_librarian` holds no search tool, because searching to decide where
+   to search lets its own first results pick the allowlist, and no write tool,
+   because Python owns the admission. `source_policy.admit` drops an invented
+   `org_type`, anything on the denylist, every top level domain but `.gov`,
+   `.edu`, and `.int`, and everything past twenty. Writes
+   `corpus/source_allowlist.json` with what was proposed, dropped, and
+   admitted. A failed or thin proposal keeps the seed, so the offline lane and
+   a dead model still run.
+4. **Sections.** For each approved section, in outline order: ask the
    section's key questions, search the corpus first, fill unanswered
    questions once, verify independently, write the section, run the
    section check, grade it, and append a ledger entry. Writes
    `knowledge/<id>/findings.json`, `sections/<id>.md`, and
    `paper_ledger.json`. A finished section is skipped on resume.
    Research for a section runs once; only that section's write retries.
-4. **Diagram.** The diagrammer returns the source, Python renders it and runs
+5. **Diagram.** The diagrammer returns the source, Python renders it and runs
    the fidelity judge, and a miss goes back to the diagrammer as a list of what
    the image lost. Three attempts, then keep the closest image and record the
    miss.
-5. **Assemble.** Stitch the sections and append the reference list, in Python.
+6. **Assemble.** Stitch the sections and append the reference list, in Python.
    Asking a model to re-emit the whole paper to join it is how a paper loses a
    section between two calls.
-6. **Check.** Deterministic rows: sources, complete, outline_coverage, grounded,
+7. **Check.** Deterministic rows: sources, complete, outline_coverage, grounded,
    cited, sourced, images, style, and, on a paper run, has_body and length.
    Length is hard at 2000 words, whatever the profile commissioned. No model
    votes here.
-7. **Review.** The judge scores the rows a script cannot, including `depth`,
+8. **Review.** The judge scores the rows a script cannot, including `depth`,
    and its verdict is a row in the failure signature rather than a separate veto.
-8. **Publish.** On request, and only after the paper passes.
+9. **Publish.** On request, and only after the paper passes.
 
 Then the knowledge bundle is written, whatever the gate said. A run that
 escalated still found sources and checked claims, and throwing that away means

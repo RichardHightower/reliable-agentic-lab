@@ -50,6 +50,7 @@ import gates
 import outline as outlines
 import publish as publisher
 import research
+import source_policy
 import rkc
 import sections as section_loop
 from turns import Escalate, TurnFailed, slugify
@@ -208,6 +209,10 @@ class Run:
     should_publish: bool = False
     require_approval: bool = False
     resume: bool = False
+    # This run's admitted search domains. The `sources` phase sets it; until
+    # then the seed applies, so a phase test that never runs that phase still
+    # searches something.
+    allowed_domains: tuple = source_policy.SEED_ALLOWLIST
     ingest_brain: Path | None = None
     # The workshop entry point enables these hard gates.  Keeping synthetic
     # phase tests opt-in lets them exercise one phase at a time without having
@@ -897,6 +902,50 @@ def do_charts(run: Run) -> dict:
     return {"rendered": len(rendered), "skipped": len(skipped)}
 
 
+def source_allowlist(run: Run) -> dict:
+    """Pick this run's search domains, once, before any paid search.
+
+    The provider takes twenty domains for the whole run. The seed is vendor
+    documentation, which is right for a paper about those vendors and close to
+    useless for one about oncology or monetary policy. The librarian proposes
+    this topic's twenty and `source_policy.admit` decides.
+
+    It runs after the outline because the section headings are the facets, and
+    before research because every later search uses the result.
+
+    A failure here is a note, never a stop. The seed still works.
+    """
+    drafted = outlines.load_approved(run.read_json("outline.approved.json"))
+    headings = [section.get("heading") for section in drafted.get("sections") or []]
+    pack = run.file("corpus/brain-pack.md")
+    prior = pack.read_text(encoding="utf-8") if pack.exists() else ""
+
+    proposal: dict = {"domains": []}
+    ask = getattr(run.turns, "source_allowlist", None)
+    if ask is not None:
+        try:
+            proposal = ask(run.topic, headings, prior) or {"domains": []}
+        except Escalate:
+            raise
+        except Exception as exc:
+            run.log(f"    source librarian failed: {exc}; keeping the seed")
+
+    decided = source_policy.admit(proposal.get("domains") or [])
+    decided["seed_used"] = len(decided["admitted"]) < source_policy.MIN_ADMITTED
+    run.write_json("corpus/source_allowlist.json", decided)
+    run.allowed_domains = source_policy.run_allowlist(decided["admitted"])
+    # The turns object issues the searches, so it needs the list too. Setting it
+    # on the Run alone would leave every provider call on the seed.
+    if hasattr(run.turns, "allowed_domains"):
+        run.turns.allowed_domains = run.allowed_domains
+    return {
+        "proposed": len(decided["proposed"]),
+        "admitted": len(decided["admitted"]),
+        "dropped": len(decided["dropped"]),
+        "seed": decided["seed_used"],
+    }
+
+
 def do_sections(run: Run) -> dict:
     """Forward-only section loop. Writes claims.json so assemble still reads it."""
     approved = approved_outline(run)
@@ -1337,6 +1386,7 @@ def edit_paper(run: Run) -> dict:
 LINEAR = [
     (0, "corpus_pack", "corpus/brain-pack.json", corpus_pack),
     (1, "outline", "outline.approved.json", do_outline),
+    (1, "sources", "corpus/source_allowlist.json", source_allowlist),
     (2, "sections", "claims.json", do_sections),
     (4, "diagram", "diagrams.json", diagram),
     (3, "charts", "charts.json", do_charts),

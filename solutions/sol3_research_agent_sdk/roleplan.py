@@ -50,6 +50,7 @@ LOOPS = {
         "outliner",
         "outline_judge",
         "outline_editor",
+        "source_librarian",
         "researcher",
         "verifier",
         "section_judge",
@@ -71,6 +72,7 @@ PURPOSE = {
     "outliner": "Turns the topic into a two-level outline. Returns it; Python writes the file.",
     "outline_judge": "Scores the outline. Reads it and returns a verdict. Holds no write path.",
     "outline_editor": "Edits a judged outline against its objections. Returns it; Python writes the file.",
+    "source_librarian": "Proposes this topic's search domains. Python admits them. Holds no write path and no search tool.",
     "test_implementer": "Writes the failing tests. Nothing else.",
     "code_implementer": "Writes the code until the tests pass. Cannot touch tests.",
     "researcher": "Calls the corpus first, then the live tool boundary, and returns findings. Writes nothing.",
@@ -170,6 +172,24 @@ OVERRIDES: dict[tuple[str, str], dict] = {
         "deny": ("**",),
         "model": "claude-opus-5",
         "effort": "high",
+    },
+    ("research", "source_librarian"): {
+        "purpose": (
+            "Proposes this topic's search domains. Python admits them. Holds no "
+            "write path and no search tool."
+        ),
+        # No search tool, deliberately. A librarian that could search would be
+        # searching to decide where to search, and its own first results would
+        # pick the allowlist. No write tool either: Python writes the artifact
+        # and Python is the admission wall.
+        #
+        # Not the researcher's job. A researcher that picks its own allowlist
+        # confirms what it already wants to say.
+        "tools": READ_TOOLS,
+        "allow": (),
+        "deny": ("**",),
+        "model": "claude-haiku-4-5",
+        "effort": "low",
     },
     ("research", "researcher"): {
         "tools": (*READ_TOOLS, *SEARCH_TOOLS),
