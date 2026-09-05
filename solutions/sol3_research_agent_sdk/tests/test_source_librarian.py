@@ -234,12 +234,26 @@ def test_a_turns_with_no_librarian_still_runs(work):
     assert run.allowed_domains == sp.SEED_ALLOWLIST
 
 
-def test_a_skipped_sources_phase_still_loads_the_admitted_list(work):
-    """Resume must not fall back to the vendor seed. Refs #304."""
+def test_run_paper_skip_reloads_the_admitted_list(work, monkeypatch):
+    """The LINEAR skip used to leave the seed. Drive the driver, not the helper."""
+    invoked = []
+
+    def must_not_run(run):
+        invoked.append(run)
+        raise AssertionError("the sources phase must not re-run")
+
+    monkeypatch.setattr(
+        paper,
+        "LINEAR",
+        [(1, "sources", "corpus/source_allowlist.json", must_not_run)],
+    )
+    monkeypatch.setattr(paper, "CYCLE", [])
+
     class Plain:
         allowed_domains = sp.SEED_ALLOWLIST
 
     run = run_for(work, Plain())
+    run.max_usd = 0
     run.write_json(
         "corpus/source_allowlist.json",
         {
@@ -248,7 +262,9 @@ def test_a_skipped_sources_phase_still_loads_the_admitted_list(work):
             "admitted": ["arxiv.org", ".gov", "nature.com"],
         },
     )
-    paper.apply_allowlist(run)
+    with pytest.raises(paper.RunFailed, match="No budget was left"):
+        paper.run_paper(run)
+    assert invoked == []
     assert run.allowed_domains == ("arxiv.org", ".gov", "nature.com")
     assert run.turns.allowed_domains == run.allowed_domains
 

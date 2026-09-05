@@ -1427,13 +1427,12 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
     work = Path(run.work_dir)
     work.mkdir(parents=True, exist_ok=True)
     run.state.query_timeout_s = adapter.QUERY_TIMEOUT_SECONDS
+    apply_allowlist(run)
 
     for number, name, output, phase in LINEAR:
         if run.file(output).exists():
             run.log(f"  {number} {name:<10} already done")
             run.state.mark(name, "skipped")
-            if name == "sources":
-                apply_allowlist(run)
             continue
         run.log(f"  {number} {name:<10} ...")
         before = run.state.total_usd
