@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -169,6 +170,44 @@ def test_findings_from_research_names_every_finding_itself():
     }
     out = sections.findings_from_research(result, "s1", "q1")
     assert [f["id"] for f in out] == ["s1-f1", "s1-f2"]
+
+
+def test_section_check_figures_grades_what_the_writer_was_handed():
+    """`diagram` runs after `sections`, so the first pass hands the writer none.
+
+    Grading placement against the outline's plan failed the writer for a
+    figure the harness never gave it. A live run escalated on that row.
+    """
+    body = "A thing is true [1]. " + ("word " * 80)
+    section = _section(
+        word_target=80,
+        key_questions=[],
+        figures=[{"name": "mast-failure-taxonomy", "kind": "chart"}],
+    )
+    handed_none = checks.section_check(
+        body, section=section, findings=[{"number": 1}], figures_given=[]
+    )
+    assert "figures" not in handed_none.signature()
+
+    handed_one = checks.section_check(
+        body,
+        section=section,
+        findings=[{"number": 1}],
+        figures_given=[{"name": "mast-failure-taxonomy", "path": "charts/m.png"}],
+    )
+    assert "figures" in handed_one.signature()
+
+
+def test_section_check_figures_falls_back_to_the_plan_when_unstated():
+    body = "A thing is true [1]. " + ("word " * 80)
+    score = checks.section_check(
+        body,
+        section=_section(
+            word_target=80, key_questions=[], figures=[{"name": "a-chart"}]
+        ),
+        findings=[{"number": 1}],
+    )
+    assert "figures" in score.signature()
 
 
 def test_section_check_cited_fails_on_an_uncited_specific():
@@ -376,6 +415,56 @@ def test_the_section_loop_escalates_on_a_repeated_failing_verdict(work, turns):
     paper.plan(run)
     with pytest.raises((Escalate, paper.RunFailed), match="not converging|s1"):
         paper.do_sections(run)
+
+
+def test_the_section_loop_does_not_demand_a_figure_it_never_handed_over(work, turns):
+    """`diagram` runs after `sections`, so `diagrams.json` is absent on pass one.
+
+    The stage must grade placement against what the writer received, not the
+    outline's plan. A live run escalated on this row at $11.47.
+    """
+    recorded = []
+
+    class Recorder(turns):
+        def write(self, section, claims, figures, notes, path=""):
+            body = "what failed why it failed [1]. " + ("word " * 80)
+            if self.root is not None and path:
+                target = Path(self.root) / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(body, encoding="utf-8")
+            return body
+
+        def judge_section(self, section, body, findings, note=""):
+            return {"passed": True, "failed_rows": []}
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=Recorder(root=work),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    stamped = json.loads((Path(work) / "outline.approved.json").read_text())
+    outline = stamped["outline"] if isinstance(stamped.get("outline"), dict) else stamped
+    for section in outline["sections"]:
+        section["figures"] = [{"name": "a-chart-nobody-drew", "kind": "chart"}]
+    (Path(work) / "outline.approved.json").write_text(json.dumps(stamped), encoding="utf-8")
+    assert not (Path(work) / "diagrams.json").exists()
+
+    # The stub body fails `coverage` and `length` and the loop gives up on
+    # those. This test is about one row, so the escalation is not the subject.
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+
+    written = list((Path(work) / "knowledge").glob("*/section-check.json"))
+    assert written, "the stage never wrote a section check"
+    for check_path in written:
+        signature = json.loads(check_path.read_text())["signature"]
+        assert "figures" not in signature, check_path
 
 
 def test_demo_lands_above_two_thousand_words(work, no_renderer):

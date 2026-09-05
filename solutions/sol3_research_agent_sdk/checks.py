@@ -766,6 +766,7 @@ def section_check(
     findings: list | None = None,
     evidence: str = "",
     word_target: int = 0,
+    figures_given: list | None = None,
 ) -> Score:
     """Eight deterministic rows on one section, before any judge."""
     section = section or {}
@@ -852,9 +853,16 @@ def section_check(
         )
     )
 
+    # The row grades whether the writer placed the figures it was handed. The
+    # `diagram` phase runs after `sections`, so on the first pass `diagrams.json`
+    # does not exist and the writer receives none. Grading it against the
+    # outline's plan failed the writer for a placement the harness never made
+    # possible. `figures_given` is None when the caller does not know, and the
+    # plan stands in.
+    source = section.get("figures") if figures_given is None else figures_given
     planned = [
         fig.get("name")
-        for fig in (section.get("figures") or [])
+        for fig in (source or [])
         if isinstance(fig, dict) and fig.get("name")
     ]
     missing_fig = [name for name in planned if name and name not in body]
