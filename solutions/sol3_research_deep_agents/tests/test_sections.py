@@ -32,6 +32,22 @@ def test_section_check_flags_second_person():
     assert any(c.name == "style" and not c.passed for c in score.checks)
 
 
+def test_section_check_style_allows_a_question_used_as_a_heading():
+    """A heading is a paragraph. The outline hands the writer key questions.
+
+    Removing the heading fails coverage, keeping it failed style. The Agent SDK
+    port escalated a live run on the same rule.
+    """
+    body = "### Why did it fail?\n\nIt failed because of a stated cause [1]."
+    score = sections.section_check(body)
+    assert not any(c.name == "style" and not c.passed for c in score.checks)
+
+
+def test_section_check_style_still_flags_a_rhetorical_question_in_prose():
+    score = sections.section_check("It failed [1].\n\nBut is that the whole story?")
+    assert any(c.name == "style" and not c.passed for c in score.checks)
+
+
 def test_offline_run_writes_section_files_and_ledger(finished_paper: Path):
     assert (finished_paper / "paper_ledger.json").exists()
     entries = json.loads((finished_paper / "paper_ledger.json").read_text())["entries"]

@@ -860,7 +860,16 @@ def section_check(
         style_hits.append("em dash")
     if SECOND_PERSON.search(_mask_code(body)):
         style_hits.append("second person")
-    if any(RHETORICAL.search(p.splitlines()[-1]) for p in _paragraphs(body) if p):
+    # A heading is a paragraph, and the outline hands the writer key questions
+    # that the `coverage` row then demands it name. The writer names them as
+    # subheadings, and this row read those as rhetoric. Remove the heading and
+    # `coverage` fails, keep it and `style` fails. Every other rule in this
+    # file already skips a heading.
+    if any(
+        RHETORICAL.search(p.splitlines()[-1])
+        for p in _paragraphs(body)
+        if p and not p.startswith("#")
+    ):
         style_hits.append("rhetorical question")
     checks.append(
         Check("style", not style_hits, "clean" if not style_hits else ", ".join(style_hits))
