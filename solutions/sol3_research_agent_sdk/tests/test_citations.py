@@ -278,6 +278,15 @@ def test_the_whole_pipeline_binds_every_citation_to_its_own_source(work, turns, 
             checked += 1
     assert checked >= 2, f"only {checked} citations reached the paper"
 
+    # Through the final gate, not up to it. The pipeline test stopped at
+    # `assemble`, so removing `reference_numbers` from `paper.check` left every
+    # citation and section test green.
+    reloaded.enforce_research_policy = False
+    score = paper.check(reloaded)
+    assert "grounded" not in score.get("failing", []), score
+    detail = {row["name"]: row for row in score.get("checks", [])}
+    assert detail["grounded"]["passed"], detail["grounded"]
+
 
 def test_a_sparse_reference_list_is_not_read_as_a_fabrication():
     """A contradicted source or a resume leaves a legitimate gap.

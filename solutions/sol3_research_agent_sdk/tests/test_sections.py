@@ -747,6 +747,87 @@ def _integrity_loop(work, turns_cls, **kwargs):
     return recorder
 
 
+def test_a_budget_that_writes_nothing_is_refused(monkeypatch):
+    """`range(1, 0 + 1)` is empty, so zero skipped the write loop entirely.
+
+    `last_verdict` then kept its optimistic default, the ledger step still ran,
+    and a section nobody wrote or checked was stamped as finished work.
+    """
+    import importlib  # noqa: PLC0415
+
+    for bad in ("0", "-1", "two", ""):
+        monkeypatch.setenv("SOL3_SECTION_ATTEMPTS", bad)
+        with pytest.raises(ValueError, match="SOL3_SECTION_ATTEMPTS"):
+            importlib.reload(sections)
+    monkeypatch.delenv("SOL3_SECTION_ATTEMPTS")
+    importlib.reload(sections)
+    assert sections.SECTION_ATTEMPTS == 3
+
+
+def test_a_repair_that_lands_on_the_fourth_attempt_is_kept(work, turns, monkeypatch):
+    """Not "more than three writes". Exactly: fix on four, and the section stamps."""
+    import importlib  # noqa: PLC0415
+
+    class Late(_Recorder):
+        def write(self, section, claims, figures, notes, path=""):
+            self.calls.append(("write", section["id"]))
+            return self._body(section, len(self.calls))
+
+        def edit_section(self, section, body, verdict, path="", note="", claims=None):
+            self.calls.append(("edit_section", section["id"]))
+            return self._body(section, len(self.calls))
+
+        def judge_section(self, section, body, findings, note=""):
+            self.calls.append(("judge_section", section["id"]))
+            return {"passed": True, "failed_rows": []}
+
+        def _body(self, section, attempt):
+            target = int(section.get("word_target") or 0)
+            named = ". ".join(section.get("key_questions") or [])
+            # Over the ceiling and closing, green on the fourth.
+            over = int(target * 1.25) + max(400 - 130 * attempt, 0)
+            body = f"{named} [1]. " + ("word " * (over if attempt < 4 else target))
+            path = Path(self.root) / f"sections/{section['id']}.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            return body
+
+    monkeypatch.setenv("SOL3_SECTION_ATTEMPTS", "6")
+    importlib.reload(sections)
+    try:
+        recorder = Late(turns(root=work), work)
+        run = paper.Run(
+            topic="a topic",
+            work_dir=work,
+            turns=recorder,
+            state=paper.State.load_or_new(work, "a topic"),
+            brain=None,
+            log=lambda *a: None,
+            enforce_research_policy=True,
+        )
+        paper.prior_art(run)
+        paper.plan(run)
+        paper.do_sections(run)
+        attempts = [c for c in recorder.calls if c[0] in ("write", "edit_section")]
+        assert len(attempts) == 4, recorder.calls
+        assert "judge_section" in [c[0] for c in recorder.calls], recorder.calls
+        check = json.loads(
+            (Path(work) / "knowledge" / "s1" / "section-check.json").read_text()
+        )
+        assert check["signature"] == [], check
+    finally:
+        monkeypatch.delenv("SOL3_SECTION_ATTEMPTS")
+        importlib.reload(sections)
+
+
+def test_every_edit_after_the_first_carries_the_judges_objections(work, turns):
+    """Feedback must reach each subsequent edit, not only the first one."""
+    recorder = _integrity_loop(work, turns, judge_passes=False)
+    edits = [c for c in recorder.calls if c[0] == "edit_section"]
+    assert len(edits) >= 1, recorder.calls
+    assert all(note for note in recorder.edit_notes), recorder.edit_notes
+
+
 def test_the_section_attempt_budget_is_tunable_and_defaults_to_three(monkeypatch):
     """`--max-iterations` drives the whole-paper cycle, never this loop.
 
