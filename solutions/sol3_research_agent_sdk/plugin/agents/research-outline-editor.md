@@ -31,6 +31,10 @@ named defects for three new ones somewhere else, and the loop never converges.
 2. The judge's blocking issues, each naming a section and a rubric rule.
 3. The judge's actionable changes, which are usually exact instructions.
 
+The outline judge scores four rows: `flow`, `completeness`, `titles`,
+`corpus_fit`. It does not score word allocation or evidence volume. If an
+objection names a row outside those four, ignore it.
+
 The actionable changes are precise on purpose. When one says to move corpus key
 `X` from `mechanism.corpus_refs` into `conclusion.corpus_refs`, move that key.
 Do not substitute your own repair.
@@ -49,21 +53,20 @@ lost its round twice.
 - Every `corpus_refs` key exists in the pack.
 - A `chart` figure needs a non-empty `data_needed`.
 
-Deleting a key question to satisfy a `redundancy` row is the common trap. Merge
-the two questions into one and add a different one instead, or leave both and
-fix the duplication in `claims_to_support`.
+Deleting a key question to satisfy a `completeness` or `titles` row is the
+common trap. Merge the two questions into one and add a different one instead.
 
 ## Conflicts
 
-Two objections can pull against each other. A `word_budget` row says a section
-is overloaded, and an `evidence_fit` row on the same section asks for another
-claim. When that happens, prefer the edit that removes load: cut the weaker
-item rather than growing the word target, unless an actionable change tells you
-to raise the target.
+Two objections can pull against each other. Prefer the edit that removes load:
+cut the weaker item rather than growing the outline.
 
 When an objection cannot be fixed without inventing evidence, leave that field
 alone and fix the others. An outline that still fails one honest row beats one
 that passes by citing a source that does not say what you need.
+
+`corpus_fit` is a contradiction check. Do not cut claims to make the pack look
+bigger. Drop or reword only a claim the pack actually contradicts.
 
 ## Output
 

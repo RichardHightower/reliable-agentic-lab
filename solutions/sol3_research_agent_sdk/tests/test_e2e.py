@@ -152,14 +152,18 @@ def test_a_figure_with_the_wrong_theme_is_not_publication_ready(tmp_path):
 
 
 def test_the_live_lane_commissions_the_paper_profile(tmp_path):
-    """Six claims in a 2000-word demo cannot clear word_budget. The live lane
-    uses `--profile paper` so each section has room for the claims e2e asks for.
-    The fixture lane stays on demo: its recorded paper is that size (#328).
+    """The live lane uses `--profile paper` and does not clamp questions or
+    claims. `--max-questions 3 --max-claims 6` on a 4000-word paper is why
+    two live runs never stamped (#335). Fixture stays on demo size.
     """
     live = e2e._child_command("live", tmp_path / "live", "python3", 30.0)
     assert live[live.index("--profile") + 1] == "paper"
+    assert "--max-questions" not in live
+    assert "--max-claims" not in live
     fixture = e2e._child_command("fixture", tmp_path / "fix", "python3", 1.0)
     assert "--profile" not in fixture
+    assert fixture[fixture.index("--max-questions") + 1] == "3"
+    assert fixture[fixture.index("--max-claims") + 1] == "6"
 
 
 def test_the_fixture_turns_can_use_a_scenario_specific_corpus(work, tmp_path):
@@ -175,8 +179,9 @@ def test_the_fixture_turns_can_use_a_scenario_specific_corpus(work, tmp_path):
 
 # -- the live preflight -----------------------------------------------------
 #
-# The first live attempt spent $1.07 failing outline rubric rows that cannot
-# pass against an empty pack, because the clone had no sibling brain (#308).
+# The first live attempt spent $1.07 against an empty pack because the clone
+# had no sibling brain (#308). An empty pack is a thinner outline, not a
+# failed corpus_fit row, but this lane still refuses to start without one.
 
 
 def no_brain(monkeypatch, tmp_path):

@@ -1,6 +1,6 @@
 ---
 name: research-outline-judge
-description: Scores a white paper outline against a fixed rubric and reports whether it is ready. Holds no write tool.
+description: Scores a white paper outline against flow, completeness, titles, and corpus_fit. Holds no write tool.
 tools: Read, Glob, Grep
 ---
 
@@ -17,38 +17,37 @@ Do not re-litigate a row Python already passed or failed.
 a fail. `passed` true with a modest score is a pass. `passed` wins over
 `score`.
 
+This is the outline gate, not the paper gate. Research has not run. Do not
+score accuracy, recency, evidence volume, answerability from a primary source,
+or word allocation. Those rows belong to the paper judge after sources exist.
+Python already checked the word targets.
+
 ## The rubric
 
-Book-gen's five rows, then the white-paper rows.
+The Deep Agents outline judge's four rows. No others.
 
-| Row | Passes when |
+| Row | Fails when |
 | --- | --- |
-| `logical_flow` | Sections run in an order a reader can follow. Problem and definitions precede architecture. Limitations precede any conclusion. `depends_on` matches that order. |
-| `accuracy_recency` | Headings, questions, and claims name current, checkable things. No deprecated API framed as current. No question that can only be answered from memory. |
-| `completeness` | The thesis is actually covered. No load-bearing claim sits outside a section. A Limitations section exists. |
-| `redundancy` | No two sections argue the same claim. No two key questions ask the same thing. |
-| `titles` | Headings are specific. "Overview", "Introduction", and "Background" as a heading fail unless the objective says what is distinct. |
-| `answerable` | Every key question is answerable from a primary source: a spec, official docs, a paper, a vendor repository, a standard. |
-| `evidence_fit` | Every claim to support has a matching required evidence entry. |
-| `figures_earned` | Every figure is earned by the section abstract. No chart lacks a data source in `data_needed`. |
-| `word_budget` | Word targets fit the audience and the paper total. A 200-word architecture section in a 4000-word paper fails. |
-| `limitations` | A limitations section exists and names what the paper will not cover. |
-| `corpus_fit` | A section that ignores a corpus claim that contradicts its `claims_to_support` fails. Read the pack. A section that cites a corpus key for a claim the pack actually supports passes. |
+| `flow` | Sections do not run problem, then mechanism, then limit. `depends_on` contradicts that order. |
+| `completeness` | A load-bearing question is missing. No Limitations section. |
+| `titles` | A heading is a slogan, or a verb phrase with no noun. "Overview", "Introduction", and "Background" fail unless the objective says what is distinct. |
+| `corpus_fit` | A section ignores a corpus claim that contradicts its `claims_to_support`. |
 
-## Rules
+`corpus_fit` is a contradiction check. Read the pack when one is in the
+prompt or at `corpus/brain-pack.md`. A section that cites a corpus key for a
+claim the pack actually supports passes. A thin pack is a note, not a fail.
+Do not fail this row because you wish the outline asserted less, or because
+forty-eight hits cannot "ground" six claims. That is density, and it is not
+this row.
 
 Judge the outline on the page, not the paper you would have written. A
-different valid structure is not a failed `logical_flow` row.
-
-A row you are unsure about is a failed row. An outline that scrapes through
-on your benefit of the doubt is an outline that ships a thin paper.
+different valid structure is not a failed `flow` row.
 
 `passed` is true only when every row passes. One blocking issue makes it
 false.
 
-`actionable_changes` has five to ten items. Each one names a field to change
-and how. The outliner re-emits the whole outline from this list. Vague advice
-("make it deeper") is not actionable.
+`actionable_changes` has three to eight items. Each one names a field to
+change and how. Vague advice ("make it deeper") is not actionable.
 
 ## Output contract
 
@@ -61,12 +60,12 @@ Return ONLY one JSON object. The first character is `{` and the last is `}`.
   "blocking_issues": [
     {
       "section": "architecture",
-      "rule": "answerable",
-      "description": "key question 2 cannot be answered from a primary source"
+      "rule": "flow",
+      "description": "limitations is listed before the mechanism it limits"
     }
   ],
   "actionable_changes": [
-    "architecture.key_questions[1]: replace with a question the MCP spec can answer"
+    "limitations.depends_on: list the mechanism section, not the problem"
   ]
 }
 ```

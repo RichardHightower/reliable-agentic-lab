@@ -251,9 +251,10 @@ def _corpus_check(brain: str | None, allow_thin: bool) -> list[str]:
     """Refuse a live run whose corpus pack would be empty.
 
     The default brain is a sibling of the primary checkout. A clone, a
-    worktree, or a scratchpad has no such sibling, and the outline rubric has
-    rows that cannot pass against an empty pack. The first live attempt spent
-    $1.07 discovering that.
+    worktree, or a scratchpad has no such sibling. An empty pack is a
+    thinner outline, not a failed `corpus_fit` row, but this lane is not
+    the thin-corpus lane. The first live attempt spent $1.07 discovering
+    that.
     """
     candidates = corpus.brain_candidates(
         extra=[brain] if brain else None,
@@ -263,8 +264,8 @@ def _corpus_check(brain: str | None, allow_thin: bool) -> list[str]:
         return []
     tried = "\n".join(f"  {row['source']}: {row['path']}" for row in candidates)
     return [
-        "no corpus brain was found, so the pack would be empty and the outline "
-        "rubric cannot pass. Tried:\n"
+        "no corpus brain was found, so the pack would be empty. This lane "
+        "is not the thin-corpus lane. Tried:\n"
         f"{tried}\n"
         "  Pass BRAIN=<path>, set RESEARCH_BRAINS, or set ALLOW_THIN_CORPUS=1 "
         "to run anyway."
@@ -315,10 +316,11 @@ def _child_command(
 ) -> list[str]:
     """The loop.py argv for one acceptance lane.
 
-    The live lane uses `--profile paper` (4000 words). The fixture lane stays
-    on demo: its recorded paper is a 2000-word artifact, and the judge's
-    word_budget row is not what that lane is for. Six claims in 470 words is
-    the live failure this exists to stop (#328).
+    The live lane uses `--profile paper` (4000 words, 20 questions, 60 claims)
+    and does not clamp those numbers. `--max-questions 3 --max-claims 6` on
+    top of six-to-ten sections is why two live runs never stamped an outline
+    (#335). The fixture lane stays on demo size: its recorded paper is a
+    2000-word artifact with three questions.
     """
     command = [
         python,
@@ -331,10 +333,6 @@ def _child_command(
         "--out",
         str(out),
         "--fresh",
-        "--max-questions",
-        "3",
-        "--max-claims",
-        "6",
         "--max-diagrams",
         "2",
         "--max-iterations",
@@ -345,6 +343,8 @@ def _child_command(
     ]
     if mode == "live":
         command += ["--profile", "paper"]
+    else:
+        command += ["--max-questions", "3", "--max-claims", "6"]
     if mode == "fixture":
         command += ["--backend", "fixture", "--fixture", str(FIXTURE)]
     else:

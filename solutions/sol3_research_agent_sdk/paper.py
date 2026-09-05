@@ -74,14 +74,13 @@ MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
 MAX_CLAIMS = 40
 MAX_WORDS = 2000
-# Every other budget in this port is a flag. This one was a bare constant, and
-# the Deep Agents port has `--attempts` for the same job. Three rounds is not
-# enough for a real corpus: a live run fixed `accuracy_recency` and
-# `limitations` in round two and ran out of rounds with five rows left, all of
-# them carried over rather than newly invented, which is a loop converging too
-# slowly rather than a loop stuck. Read at import so a test can still patch the
-# module attribute.
-OUTLINE_JUDGE_ROUNDS = int(os.environ.get("SOL3_OUTLINE_JUDGE_ROUNDS", "3"))
+# Every other budget in this port is a flag. The Deep Agents twin defaults
+# this to 14. Three rounds was enough for a four-row judge on a fixture, and
+# not enough once the live judge was scoring eleven rows a paper rubric owns.
+# The outline judge is four rows again; keep the round ceiling in lockstep
+# with the twin so a single failed row still gets an editor pass. Read at
+# import so a test can still patch the module attribute.
+OUTLINE_JUDGE_ROUNDS = int(os.environ.get("SOL3_OUTLINE_JUDGE_ROUNDS", "14"))
 
 # A ceiling on verification, for the same reason. Four good questions produced
 # a hundred and eleven claims on one live run, and every claim is a turn. The
@@ -396,6 +395,7 @@ def _budget_for(run: Run) -> dict:
     return {
         "questions": run.max_questions,
         "diagrams": run.max_diagrams,
+        "claims": run.max_claims,
         "words": run.word_target_total,
     }
 
@@ -429,7 +429,7 @@ def _draft_valid_outline(run: Run) -> dict:
 
 
 def _judge_loop(run: Run, drafted: dict) -> dict:
-    """Judge, then re-outline with actionable_changes, at most three rounds.
+    """Judge, then edit in place, at most OUTLINE_JUDGE_ROUNDS rounds.
 
     `passed` from the judge wins over `score`. A repeated failure signature
     escalates as a stall through `gates.decide`.

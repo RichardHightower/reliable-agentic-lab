@@ -77,7 +77,8 @@ search and write can adjust the evidence to fit the paper.
 1. **Outline.** Turn the topic into a two-level outline: sections with
    objectives, abstracts, key questions, claims to support, required evidence,
    word targets, planned figures, and `corpus_refs` from the pack. Python
-   validates the outline, an Opus judge scores it (including `corpus_fit`),
+   validates the outline, an Opus judge scores it on `flow`, `completeness`,
+   `titles`, and `corpus_fit` (contradiction only; a thin pack is not a fail),
    and a stamp writes `outline.approved.json`. Later phases read that file
    and nothing else.
 2. **Sections.** For each approved section, in outline order: ask the
