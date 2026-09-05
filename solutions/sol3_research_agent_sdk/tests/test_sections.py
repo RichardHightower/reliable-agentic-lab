@@ -43,7 +43,9 @@ def _section(**kwargs):
 
 def test_section_check_length_fails_when_thin():
     score = checks.section_check("short [1].", section=_section(word_target=200), findings=[{"number": 1}])
-    assert "length" in score.signature()
+    # Advisory. Reported to the writer, never a reason to fail the section.
+    assert "length" in score.advisories()
+    assert "length" not in score.signature()
 
 
 def test_section_check_stub_fails_on_todo():
@@ -785,8 +787,14 @@ def test_a_repair_that_lands_on_the_fourth_attempt_is_kept(work, turns, monkeypa
             target = int(section.get("word_target") or 0)
             named = ". ".join(section.get("key_questions") or [])
             # Over the ceiling and closing, green on the fourth.
-            over = int(target * 1.25) + max(400 - 130 * attempt, 0)
-            body = f"{named} [1]. " + ("word " * (over if attempt < 4 else target))
+            # A different red row each of the first three attempts, so the stall
+            # holds off and the budget is what decides. Green on the fourth.
+            if attempt >= 4:
+                body = f"{named} [1]. " + ("word " * target)
+            elif attempt % 2:
+                body = "unnamed [1]. " + ("word " * target)  # coverage
+            else:
+                body = f"{named}. Python 3.13 shipped. " + ("word " * target)  # cited
             path = Path(self.root) / f"sections/{section['id']}.md"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")
@@ -873,10 +881,9 @@ def test_a_raised_budget_gives_the_section_more_attempts(work, turns, monkeypatc
             questions = section.get("key_questions") or []
             target_words = int(section.get("word_target") or 0)
             if attempt % 2:
-                named, words = "", max(target_words, 60)  # coverage fails
+                body = "unnamed [1]. " + ("word " * target_words)  # coverage fails
             else:
-                named, words = ". ".join(questions), target_words * 40  # length fails
-            body = f"{named} [1]. " + ("word " * words)
+                body = ". ".join(questions) + ". Python 3.13 shipped. " + ("word " * target_words)  # cited fails
             path = Path(self.root) / f"sections/{section['id']}.md"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")
@@ -913,37 +920,61 @@ def test_a_failing_length_row_says_how_far_off_it_is():
                                findings=[{"number": 1, "id": "f1"}])
     near = checks.section_check(("word " * 1600) + " [1].", section=section,
                                 findings=[{"number": 1, "id": "f1"}])
-    assert far.signature() == near.signature() == ("length",)
-    assert far.distances()["length"] > near.distances()["length"] > 0
+    # Advisory: out of the signature, out of the stall, still on the record.
+    assert far.signature() == near.signature() == ()
+    assert far.advisories() == near.advisories() == ("length",)
+    assert far.distances() == near.distances() == {}
+    far_row = next(c for c in far.checks if c.name == "length")
+    near_row = next(c for c in near.checks if c.name == "length")
+    assert far_row.distance > near_row.distance > 0
 
 
-def test_a_section_that_is_closing_the_gap_is_not_a_stall(work, turns):
-    """Run 12 stopped at two attempts with four unspent, on `length` twice.
-
-    The writer was moving. The stall rule could not see it, because the row
-    name is `length` at 1739 words and at 1600.
+def test_the_stall_rule_yields_to_measured_progress():
+    """`gates.decide` reads `progressed`. No live row carries a distance now
+    that `length` is advisory, so this holds the rule at the gate rather than
+    through a stage fixture that would need a blocking row to measure.
     """
-    class Closing(_Recorder):
+    import gates  # noqa: PLC0415
+
+    stalled = gates.decide(
+        passed=False, iteration=2, budget=6, signature=("coverage",),
+        previous_signature=("coverage",), progressed=False,
+    )
+    assert stalled.stop and "not converging" in stalled.reason
+    moving = gates.decide(
+        passed=False, iteration=2, budget=6, signature=("coverage",),
+        previous_signature=("coverage",), progressed=True,
+    )
+    assert not moving.stop, moving
+
+
+def test_a_section_that_is_not_moving_still_stalls_at_two(work, turns):
+    """Progress must not become a licence to burn the whole budget."""
+    recorder = _loop(work, turns)
+    attempts = [c for c in recorder.calls if c[0] in ("write", "edit_section")]
+    assert len(attempts) == 2, recorder.calls
+    assert "not converging" in recorder.escalation, recorder.escalation
+
+
+def test_a_section_over_its_word_target_still_stamps(work, turns):
+    """Thirteen live runs never stamped a section. The last died 24 words over.
+
+    Length is measured and reported and never a reason to fail. The writer
+    still hears the target and the count. The section still reaches the judge.
+    """
+
+    class Long(_Integrity):
         def write(self, section, claims, figures, notes, path=""):
             self.calls.append(("write", section["id"]))
-            return self._body(section, len(self.calls))
-
-        def edit_section(self, section, body, verdict, path="", note="", claims=None):
-            self.calls.append(("edit_section", section["id"]))
-            return self._body(section, len(self.calls))
-
-        def _body(self, section, attempt):
-            # Over the ceiling every time, and closer every time.
-            target = int(section.get("word_target") or 0)
-            over = max(int(target * 1.25) + 400 - 100 * attempt, int(target * 1.25) + 20)
             named = ". ".join(section.get("key_questions") or [])
-            body = f"{named} [1]. " + ("word " * over)
+            target = int(section.get("word_target") or 0)
+            body = f"{named} [1]. " + ("word " * (target * 2))
             path = Path(self.root) / f"sections/{section['id']}.md"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")
             return body
 
-    recorder = Closing(turns(root=work), work)
+    recorder = Long(turns(root=work), work)
     run = paper.Run(
         topic="a topic",
         work_dir=work,
@@ -955,18 +986,13 @@ def test_a_section_that_is_closing_the_gap_is_not_a_stall(work, turns):
     )
     paper.prior_art(run)
     paper.plan(run)
-    with contextlib.suppress(Escalate, paper.RunFailed):
-        paper.do_sections(run)
-    attempts = [c for c in recorder.calls if c[0] in ("write", "edit_section")]
-    assert len(attempts) > 2, f"the stall fired on a section that was closing: {recorder.calls}"
-
-
-def test_a_section_that_is_not_moving_still_stalls_at_two(work, turns):
-    """Progress must not become a licence to burn the whole budget."""
-    recorder = _loop(work, turns)
-    attempts = [c for c in recorder.calls if c[0] in ("write", "edit_section")]
-    assert len(attempts) == 2, recorder.calls
-    assert "not converging" in recorder.escalation, recorder.escalation
+    paper.do_sections(run)  # must not escalate
+    kinds = [c[0] for c in recorder.calls]
+    assert kinds == ["write", "judge_section", "ledger_turn"], kinds
+    check = json.loads((Path(work) / "knowledge" / "s1" / "section-check.json").read_text())
+    assert check["signature"] == [], check
+    length = next(row for row in check["checks"] if row["name"] == "length")
+    assert not length["passed"], "the count must still be on the record"
 
 
 def test_the_stage_hands_the_judge_the_numbered_claims(work, turns):

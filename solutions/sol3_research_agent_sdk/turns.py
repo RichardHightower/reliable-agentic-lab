@@ -528,7 +528,7 @@ class SdkTurns(Turns):
             f"Abstract: {section.get('abstract', '')}\n"
             f"Claims to support: {json.dumps(section.get('claims_to_support') or [])}\n"
             f"Word target: {section.get('word_target') or 'unspecified'} words. "
-            "Stay within 0.6 to 1.25 times that target.\n\n"
+            "Aim within ten percent of that target.\n\n"
             "Coverage is a case-insensitive substring. Each key question below "
             "must appear in the section body as that string, not a paraphrase:\n"
             f"{question_lines or '(none)'}\n\n"
@@ -624,7 +624,7 @@ class SdkTurns(Turns):
         contract = (
             f"\n\nObjective: {section.get('objective') or section.get('goal', '')}"
             f"\nWord target: {section.get('word_target') or 'unspecified'} words, "
-            "and stay within 0.6 to 1.25 times that.\n"
+            "and aim within ten percent of that.\n"
             "Each key question must appear in the body as this exact string:\n"
             f"{questions or '(none)'}\n"
             "Cite each claim by its `number` field, like [3]. Do not cite the id. "
