@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 
 import checks
+import citations
 import gates
 import outline as outlines
 from turns import Escalate, TurnFailed
@@ -141,7 +142,23 @@ def findings_from_research(result: dict, section_id: str, question: str, start: 
     return out
 
 
-def _claims_for_writer(findings: list[dict], verdicts: dict[str, dict], section_id: str) -> list[dict]:
+def _claims_for_writer(
+    findings: list[dict],
+    verdicts: dict[str, dict],
+    section_id: str,
+    numbers: dict[str, int] | None = None,
+) -> list[dict]:
+    """The claims the writer may cite, each carrying its run-wide number.
+
+    These numbers were 1..N per section, restarting every section, while the
+    bibliography was numbered globally at assembly. Section two wrote `[1]`
+    meaning its own first source and the paper's `[1]` was section one's.
+    `numbers` is the run's registry, so the number in the prose and the number
+    in the reference list come from one pass.
+
+    `None` means the caller has no registry, which is the offline and unit-test
+    path. The old local numbering stands in there.
+    """
     usable = []
     number = 1
     for finding in findings:
@@ -149,6 +166,7 @@ def _claims_for_writer(findings: list[dict], verdicts: dict[str, dict], section_
         if status == "contradicted":
             continue
         url = (finding.get("source") or {}).get("url_or_path") or ""
+        cite = number if numbers is None else numbers.get(url, 0)
         usable.append(
             {
                 "id": finding["id"],
@@ -158,7 +176,7 @@ def _claims_for_writer(findings: list[dict], verdicts: dict[str, dict], section_
                 "question_id": finding.get("answers_question") or "",
                 "section": section_id,
                 "status": status,
-                "number": number,
+                "number": cite,
             }
         )
         number += 1
@@ -351,7 +369,13 @@ def run_section(run, section: dict) -> dict:
     )
 
     # 3e–3g write, check, judge, with gates.decide on the section signature
-    bound = _claims_for_writer(findings, verdicts, sid)
+    # Register every source this section will cite before the writer runs, so
+    # the number it is told to use is the number the bibliography will give.
+    numbers = citations.register(
+        run.work_dir,
+        [(f.get("source") or {}).get("url_or_path") or "" for f in findings],
+    )
+    bound = _claims_for_writer(findings, verdicts, sid, numbers)
     figures = []
     diagrams_path = run.file("diagrams.json")
     if diagrams_path.exists():
@@ -450,10 +474,17 @@ def run_section(run, section: dict) -> dict:
             else:
                 body = run.turns.write(section, bound, figures, instruction, relative)
         except TurnFailed:
-            # A turn that failed costs the attempt, never the draft. Escalate
-            # is the runtime's own ceiling and is not a turn to recover from.
+            # A turn that failed costs the attempt, never the draft.
             run.log(f"    {sid}: the writer turn failed. Keeping the last draft.")
             body = ""
+        except Escalate:
+            # The runtime hit its own ceiling, so the run stops here. Put the
+            # draft back first: the file was unlinked before the turn, and the
+            # in-memory copy dies with this frame. A resume would otherwise
+            # re-research a section that was already written.
+            if existing:
+                path.write_text(existing, encoding="utf-8")
+            raise
         if not path.exists() or not path.read_text(encoding="utf-8").strip():
             if (body or "").strip():
                 path.write_text(body.rstrip() + "\n", encoding="utf-8")
@@ -463,7 +494,13 @@ def run_section(run, section: dict) -> dict:
                 # draft. The next pass edits the section that got this far.
                 run.log(f"    {sid}: the edit produced nothing. Keeping the last draft.")
                 path.write_text(existing, encoding="utf-8")
-        body = path.read_text(encoding="utf-8")
+            else:
+                # Attempt one produced nothing and there is no draft to keep.
+                # Leave the file absent rather than writing a blank one, so the
+                # next attempt writes instead of editing emptiness, and
+                # `_section_done` does not read this as finished work.
+                run.log(f"    {sid}: the writer produced nothing on the first attempt.")
+        body = path.read_text(encoding="utf-8") if path.exists() else ""
         last_score = checks.section_check(
             body,
             section=section,
