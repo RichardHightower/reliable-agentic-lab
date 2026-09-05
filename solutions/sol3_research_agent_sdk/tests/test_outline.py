@@ -610,8 +610,33 @@ def test_the_outline_judge_rounds_read_the_environment(monkeypatch):
         importlib.reload(paper)
 
 
-def test_the_default_round_count_is_unchanged():
-    assert paper.OUTLINE_JUDGE_ROUNDS == 3
+def test_the_default_round_count_matches_deep_agents():
+    assert paper.OUTLINE_JUDGE_ROUNDS == 14
+
+
+def test_the_outline_judge_scores_the_same_four_rows_as_deep_agents():
+    """Eleven book-gen rows on this gate is why two live SDK runs never stamped
+    while Deep Agents shipped a paper (#335). Research has not run yet.
+    """
+    text = (
+        Path(__file__).resolve().parents[1]
+        / "plugin"
+        / "agents"
+        / "research-outline-judge.md"
+    ).read_text(encoding="utf-8")
+    for row in ("flow", "completeness", "titles", "corpus_fit"):
+        assert f"`{row}`" in text
+    for row in (
+        "evidence_fit",
+        "word_budget",
+        "accuracy_recency",
+        "answerable",
+        "figures_earned",
+        "logical_flow",
+    ):
+        assert f"`{row}`" not in text, row
+    assert "contradiction" in text.lower()
+
 
 
 def test_the_loop_honours_a_raised_round_count(work, monkeypatch):

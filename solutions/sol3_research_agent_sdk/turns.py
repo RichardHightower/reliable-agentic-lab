@@ -46,6 +46,7 @@ from load_agents import (
 # the turns it drives.
 MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
+MAX_CLAIMS = 40
 MAX_WORDS = 2000
 EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
@@ -280,18 +281,27 @@ class SdkTurns(Turns):
             else "There is no corpus pack for this topic. Outline from the topic alone."
         )
         # Tell the outliner what it can afford. Asked without a budget it returns
-        # a good outline the run cannot pay for.
+        # a good outline the run cannot pay for. Each section needs two
+        # key_questions, so the question cap is also a section cap.
         budget = budget or {}
+        questions = int(budget.get("questions") or MAX_QUESTIONS)
+        diagrams = int(budget.get("diagrams") or MAX_DIAGRAMS)
+        claims = int(budget.get("claims") or MAX_CLAIMS)
+        words = int(budget.get("words") or MAX_WORDS)
+        sections_cap = max(3, min(10, questions // 2 or 3))
         limits = (
-            f"You have a budget of {budget.get('questions', MAX_QUESTIONS)} research "
-            f"questions, {budget.get('diagrams', MAX_DIAGRAMS)} figures, and "
-            f"{budget.get('words', MAX_WORDS)} words for the whole paper "
-            f"(word_target_total={budget.get('words', MAX_WORDS)}). Anything past "
-            "the question or figure ceiling is discarded, and a section whose "
-            "questions are discarded is dropped with them. Outline a paper that "
-            "fits: fewer sections, each one answered, beats more sections "
-            "half-researched. Section word_targets must sum to word_target_total "
-            "within ten percent."
+            f"You have a budget of {questions} research questions, "
+            f"{diagrams} figures, {claims} claims to verify, and {words} words "
+            f"for the whole paper (word_target_total={words}). Each section "
+            f"needs at least two key_questions, and the total across sections "
+            f"must not exceed {questions}, so write at most {sections_cap} "
+            f"sections. Anything past the question or figure ceiling is "
+            f"discarded, and a section whose questions are discarded is dropped "
+            f"with them. Outline a paper that fits: fewer sections, each one "
+            f"answered, beats more sections half-researched. Section "
+            f"word_targets must sum to word_target_total within ten percent. "
+            f"claims_to_support across the outline must fit the {claims} "
+            f"verification cap; extra claims stay unverified."
         )
         # A deterrent, and it is not literally true: nothing deletes the
         # outline. Duplication is the single most expensive defect this loop
@@ -323,11 +333,22 @@ class SdkTurns(Turns):
 
     def judge_outline(self, drafted: dict, note: str = "") -> dict:
         payload = json.dumps(drafted, indent=2)
+        pack_path = Path(self.work_dir) / "corpus" / "brain-pack.md"
+        pack = pack_path.read_text(encoding="utf-8") if pack_path.exists() else ""
+        pack_block = (
+            "The corpus pack is below. corpus_fit is a contradiction check, "
+            "not a density check. A thin pack is not a fail.\n\n"
+            f"{pack[:4000]}\n"
+            if pack
+            else "There is no corpus pack. Do not fail corpus_fit for that.\n"
+        )
         return self._json(
             "research-outline-judge",
-            "Score this white paper outline. Python already ran the deterministic "
-            "validator. Do not re-litigate those rows. Score only what a script "
-            f"cannot.\n\n{payload}\n{note}",
+            "Score this white paper outline against flow, completeness, titles, "
+            "and corpus_fit. Python already ran the deterministic validator. "
+            "Do not re-litigate those rows. Do not score accuracy, recency, "
+            "evidence volume, or word allocation. Research has not run.\n\n"
+            f"{pack_block}\n{payload}\n{note}",
             OUTLINE_VERDICT_SCHEMA,
         )
 

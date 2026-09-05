@@ -29,10 +29,13 @@ validation.
 
 ## Shape the paper
 
-Four to ten sections. A 2000-word paper is four to six. A 4000-word paper is
-six to ten. A white paper earns its length with evidence under those headings,
-not with extra headings. Include a mechanism or architecture section,
-tradeoffs, and Limitations. A paper with no limitations section is marketing.
+The question budget decides the section count. Each section needs at least two
+`key_questions`, and the total across sections must not exceed the budget you
+were given. A 4000-word paper is six to ten only when the question budget can
+pay for that. Fewer whole sections beat more half-researched ones.
+
+Include a mechanism or architecture section, tradeoffs, and Limitations. A
+paper with no limitations section is marketing.
 
 Every section is an object with all of these fields:
 

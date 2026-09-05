@@ -94,21 +94,23 @@ LIVE_E2E_MAX_USD=10 task e2e-live
 This is a manual or nightly acceptance test. It uses the Agent SDK and MCP
 research tools, so it requires `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, the
 renderer, and an approved image backend. It never publishes a gist. The live
-lane passes `--profile paper` (4000 words) so six commissioned claims have a
-word budget the outline judge can accept; the fixture lane stays on demo.
-The resulting figures must have no fidelity misses, be embedded in the paper,
+lane passes `--profile paper` (4000 words, 20 questions, 60 claims) and does
+not clamp those numbers; the fixture lane stays on demo. The outline judge
+scores `flow`, `completeness`, `titles`, and `corpus_fit` — the same four
+rows as the Deep Agents twin. The resulting figures must have no fidelity misses, be embedded in the paper,
 and meet the resolution floor recorded in `e2e-report.json`.
 
 The live lane also needs a corpus brain. It looks for one in this order:
 `BRAIN`, then `RESEARCH_BRAINS`, then a `loop_eng_2nd_brain/knowledge` sibling
 of this checkout. A brain is prior art in another repository, and a clone or a
 worktree usually has no sibling. When it finds none, the preflight names every
-path it tried and stops before the first paid query, because the outline rubric
-has rows that cannot pass against an empty pack.
+path it tried and stops before the first paid query. An empty pack is a thinner
+outline, not a failed `corpus_fit` row, but this lane is not the thin-corpus
+lane.
 
 ```bash
 BRAIN=/path/to/loop_eng_2nd_brain/knowledge LIVE_E2E_MAX_USD=10 task e2e-live
-ALLOW_THIN_CORPUS=1 LIVE_E2E_MAX_USD=10 task e2e-live   # run anyway, expect a rubric failure
+ALLOW_THIN_CORPUS=1 LIVE_E2E_MAX_USD=10 task e2e-live   # run anyway; thinner outline
 ```
 
 Set `SOL3_QUERY_TIMEOUT_SECONDS` to change the per-query ceiling. The default

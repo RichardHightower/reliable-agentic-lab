@@ -212,8 +212,12 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
 2. **Outline.** Turn the topic into a two-level outline: sections with
    objectives, abstracts, key questions, claims to support, required evidence,
    word targets, and planned figures. Python validates it, an outline judge
-   scores it, and a stamp writes `outline.approved.json`. Later phases read
-   that file and nothing else. `--profile demo` commissions 2000 words,
+   scores it on four rows (`flow`, `completeness`, `titles`, `corpus_fit`),
+   and a stamp writes `outline.approved.json`. Later phases read
+   that file and nothing else. The outline judge is not the paper judge.
+   After research, the paper judge scores the written page: `defined`,
+   `structured`, `evidenced`, `limited`, `figured`, `depth`, `repetition`,
+   `voice`. `--profile demo` commissions 2000 words,
    `--profile paper` 4000, and `--profile whitepaper` 6000. A profile sets the
    outline target, never the check floor: the floor is one number, 2000 words,
    for every profile. `--approve` stops after the outline
