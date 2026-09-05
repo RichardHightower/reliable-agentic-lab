@@ -415,7 +415,28 @@ class Paper:
         self.budget.spent_usd = self.state.search_cost_usd
         self.budget.calls = self.state.search_calls
         self.budget.on_charge = self._reserve_search
-        self.allowed_domains = source_policy.SEED_ALLOWLIST
+        self._load_allowlist()
+
+    def _load_allowlist(self) -> None:
+        """Resume must use the run's admitted hosts, not the leftover seed.
+
+        `stage_sources` writes `corpus/source_allowlist.json` and sets
+        `allowed_domains`. A later `--resume` that skips that stage would
+        otherwise search the vendor seed and drop every host the librarian
+        had admitted.
+        """
+        path = self.work_dir / "corpus" / "source_allowlist.json"
+        if path.exists():
+            decided = json.loads(path.read_text(encoding="utf-8"))
+            admitted = decided.get("admitted") if isinstance(decided, dict) else None
+            self.allowed_domains = source_policy.run_allowlist(admitted or [])
+        else:
+            self.allowed_domains = source_policy.SEED_ALLOWLIST
+        setter = getattr(self.backend, "set_allowlist", None)
+        if callable(setter):
+            setter(self.allowed_domains)
+        else:
+            self.backend.allowlist = self.allowed_domains
 
     # -- plumbing ----------------------------------------------------------
 

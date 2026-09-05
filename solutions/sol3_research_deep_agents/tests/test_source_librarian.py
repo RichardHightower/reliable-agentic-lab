@@ -212,6 +212,25 @@ def test_scout_cannot_add_an_aggregator():
     assert "medium.com" not in merged
 
 
+def test_resume_reloads_the_admitted_list(run_dir, stub_renderer):
+    """A skipped sources stage must not fall back to the vendor seed."""
+    dest = Path(run_dir) / "corpus"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "source_allowlist.json").write_text(
+        json.dumps(
+            {
+                "proposed": [{"host": "arxiv.org", "org_type": "preprint"}],
+                "dropped": [],
+                "admitted": ["arxiv.org", ".gov", "nature.com"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    run = build_run(run_dir)
+    assert run.allowed_domains == ("arxiv.org", ".gov", "nature.com")
+    assert run.backend.allowlist == run.allowed_domains
+
+
 def test_the_librarian_holds_no_write_path():
     import roleplan  # noqa: PLC0415
 
