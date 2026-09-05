@@ -504,3 +504,28 @@ def test_the_offline_judge_adds_no_opinion_of_its_own():
     turn = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
     assert turn.review("body", "PASS  cited      ok")["done"]
     assert not turn.review("body", "FAIL  cited      no")["done"]
+
+
+def test_the_writer_prompt_names_key_questions_and_the_claim_number(work):
+    """Coverage is a substring match. A writer that never sees the question
+    paraphrases it and fails. Cite-by-number is the card; the id is not.
+    """
+    backend = Backend([result(output="## The problem\n")])
+    section = {
+        "id": "s1",
+        "heading": "The problem",
+        "objective": "State it.",
+        "abstract": "An abstract.",
+        "key_questions": ["what three exits does the loop check", "why does order matter"],
+        "claims_to_support": ["The exits are arithmetic."],
+        "word_target": 400,
+    }
+    claims = [
+        {"id": "s1-f1", "text": "Done then cost then turns.", "number": 3, "status": "verified"}
+    ]
+    t.SdkTurns(backend=backend, work_dir=work).write(section, claims, [], "", "sections/s1.md")
+    prompt = backend.prompts[0][0]
+    assert "what three exits does the loop check" in prompt
+    assert "why does order matter" in prompt
+    assert "Cite each claim by its `number` field" in prompt
+    assert '"number": 3' in prompt

@@ -59,8 +59,12 @@ coverage, citations, and voice. Leave everything else.
 ## Cite every claim
 
 Every paragraph that asserts something carries a numbered citation marker that
-resolves to the reference list. A paragraph with no marker fails a
-deterministic check, and the run comes back to you to fix it.
+resolves to the reference list, using the claim's `number` field: `[3]`, not
+the finding id. A paragraph with no marker fails a deterministic check, and
+the run comes back to you to fix it.
+
+Each key question in your input must appear in the section body as that
+string. Coverage is a case-insensitive substring. Paraphrasing fails the row.
 
 Use only the claims you were given. Their verification status governs how you
 write them:

@@ -462,6 +462,11 @@ class SdkTurns(Turns):
     def write(
         self, section: dict, claims: list[dict], figures: list[dict], notes: str, path: str = ""
     ) -> str:
+        questions = section.get("key_questions") or []
+        question_lines = "\n".join(
+            f"- {item if isinstance(item, str) else item.get('text') or ''}"
+            for item in questions
+        )
         payload = json.dumps({"claims": claims, "figures": figures}, indent=2)
         target = path or f"sections/{section['id']}.md"
         result = self._ask(
@@ -472,7 +477,11 @@ class SdkTurns(Turns):
             f"Claims to support: {json.dumps(section.get('claims_to_support') or [])}\n"
             f"Word target: {section.get('word_target') or 'unspecified'} words. "
             "Stay within 0.6 to 1.25 times that target.\n\n"
+            "Coverage is a case-insensitive substring. Each key question below "
+            "must appear in the section body as that string, not a paraphrase:\n"
+            f"{question_lines or '(none)'}\n\n"
             f"Write it to {target} and also return it as your final message.\n\n"
+            "Cite each claim by its `number` field, like [3]. Do not cite the id. "
             "A claim's status changes how you word it and is never something to "
             "mention. Do not write about this run, its budget, or what it "
             "checked. Unpack every bound claim: finding, mechanism, alternative "

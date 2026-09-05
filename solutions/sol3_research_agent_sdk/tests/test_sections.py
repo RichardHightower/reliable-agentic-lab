@@ -239,6 +239,71 @@ def test_assemble_context_logs_a_cut():
     assert len(slots["previous"]) <= 4000
 
 
+def test_the_section_writer_context_is_the_bound_list(work, turns, no_renderer, monkeypatch):
+    """assemble_context used to get raw findings. The writer then cited ids
+    with no number, and a contradicted claim sat in the blob (#339).
+
+    Recorded at the stage call, not the helper. A test that only calls
+    assemble_context stays green when the call site is reverted.
+    """
+    seen = {}
+    original = sections.assemble_context
+
+    def wrap(**kwargs):
+        seen["findings"] = kwargs["findings"]
+        return original(**kwargs)
+
+    monkeypatch.setattr(sections, "assemble_context", wrap)
+
+    class Mixed(turns):
+        def __init__(self):
+            super().__init__(
+                claims=[
+                    {
+                        "text": "A thing is true.",
+                        "source_url": "https://example.invalid/doc",
+                        "quote": "a thing is true",
+                    },
+                    {
+                        "text": "A false thing.",
+                        "source_url": "https://example.invalid/x",
+                        "quote": "",
+                    },
+                ]
+            )
+
+        def verify(self, claim):
+            self.asked.append(("verify", claim))
+            if "false" in claim.lower():
+                return {
+                    "verdict": "contradicts",
+                    "source_url": "",
+                    "excerpt": "no",
+                }
+            return {
+                "verdict": "supports",
+                "source_url": "https://example.invalid/other",
+                "excerpt": "a thing is true",
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=Mixed(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert seen.get("findings"), "the section writer must assemble context"
+    assert all("number" in row for row in seen["findings"])
+    assert all(row.get("status") != "contradicted" for row in seen["findings"])
+    assert "A false thing." not in [row.get("text") for row in seen["findings"]]
+
+
 def test_the_ledger_appends_one_entry_per_section(work, turns, no_renderer):
     run = paper.Run(
         topic="a topic",
