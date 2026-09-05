@@ -399,9 +399,11 @@ def run_section(run, section: dict) -> dict:
         spent = run.exhausted()
         if spent:
             raise Escalate(f"{sid}: {spent}")
+        # What the previous attempt failed. It steers this attempt's writer and
+        # editor. It must never reach the judge, which grades the body in front
+        # of it, not the one before it.
         retry_note = ""
         if last_score is not None and not last_score.passed:
-            retry_note = checks.Score.report(last_score) if hasattr(last_score, "report") else ""
             retry_note = last_score.report()
         if last_verdict.get("failed_rows"):
             retry_note = (retry_note + "\n" + " ".join(last_verdict.get("notes") or [])).strip()
@@ -423,6 +425,9 @@ def run_section(run, section: dict) -> dict:
         existing = ""
         if path.exists():
             existing = path.read_text(encoding="utf-8")
+        # The writer holds `Write` scoped to this path and is told to use it,
+        # so the old file goes before the turn runs. `existing` is the copy
+        # that survives a turn which raises or answers with nothing.
         path.unlink(missing_ok=True)
         # Edit whenever a draft exists. The old condition also required the
         # judge to have named a row, so a section that failed only a Python row
@@ -432,20 +437,32 @@ def run_section(run, section: dict) -> dict:
         # `last_score.report()` carries the deterministic rows. `length` never
         # reaches `failed_rows`, so without it the editor was told to fix
         # `objective_met` and never heard "1186 words, ceiling 1000".
-        if hasattr(run.turns, "edit_section") and existing:
-            body = run.turns.edit_section(
-                section,
-                existing,
-                last_verdict,
-                relative,
-                note=last_score.report() if last_score else "",
-                claims=bound,
-            )
-        else:
-            body = run.turns.write(section, bound, figures, instruction, relative)
+        try:
+            if hasattr(run.turns, "edit_section") and existing:
+                body = run.turns.edit_section(
+                    section,
+                    existing,
+                    last_verdict,
+                    relative,
+                    note=last_score.report() if last_score else "",
+                    claims=bound,
+                )
+            else:
+                body = run.turns.write(section, bound, figures, instruction, relative)
+        except TurnFailed:
+            # A turn that failed costs the attempt, never the draft. Escalate
+            # is the runtime's own ceiling and is not a turn to recover from.
+            run.log(f"    {sid}: the writer turn failed. Keeping the last draft.")
+            body = ""
         if not path.exists() or not path.read_text(encoding="utf-8").strip():
-            path.write_text((body or "").rstrip() + "\n", encoding="utf-8")
-            written_from_message += 1
+            if (body or "").strip():
+                path.write_text(body.rstrip() + "\n", encoding="utf-8")
+                written_from_message += 1
+            elif existing:
+                # An attempt that produced nothing costs the attempt, never the
+                # draft. The next pass edits the section that got this far.
+                run.log(f"    {sid}: the edit produced nothing. Keeping the last draft.")
+                path.write_text(existing, encoding="utf-8")
         body = path.read_text(encoding="utf-8")
         last_score = checks.section_check(
             body,
@@ -465,8 +482,13 @@ def run_section(run, section: dict) -> dict:
         # a turn grading a rejected section and then fed its rows to the editor
         # in place of the row that actually blocked the section.
         if hasattr(run.turns, "judge_section") and run.enforce_research_policy and not check_failed:
+            # The current report, never `retry_note`. A section whose `length`
+            # row was just repaired reached the judge beside `FAIL length`, and
+            # the judge was told the artifact in front of it was broken in a
+            # way it no longer was.
+            judge_note = last_score.report() if last_score else ""
             try:
-                last_verdict = run.turns.judge_section(section, body, findings, note=retry_note)
+                last_verdict = run.turns.judge_section(section, body, findings, note=judge_note)
             except (TurnFailed, Escalate):
                 last_verdict = {
                     "passed": False,
@@ -474,7 +496,22 @@ def run_section(run, section: dict) -> dict:
                     "notes": ["section judge failed"],
                 }
         else:
-            last_verdict = {"passed": True, "failed_rows": [], "notes": []}
+            # Not run is not the same as agreed. `gates.decide` already draws
+            # this line for `judge_done`. A reader of `section-verdict.json`
+            # could not tell a judge that passed the section from a judge that
+            # never saw it. `passed` stays true so the deterministic rows alone
+            # decide the gate, and `state` says why.
+            last_verdict = {
+                "passed": True,
+                "failed_rows": [],
+                "notes": [],
+                "state": "not_run",
+                "reason": (
+                    "the deterministic check failed, so the judge was not spent"
+                    if check_failed
+                    else "the research policy is off for this run"
+                ),
+            }
         (knowledge / "section-verdict.json").write_text(
             json.dumps(last_verdict, indent=2) + "\n", encoding="utf-8"
         )

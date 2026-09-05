@@ -614,6 +614,23 @@ class SdkTurns(Turns):
         # returned another section over the ceiling.
         rows = ", ".join(verdict.get("failed_rows") or []) or "the rows named below"
         deterministic = f"\n\nPython already checked this section:\n{note}" if note else ""
+        # The same contract the first write received. Without it the editor was
+        # asked to repair a `cited`, `coverage`, or `evidence` row while holding
+        # no claim list, no key questions, and no word target. Length-only
+        # editing survived that. Nothing else does.
+        questions = "\n".join(
+            f"- {checks.question_text(item)}" for item in section.get("key_questions") or []
+        )
+        contract = (
+            f"\n\nObjective: {section.get('objective') or section.get('goal', '')}"
+            f"\nWord target: {section.get('word_target') or 'unspecified'} words, "
+            "and stay within 0.6 to 1.25 times that.\n"
+            "Each key question must appear in the body as this exact string:\n"
+            f"{questions or '(none)'}\n"
+            "Cite each claim by its `number` field, like [3]. Do not cite the id. "
+            "Use only the claims below, and add no facts that are not in them:\n"
+            f"{json.dumps(claims or [], indent=2)}"
+        )
         result = self._ask(
             "research-writer",
             f"Edit mode for '{section['heading']}'. Fix only these rows: {rows}. "
@@ -621,7 +638,8 @@ class SdkTurns(Turns):
             "here, and do not rewrite what already passes. Write the result to "
             f"{target} and also return it as your final message."
             f"{deterministic}\n"
-            f"Notes: {json.dumps(verdict.get('notes') or [])}\n\nCurrent body:\n{whole(body)}",
+            f"Notes: {json.dumps(verdict.get('notes') or [])}"
+            f"{contract}\n\nCurrent body:\n{whole(body)}",
             allow=[target],
         )
         return result.output or ""
