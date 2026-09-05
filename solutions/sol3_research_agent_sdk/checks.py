@@ -855,7 +855,11 @@ def section_check(
         # A writer shortens a long id in prose. `outline.validate` already
         # resolves a bare ULID to its full corpus key, so a citation resolves
         # the same way: an unambiguous suffix is the finding it names.
-        if len([i for i in ids if i.endswith(f"-{marker}")]) != 1:
+        #
+        # A bare number is never a suffix. `[1]` is a reference number, and
+        # letting it match the tail of `s1-f1` or `s1-1` would silently bind a
+        # citation to whichever finding happened to end in that digit.
+        if marker.isdigit() or len([i for i in ids if i.endswith(f"-{marker}")]) != 1:
             dangling.append(f"[{marker}]")
     checks.append(
         Check(
