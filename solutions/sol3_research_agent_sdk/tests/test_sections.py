@@ -747,6 +747,84 @@ def _integrity_loop(work, turns_cls, **kwargs):
     return recorder
 
 
+def test_the_section_attempt_budget_is_tunable_and_defaults_to_three(monkeypatch):
+    """`--max-iterations` drives the whole-paper cycle, never this loop.
+
+    A live section spent attempt one on the draft, attempt two on the Python
+    rows, and had one left when the judge named its objections. The outline
+    gate gets fourteen rounds. This one had three, and no way to say otherwise.
+    """
+    import importlib  # noqa: PLC0415
+
+    assert sections.SECTION_ATTEMPTS == 3
+    monkeypatch.setenv("SOL3_SECTION_ATTEMPTS", "6")
+    reloaded = importlib.reload(sections)
+    try:
+        assert reloaded.SECTION_ATTEMPTS == 6
+    finally:
+        monkeypatch.delenv("SOL3_SECTION_ATTEMPTS")
+        importlib.reload(sections)
+
+
+def test_a_raised_budget_gives_the_section_more_attempts(work, turns, monkeypatch):
+    """The loop reads the constant, so raising it must reach the loop."""
+    import importlib  # noqa: PLC0415
+
+    class Changing(_Recorder):
+        """Fails a different row each attempt, so the stall detector holds off.
+
+        A budget cannot be spent by a section whose signature repeats: the
+        stall rule stops that after two. This isolates the budget itself.
+        """
+
+        def write(self, section, claims, figures, notes, path=""):
+            self.calls.append(("write", section["id"]))
+            return self._body(section, len(self.calls))
+
+        def edit_section(self, section, body, verdict, path="", note="", claims=None):
+            self.calls.append(("edit_section", section["id"]))
+            return self._body(section, len(self.calls))
+
+        def _body(self, section, attempt):
+            # Alternate the failing row. Two equal signatures in a row is a
+            # stall, and the stall rule would stop the loop before the budget
+            # does, which would prove nothing about the budget.
+            questions = section.get("key_questions") or []
+            target_words = int(section.get("word_target") or 0)
+            if attempt % 2:
+                named, words = "", max(target_words, 60)  # coverage fails
+            else:
+                named, words = ". ".join(questions), target_words * 40  # length fails
+            body = f"{named} [1]. " + ("word " * words)
+            path = Path(self.root) / f"sections/{section['id']}.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            return body
+
+    monkeypatch.setenv("SOL3_SECTION_ATTEMPTS", "5")
+    importlib.reload(sections)
+    try:
+        recorder = _Changing = Changing(turns(root=work), work)
+        run = paper.Run(
+            topic="a topic",
+            work_dir=work,
+            turns=recorder,
+            state=paper.State.load_or_new(work, "a topic"),
+            brain=None,
+            log=lambda *a: None,
+            enforce_research_policy=True,
+        )
+        paper.prior_art(run)
+        paper.plan(run)
+        with contextlib.suppress(Escalate, paper.RunFailed):
+            paper.do_sections(run)
+        writes = [c for c in recorder.calls if c[0] in ("write", "edit_section")]
+        assert len(writes) > 3, f"the budget stayed at three: {recorder.calls}"
+    finally:
+        monkeypatch.delenv("SOL3_SECTION_ATTEMPTS")
+        importlib.reload(sections)
+
+
 def test_the_stage_hands_the_judge_the_numbered_claims(work, turns):
     """The judge received raw findings while everyone else held `bound`.
 
