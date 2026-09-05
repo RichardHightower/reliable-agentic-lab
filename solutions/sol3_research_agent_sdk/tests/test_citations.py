@@ -308,19 +308,26 @@ def test_the_paper_gate_accepts_a_sparse_reference_list():
     assert "grounded" in ungrounded.signature()
 
 
-def test_the_rendered_pdf_keeps_the_reference_numbers(tmp_path):
-    """The renderer, not the parser. Reverting the renderer left the parser test green."""
+def test_the_pdf_parser_keeps_the_reference_numbers():
+    """The parser discarded the label. This half needs no PDF toolchain."""
     import pdf_report  # noqa: PLC0415
 
     story = pdf_report.markdown_blocks(
         "1. step one\n2. step two\n\n## References\n\n1. https://a.invalid\n"
         "3. https://c.invalid\n"
     )
-    rendered = []
-    for block in story:
-        if block.kind == "numbered":
-            rendered.append(block.level)
-    assert rendered == [1, 2, 1, 3], rendered
+    assert [b.level for b in story if b.kind == "numbered"] == [1, 2, 1, 3]
+
+
+def test_the_rendered_pdf_keeps_the_reference_numbers(tmp_path):
+    """The renderer, not the parser. A parser-only assertion stayed green.
+
+    Skipped where the PDF toolchain is absent, matching `test_pdf_report.py`.
+    The renderer revert is caught wherever the export lane can actually run.
+    """
+    pytest.importorskip("reportlab")
+    pytest.importorskip("pypdf")
+    import pdf_report  # noqa: PLC0415
 
     source = tmp_path / "paper.md"
     source.write_text(
