@@ -438,6 +438,7 @@ def run_section(run, section: dict) -> dict:
             findings=bound,
             evidence=_evidence_blob(run, sid, findings),
             word_target=int(section.get("word_target") or 0),
+            figures_given=figures,
         )
         (knowledge / "section-check.json").write_text(
             json.dumps(last_score.to_dict(), indent=2) + "\n", encoding="utf-8"
