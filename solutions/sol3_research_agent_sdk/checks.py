@@ -45,8 +45,14 @@ CITATION = re.compile(r"\[(\d+)\]")
 # pattern read every one of those paragraphs as uncited, and no rewrite could
 # fix it. `CITATION` still answers "which numbered reference is this", which
 # a finding id cannot. `ANY_CITATION` answers "is this paragraph sourced".
-FINDING_ID = re.compile(r"\[([a-z0-9]+(?:-[a-z0-9]+)+)\]")
-ANY_CITATION = re.compile(r"\[(?:\d+|[a-z0-9]+(?:-[a-z0-9]+)+)\]")
+# The researcher names its own findings, and the scheme changes every run:
+# `fm-q1-01`, `reliability-failure-modes-q1-f2`, `f1`, `f3b`. A pattern that
+# guesses the shape rejects the next one. Accept any bracketed token instead
+# and let the `grounded` row decide whether it names a finding. The lookahead
+# keeps a markdown link out, because `[the spec](url)` names a source without
+# saying which claim it backs.
+FINDING_ID = re.compile(r"\[([A-Za-z0-9][A-Za-z0-9._-]*)\](?!\()")
+ANY_CITATION = FINDING_ID
 EM_DASH = re.compile(r"\s*—\s*")
 EN_DASH = re.compile(r"(?<=\w)–(?=\w)")  # noqa: RUF001  (the dash is the target)
 CODE_SPAN = re.compile(r"`[^`]*`|```.*?```", re.S)
@@ -821,8 +827,13 @@ def section_check(
     # A citation is grounded when it names a finding, by its number or by its
     # id. The id branch was here already and never fired, because the numeric
     # pattern that fed this loop could not return one.
-    for marker in CITATION.findall(body) + FINDING_ID.findall(body):
-        if marker not in numbers and marker not in ids:
+    for marker in FINDING_ID.findall(body):
+        if marker in numbers or marker in ids:
+            continue
+        # A writer shortens a long id in prose. `outline.validate` already
+        # resolves a bare ULID to its full corpus key, so a citation resolves
+        # the same way: an unambiguous suffix is the finding it names.
+        if len([i for i in ids if i.endswith(f"-{marker}")]) != 1:
             dangling.append(f"[{marker}]")
     checks.append(
         Check(
