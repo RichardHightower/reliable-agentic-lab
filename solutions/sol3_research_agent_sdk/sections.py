@@ -14,6 +14,7 @@ and the ledger are Python-written files.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import checks
@@ -24,7 +25,16 @@ from turns import Escalate, TurnFailed
 
 LIVE_SEARCHES_PER_QUESTION = 2
 LIVE_SEARCHES_PER_SECTION = 8
-SECTION_ATTEMPTS = 3
+# The attempts one section gets, covering the first draft, every deterministic
+# repair, and every judge repair from one budget. Three was silently the whole
+# story: `--max-iterations` drives the whole-paper cycle in `paper.py`, not
+# this loop, so a run that raised it changed nothing here.
+#
+# A live section spent attempt one on the draft, attempt two on the Python
+# rows, and had one left when the judge finally named `evidence_matches` and
+# `voice`. The outline gate gets fourteen rounds by comparison and converges.
+# The default stays 3, so a run changes nothing unless it opts in.
+SECTION_ATTEMPTS = int(os.environ.get("SOL3_SECTION_ATTEMPTS", "3"))
 
 # Named slots, in priority order. Cut from the tail of a slot, never from a
 # higher-priority slot, and log what went.
