@@ -311,6 +311,35 @@ def test_the_writer_is_shown_the_string_the_coverage_row_matches(work):
     assert "knowledge:claim.loop.01M0" not in prompt, prompt
 
 
+def test_the_live_edit_prompt_carries_the_writers_contract(work):
+    """`edit_section` took `claims` and never used them.
+
+    The prompt also dropped the objective, the key questions, the word target,
+    and the citation rule. Length-only editing survived that. A `cited`,
+    `coverage`, or `evidence` repair is under-specified without it.
+    """
+    section = {
+        "id": "s1",
+        "heading": "Stopping",
+        "objective": "Say when the loop stops.",
+        "key_questions": ["What stops the loop? (Answered by the pack: knowledge:claim.x.01M0.)"],
+        "word_target": 900,
+    }
+    claims = [{"number": 3, "id": "s1-f3", "text": "The loop stops on a rubric."}]
+    backend = Backend([result(output="an edited section")])
+    turn = t.SdkTurns(backend=backend, work_dir=work)
+    turn.edit_section(section, "old body", {"failed_rows": ["cited"]}, claims=claims)
+    prompt = backend.prompts[0][0]
+
+    assert "The loop stops on a rubric." in prompt, "the claims never reached the editor"
+    assert '"number": 3' in prompt
+    assert "Say when the loop stops." in prompt
+    assert "What stops the loop?" in prompt
+    assert "900" in prompt
+    # The same normalization the coverage row applies (#350).
+    assert "knowledge:claim.x.01M0" not in prompt, prompt
+
+
 def test_structured_output_is_the_happy_path(work):
     backend = Backend([result(output="", structured={"verdict": "supports"})])
     turn = t.SdkTurns(backend=backend, work_dir=work)

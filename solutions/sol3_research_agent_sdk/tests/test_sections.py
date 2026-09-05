@@ -11,7 +11,7 @@ import paper
 import pytest
 import sections
 import turns as turns_mod
-from turns import Escalate
+from turns import Escalate, TurnFailed
 
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "brain"
@@ -554,8 +554,12 @@ def test_whole_cuts_on_a_paragraph_boundary_and_says_what_went():
     assert len(kept) < len(body)
     assert "more characters" in cut
     assert "withheld for length" in cut
-    # A whole number of paragraphs, never a sentence cut in half.
-    assert all(part in body for part in kept.split("\n\n"))
+    # A whole number of paragraphs, never a sentence cut in half. A substring
+    # check alone also passes for a mid-paragraph slice, so compare the kept
+    # text to the body's own leading paragraphs.
+    paragraphs = body.split("\n\n")
+    assert kept.split("\n\n") == paragraphs[: len(kept.split("\n\n"))]
+    assert kept == "\n\n".join(paragraphs[: len(kept.split("\n\n"))])
 
 
 def test_whole_reads_its_ceiling_at_call_time(monkeypatch):
@@ -672,6 +676,116 @@ def test_an_edit_keeps_the_claims_the_offline_writer_cites_with():
     edited = turn.edit_section(section, "old body", {"failed_rows": ["length"]}, claims=claims)
     assert "[1]" in edited, edited
     assert "would have answered" not in edited, edited
+
+
+# -- retry integrity (#352) --------------------------------------------------
+
+
+class _Integrity(_Recorder):
+    """A loop that goes red, then green, so the judge and ledger are reached."""
+
+    def __init__(self, base, root, edit_result="green", judge_passes=True):
+        super().__init__(base, root, judge_passes=judge_passes)
+        self.edit_result = edit_result
+        self.judge_notes: list[str] = []
+
+    def _green(self, section):
+        named = ". ".join(section.get("key_questions") or ["what failed"])
+        target = int(section.get("word_target") or 0)
+        return f"{named} [1]. " + ("word " * max(target, 60))
+
+    def write(self, section, claims, figures, notes, path=""):
+        self.calls.append(("write", section["id"]))
+        body = "too short [1]."
+        target = Path(self.root) / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+        return body
+
+    def edit_section(self, section, body, verdict, path="", note="", claims=None):
+        self.calls.append(("edit_section", section["id"]))
+        self.edit_notes.append(note)
+        if self.edit_result == "raise":
+            raise TurnFailed("the editor is down")
+        if self.edit_result == "empty":
+            return ""
+        fixed = self._green(section)
+        target = Path(self.root) / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(fixed, encoding="utf-8")
+        return fixed
+
+    def judge_section(self, section, body, findings, note=""):
+        self.calls.append(("judge_section", section["id"]))
+        self.judge_notes.append(note)
+        self.judged_bodies.append(body)
+        return {"passed": True, "failed_rows": []}
+
+    def ledger_turn(self, section, body):
+        self.calls.append(("ledger_turn", section["id"]))
+        return {"section_id": section["id"], "claims": [], "numbers": []}
+
+
+def _integrity_loop(work, turns_cls, **kwargs):
+    recorder = _Integrity(turns_cls(root=work), work, **kwargs)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    recorder.escalation = ""
+    try:
+        paper.do_sections(run)
+    except (Escalate, paper.RunFailed) as stop:
+        recorder.escalation = str(stop)
+    return recorder
+
+
+def test_a_repair_reaches_the_judge_and_the_ledger_in_order(work, turns):
+    recorder = _integrity_loop(work, turns)
+    kinds = [c[0] for c in recorder.calls]
+    assert kinds[:4] == ["write", "edit_section", "judge_section", "ledger_turn"], kinds
+
+
+def test_the_judge_is_given_the_repaired_score_not_the_broken_one(work, turns):
+    """`retry_note` was built from the previous attempt and handed to the judge.
+
+    A section whose `length` row had just been repaired reached the judge
+    beside `FAIL length`.
+    """
+    recorder = _integrity_loop(work, turns)
+    assert recorder.judge_notes, "the judge never ran"
+    note = recorder.judge_notes[0]
+    assert "FAIL" not in note, note
+    assert "length" not in note or "PASS" in note, note
+
+
+def test_an_editor_that_raises_costs_the_attempt_not_the_draft(work, turns):
+    recorder = _integrity_loop(work, turns, edit_result="raise")
+    body = (Path(work) / "sections" / "s1.md").read_text()
+    assert body.strip(), "the draft was destroyed"
+    assert "too short" in body, body
+
+
+def test_an_editor_that_answers_with_nothing_costs_the_attempt_not_the_draft(work, turns):
+    recorder = _integrity_loop(work, turns, edit_result="empty")
+    body = (Path(work) / "sections" / "s1.md").read_text()
+    assert body.strip(), "the draft was destroyed"
+    assert "too short" in body, body
+
+
+def test_a_judge_that_never_ran_is_not_recorded_as_a_judge_that_agreed(work, turns):
+    """`not run` and `agreed` were the same JSON. `gates` already draws the line."""
+    _loop(work, turns)  # the plain recorder never goes green, so the judge is skipped
+    verdict = json.loads((Path(work) / "knowledge" / "s1" / "section-verdict.json").read_text())
+    assert verdict.get("state") == "not_run", verdict
+    assert verdict.get("reason"), verdict
 
 
 def test_demo_lands_above_two_thousand_words(work, no_renderer):
