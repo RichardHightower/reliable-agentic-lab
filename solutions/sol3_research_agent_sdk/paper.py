@@ -1100,13 +1100,21 @@ def _resolve_markers(text: str, numbers: dict[str, int]) -> str:
 def _cite_number(url: str, registry: dict, sources: list[str]) -> int:
     """The number this source was given when a section first cited it.
 
-    The registry is the run's own record. Position in `sources` is the fallback
-    for a run that predates it, and for the unit tests that call `_numbered`
-    with no work directory.
+    Position is the fallback only when the run has no registry at all, which
+    is a pre-registry work directory and the unit tests that call `_numbered`
+    without one. Once a registry exists it is the whole answer: falling back
+    for a single unregistered url gave two different sources the same number,
+    silently, because position and registry disagree.
     """
     if not url:
         return 0
-    if url in registry:
+    if registry:
+        if url not in registry:
+            raise RunFailed(
+                f"{url} is cited but was never registered. The sections were "
+                "written against a different numbering. Assemble from the work "
+                "directory that wrote them, or start a fresh run."
+            )
         return registry[url]
     return sources.index(url) + 1 if url in sources else 0
 
@@ -1351,10 +1359,15 @@ def check(run: Run) -> dict:
     body = run.file("paper.md").read_text(encoding="utf-8")
     planned = outlines.plan_view(approved_outline(run))
     claims = run.read_json("claims.json")["claims"]
-    references = [ref["url"] for ref in _numbered(claims, planned, run.work_dir)[1]]
+    refs = _numbered(claims, planned, run.work_dir)[1]
+    references = [ref["url"] for ref in refs]
     score = checks.check(
         body,
         references,
+        # The numbers the reference list carries, not `1..len(references)`.
+        # The registry is append-only, so a contradicted source or a resume
+        # leaves a gap that positional numbering reads as a fabrication.
+        reference_numbers=[int(ref["number"]) for ref in refs if ref.get("number")],
         base_dir=run.work_dir,
         corpus=corpus_for(run),
         headings=[section["heading"] for section in planned["sections"]],

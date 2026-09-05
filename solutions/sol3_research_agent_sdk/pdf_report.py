@@ -38,7 +38,7 @@ DEFAULT_PALETTE = {
 IMAGE = re.compile(r"^!\[([^]]*)\]\(([^)\s]+)\)\s*$")
 HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 BULLET = re.compile(r"^\s*[-*+]\s+(.+)$")
-NUMBERED = re.compile(r"^\s*\d+[.)]\s+(.+)$")
+NUMBERED = re.compile(r"^\s*(\d+)[.)]\s+(.+)$")
 TABLE_DIVIDER = re.compile(r"^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$")
 
 
@@ -103,7 +103,12 @@ def markdown_blocks(markdown: str) -> list[Block]:
             blocks.append(Block("bullet", bullet.group(1)))
         elif numbered:
             flush_paragraph()
-            blocks.append(Block("numbered", numbered.group(1)))
+            # Keep the number the markdown wrote. The reference list is
+            # numbered from the run's citation registry, which is append-only,
+            # so `1. 3.` is a correct list. Re-counting turned that into
+            # `1. 2.` and every `[3]` in the prose then pointed at the wrong
+            # entry. A numbered list earlier in the paper moved the counter too.
+            blocks.append(Block("numbered", numbered.group(2), level=int(numbered.group(1))))
         elif (
             "|" in line
             and index + 1 < len(lines)
@@ -368,7 +373,7 @@ def build_pdf(
         elif block.kind == "bullet":
             story.append(Paragraph(f"&#8226;&nbsp; {_inline(block.text)}", styles["list"]))
         elif block.kind == "numbered":
-            numbered += 1
+            numbered = block.level or numbered + 1
             story.append(Paragraph(f"{numbered}.&nbsp; {_inline(block.text)}", styles["list"]))
         elif block.kind == "quote":
             story.append(Paragraph(_inline(block.text), styles["quote"]))
