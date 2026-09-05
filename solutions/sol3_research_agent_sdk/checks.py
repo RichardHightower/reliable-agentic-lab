@@ -114,6 +114,11 @@ class Check:
     # How far this row is from passing, when the row can measure it. `None`
     # means the row is pass or fail with nothing in between.
     distance: float | None = None
+    # An advisory row is measured and reported and never blocks. Thirteen live
+    # runs never stamped a section, and the last one died 24 words over a
+    # ceiling after eight writer turns. The Deep Agents port made length
+    # advisory in #294 and it is the port that finishes papers.
+    advisory: bool = False
 
 
 @dataclass
@@ -122,15 +127,19 @@ class Score:
 
     @property
     def passed(self) -> bool:
-        return bool(self.checks) and all(check.passed for check in self.checks)
+        return bool(self.checks) and all(c.passed or c.advisory for c in self.checks)
 
     def signature(self) -> tuple[str, ...]:
         """What failed, not how it was worded.
 
         Two equal signatures mean the last attempt changed nothing, which is the
-        stall the gate stops on.
+        stall the gate stops on. An advisory row is never in it.
         """
-        return tuple(sorted(c.name for c in self.checks if not c.passed))
+        return tuple(sorted(c.name for c in self.checks if not c.passed and not c.advisory))
+
+    def advisories(self) -> tuple[str, ...]:
+        """Rows that missed their mark and did not block. For the record."""
+        return tuple(sorted(c.name for c in self.checks if not c.passed and c.advisory))
 
     def distances(self) -> dict[str, float]:
         """How far each failing row is from passing, where it can say.
@@ -144,13 +153,16 @@ class Score:
         return {
             c.name: c.distance
             for c in self.checks
-            if not c.passed and c.distance is not None
+            if not c.passed and not c.advisory and c.distance is not None
         }
 
     def report(self) -> str:
-        return "\n".join(
-            f"{'PASS' if c.passed else 'FAIL'}  {c.name:<10} {c.detail}" for c in self.checks
-        )
+        def label(c: Check) -> str:
+            if c.passed:
+                return "PASS"
+            return "NOTE" if c.advisory else "FAIL"
+
+        return "\n".join(f"{label(c)}  {c.name:<10} {c.detail}" for c in self.checks)
 
     def to_dict(self) -> dict:
         return {
@@ -829,14 +841,17 @@ def section_check(
     target = int(word_target or section.get("word_target") or 0)
     words = word_count(body)
     if target:
-        low = int(0.6 * target)
-        high = int(1.25 * target)
+        # Aim for the target within ten percent. Measured, reported to the
+        # writer and the editor, and never a reason to fail the section.
+        low = int(0.9 * target)
+        high = int(1.1 * target)
         checks.append(
             Check(
                 "length",
                 low <= words <= high,
-                f"{words} words (need {low}-{high} for target {target})",
+                f"{words} words (aim for {low}-{high}, target {target})",
                 distance=float(max(low - words, words - high, 0)),
+                advisory=True,
             )
         )
     else:
@@ -1042,7 +1057,8 @@ def demo() -> int:
         findings=[{"id": "f1", "number": 1}],
         evidence="",
     )
-    assert "length" in thin.signature()
+    assert "length" in thin.advisories()
+    assert "length" not in thin.signature()
     assert "stub" in thin.signature()
     assert "coverage" in thin.signature()
     specific = section_check(
