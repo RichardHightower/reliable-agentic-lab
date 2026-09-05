@@ -111,6 +111,9 @@ class Check:
     name: str
     passed: bool
     detail: str = ""
+    # How far this row is from passing, when the row can measure it. `None`
+    # means the row is pass or fail with nothing in between.
+    distance: float | None = None
 
 
 @dataclass
@@ -128,6 +131,21 @@ class Score:
         stall the gate stops on.
         """
         return tuple(sorted(c.name for c in self.checks if not c.passed))
+
+    def distances(self) -> dict[str, float]:
+        """How far each failing row is from passing, where it can say.
+
+        The stall rule compares row names. A section that went from 1912 words
+        to 1400 against a 1500 ceiling failed `length` both times, so the names
+        matched and the loop stopped while the writer was still closing the
+        gap. Names alone cannot tell a section that is stuck from one that is
+        working.
+        """
+        return {
+            c.name: c.distance
+            for c in self.checks
+            if not c.passed and c.distance is not None
+        }
 
     def report(self) -> str:
         return "\n".join(
@@ -818,6 +836,7 @@ def section_check(
                 "length",
                 low <= words <= high,
                 f"{words} words (need {low}-{high} for target {target})",
+                distance=float(max(low - words, words - high, 0)),
             )
         )
     else:
