@@ -1070,6 +1070,24 @@ def maybe_write(run: Run) -> dict:
 USABLE = ("verified", "disputed", "unverified")
 
 
+def _resolve_markers(text: str, numbers: dict[str, int]) -> str:
+    """Rewrite a finding-id citation to the reference number of its source.
+
+    The writer cites `[fm-q1-03]`, the only handle it holds. The reference
+    list is numbered by source. Python maps one to the other, the same way
+    `outline.validate` rewrites a bare ULID to its full corpus key.
+
+    A marker that resolves to nothing stays as it is. Deleting an evidence
+    marker to make a check pass is how a paper loses its trace.
+    """
+
+    def swap(match: re.Match) -> str:
+        number = numbers.get(match.group(1))
+        return f"[{number}]" if number else match.group(0)
+
+    return checks.FINDING_ID.sub(swap, text)
+
+
 def _numbered(claims: list[dict], planned: dict) -> tuple[list[dict], list[dict]]:
     """Assign reference numbers in the order the paper will read.
 
@@ -1192,7 +1210,8 @@ def assemble(run: Run) -> dict:
     """
     planned = outlines.plan_view(approved_outline(run))
     claims = run.read_json("claims.json")["claims"]
-    _, references = _numbered(claims, planned)
+    usable, references = _numbered(claims, planned)
+    numbers = {c["id"]: c["number"] for c in usable if c.get("id") and c.get("number")}
 
     parts = [f"# {planned['title']}", ""]
     if planned.get("abstract") or planned.get("thesis"):
@@ -1207,6 +1226,7 @@ def assemble(run: Run) -> dict:
         text = checks.drop_owned_headings(path.read_text(encoding="utf-8"))
         text, found = checks.take_flags(text)
         flags += [{"section": section["id"], "flag": flag} for flag in found]
+        text = _resolve_markers(text, numbers)
         parts += [text.strip(), ""]
         for chart in _charts_for(run, section["id"]):
             rel = f"charts/{Path(chart['path']).name}"

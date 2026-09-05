@@ -56,6 +56,44 @@ def test_section_check_coverage_fails_when_a_question_is_missing():
     assert "coverage" in score.signature()
 
 
+def test_section_check_cited_accepts_the_finding_id_the_writer_holds():
+    """The researcher keys findings `fm-q1-03`, so that is what the writer cites.
+
+    A numeric-only pattern read a fully cited section as entirely uncited, and
+    the writer could not act on the note. It spent every attempt and the run
+    escalated.
+    """
+    body = "Python 3.13 shipped [fm-q1-03]. " + ("word " * 80)
+    score = checks.section_check(
+        body,
+        section=_section(word_target=80, key_questions=[]),
+        findings=[{"id": "fm-q1-03", "number": 1}],
+    )
+    assert "cited" not in score.signature()
+    assert "grounded" not in score.signature()
+
+
+def test_section_check_grounded_fails_on_a_finding_id_that_does_not_exist():
+    body = "Python 3.13 shipped [fm-q9-99]. " + ("word " * 80)
+    score = checks.section_check(
+        body,
+        section=_section(word_target=80, key_questions=[]),
+        findings=[{"id": "fm-q1-03", "number": 1}],
+    )
+    assert "grounded" in score.signature()
+
+
+def test_section_check_cited_does_not_take_a_markdown_link_for_a_citation():
+    """`[the spec](url)` names a source. It does not say which claim it backs."""
+    body = "Python 3.13 shipped, see [the spec](https://x.invalid). " + ("word " * 80)
+    score = checks.section_check(
+        body,
+        section=_section(word_target=80, key_questions=[]),
+        findings=[{"id": "fm-q1-03", "number": 1}],
+    )
+    assert "cited" in score.signature()
+
+
 def test_section_check_cited_fails_on_an_uncited_specific():
     body = "Python 3.13 shipped. " + ("word " * 80)
     score = checks.section_check(

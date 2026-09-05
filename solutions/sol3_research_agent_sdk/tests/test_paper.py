@@ -170,6 +170,38 @@ def test_a_contradicted_claim_never_reaches_the_writer(work, turns, no_renderer)
     assert "A thing is true." not in (Path(work) / "paper.md").read_text()
 
 
+def test_assemble_rewrites_a_finding_id_marker_to_its_reference_number(
+    work, turns, no_renderer
+):
+    """The writer cites the id it holds. The reference list is numbered."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    cited = next(c for c in claims if c.get("source_url"))
+    section = sorted((Path(work) / "sections").glob("*.md"))[0]
+    section.write_text(
+        f"A thing is true [{cited['id']}].\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert f"[{cited['id']}]" not in body, "the finding id survived assembly"
+    assert "A thing is true [1]." in body
+
+
+def test_assemble_keeps_a_marker_it_cannot_resolve(work, turns, no_renderer):
+    """Deleting an evidence marker to pass a check loses the trace."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    section = sorted((Path(work) / "sections").glob("*.md"))[0]
+    section.write_text("A thing is true [fm-q9-99].\n", encoding="utf-8")
+    paper.assemble(run)
+    assert "[fm-q9-99]" in (Path(work) / "paper.md").read_text()
+
+
 # -- the whole run ----------------------------------------------------------
 
 
