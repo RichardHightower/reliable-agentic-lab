@@ -40,6 +40,13 @@ from pathlib import Path
 import source_policy
 
 CITATION = re.compile(r"\[(\d+)\]")
+# The researcher keys its findings `fm-q1-03`, and that id is the only handle
+# the writer holds for them, so that is what the writer cites. A numeric-only
+# pattern read every one of those paragraphs as uncited, and no rewrite could
+# fix it. `CITATION` still answers "which numbered reference is this", which
+# a finding id cannot. `ANY_CITATION` answers "is this paragraph sourced".
+FINDING_ID = re.compile(r"\[([a-z0-9]+(?:-[a-z0-9]+)+)\]")
+ANY_CITATION = re.compile(r"\[(?:\d+|[a-z0-9]+(?:-[a-z0-9]+)+)\]")
 EM_DASH = re.compile(r"\s*—\s*")
 EN_DASH = re.compile(r"(?<=\w)–(?=\w)")  # noqa: RUF001  (the dash is the target)
 CODE_SPAN = re.compile(r"`[^`]*`|```.*?```", re.S)
@@ -210,7 +217,7 @@ def uncited_claims(body: str) -> list[str]:
         # silly.
         if LIST_ITEM.match(text):
             continue
-        if not CITATION.search(text):
+        if not ANY_CITATION.search(text):
             loose.append(text.splitlines()[0][:80])
     return loose
 
@@ -798,7 +805,7 @@ def section_check(
             continue
         if para.startswith(("|", "-", "*")):
             continue
-        if has_specifics(para) and not CITATION.search(para):
+        if has_specifics(para) and not ANY_CITATION.search(para):
             uncited.append(para.splitlines()[0][:80])
     checks.append(
         Check(
@@ -811,13 +818,12 @@ def section_check(
     numbers = {str(f.get("number") or "") for f in findings if f.get("number")}
     ids = {str(f.get("id") or "") for f in findings}
     dangling = []
-    for marker in CITATION.findall(body):
-        if marker not in numbers and marker not in ids and f"[{marker}]" not in "".join(
-            str(f.get("id") or "") for f in findings
-        ):
-            # A citation is grounded if it matches a finding number or id suffix.
-            if not any(str(f.get("number")) == marker for f in findings):
-                dangling.append(f"[{marker}]")
+    # A citation is grounded when it names a finding, by its number or by its
+    # id. The id branch was here already and never fired, because the numeric
+    # pattern that fed this loop could not return one.
+    for marker in CITATION.findall(body) + FINDING_ID.findall(body):
+        if marker not in numbers and marker not in ids:
+            dangling.append(f"[{marker}]")
     checks.append(
         Check(
             "grounded",
