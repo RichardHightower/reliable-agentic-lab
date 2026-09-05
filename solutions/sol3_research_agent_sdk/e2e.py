@@ -305,25 +305,21 @@ def _stream(command: list[str], log_path: Path) -> int:
         return proc.wait()
 
 
-def run(
+def _child_command(
     mode: str,
     out: Path,
     python: str,
     max_usd: float,
     *,
     brain: str | None = None,
-    allow_thin: bool = False,
-) -> int:
-    """Run one acceptance lane, then leave a report even when it fails."""
-    out = Path(out)
-    missing = _preflight(mode, brain=brain, allow_thin=allow_thin)
-    if missing:
-        report = {"work_dir": str(out), "passed": False, "failures": missing, "mode": mode}
-        _write_report(out, report)
-        print("E2E preflight failed:")
-        print("\n".join(f"- {item}" for item in missing))
-        return 2
+) -> list[str]:
+    """The loop.py argv for one acceptance lane.
 
+    The live lane uses `--profile paper` (4000 words). The fixture lane stays
+    on demo: its recorded paper is a 2000-word artifact, and the judge's
+    word_budget row is not what that lane is for. Six claims in 470 words is
+    the live failure this exists to stop (#328).
+    """
     command = [
         python,
         # Unbuffered, so the stream below is live rather than a batch that
@@ -347,12 +343,37 @@ def run(
         str(max_usd),
         "--enforce-loop-doctrine",
     ]
+    if mode == "live":
+        command += ["--profile", "paper"]
     if mode == "fixture":
         command += ["--backend", "fixture", "--fixture", str(FIXTURE)]
     else:
         command += ["--backend", "agent", "--brief-file", str(SCENARIO)]
     if brain:
         command += ["--brain", brain]
+    return command
+
+
+def run(
+    mode: str,
+    out: Path,
+    python: str,
+    max_usd: float,
+    *,
+    brain: str | None = None,
+    allow_thin: bool = False,
+) -> int:
+    """Run one acceptance lane, then leave a report even when it fails."""
+    out = Path(out)
+    missing = _preflight(mode, brain=brain, allow_thin=allow_thin)
+    if missing:
+        report = {"work_dir": str(out), "passed": False, "failures": missing, "mode": mode}
+        _write_report(out, report)
+        print("E2E preflight failed:")
+        print("\n".join(f"- {item}" for item in missing))
+        return 2
+
+    command = _child_command(mode, out, python, max_usd, brain=brain)
 
     # Stream, never capture. `capture_output=True` shows the operator nothing
     # until the process exits, which made a ten-minute phase look like a hang no

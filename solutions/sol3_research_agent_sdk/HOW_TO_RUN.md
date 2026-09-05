@@ -93,9 +93,11 @@ LIVE_E2E_MAX_USD=10 task e2e-live
 
 This is a manual or nightly acceptance test. It uses the Agent SDK and MCP
 research tools, so it requires `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, the
-renderer, and an approved image backend. It never publishes a gist. The resulting figures must
-have no fidelity misses, be embedded in the paper, and meet the resolution
-floor recorded in `e2e-report.json`.
+renderer, and an approved image backend. It never publishes a gist. The live
+lane passes `--profile paper` (4000 words) so six commissioned claims have a
+word budget the outline judge can accept; the fixture lane stays on demo.
+The resulting figures must have no fidelity misses, be embedded in the paper,
+and meet the resolution floor recorded in `e2e-report.json`.
 
 The live lane also needs a corpus brain. It looks for one in this order:
 `BRAIN`, then `RESEARCH_BRAINS`, then a `loop_eng_2nd_brain/knowledge` sibling
