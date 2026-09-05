@@ -41,6 +41,7 @@ LOOPS = {
         "orchestrator",
         "planner",
         "outline_judge",
+        "outline_editor",
         "researcher",
         "verifier",
         "section_judge",
@@ -82,6 +83,10 @@ PURPOSE = {
     "outline_judge": (
         "Scores the outline before any research spend. Holds no write path."
     ),
+    "outline_editor": (
+        "Edits a judged outline against its objections. Holds no write path. "
+        "Python writes the file from what it returns."
+    ),
     "section_judge": (
         "Grades one section against its outline row. Holds no write path."
     ),
@@ -99,6 +104,7 @@ READERS = (
     "researcher",
     "reviewer",
     "outline_judge",
+    "outline_editor",
     "section_judge",
     "ledger",
     "chartist",
@@ -110,6 +116,7 @@ TOOLS_FOR_READER = {
     "researcher": (*READ_TOOLS, "WebSearch"),
     "reviewer": (*READ_TOOLS,),
     "outline_judge": (*READ_TOOLS,),
+    "outline_editor": (*READ_TOOLS,),
     "section_judge": (*READ_TOOLS,),
     "ledger": (*READ_TOOLS,),
     "chartist": (*READ_TOOLS,),

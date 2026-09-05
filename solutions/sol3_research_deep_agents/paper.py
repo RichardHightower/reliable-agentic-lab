@@ -666,6 +666,56 @@ class Paper:
             f"{len(self.plan['diagrams'])} figures planned",
         )
 
+    def _edit_outline(self, drafted: dict, verdict: dict) -> tuple[dict | None, float]:
+        """Repair a judged outline, rather than re-planning it.
+
+        The planner plans. Sending a failed outline back to it produces a
+        different plan with different defects, which is how a loop hovers
+        instead of converging. The editor changes only what the judge named.
+
+        Returns `(None, cost)` when there is nothing usable, so the caller
+        keeps the outline it already has.
+        """
+        objections = "\n".join(
+            f"- {item}" for item in (verdict.get("blocking_issues") or verdict.get("notes") or [])
+        ) or (verdict.get("summary") or "the judge rejected the outline")
+        changes = "\n".join(f"- {item}" for item in (verdict.get("actionable_changes") or []))
+        if changes:
+            objections += "\n\nApply these actionable changes:\n" + changes
+        try:
+            reply = self._ask(
+                "outline_editor",
+                "Edit this outline so it clears the objections below. Make the "
+                "fewest edits that do it. Every field the judge did not name "
+                "comes back exactly as you received it, and a section the judge "
+                "did not fault is returned unchanged. Do not rewrite, reorder, "
+                "or renumber anything. Python revalidates before the judge sees "
+                "this, and a rejected edit wastes the round.\n\n"
+                f"The outline:\n{json.dumps(drafted, indent=2)}\n\n"
+                f"The objections:\n{objections}",
+            )
+        except BudgetSpent:
+            raise
+        except Exception as exc:  # a failed repair must not lose the outline
+            self.say(f"  outline editor failed: {exc}")
+            return None, 0.0
+
+        usd = reply.usd
+        try:
+            edited = self._json_reply("outline_editor", reply)
+        except GateFailed as exc:
+            self.say(f"  outline editor returned no outline: {exc}")
+            return None, usd
+        if not isinstance(edited, dict):
+            return None, usd
+        errors = outlines.validate(
+            edited, word_target_total=edited.get("word_target_total") or 2000
+        )
+        if errors:
+            self.say(f"  outline editor edit rejected: {errors[0]}")
+            return None, usd
+        return edited, usd
+
     def _approve_outline(self) -> float:
         """Validate, judge, and stamp the outline. `--approve` stops before research."""
         dest = self.work_dir / "outline.json"
@@ -695,6 +745,17 @@ class Paper:
                 json.dumps(verdict, indent=2) + "\n", encoding="utf-8"
             )
             if not verdict.get("passed"):
+                edited, edit_usd = self._edit_outline(drafted, verdict)
+                usd += edit_usd
+                if edited is not None:
+                    # The editor changed only what the judge named. Write it and
+                    # let the next attempt judge the repair, rather than sending
+                    # the planner back to write a different plan. The sibling
+                    # port converged this way after five runs that did not.
+                    dest.write_text(json.dumps(edited, indent=2) + "\n", encoding="utf-8")
+                    (self.work_dir / "outline.md").write_text(
+                        outlines.to_markdown(edited), encoding="utf-8"
+                    )
                 raise GateFailed(
                     "the outline judge rejected the outline: "
                     + (verdict.get("summary") or "failed"),
