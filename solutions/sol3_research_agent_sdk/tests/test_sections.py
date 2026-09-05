@@ -780,6 +780,66 @@ def test_an_editor_that_answers_with_nothing_costs_the_attempt_not_the_draft(wor
     assert "too short" in body, body
 
 
+def test_an_escalate_puts_the_draft_back_before_it_stops_the_run(work, turns):
+    """The file is unlinked before the turn, and the in-memory copy dies here.
+
+    A resume would otherwise re-research a section that was already written.
+    """
+
+    class Ceiling(_Integrity):
+        def edit_section(self, section, body, verdict, path="", note="", claims=None):
+            self.calls.append(("edit_section", section["id"]))
+            raise Escalate("the runtime hit its ceiling")
+
+    recorder = Ceiling(turns(root=work), work)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with pytest.raises(Escalate):
+        paper.do_sections(run)
+    body = (Path(work) / "sections" / "s1.md").read_text()
+    assert "too short" in body, "the draft was lost when the runtime stopped"
+
+
+def test_an_empty_first_write_leaves_no_file_to_mistake_for_finished_work(work, turns):
+    """Attempt one produced nothing and there is no draft to keep.
+
+    A blank file would read as finished work to `_section_done`, and the next
+    attempt would edit emptiness instead of writing.
+    """
+
+    class Silent(_Integrity):
+        def write(self, section, claims, figures, notes, path=""):
+            self.calls.append(("write", section["id"]))
+            return ""
+
+    recorder = Silent(turns(root=work), work)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+    path = Path(work) / "sections" / "s1.md"
+    assert not path.exists() or not path.read_text().strip(), path.read_text()
+    assert [c[0] for c in recorder.calls].count("write") > 1, recorder.calls
+
+
 def test_a_judge_that_never_ran_is_not_recorded_as_a_judge_that_agreed(work, turns):
     """`not run` and `agreed` were the same JSON. `gates` already draws the line."""
     _loop(work, turns)  # the plain recorder never goes green, so the judge is skipped

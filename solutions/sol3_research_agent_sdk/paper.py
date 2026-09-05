@@ -43,6 +43,7 @@ from pathlib import Path
 
 import adapter
 import checks
+import citations
 import charts
 import corpus
 import diagrams
@@ -1084,9 +1085,11 @@ def _resolve_markers(text: str, numbers: dict[str, int]) -> str:
     def swap(match: re.Match) -> str:
         marker = match.group(1)
         number = numbers.get(marker)
-        if number is None:
+        if number is None and not marker.isdigit():
             # An abbreviated id resolves when exactly one finding ends in it,
-            # the rule `outline.validate` already applies to a bare ULID.
+            # the rule `outline.validate` already applies to a bare ULID. A
+            # bare number is a reference number and never a suffix: `[1]` must
+            # not bind to whichever finding id happens to end in `-1`.
             hits = [n for key, n in numbers.items() if key.endswith(f"-{marker}")]
             number = hits[0] if len(hits) == 1 else None
         return f"[{number}]" if number else match.group(0)
@@ -1094,7 +1097,23 @@ def _resolve_markers(text: str, numbers: dict[str, int]) -> str:
     return checks.FINDING_ID.sub(swap, text)
 
 
-def _numbered(claims: list[dict], planned: dict) -> tuple[list[dict], list[dict]]:
+def _cite_number(url: str, registry: dict, sources: list[str]) -> int:
+    """The number this source was given when a section first cited it.
+
+    The registry is the run's own record. Position in `sources` is the fallback
+    for a run that predates it, and for the unit tests that call `_numbered`
+    with no work directory.
+    """
+    if not url:
+        return 0
+    if url in registry:
+        return registry[url]
+    return sources.index(url) + 1 if url in sources else 0
+
+
+def _numbered(
+    claims: list[dict], planned: dict, run_dir=None
+) -> tuple[list[dict], list[dict]]:
     """Assign reference numbers in the order the paper will read.
 
     Numbering by source, not by claim, so two claims from one page share a
@@ -1106,6 +1125,9 @@ def _numbered(claims: list[dict], planned: dict) -> tuple[list[dict], list[dict]
     usable = [c for c in claims if c["status"] in USABLE]
     usable.sort(key=lambda c: order.index(c["section"]) if c["section"] in order else len(order))
 
+    # The registry, when the run built one. Renumbering here is what made the
+    # paper's `[1]` disagree with a section's `[1]`: two passes, two answers.
+    registry = citations.load(run_dir) if run_dir else {}
     sources: list[str] = []
     extra: dict[str, dict] = {}
     for claim in usable:
@@ -1117,14 +1139,14 @@ def _numbered(claims: list[dict], planned: dict) -> tuple[list[dict], list[dict]
                 "source_kind": claim.get("source_kind") or "",
                 "epistemic": claim.get("epistemic") or "",
             }
-        claim["number"] = sources.index(url) + 1 if url else 0
+        claim["number"] = _cite_number(url, registry, sources)
     refs = []
-    for index, url in enumerate(sources):
+    for url in sorted(sources, key=lambda u: _cite_number(u, registry, sources)):
         meta = extra.get(url) or {}
         refs.append(
             {
                 "url": url,
-                "number": index + 1,
+                "number": _cite_number(url, registry, sources),
                 "origin": meta.get("origin") or "",
                 "source_kind": meta.get("source_kind") or "",
                 "epistemic": meta.get("epistemic") or "",
@@ -1145,7 +1167,7 @@ def write_sections(run: Run) -> dict:
             by_id[section["id"]] = {**by_id[section["id"]], **section}
     claims = run.read_json("claims.json")["claims"]
     figures = run.read_json("diagrams.json")["figures"]
-    usable, _ = _numbered(claims, planned)
+    usable, _ = _numbered(claims, planned, run.work_dir)
 
     notes = ""
     review_path = run.file("review.json")
@@ -1216,7 +1238,7 @@ def assemble(run: Run) -> dict:
     """
     planned = outlines.plan_view(approved_outline(run))
     claims = run.read_json("claims.json")["claims"]
-    usable, references = _numbered(claims, planned)
+    usable, references = _numbered(claims, planned, run.work_dir)
     numbers = {c["id"]: c["number"] for c in usable if c.get("id") and c.get("number")}
 
     parts = [f"# {planned['title']}", ""]
@@ -1329,7 +1351,7 @@ def check(run: Run) -> dict:
     body = run.file("paper.md").read_text(encoding="utf-8")
     planned = outlines.plan_view(approved_outline(run))
     claims = run.read_json("claims.json")["claims"]
-    references = [ref["url"] for ref in _numbered(claims, planned)[1]]
+    references = [ref["url"] for ref in _numbered(claims, planned, run.work_dir)[1]]
     score = checks.check(
         body,
         references,
