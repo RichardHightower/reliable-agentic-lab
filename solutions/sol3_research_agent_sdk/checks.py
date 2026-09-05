@@ -727,6 +727,29 @@ def unmarked_corpus_briefs(body: str, claims: list) -> list[str]:
     return unmarked
 
 
+def question_text(item) -> str:
+    """The question a section must answer, without the researcher's note.
+
+    The outliner appends its own research notes to a key question, so one
+    question arrived 460 characters long and carrying two corpus ULIDs. The
+    `coverage` row matched the whole string against the body, which meant the
+    published paper had to reproduce the ULIDs to pass.
+
+    The writer was shown the same raw string and told it must appear verbatim.
+    It complied with an HTML comment, invisible in the rendered paper, and the
+    `cited` row then failed on the comment. Two rows, mutually exclusive, no
+    way through.
+
+    The note is for the researcher, which is the phase that reads it. Strip a
+    trailing parenthetical and keep the question.
+    """
+    text = item if not isinstance(item, dict) else item.get("text") or ""
+    text = str(text).strip()
+    # Only a note that trails the question. A parenthetical inside the question
+    # is part of it.
+    return re.sub(r"\s*\([^()]*\)\s*$", "", text).strip() or text
+
+
 def unstated_gaps(body: str, gaps: list) -> list[str]:
     questions = []
     for gap in gaps or []:
@@ -792,11 +815,9 @@ def section_check(
         Check("stub", not stub, "no stub markers" if not stub else f"stub: {stub[:3]}")
     )
 
-    questions = []
-    for item in section.get("key_questions") or []:
-        text = item if not isinstance(item, dict) else item.get("text") or ""
-        if str(text).strip():
-            questions.append(str(text).strip())
+    questions = [
+        text for text in (question_text(item) for item in section.get("key_questions") or []) if text
+    ]
     missing_q = [q for q in questions if q.lower() not in body.lower()]
     checks.append(
         Check(

@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import checks
 import research
 import source_policy
 from load_agents import (
@@ -514,10 +515,10 @@ class SdkTurns(Turns):
         self, section: dict, claims: list[dict], figures: list[dict], notes: str, path: str = ""
     ) -> str:
         questions = section.get("key_questions") or []
-        question_lines = "\n".join(
-            f"- {item if isinstance(item, str) else item.get('text') or ''}"
-            for item in questions
-        )
+        # The same string the `coverage` row matches. Showing the writer the
+        # raw question, notes and corpus ULIDs included, told it to reproduce
+        # 460 characters of research note in the published paper.
+        question_lines = "\n".join(f"- {checks.question_text(item)}" for item in questions)
         payload = json.dumps({"claims": claims, "figures": figures}, indent=2)
         target = path or f"sections/{section['id']}.md"
         result = self._ask(
@@ -1013,7 +1014,7 @@ class OfflineTurns(Turns):
         questions = section.get("key_questions") or []
         marker = f"[{claims[0]['number']}]" if claims and claims[0].get("number") else ""
         for question in questions:
-            text = question if isinstance(question, str) else question.get("text") or ""
+            text = checks.question_text(question)
             if claims:
                 lines += [
                     f"This section answers: {text} {marker}".strip(),

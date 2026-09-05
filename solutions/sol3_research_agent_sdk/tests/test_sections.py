@@ -211,6 +211,52 @@ def test_section_check_figures_falls_back_to_the_plan_when_unstated():
     assert "figures" in score.signature()
 
 
+def test_coverage_ignores_the_researcher_note_appended_to_a_question():
+    """A live run had to reproduce 460 characters of note, ULIDs included.
+
+    The outliner appends its research notes to a key question. `coverage`
+    matched the whole string, so the published paper had to carry the corpus
+    ULIDs to pass. The writer was shown the same string, complied with an HTML
+    comment, and `cited` then failed on the comment.
+    """
+    question = (
+        "What are the five components of a reliable agent loop? "
+        "(Already answered by the pack: knowledge:claim.loop.01M0Y8EYDJ and "
+        "knowledge:claim.loop.01M0Y8EYDK name the five parts.)"
+    )
+    body = (
+        "What are the five components of a reliable agent loop? "
+        "The loop gathers, acts, verifies, remembers, and stops [1]. "
+        + ("word " * 80)
+    )
+    score = checks.section_check(
+        body,
+        section=_section(word_target=80, key_questions=[question]),
+        findings=[{"number": 1, "id": "f1"}],
+    )
+    assert "coverage" not in score.signature(), score.to_dict()["checks"]
+
+
+def test_coverage_still_fails_a_question_the_section_never_names():
+    question = "What stops the loop? (Answered by the pack: knowledge:claim.loop.01M0.)"
+    body = "This section is about something else entirely [1]. " + ("word " * 80)
+    score = checks.section_check(
+        body,
+        section=_section(word_target=80, key_questions=[question]),
+        findings=[{"number": 1, "id": "f1"}],
+    )
+    assert "coverage" in score.signature()
+
+
+def test_question_text_keeps_a_parenthetical_inside_the_question():
+    assert (
+        checks.question_text("Does the loop (the outer one) stop?")
+        == "Does the loop (the outer one) stop?"
+    )
+    assert checks.question_text("Plain question?") == "Plain question?"
+    assert checks.question_text({"text": "From a dict? (a note.)"}) == "From a dict?"
+
+
 def test_section_check_cited_fails_on_an_uncited_specific():
     body = "Python 3.13 shipped. " + ("word " * 80)
     score = checks.section_check(

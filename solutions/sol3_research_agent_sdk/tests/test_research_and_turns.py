@@ -289,6 +289,28 @@ def test_a_body_past_the_ceiling_is_cut_on_a_paragraph_and_declared(work):
     assert "Do not fail objective_met" in prompt
 
 
+def test_the_writer_is_shown_the_string_the_coverage_row_matches(work):
+    """The writer was told to reproduce the researcher's note verbatim, so it did.
+
+    It pasted 460 characters of note, corpus ULIDs included, into an HTML
+    comment to satisfy `coverage`. The `cited` row then failed on the comment.
+    """
+    question = "What stops the loop? (Answered by the pack: knowledge:claim.loop.01M0.)"
+    section = {
+        "id": "s1",
+        "heading": "Stopping",
+        "key_questions": [question],
+        "figures": [],
+        "word_target": 200,
+    }
+    backend = Backend([result(output="a section")])
+    turn = t.SdkTurns(backend=backend, work_dir=work)
+    turn.write(section, [{"number": 1, "text": "A thing."}], [], "", path="sections/s1.md")
+    prompt = backend.prompts[0][0]
+    assert "What stops the loop?" in prompt
+    assert "knowledge:claim.loop.01M0" not in prompt, prompt
+
+
 def test_structured_output_is_the_happy_path(work):
     backend = Backend([result(output="", structured={"verdict": "supports"})])
     turn = t.SdkTurns(backend=backend, work_dir=work)
