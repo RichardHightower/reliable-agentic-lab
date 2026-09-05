@@ -121,6 +121,56 @@ def test_section_check_style_still_fails_a_rhetorical_question_in_prose():
     assert "style" in score.signature()
 
 
+def test_section_check_cited_accepts_a_marker_with_no_hyphen():
+    """The researcher named its findings `f1` and `f3b` on one live run.
+
+    A pattern that required a hyphen read that whole section as uncited. The
+    id scheme is the researcher's choice and it changes every run, so the row
+    accepts any bracketed token and `grounded` decides whether it resolves.
+    """
+    body = "Python 3.13 shipped [f1]. " + ("word " * 80)
+    score = checks.section_check(
+        body,
+        section=_section(word_target=80, key_questions=[]),
+        findings=[{"id": "f1", "number": 1}],
+    )
+    assert "cited" not in score.signature()
+    assert "grounded" not in score.signature()
+
+
+def test_section_check_grounded_resolves_an_abbreviated_finding_id():
+    """A writer shortens a long id in prose, the way #302's model wrote a bare ULID."""
+    body = "Python 3.13 shipped [f14]. " + ("word " * 80)
+    score = checks.section_check(
+        body,
+        section=_section(word_target=80, key_questions=[]),
+        findings=[{"id": "why-prompting-does-not-scale-f14", "number": 1}],
+    )
+    assert "grounded" not in score.signature()
+
+
+def test_section_check_grounded_rejects_an_ambiguous_abbreviation():
+    body = "Python 3.13 shipped [f14]. " + ("word " * 80)
+    score = checks.section_check(
+        body,
+        section=_section(word_target=80, key_questions=[]),
+        findings=[{"id": "a-f14", "number": 1}, {"id": "b-f14", "number": 2}],
+    )
+    assert "grounded" in score.signature()
+
+
+def test_findings_from_research_names_every_finding_itself():
+    """Two id schemes in one section taught the writer to abbreviate the long one."""
+    result = {
+        "claims": [
+            {"id": "f1", "text": "The model named this one."},
+            {"text": "The model named nothing here."},
+        ]
+    }
+    out = sections.findings_from_research(result, "s1", "q1")
+    assert [f["id"] for f in out] == ["s1-f1", "s1-f2"]
+
+
 def test_section_check_cited_fails_on_an_uncited_specific():
     body = "Python 3.13 shipped. " + ("word " * 80)
     score = checks.section_check(

@@ -1082,7 +1082,13 @@ def _resolve_markers(text: str, numbers: dict[str, int]) -> str:
     """
 
     def swap(match: re.Match) -> str:
-        number = numbers.get(match.group(1))
+        marker = match.group(1)
+        number = numbers.get(marker)
+        if number is None:
+            # An abbreviated id resolves when exactly one finding ends in it,
+            # the rule `outline.validate` already applies to a bare ULID.
+            hits = [n for key, n in numbers.items() if key.endswith(f"-{marker}")]
+            number = hits[0] if len(hits) == 1 else None
         return f"[{number}]" if number else match.group(0)
 
     return checks.FINDING_ID.sub(swap, text)

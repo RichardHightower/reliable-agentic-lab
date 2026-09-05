@@ -100,7 +100,12 @@ def _finding_from_claim(claim: dict, section_id: str, question: str, index: int)
     url = claim.get("source_url") or ""
     kind = "corpus" if (claim.get("origin") == "corpus" or str(url).startswith("brain:")) else "web"
     return {
-        "id": claim.get("id") or f"{section_id}-f{index}",
+        # The harness names every finding, never the model. A researcher that
+        # supplies its own id for some claims and not others put two schemes in
+        # one section, `f1` beside `why-prompting-does-not-scale-f14`. The
+        # writer read the short form as the house style and abbreviated the
+        # rest, and every abbreviated citation then failed `grounded`.
+        "id": f"{section_id}-f{index}",
         "section_id": section_id,
         "answers_question": question,
         "claim": claim.get("text") or claim.get("claim") or "",
@@ -131,7 +136,7 @@ def findings_from_research(result: dict, section_id: str, question: str, start: 
                 item = dict(item)
                 item.setdefault("section_id", section_id)
                 item.setdefault("answers_question", question)
-                item.setdefault("id", f"{section_id}-f{offset}")
+                item["id"] = f"{section_id}-f{offset}"
                 out.append(item)
     return out
 
