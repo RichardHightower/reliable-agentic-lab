@@ -409,7 +409,7 @@ def run_section(run, section: dict) -> dict:
             outline=approved,
             ledger=ledger,
             previous=previous,
-            findings=findings,
+            findings=bound,
             retry=retry_note,
         )
         for line in cuts:
