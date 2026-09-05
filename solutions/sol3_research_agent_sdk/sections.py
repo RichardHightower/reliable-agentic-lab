@@ -424,8 +424,23 @@ def run_section(run, section: dict) -> dict:
         if path.exists():
             existing = path.read_text(encoding="utf-8")
         path.unlink(missing_ok=True)
-        if last_verdict.get("failed_rows") and hasattr(run.turns, "edit_section") and existing:
-            body = run.turns.edit_section(section, existing, last_verdict, relative)
+        # Edit whenever a draft exists. The old condition also required the
+        # judge to have named a row, so a section that failed only a Python row
+        # was rewritten from nothing. A full rewrite of a 1900-word section
+        # returns another 1900-word section. Rewrite is attempt one only.
+        #
+        # `last_score.report()` carries the deterministic rows. `length` never
+        # reaches `failed_rows`, so without it the editor was told to fix
+        # `objective_met` and never heard "1186 words, ceiling 1000".
+        if hasattr(run.turns, "edit_section") and existing:
+            body = run.turns.edit_section(
+                section,
+                existing,
+                last_verdict,
+                relative,
+                note=last_score.report() if last_score else "",
+                claims=bound,
+            )
         else:
             body = run.turns.write(section, bound, figures, instruction, relative)
         if not path.exists() or not path.read_text(encoding="utf-8").strip():
@@ -444,9 +459,12 @@ def run_section(run, section: dict) -> dict:
             json.dumps(last_score.to_dict(), indent=2) + "\n", encoding="utf-8"
         )
         check_failed = bool(last_score.signature()) if run.enforce_research_policy else False
-        if hasattr(run.turns, "judge_section") and (
-            run.enforce_research_policy or check_failed
-        ):
+        # Python first, model second, and never re-litigate a row Python
+        # decided. The outline gate already holds this doctrine. Here the judge
+        # ran even when the deterministic check had already failed, which spent
+        # a turn grading a rejected section and then fed its rows to the editor
+        # in place of the row that actually blocked the section.
+        if hasattr(run.turns, "judge_section") and run.enforce_research_policy and not check_failed:
             try:
                 last_verdict = run.turns.judge_section(section, body, findings, note=retry_note)
             except (TurnFailed, Escalate):

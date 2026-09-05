@@ -247,6 +247,48 @@ def result(**kwargs):
     return TurnResult(**kwargs)
 
 
+def test_every_body_bearing_turn_receives_the_whole_section(work):
+    """Proof the turns call `whole`. Testing `whole` alone proved nothing.
+
+    Reverting all four call sites to `body[:8000]` left the helper tests green.
+    A helper test does not catch a turn that stopped calling the helper. The
+    Deep Agents port already paid for this lesson in #324.
+    """
+    tail = "The last paragraph carries the load-bearing number, 42 percent. [1]"
+    body = (
+        "Opening paragraph. [1]\n\n"
+        + "\n\n".join("Filler sentence about loops. " * 20 for _ in range(20))
+        + "\n\n"
+        + tail
+    )
+    assert len(body) > 8000, "the body must exceed the old ceiling"
+    assert len(body) < t.BODY_PROMPT_CHARS, "and stay under the new one"
+
+    section = {"id": "s1", "heading": "Bounding the loop"}
+    verdict = {"failed_rows": ["depth"], "notes": ["no mechanism"]}
+    cases = (
+        ("judge_section", lambda turn: turn.judge_section(section, body, [])),
+        ("ledger_turn", lambda turn: turn.ledger_turn(section, body)),
+        ("edit_section", lambda turn: turn.edit_section(section, body, verdict)),
+        ("edit_paper", lambda turn: turn.edit_paper(section, body)),
+    )
+    for name, call in cases:
+        backend = Backend([result(output="{}", structured={})])
+        call(t.SdkTurns(backend=backend, work_dir=work))
+        prompt = backend.prompts[0][0]
+        assert tail in prompt, f"{name} lost the end of the section"
+
+
+def test_a_body_past_the_ceiling_is_cut_on_a_paragraph_and_declared(work):
+    backend = Backend([result(output="{}", structured={})])
+    body = "\n\n".join(f"Paragraph {n}. " + "word " * 60 for n in range(400))
+    assert len(body) > t.BODY_PROMPT_CHARS
+    t.SdkTurns(backend=backend, work_dir=work).judge_section({"id": "s1"}, body, [])
+    prompt = backend.prompts[0][0]
+    assert "withheld for length" in prompt
+    assert "Do not fail objective_met" in prompt
+
+
 def test_structured_output_is_the_happy_path(work):
     backend = Backend([result(output="", structured={"verdict": "supports"})])
     turn = t.SdkTurns(backend=backend, work_dir=work)

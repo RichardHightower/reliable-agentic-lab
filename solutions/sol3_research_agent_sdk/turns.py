@@ -56,6 +56,41 @@ class TurnFailed(RuntimeError):
     """A turn came back unusable. A person decides what happens next."""
 
 
+BODY_PROMPT_CHARS = 24000
+
+
+def whole(body: str, limit: int | None = None) -> str:
+    """A section body a gate can grade, and a ledger can read.
+
+    Four call sites used `body[:8000]`. A 1912-word section is about 12,000
+    characters, so the judge scored 60 percent of it, cut mid-sentence, and
+    failed `objective_met`, `evidence_matches`, and `tradeoff`. That is
+    precisely how a section cut mid-sentence reads. The judge graded what it
+    was handed. The Deep Agents port already named this failure in #324.
+
+    The ledger call is worse. It is not a gate, so every claim, number, and
+    term past the cut vanished with no error.
+
+    When a ceiling is unavoidable, cut on a paragraph boundary and say how much
+    went, so a reader knows the text ended early rather than inferring that the
+    writer stopped there.
+
+    The limit is read at call time, never as a default argument. A default
+    binds once at definition, and a test that lowers it would change nothing.
+    """
+    limit = BODY_PROMPT_CHARS if limit is None else limit
+    if len(body) <= limit:
+        return body
+
+    kept = body[:limit].rsplit("\n\n", 1)[0] or body[:limit]
+    dropped = len(body) - len(kept)
+    return (
+        f"{kept}\n\n[The section continues for {dropped} more characters, "
+        "withheld for length. It is not truncated in the paper. Do not fail "
+        "objective_met, evidence_matches, or tradeoff for the withheld text.]"
+    )
+
+
 class Escalate(RuntimeError):
     """The runtime hit its own ceiling. Not a turn to retry."""
 
@@ -203,13 +238,29 @@ class Turns:
             "forward_refs": [],
         }
 
-    def edit_section(self, section: dict, body: str, verdict: dict, path: str = "") -> str:
+    def edit_section(
+        self,
+        section: dict,
+        body: str,
+        verdict: dict,
+        path: str = "",
+        note: str = "",
+        claims: list[dict] | None = None,
+    ) -> str:
+        """Default: re-run the writer in edit mode.
+
+        The claims travel with the call. This delegated to `write` with an
+        empty claim list, which was harmless while an edit only followed a
+        judge verdict. Now that any existing draft is edited, an empty list
+        would strip every citation from the offline twin's section.
+        """
         rows = ", ".join(verdict.get("failed_rows") or [])
         notes = (
             f"Edit mode. Fix only these rows: {rows}. Add no facts.\n"
             + "\n".join(verdict.get("notes") or [])
+            + (f"\nPython already checked this section:\n{note}" if note else "")
         )
-        return self.write(section, [], [], notes, path)
+        return self.write(section, claims or [], [], notes, path)
 
     def edit_paper(self, section: dict, body: str, path: str = "") -> str:
         """Flow and transitions only. Add no facts."""
@@ -534,7 +585,7 @@ class SdkTurns(Turns):
             "research-section-judge",
             "Grade this section against its outline row. Python already ran the "
             "deterministic section check. Do not re-litigate those rows.\n"
-            f"{payload}\n\nSection body:\n{body[:8000]}\n{note}",
+            f"{payload}\n\nSection body:\n{whole(body)}\n{note}",
             SECTION_VERDICT_SCHEMA,
         )
 
@@ -542,19 +593,34 @@ class SdkTurns(Turns):
         return self._json(
             "research-ledger",
             f"Extract the ledger entry for section {section.get('id')} "
-            f"({section.get('heading')}).\n\n{body[:8000]}",
+            f"({section.get('heading')}).\n\n{whole(body)}",
             LEDGER_SCHEMA,
         )
 
-    def edit_section(self, section: dict, body: str, verdict: dict, path: str = "") -> str:
+    def edit_section(
+        self,
+        section: dict,
+        body: str,
+        verdict: dict,
+        path: str = "",
+        note: str = "",
+        claims: list[dict] | None = None,
+    ) -> str:
         target = path or f"sections/{section['id']}.md"
-        rows = ", ".join(verdict.get("failed_rows") or [])
+        # `length` is a deterministic row, so it never appears in the judge's
+        # `failed_rows`. Without the Python report the editor was told to fix
+        # `objective_met` and never heard "1186 words, ceiling 1000". It then
+        # returned another section over the ceiling.
+        rows = ", ".join(verdict.get("failed_rows") or []) or "the rows named below"
+        deterministic = f"\n\nPython already checked this section:\n{note}" if note else ""
         result = self._ask(
             "research-writer",
             f"Edit mode for '{section['heading']}'. Fix only these rows: {rows}. "
-            "Add no facts. Write the result to "
-            f"{target} and also return it as your final message.\n"
-            f"Notes: {json.dumps(verdict.get('notes') or [])}\n\nCurrent body:\n{body[:8000]}",
+            "Add no facts. Make the fewest edits that clear every row named "
+            "here, and do not rewrite what already passes. Write the result to "
+            f"{target} and also return it as your final message."
+            f"{deterministic}\n"
+            f"Notes: {json.dumps(verdict.get('notes') or [])}\n\nCurrent body:\n{whole(body)}",
             allow=[target],
         )
         return result.output or ""
@@ -566,7 +632,7 @@ class SdkTurns(Turns):
             f"Edit mode for '{section.get('heading')}'. Rewrite only for flow, "
             "transitions, and definitions. Do not add new facts. Write the "
             f"result to {target} and also return it as your final message.\n\n"
-            f"Current body:\n{body[:8000]}",
+            f"Current body:\n{whole(body)}",
             allow=[target],
         )
         return result.output or ""

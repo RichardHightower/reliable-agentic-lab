@@ -10,6 +10,7 @@ import checks
 import paper
 import pytest
 import sections
+import turns as turns_mod
 from turns import Escalate
 
 
@@ -393,9 +394,25 @@ def test_the_section_loop_escalates_on_a_repeated_failing_verdict(work, turns):
             self.asked.append(("judge_section", section["id"]))
             return {"passed": False, "failed_rows": ["depth"], "notes": ["no mechanism"]}
 
+        def _body(self, section):
+            # Python must pass, or the judge never runs and this test escalates
+            # on a repeated Python signature instead of a repeated verdict.
+            named = ". ".join(section.get("key_questions") or ["what failed"])
+            target = int(section.get("word_target") or 0)
+            return f"{named} [1]. " + ("word " * max(target, 60))
+
         def write(self, section, claims, figures, notes, path=""):
             self.asked.append(("write", section["id"], notes, path))
-            body = "what failed why it failed [1]. " + ("word " * 80)
+            body = self._body(section)
+            if self.root is not None and path:
+                target = Path(self.root) / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(body, encoding="utf-8")
+            return body
+
+        def edit_section(self, section, body, verdict, path="", note="", claims=None):
+            self.asked.append(("edit_section", section["id"]))
+            body = self._body(section)
             if self.root is not None and path:
                 target = Path(self.root) / path
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -415,6 +432,9 @@ def test_the_section_loop_escalates_on_a_repeated_failing_verdict(work, turns):
     paper.plan(run)
     with pytest.raises((Escalate, paper.RunFailed), match="not converging|s1"):
         paper.do_sections(run)
+    # The judge must actually have graded. Without this the test passes on a
+    # repeated Python signature and stops covering the verdict path.
+    assert any(call[0] == "judge_section" for call in run.turns.asked), run.turns.asked
 
 
 def test_the_section_loop_does_not_demand_a_figure_it_never_handed_over(work, turns):
@@ -465,6 +485,147 @@ def test_the_section_loop_does_not_demand_a_figure_it_never_handed_over(work, tu
     for check_path in written:
         signature = json.loads(check_path.read_text())["signature"]
         assert "figures" not in signature, check_path
+
+
+# -- the retry loop shows the writer what the gate grades (#347) -------------
+
+
+def _long_body(words: int = 400) -> str:
+    """A body over the old 8000-character prompt ceiling."""
+    para = "The harness bounds the loop and the checker reads the artifact [1]. "
+    return "\n\n".join(para * 10 for _ in range(words // 40))
+
+
+def test_whole_does_not_cut_a_body_that_fits():
+    body = "one [1].\n\ntwo [1]."
+    assert turns_mod.whole(body) == body
+
+
+def test_whole_cuts_on_a_paragraph_boundary_and_says_what_went():
+    body = "\n\n".join(f"paragraph {n} " + "word " * 20 for n in range(200))
+    cut = turns_mod.whole(body, limit=500)
+    kept = cut.split("\n\n[The section continues")[0]
+    assert len(kept) < len(body)
+    assert "more characters" in cut
+    assert "withheld for length" in cut
+    # A whole number of paragraphs, never a sentence cut in half.
+    assert all(part in body for part in kept.split("\n\n"))
+
+
+def test_whole_reads_its_ceiling_at_call_time(monkeypatch):
+    """A default argument binds once, and a test that lowers it proves nothing."""
+    body = "a" * 100
+    assert turns_mod.whole(body) == body
+    monkeypatch.setattr(turns_mod, "BODY_PROMPT_CHARS", 10)
+    assert "withheld for length" in turns_mod.whole(body)
+
+
+class _Recorder:
+    """Records which turn the section loop reached, and with what."""
+
+    def __init__(self, base, root, judge_passes=True):
+        self.base = base
+        self.root = root
+        self.judge_passes = judge_passes
+        self.calls: list[tuple] = []
+        self.edit_notes: list[str] = []
+        self.judged_bodies: list[str] = []
+
+    def __getattr__(self, name):
+        return getattr(self.base, name)
+
+    def write(self, section, claims, figures, notes, path=""):
+        self.calls.append(("write", section["id"]))
+        body = "what failed why it failed [1]. " + ("word " * 400)
+        target = Path(self.root) / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+        return body
+
+    def edit_section(self, section, body, verdict, path="", note="", claims=None):
+        self.calls.append(("edit_section", section["id"]))
+        self.edit_notes.append(note)
+        target = Path(self.root) / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+        return body
+
+    def judge_section(self, section, body, findings, note=""):
+        self.calls.append(("judge_section", section["id"]))
+        self.judged_bodies.append(body)
+        if self.judge_passes:
+            return {"passed": True, "failed_rows": []}
+        return {"passed": False, "failed_rows": ["depth"], "notes": ["no mechanism"]}
+
+
+def _loop(work, turns_cls, **kwargs):
+    recorder = _Recorder(turns_cls(root=work), work, **kwargs)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    recorder.escalation = ""
+    try:
+        paper.do_sections(run)
+    except (Escalate, paper.RunFailed) as stop:
+        recorder.escalation = str(stop)
+    return recorder
+
+
+def test_a_python_only_failure_edits_instead_of_rewriting(work, turns):
+    """A full rewrite of an over-long section returns another over-long one."""
+    recorder = _loop(work, turns)
+    kinds = [c[0] for c in recorder.calls]
+    assert kinds[0] == "write", kinds
+    assert "edit_section" in kinds, kinds
+    assert kinds.count("write") == 1, kinds
+
+
+def test_the_editor_is_told_the_deterministic_row_it_must_fix(work, turns):
+    """`length` never reaches the judge's failed_rows, so the editor never heard it."""
+    recorder = _loop(work, turns)
+    assert recorder.edit_notes, "the editor never ran"
+    assert any("length" in note for note in recorder.edit_notes), recorder.edit_notes
+    assert any("words" in note for note in recorder.edit_notes), recorder.edit_notes
+
+
+def test_the_judge_does_not_grade_a_section_python_already_rejected(work, turns):
+    """Python first, model second. The outline gate already holds this rule."""
+    recorder = _loop(work, turns)
+    assert "judge_section" not in [c[0] for c in recorder.calls], recorder.calls
+    # The stall detector now sees Python rows only. It must still escalate on a
+    # repeated signature, or skipping the judge would buy an endless loop.
+    assert "not converging" in recorder.escalation, recorder.escalation
+
+
+def test_an_edit_keeps_the_claims_the_offline_writer_cites_with():
+    """`edit_section` delegated to `write` with an empty claim list.
+
+    That was harmless while an edit only followed a judge verdict. Editing any
+    existing draft makes it the common path, and `OfflineTurns.write` with no
+    claims emits blockquote stubs carrying no citation marker.
+    """
+    import research  # noqa: PLC0415
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
+    turn = turns_mod.OfflineTurns(backend=research.FixtureBackend(fixture))
+    section = {
+        "id": "s1",
+        "heading": "The problem",
+        "key_questions": ["what failed"],
+        "figures": [],
+    }
+    claims = [{"number": 1, "id": "s1-f1", "text": "A thing is true."}]
+    edited = turn.edit_section(section, "old body", {"failed_rows": ["length"]}, claims=claims)
+    assert "[1]" in edited, edited
+    assert "would have answered" not in edited, edited
 
 
 def test_demo_lands_above_two_thousand_words(work, no_renderer):
