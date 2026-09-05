@@ -42,6 +42,7 @@ LOOPS = {
         "planner",
         "outline_judge",
         "outline_editor",
+        "source_librarian",
         "researcher",
         "verifier",
         "section_judge",
@@ -87,6 +88,10 @@ PURPOSE = {
         "Edits a judged outline against its objections. Holds no write path. "
         "Python writes the file from what it returns."
     ),
+    "source_librarian": (
+        "Proposes this topic's search domains. Python admits them. "
+        "Holds no write path and no search tool."
+    ),
     "section_judge": (
         "Grades one section against its outline row. Holds no write path."
     ),
@@ -105,6 +110,7 @@ READERS = (
     "reviewer",
     "outline_judge",
     "outline_editor",
+    "source_librarian",
     "section_judge",
     "ledger",
     "chartist",
@@ -117,6 +123,7 @@ TOOLS_FOR_READER = {
     "reviewer": (*READ_TOOLS,),
     "outline_judge": (*READ_TOOLS,),
     "outline_editor": (*READ_TOOLS,),
+    "source_librarian": (*READ_TOOLS,),
     "section_judge": (*READ_TOOLS,),
     "ledger": (*READ_TOOLS,),
     "chartist": (*READ_TOOLS,),

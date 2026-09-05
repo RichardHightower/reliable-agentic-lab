@@ -9,6 +9,8 @@ READS_ONLY = (
     "researcher",
     "reviewer",
     "outline_judge",
+    "outline_editor",
+    "source_librarian",
     "section_judge",
     "ledger",
     "chartist",
@@ -16,13 +18,14 @@ READS_ONLY = (
 WRITES = ("planner", "verifier", "diagrammer", "writer")
 
 
-def test_paper_cast_is_twelve_roles():
+def test_paper_cast_is_thirteen_roles():
     roles = roleplan.plan(None, "paper")
     assert list(roles) == [
         "orchestrator",
         "planner",
         "outline_judge",
         "outline_editor",
+        "source_librarian",
         "researcher",
         "verifier",
         "section_judge",
@@ -76,4 +79,5 @@ def test_table_prints_the_writes_column():
     table = roleplan.table(roleplan.plan(None, "paper"))
     assert "reviewer          no" in table
     assert "chartist          no" in table
+    assert "source_librarian  no" in table
     assert "planner           yes" in table

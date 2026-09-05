@@ -23,7 +23,7 @@ This folder imports no shared engine. Every module below is a copy, and
 | `write_scope.py` | `WriteScope`, `Doer`, `Judge`, `Orchestrator` |
 | `gates.py` | Three exits, and stable failure detection |
 | `research.py` | One filtered search boundary, paper-safe provider fallbacks, and a hard cost cap |
-| `source_policy.py` | The explicit official-host allowlist and citation post-filter |
+| `source_policy.py` | The admission wall: seed fallback, `admit()`, and citation post-filter |
 | `researcher.py` | The Lab 3 runner |
 | `brief.py` | Citation arithmetic and the em dash sweep |
 | `adapter.py` | Deep Agents results into a `DoerResult` |
@@ -47,6 +47,8 @@ role              writes  scope
 orchestrator      no      nothing
 planner           yes     plan.json
 outline_judge     no      nothing
+outline_editor    no      nothing
+source_librarian  no      nothing
 researcher        no      nothing
 verifier          yes     evidence/**   (denied: paper/**)
 section_judge     no      nothing
@@ -171,9 +173,17 @@ entitled to know which claims nobody went back and checked.
 
 ## One filtered boundary, with no Bing paper fallback
 
-The model never chooses who is reputable. Python sends each provider an explicit
-allowlist and drops every returned URL that does not pass the same policy. The
-paper gate repeats that check against the rendered references.
+The model never chooses who is reputable. After the outline is stamped, one
+`source_librarian` turn proposes this topic's hosts. Python `admit()` drops an
+invented `org_type`, anything on the denylist, every top level domain but
+`.gov`, `.edu`, and `.int`, and everything past twenty, then writes
+`corpus/source_allowlist.json`. Every later Perplexity call and the post-filter
+use that run's list. A failed or thin proposal keeps the vendor seed, so the
+offline lane still runs.
+
+Python sends each provider the admitted list and drops every returned URL that
+does not pass the same policy. The paper gate repeats that check against the
+rendered references.
 
 For each planned question, Perplexity runs Scout then Retrieve within the one
 researcher tool invocation. Scout may add only `docs.`, `reference.`, or

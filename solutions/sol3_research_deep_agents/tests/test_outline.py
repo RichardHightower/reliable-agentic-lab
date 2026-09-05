@@ -415,9 +415,10 @@ def test_a_rejected_outline_is_edited_before_the_next_attempt(run_dir, stub_rend
 
     runner = RejectingRunner(FIXTURES / "replies.json")
     run = build_run(run_dir, runner=runner)
+    run.outline_judge_rounds = 2
     run.stage_corpus("")
 
-    with pytest.raises(stages.GateFailed):
+    with pytest.raises(paper.OutlineRejected):
         run.stage_plan("")
 
     assert "outline_editor" in runner.roles, "the judge failed and nobody edited"
@@ -425,3 +426,47 @@ def test_a_rejected_outline_is_edited_before_the_next_attempt(run_dir, stub_rend
     assert written["sections"][0]["objective"] == "Repaired by the editor.", (
         "the repair must be on disk for the next attempt to judge"
     )
+
+
+def test_a_repaired_outline_is_rejudged_without_replanning(run_dir, stub_renderer):
+    """The SDK port judges, then edits, then judges again. Re-planning is how
+    a loop hovers. This is the Deep Agents copy of that inner loop.
+    """
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    class ConvergingRunner(paper.FixtureRunner):
+        def __init__(self, path):
+            super().__init__(path)
+            self.roles: list[str] = []
+            self.judge_turns = 0
+
+        def ask(self, role, prompt):
+            self.roles.append(role)
+            if role == "outline_judge":
+                self.judge_turns += 1
+                if self.judge_turns == 1:
+                    return paper.Reply(text="", data=failing_verdict(), usd=0.1)
+                return paper.Reply(
+                    text="",
+                    data={"passed": True, "score": 0.9, "blocking_issues": [], "actionable_changes": []},
+                    usd=0.1,
+                )
+            if role == "outline_editor":
+                body = prompt[prompt.index("The outline:") + len("The outline:") :]
+                drafted = json.loads(body[body.index("{") : body.rindex("}") + 1])
+                drafted["sections"][0]["objective"] = "Repaired by the editor."
+                return paper.Reply(text="", data=drafted, usd=0.25)
+            return super().ask(role, prompt)
+
+    runner = ConvergingRunner(FIXTURES / "replies.json")
+    run = build_run(run_dir, runner=runner)
+    run.outline_judge_rounds = 4
+    run.stage_corpus("")
+    run.stage_plan("")
+
+    assert runner.roles.count("planner") == 1
+    assert runner.roles.count("outline_editor") == 1
+    assert runner.judge_turns == 2
+    assert (pathlib.Path(run_dir) / "outline.approved.json").exists()
+    written = json.loads((pathlib.Path(run_dir) / "outline.json").read_text())
+    assert written["sections"][0]["objective"] == "Repaired by the editor."

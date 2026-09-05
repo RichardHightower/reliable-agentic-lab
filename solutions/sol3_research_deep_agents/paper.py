@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 import sys
 import threading
@@ -38,6 +39,7 @@ import gates
 import outline as outlines
 import research
 import sections
+import source_policy
 import stages
 import state as pstate
 from stages import GateFailed, StageResult
@@ -49,6 +51,7 @@ DEFAULT_BRAIN = HERE / ".." / ".." / ".." / "loop_eng_2nd_brain" / "knowledge"
 DEFAULT_MAX_USD = 12.0
 DEFAULT_STAGE_ATTEMPTS = 3
 DEFAULT_SEARCH_CALLS = 36
+OUTLINE_JUDGE_ROUNDS = int(os.environ.get("SOL3_OUTLINE_JUDGE_ROUNDS", "14"))
 
 DONE, COST, MAX_TURNS = "done", "cost", "max turns"
 
@@ -80,6 +83,17 @@ def section_body(text: str, heading: str) -> str:
 
 class AwaitingApproval(RuntimeError):
     """`--approve` stops here. The operator edits outline.json, then `--resume`."""
+
+
+class OutlineRejected(GateFailed):
+    """The inner judge/editor loop exhausted. Do not send the planner back.
+
+    `_run_stage` retries a failed plan by re-asking the planner, which is how
+    a repaired outline gets thrown away. This failure is terminal for the
+    stage: the editor already had its rounds.
+    """
+
+    terminal = True
 
 
 class BudgetSpent(RuntimeError):
@@ -370,6 +384,7 @@ class Paper:
     ingest_brain: Path | None = None
     require_approval: bool = False
     resume: bool = False
+    outline_judge_rounds: int = OUTLINE_JUDGE_ROUNDS
 
     state: pstate.PaperState = field(init=False)
     ledger: evidence.Ledger = field(init=False)
@@ -378,6 +393,7 @@ class Paper:
     written: dict = field(default_factory=dict, init=False)
     figures: list = field(default_factory=list, init=False)
     charts: list = field(default_factory=list, init=False)
+    allowed_domains: tuple = field(default_factory=tuple, init=False)
     budget: research.Budget = field(init=False)
     # Diagram names the complexity gate rejected, so a retry redraws only those.
     _redraw: set = field(default_factory=set, init=False)
@@ -399,6 +415,28 @@ class Paper:
         self.budget.spent_usd = self.state.search_cost_usd
         self.budget.calls = self.state.search_calls
         self.budget.on_charge = self._reserve_search
+        self._load_allowlist()
+
+    def _load_allowlist(self) -> None:
+        """Resume must use the run's admitted hosts, not the leftover seed.
+
+        `stage_sources` writes `corpus/source_allowlist.json` and sets
+        `allowed_domains`. A later `--resume` that skips that stage would
+        otherwise search the vendor seed and drop every host the librarian
+        had admitted.
+        """
+        path = self.work_dir / "corpus" / "source_allowlist.json"
+        if path.exists():
+            decided = json.loads(path.read_text(encoding="utf-8"))
+            admitted = decided.get("admitted") if isinstance(decided, dict) else None
+            self.allowed_domains = source_policy.run_allowlist(admitted or [])
+        else:
+            self.allowed_domains = source_policy.SEED_ALLOWLIST
+        setter = getattr(self.backend, "set_allowlist", None)
+        if callable(setter):
+            setter(self.allowed_domains)
+        else:
+            self.backend.allowlist = self.allowed_domains
 
     # -- plumbing ----------------------------------------------------------
 
@@ -556,6 +594,10 @@ class Paper:
                 self.state.save()
                 return self._escalate(name, COST, str(spent))
             except GateFailed as failure:
+                if getattr(failure, "terminal", False):
+                    self.state.mark_failed(name, str(failure))
+                    self.state.save()
+                    return self._escalate(name, MAX_TURNS, str(failure))
                 signature = failure.signature
                 decision = gates.decide(
                     passed=False,
@@ -717,7 +759,13 @@ class Paper:
         return edited, usd
 
     def _approve_outline(self) -> float:
-        """Validate, judge, and stamp the outline. `--approve` stops before research."""
+        """Validate, judge, edit in place, and stamp. `--approve` stops before research.
+
+        The planner plans once. A failed judge used to raise GateFailed, and
+        `_run_stage` retried the whole plan stage, which asked the planner
+        again. That is how a repaired outline got thrown away. The sibling
+        port judges then edits, at most N rounds, without re-planning.
+        """
         dest = self.work_dir / "outline.json"
         judged_path = self.work_dir / "outline-judged.json"
         stamped = self.work_dir / "outline.approved.json"
@@ -733,35 +781,54 @@ class Paper:
         (self.work_dir / "outline.md").write_text(outlines.to_markdown(drafted), encoding="utf-8")
 
         if not judged_path.exists() or self.resume:
-            reply = self._ask(
-                "outline_judge",
-                "Grade this outline against logical flow, completeness, titles, "
-                "and corpus_fit. Do not re-litigate Python's validator.\n"
-                + outlines.for_judge(drafted),
-            )
-            usd = reply.usd
-            verdict = self._json_reply("outline_judge", reply)
-            (self.work_dir / "outline-verdict.json").write_text(
-                json.dumps(verdict, indent=2) + "\n", encoding="utf-8"
-            )
-            if not verdict.get("passed"):
+            previous: tuple[str, ...] | None = None
+            rounds = max(1, int(self.outline_judge_rounds))
+            for round_no in range(1, rounds + 1):
+                reply = self._ask(
+                    "outline_judge",
+                    "Grade this outline against logical flow, completeness, titles, "
+                    "and corpus_fit. Do not re-litigate Python's validator.\n"
+                    + outlines.for_judge(drafted),
+                )
+                usd += reply.usd
+                verdict = self._json_reply("outline_judge", reply)
+                (self.work_dir / "outline-verdict.json").write_text(
+                    json.dumps(verdict, indent=2) + "\n", encoding="utf-8"
+                )
+                if verdict.get("passed"):
+                    judged_path.write_text(json.dumps(drafted, indent=2) + "\n", encoding="utf-8")
+                    break
+                signature = outlines.judge_signature(verdict)
+                decision = gates.decide(
+                    passed=False,
+                    iteration=round_no,
+                    budget=rounds,
+                    signature=signature,
+                    previous_signature=previous,
+                    usd_left=max(0.0, self.max_usd - self.state.total_cost_usd),
+                )
+                self.say(f"    outline judge round {round_no}: {decision.reason}")
+                if decision.stop:
+                    raise OutlineRejected(
+                        "the outline judge rejected the outline: "
+                        + (verdict.get("summary") or "failed"),
+                        signature or ("outline",),
+                    )
+                previous = signature
                 edited, edit_usd = self._edit_outline(drafted, verdict)
                 usd += edit_usd
                 if edited is not None:
-                    # The editor changed only what the judge named. Write it and
-                    # let the next attempt judge the repair, rather than sending
-                    # the planner back to write a different plan. The sibling
-                    # port converged this way after five runs that did not.
-                    dest.write_text(json.dumps(edited, indent=2) + "\n", encoding="utf-8")
+                    drafted = edited
+                    dest.write_text(json.dumps(drafted, indent=2) + "\n", encoding="utf-8")
                     (self.work_dir / "outline.md").write_text(
-                        outlines.to_markdown(edited), encoding="utf-8"
+                        outlines.to_markdown(drafted), encoding="utf-8"
                     )
-                raise GateFailed(
-                    "the outline judge rejected the outline: "
-                    + (verdict.get("summary") or "failed"),
-                    outlines.judge_signature(verdict),
+            else:
+                raise OutlineRejected(
+                    "the outline judge rejected the outline after "
+                    f"{rounds} rounds",
+                    ("outline",),
                 )
-            judged_path.write_text(json.dumps(drafted, indent=2) + "\n", encoding="utf-8")
 
         if self.require_approval and not self.resume:
             raise AwaitingApproval(self.work_dir / "outline.md")
@@ -772,6 +839,82 @@ class Paper:
             encoding="utf-8",
         )
         return usd
+
+    # -- 1b. sources -------------------------------------------------------
+
+    def stage_sources(self, extra: str = "") -> StageResult:
+        """Pick this run's search domains, once, before any paid search.
+
+        The provider takes twenty domains for the whole run. The seed is vendor
+        documentation, which is right for a paper about those vendors and close
+        to useless for one about oncology or monetary policy. The librarian
+        proposes this topic's twenty and `source_policy.admit` decides.
+
+        A failure here is a note, never a stop. The seed still works. The
+        offline fixture has no librarian reply, so it takes that path.
+        """
+        dest = self.work_dir / "corpus" / "source_allowlist.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        headings = []
+        outline_path = self.work_dir / "outline.json"
+        if outline_path.exists():
+            drafted = json.loads(outline_path.read_text(encoding="utf-8"))
+            headings = [section.get("heading") for section in drafted.get("sections") or []]
+        elif self.plan:
+            headings = [section.get("heading") for section in self.plan.get("sections") or []]
+        pack = self.work_dir / "corpus" / "brain-pack.md"
+        prior = pack.read_text(encoding="utf-8") if pack.exists() else ""
+
+        proposal: dict = {"domains": []}
+        usd = 0.0
+        try:
+            reply = self._ask(
+                "source_librarian",
+                "Name the domains this paper should search.\n\n"
+                f"Topic: {self.topic}\n\n"
+                "Sections:\n"
+                + "\n".join(f"- {heading}" for heading in headings if heading)
+                + f"\n\nAt most {source_policy.MAX_PERPLEXITY_DOMAINS} entries. "
+                "Each needs a host and an org_type from the schema enum. Name "
+                "hosts, not journal titles. `.gov`, `.edu`, and `.int` may be "
+                "whole top level domains; no other TLD is admitted. Cable news "
+                "and encyclopedias are dropped under every type. Fewer good "
+                "hosts beats a padded list."
+                + (f"\n\nHosts the curated corpus already cites:\n{prior[:1500]}" if prior else "")
+                + extra,
+            )
+            usd = reply.usd
+            parsed = self._json_reply("source_librarian", reply)
+            if isinstance(parsed, dict):
+                proposal = parsed
+        except BudgetSpent:
+            raise
+        except Exception as exc:
+            self.say(f"  source librarian failed: {exc}; keeping the seed")
+
+        decided = source_policy.admit(proposal.get("domains") or [])
+        decided["seed_used"] = len(decided["admitted"]) < source_policy.MIN_ADMITTED
+        dest.write_text(json.dumps(decided, indent=2) + "\n", encoding="utf-8")
+        self.allowed_domains = source_policy.run_allowlist(decided["admitted"])
+        setter = getattr(self.backend, "set_allowlist", None)
+        if callable(setter):
+            setter(self.allowed_domains)
+        else:
+            self.backend.allowlist = self.allowed_domains
+        return StageResult(
+            "sources",
+            usd=usd,
+            artifacts={
+                "proposed": len(decided["proposed"]),
+                "admitted": len(decided["admitted"]),
+                "dropped": len(decided["dropped"]),
+                "seed": decided["seed_used"],
+            },
+            summary=(
+                f"{len(self.allowed_domains)} domains"
+                + (" (seed)" if decided["seed_used"] else "")
+            ),
+        )
 
     # -- 2. search ---------------------------------------------------------
 
@@ -801,7 +944,9 @@ class Paper:
                 else None
             )
             if repository_report is not None:
-                stages.record_findings(self.ledger, question, repository_report)
+                stages.record_findings(
+                    self.ledger, question, repository_report, seed=self.allowed_domains
+                )
                 self.ledger.write()
                 continue
             # The researcher has one tool call. Its filtered Perplexity boundary
@@ -821,7 +966,12 @@ class Paper:
             finally:
                 self.budget.end_request()
             usd += reply.usd
-            stages.record_findings(self.ledger, question, self._json_reply("researcher", reply))
+            stages.record_findings(
+                self.ledger,
+                question,
+                self._json_reply("researcher", reply),
+                seed=self.allowed_domains,
+            )
             # Persist per question. A stop between questions must not discard
             # the answers this run already paid for.
             self.ledger.write()
@@ -1289,7 +1439,9 @@ class Paper:
         import brief  # noqa: PLC0415
 
         body = brief.strip_em_dashes(body)
-        score = stages.assemble_gate(body, self.ledger, charts=self._loaded_charts())
+        score = stages.assemble_gate(
+            body, self.ledger, charts=self._loaded_charts(), allowed_domains=self.allowed_domains
+        )
         self.paper_path.write_text(body, encoding="utf-8")
         # A warning is not a failure. Filing both under one key made a short
         # paper look like it had failed a gate, and `publish` reads this file to
