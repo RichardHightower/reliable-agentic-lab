@@ -902,6 +902,23 @@ def do_charts(run: Run) -> dict:
     return {"rendered": len(rendered), "skipped": len(skipped)}
 
 
+def apply_allowlist(run: Run) -> None:
+    """Load this run's admitted hosts from disk.
+
+    The LINEAR driver skips a phase whose artifact already exists. Skipping
+    `sources` without this would leave `allowed_domains` on the vendor seed,
+    and every later search would drop the hosts the librarian admitted.
+    """
+    path = run.file("corpus/source_allowlist.json")
+    if not path.exists():
+        return
+    decided = json.loads(path.read_text(encoding="utf-8"))
+    admitted = decided.get("admitted") if isinstance(decided, dict) else None
+    run.allowed_domains = source_policy.run_allowlist(admitted or [])
+    if hasattr(run.turns, "allowed_domains"):
+        run.turns.allowed_domains = run.allowed_domains
+
+
 def source_allowlist(run: Run) -> dict:
     """Pick this run's search domains, once, before any paid search.
 
@@ -933,11 +950,7 @@ def source_allowlist(run: Run) -> dict:
     decided = source_policy.admit(proposal.get("domains") or [])
     decided["seed_used"] = len(decided["admitted"]) < source_policy.MIN_ADMITTED
     run.write_json("corpus/source_allowlist.json", decided)
-    run.allowed_domains = source_policy.run_allowlist(decided["admitted"])
-    # The turns object issues the searches, so it needs the list too. Setting it
-    # on the Run alone would leave every provider call on the seed.
-    if hasattr(run.turns, "allowed_domains"):
-        run.turns.allowed_domains = run.allowed_domains
+    apply_allowlist(run)
     return {
         "proposed": len(decided["proposed"]),
         "admitted": len(decided["admitted"]),
@@ -1414,6 +1427,7 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
     work = Path(run.work_dir)
     work.mkdir(parents=True, exist_ok=True)
     run.state.query_timeout_s = adapter.QUERY_TIMEOUT_SECONDS
+    apply_allowlist(run)
 
     for number, name, output, phase in LINEAR:
         if run.file(output).exists():
