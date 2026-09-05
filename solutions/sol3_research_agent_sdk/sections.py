@@ -426,6 +426,7 @@ def run_section(run, section: dict) -> dict:
     from paper import _section_instruction  # noqa: PLC0415
 
     previous_sig: tuple[str, ...] | None = None
+    previous_gaps: dict[str, float] = {}
     last_score = None
     last_verdict = {"passed": True, "failed_rows": [], "notes": []}
     written_from_message = 0
@@ -570,7 +571,17 @@ def run_section(run, section: dict) -> dict:
         )
         passed = (not check_failed) and bool(last_verdict.get("passed", True))
         signature = tuple(last_score.signature()) + tuple(last_verdict.get("failed_rows") or ())
+        # A row that measures its own gap says whether the attempt moved. Row
+        # names alone read 1739 words and 1600 words against a 1500 ceiling as
+        # the same failure, and the loop stopped while the writer was closing
+        # it. One word of movement is noise, so ask for a real step.
+        distances = last_score.distances()
+        progressed = any(
+            name in previous_gaps and gap < previous_gaps[name] * 0.9
+            for name, gap in distances.items()
+        )
         decision = gates.decide(
+            progressed=progressed,
             passed=passed,
             iteration=iteration,
             budget=SECTION_ATTEMPTS,
@@ -583,6 +594,7 @@ def run_section(run, section: dict) -> dict:
                 break
             raise Escalate(f"{sid}: {decision.reason}")
         previous_sig = signature
+        previous_gaps = distances
 
     # 3h ledger
     try:

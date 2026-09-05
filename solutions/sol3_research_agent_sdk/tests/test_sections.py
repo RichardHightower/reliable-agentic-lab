@@ -825,6 +825,69 @@ def test_a_raised_budget_gives_the_section_more_attempts(work, turns, monkeypatc
         importlib.reload(sections)
 
 
+def test_a_failing_length_row_says_how_far_off_it_is():
+    """Row names read 1739 words and 1600 words as the same failure."""
+    section = _section(word_target=1200, key_questions=[], figures=[])
+    far = checks.section_check(("word " * 1739) + " [1].", section=section,
+                               findings=[{"number": 1, "id": "f1"}])
+    near = checks.section_check(("word " * 1600) + " [1].", section=section,
+                                findings=[{"number": 1, "id": "f1"}])
+    assert far.signature() == near.signature() == ("length",)
+    assert far.distances()["length"] > near.distances()["length"] > 0
+
+
+def test_a_section_that_is_closing_the_gap_is_not_a_stall(work, turns):
+    """Run 12 stopped at two attempts with four unspent, on `length` twice.
+
+    The writer was moving. The stall rule could not see it, because the row
+    name is `length` at 1739 words and at 1600.
+    """
+    class Closing(_Recorder):
+        def write(self, section, claims, figures, notes, path=""):
+            self.calls.append(("write", section["id"]))
+            return self._body(section, len(self.calls))
+
+        def edit_section(self, section, body, verdict, path="", note="", claims=None):
+            self.calls.append(("edit_section", section["id"]))
+            return self._body(section, len(self.calls))
+
+        def _body(self, section, attempt):
+            # Over the ceiling every time, and closer every time.
+            target = int(section.get("word_target") or 0)
+            over = max(int(target * 1.25) + 400 - 100 * attempt, int(target * 1.25) + 20)
+            named = ". ".join(section.get("key_questions") or [])
+            body = f"{named} [1]. " + ("word " * over)
+            path = Path(self.root) / f"sections/{section['id']}.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            return body
+
+    recorder = Closing(turns(root=work), work)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+    attempts = [c for c in recorder.calls if c[0] in ("write", "edit_section")]
+    assert len(attempts) > 2, f"the stall fired on a section that was closing: {recorder.calls}"
+
+
+def test_a_section_that_is_not_moving_still_stalls_at_two(work, turns):
+    """Progress must not become a licence to burn the whole budget."""
+    recorder = _loop(work, turns)
+    attempts = [c for c in recorder.calls if c[0] in ("write", "edit_section")]
+    assert len(attempts) == 2, recorder.calls
+    assert "not converging" in recorder.escalation, recorder.escalation
+
+
 def test_the_stage_hands_the_judge_the_numbered_claims(work, turns):
     """The judge received raw findings while everyone else held `bound`.
 
