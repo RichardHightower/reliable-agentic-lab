@@ -1285,6 +1285,7 @@ def assemble(run: Run) -> dict:
     if planned.get("abstract") or planned.get("thesis"):
         parts += ["## Abstract", "", (planned.get("abstract") or planned.get("thesis") or "").strip(), ""]
     flags: list[dict] = []
+    used_diagrams: set[str] = set()
     for section in planned["sections"]:
         path = run.file("sections") / f"{section['id']}.md"
         if not path.exists():
@@ -1322,6 +1323,27 @@ def assemble(run: Run) -> dict:
             caption = chart.get("caption") or chart.get("name") or rel
             if rel not in text:
                 parts += [f"![{caption}]({rel})", ""]
+        # Charts already had a placement helper. Diagrams were rendered, judged,
+        # and left on disk: the first assembled paper had a 597 KB PNG and no
+        # markdown link (#370). Deep Agents inserts at assemble; copy that.
+        for figure in _diagrams_for(run, section["id"]):
+            rel = _diagram_rel(figure)
+            caption = figure.get("caption") or figure.get("name") or rel
+            if rel and rel not in text and Path(rel).name not in text:
+                parts += [f"![{caption}]({rel})", ""]
+            if rel:
+                used_diagrams.add(_diagram_key(figure))
+    for figure in _rendered_diagrams(run):
+        if _diagram_key(figure) in used_diagrams:
+            continue
+        rel = _diagram_rel(figure)
+        if not rel:
+            continue
+        caption = figure.get("caption") or figure.get("name") or rel
+        if "## Figures" not in parts:
+            parts += ["## Figures", ""]
+        parts += [f"![{caption}]({rel})", ""]
+        used_diagrams.add(_diagram_key(figure))
     if references:
         parts += ["## References", ""]
         parts += [
@@ -1353,6 +1375,41 @@ def _charts_for(run: Run, section_id: str) -> list[dict]:
         for item in payload.get("charts") or []
         if item.get("section") == section_id and item.get("path")
     ]
+
+
+def _diagram_rel(figure: dict) -> str:
+    path = str(figure.get("path") or "").strip()
+    if not path:
+        return ""
+    name = Path(path).name
+    return path if "/" in path.replace("\\", "/") else f"diagrams/{name}"
+
+
+def _diagram_key(figure: dict) -> str:
+    return str(figure.get("name") or "") or _diagram_rel(figure)
+
+
+def _load_diagrams(run: Run) -> list[dict]:
+    path = run.file("diagrams.json")
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return list(payload.get("figures") or [])
+
+
+def _diagrams_for(run: Run, section_id: str) -> list[dict]:
+    return [
+        item
+        for item in _load_diagrams(run)
+        if item.get("path") and item.get("section") == section_id
+    ]
+
+
+def _rendered_diagrams(run: Run) -> list[dict]:
+    return [item for item in _load_diagrams(run) if item.get("path")]
 
 
 def _rendered_charts(run: Run) -> list[dict]:
@@ -1434,6 +1491,7 @@ def check(run: Run) -> dict:
         gaps=_coverage_gaps(run) if run.enforce_research_policy else None,
         claims=claims if run.enforce_research_policy else None,
         charts=_rendered_charts(run),
+        diagrams=_rendered_diagrams(run),
     )
     run.write_json("check.json", score.to_dict())
     return score.to_dict()

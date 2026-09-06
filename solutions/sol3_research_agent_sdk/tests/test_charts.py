@@ -129,6 +129,100 @@ def test_assemble_embeds_a_rendered_chart(work, turns):
     assert "charts/three-exits.png" in body
 
 
+def test_assemble_embeds_a_rendered_diagram(work, turns):
+    """Run 15 rendered loop-and-harness-architecture_imagen.png (597 KB)
+    and never linked it. Charts had `_charts_for`. Diagrams did not (#370).
+    """
+    run = make_run(work, turns())
+    paper.prior_art(run)
+    paper.do_outline(run)
+    dest = run.file("diagrams")
+    dest.mkdir(parents=True, exist_ok=True)
+    png = dest / "loop-and-harness-architecture_imagen.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 64)
+    run.write_json(
+        "diagrams.json",
+        {
+            "figures": [
+                {
+                    "name": "loop-and-harness-architecture",
+                    "section": "s1",
+                    "caption": "Loop and harness architecture",
+                    "path": f"diagrams/{png.name}",
+                }
+            ]
+        },
+    )
+    section_dir = run.file("sections")
+    section_dir.mkdir(parents=True, exist_ok=True)
+    (section_dir / "s1.md").write_text("A thing is true [1].\n", encoding="utf-8")
+    run.write_json(
+        "claims.json",
+        {
+            "claims": [
+                {
+                    "text": "A thing is true.",
+                    "source_url": "https://example.invalid/doc",
+                    "quote": "a thing is true",
+                    "number": 1,
+                    "status": "verified",
+                    "section": "s1",
+                }
+            ]
+        },
+    )
+    paper.assemble(run)
+    body = run.file("paper.md").read_text(encoding="utf-8")
+    assert "diagrams/loop-and-harness-architecture_imagen.png" in body, body
+    assert "Loop and harness architecture" in body
+
+
+def test_assemble_puts_an_unsectioned_diagram_under_figures(work, turns):
+    """A rendered figure the outline never placed still belongs in the paper."""
+    run = make_run(work, turns())
+    paper.prior_art(run)
+    paper.do_outline(run)
+    dest = run.file("diagrams")
+    dest.mkdir(parents=True, exist_ok=True)
+    png = dest / "orphan_imagen.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 64)
+    run.write_json(
+        "diagrams.json",
+        {
+            "figures": [
+                {
+                    "name": "orphan",
+                    "section": "s-missing",
+                    "caption": "An orphaned figure",
+                    "path": f"diagrams/{png.name}",
+                }
+            ]
+        },
+    )
+    section_dir = run.file("sections")
+    section_dir.mkdir(parents=True, exist_ok=True)
+    (section_dir / "s1.md").write_text("A thing is true [1].\n", encoding="utf-8")
+    run.write_json(
+        "claims.json",
+        {
+            "claims": [
+                {
+                    "text": "A thing is true.",
+                    "source_url": "https://example.invalid/doc",
+                    "quote": "a thing is true",
+                    "number": 1,
+                    "status": "verified",
+                    "section": "s1",
+                }
+            ]
+        },
+    )
+    paper.assemble(run)
+    body = run.file("paper.md").read_text(encoding="utf-8")
+    assert "## Figures" in body, body
+    assert "diagrams/orphan_imagen.png" in body
+
+
 def test_linear_runs_charts_after_diagram():
     names = [name for _n, name, _out, _fn in paper.LINEAR]
     assert names.index("diagram") < names.index("charts")
@@ -147,6 +241,9 @@ def test_the_sidecar_names_the_renderer_that_drew_the_chart(tmp_path):
     rows = [{"k": "a", "v": 1, "source": "u"}, {"k": "b", "v": 2, "source": "u"}]
     side = charts.render(spec, rows, tmp_path)
     assert side["renderer"] == "matplotlib", side
+    assert side["title"], side
+    assert side["xlabel"] == "k", side
+    assert side["ylabel"] == "v", side
 
 
 def test_a_swallowed_renderer_error_is_named_in_the_sidecar(tmp_path, monkeypatch):

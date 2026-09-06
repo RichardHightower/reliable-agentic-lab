@@ -412,6 +412,26 @@ def unresolved_images(body: str, base_dir: Path | str | None) -> list[str]:
     return missing
 
 
+def unplaced_figures(body: str, figures: list[dict] | None) -> list[str]:
+    """Rendered diagrams the paper never linked.
+
+    `unresolved_images` only grades links that exist, so a paper with a PNG
+    on disk and no markdown image passed. Assembly is supposed to place
+    them; this row catches a resume that assembled before that helper.
+    """
+    missing = []
+    for figure in figures or []:
+        path = str(figure.get("path") or "").strip()
+        if not path:
+            continue
+        name = str(figure.get("name") or "")
+        filename = Path(path).name
+        if filename in body or (name and name in body):
+            continue
+        missing.append(name or filename)
+    return missing
+
+
 def non_publication_images(body: str) -> list[str]:
     """Diagrams must be judged `*_imagen.png`. Charts live under `charts/`."""
     bad = []
@@ -518,6 +538,7 @@ def check(
     gaps=None,
     claims=None,
     charts=None,
+    diagrams=None,
 ) -> Score:
     """Score a paper. No model call."""
     checks: list[Check] = []
@@ -601,13 +622,15 @@ def check(
     )
 
     missing = unresolved_images(body, base_dir)
+    unplaced = unplaced_figures(body, diagrams)
+    image_fail = missing + unplaced
     checks.append(
         Check(
             "images",
-            not missing,
+            not image_fail,
             f"{len(IMAGE.findall(body))} figures resolve"
-            if not missing
-            else f"missing: {missing[:3]}",
+            if not image_fail
+            else f"missing: {image_fail[:3]}",
         )
     )
 
