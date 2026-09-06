@@ -732,3 +732,53 @@ def test_a_corroborated_cabinet_finding_with_a_public_url_still_skips_the_verifi
     notes = {row["finding_id"]: row for row in verdicts_of(work)}
     assert notes[located[0]["id"]]["note"] == "cross_checked: corpus", notes
     assert ("verify", MIDDLE_TEXT) not in stub.asked, stub.asked
+
+
+def test_a_web_finding_on_a_pack_hits_public_url_is_a_cabinet_finding(work, brain, turns):
+    """`corpus_search` prints the URL, so a researcher can cite the page.
+
+    Same source, other spelling. Graded as web it would meet the research wall
+    on a host the librarian was never asked about.
+    """
+    cited_page = {"text": MIDDLE_TEXT, "source_url": MIDDLE_URL, "quote": MIDDLE_TEXT}
+    stub = make_turns(
+        wordy(turns),
+        [
+            (
+                "s1",
+                [
+                    ("what loses the middle", [cited_page]),
+                    ("what else is known", [web_claim()]),
+                ],
+            )
+        ],
+    )
+    run = policy_drive(work, brain, stub)
+
+    assert stub.locate_calls == []
+    tagged = [f for f in findings_of(work) if f["source"]["url_or_path"] == MIDDLE_URL]
+    assert tagged, findings_of(work)
+    assert tagged[0]["source"]["kind"] == "corpus", tagged
+    assert tagged[0]["origin"] == "corpus", tagged
+    assert tagged[0]["source"]["located_from"] == MIDDLE, tagged
+
+    paper.assemble(run)
+    score = paper.check(run)
+    assert MIDDLE_URL in references_block(work), references_block(work)
+    assert rows_of(score)["hosts"]["passed"], rows_of(score)["hosts"]
+
+
+def test_a_web_finding_on_a_url_no_pack_hit_carries_stays_web(work, brain, turns):
+    """The belt tags the cabinet's own pages, not every page the run cites."""
+    stub = make_turns(
+        turns,
+        [("s1", [("what else is known", [web_claim()]),
+                 ("what more is known", [web_claim("A second web answer.")])])],
+    )
+    drive(work, brain, stub)
+
+    web = [f for f in findings_of(work) if f["source"]["url_or_path"] == WEB_URL]
+    assert web, findings_of(work)
+    assert [f["source"]["kind"] for f in web] == ["web"] * len(web), web
+    assert [f["origin"] for f in web] == ["web"] * len(web), web
+    assert not any("located_from" in f["source"] for f in web), web

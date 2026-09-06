@@ -437,10 +437,41 @@ def locate_cabinet_findings(run, findings: list[dict]) -> tuple[list[dict], list
     unlocated: list[dict] = []
     cache = _load_located(run)
     pack = _pack_hits(run)
-    turns = found = missed = 0
+    # The belt. `corpus_search` prints a `URL:` line, and a researcher that
+    # cites that page instead of the key has cited the same cabinet source.
+    # Left as a web finding it faces the research wall, and the librarian was
+    # never asked about arxiv.org, so the `hosts` row fails a reference the
+    # brain already held. The run must not depend on which spelling the model
+    # chose. First hit wins, and the pack is ranked, so two claims out of one
+    # paper tag with the better of the two keys rather than the later one.
+    public_hits: dict[str, dict] = {}
+    for hit in pack:
+        public = str(hit.get("url") or "").strip()
+        if public.lower().startswith(("http://", "https://")):
+            public_hits.setdefault(public, hit)
+    turns = found = missed = tagged = 0
 
     for finding in findings:
         source = finding.get("source") or {}
+        hit = public_hits.get(str(source.get("url_or_path") or "").strip())
+        if hit is not None:
+            key = str(hit.get("key") or "")
+            ref = str(source.get("ref") or "").strip()
+            # No turn and no rewrite: the URL already is the public copy. Only
+            # the paperwork changes, so the gates read it as what it is.
+            if not ref or ref.lower().startswith(("http://", "https://")):
+                source["ref"] = key
+            if not source.get("title"):
+                source["title"] = str(hit.get("source_title") or "")
+            if not source.get("vendor"):
+                source["vendor"] = str(hit.get("vendor") or "")
+            source["kind"] = "corpus"
+            source["located_from"] = key
+            finding["source"] = source
+            finding["origin"] = "corpus"
+            kept.append(finding)
+            tagged += 1
+            continue
         if not locate.is_cabinet(finding):
             kept.append(finding)
             continue
@@ -523,7 +554,7 @@ def locate_cabinet_findings(run, findings: list[dict]) -> tuple[list[dict], list
         found += 1
 
     sid = next((f.get("section_id") for f in findings if f.get("section_id")), "")
-    run.log(f"    {sid} locate: {turns} turns, {found} hits, {missed} misses")
+    run.log(f"    {sid} locate: {turns} turns, {found} hits, {tagged} tagged, {missed} misses")
     return kept, unlocated
 
 
