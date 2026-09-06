@@ -13,8 +13,11 @@ on disk as a knowledge bundle.
 - `orchestrator`
 - `outliner`
 - `outline_judge`
+- `outline_editor`
+- `source_librarian`
 - `researcher`
 - `verifier`
+- `locator`
 - `section_judge`
 - `ledger`
 - `diagrammer`
@@ -25,7 +28,7 @@ on disk as a knowledge bundle.
 `roleplan.py` is where that list lives. Read it there. Do not restate a scope in
 this folder.
 
-Eleven roles is more than the other three loops need, and each one is here
+Fourteen roles is more than the other three loops need, and each one is here
 because it holds a tool set or a context no other role holds. The researcher
 searches and cannot write, because a searcher that can write can edit the
 evidence to fit the paper. The verifier searches again and is never shown the
@@ -147,7 +150,7 @@ task test
 
 Those checks need no SDK, no API key, and no network. They assert:
 
-- The cast is eleven roles, and the judge writes nothing in every loop.
+- The cast is fourteen roles, and the judge writes nothing in every loop.
 - Every tool the cast holds appears in `allowed_tools`, so no role is denied a
   tool its own list grants.
 - One writer, one hook, and no reader can write through it.
@@ -244,12 +247,17 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
    admitted. A failed or thin proposal keeps the seed, so the offline lane and
    a dead model still run.
 4. **Sections.** For each approved section, in outline order: ask the
-   section's key questions, search the corpus first, fill unanswered
-   questions once, verify independently, write the section, run the
-   section check, grade it, and append a ledger entry. Writes
-   `knowledge/<id>/findings.json`, `sections/<id>.md`, and
-   `paper_ledger.json`. A finished section is skipped on resume.
-   Research for a section runs once; only that section's write retries.
+   section's key questions, search the corpus first, and locate every cabinet
+   finding. Then fill unanswered questions once, verify independently, write
+   the section, run the section check, grade it, and append a ledger entry. The
+   locate step gives each cabinet finding a URL a reader can open. A finding
+   the locator cannot place leaves the pipeline and is written to
+   `knowledge/<id>/unresolved.json`. Locate runs before the gap pass, so the
+   question that finding answered is researched again on the live web. Writes
+   `knowledge/<id>/findings.json`, `knowledge/located.json`,
+   `sections/<id>.md`, and `paper_ledger.json`. A finished section is
+   skipped on resume. Research for a section runs once; only that section's
+   write retries.
 5. **Diagram.** The diagrammer returns the source, Python renders it and runs
    the fidelity judge, and a miss goes back to the diagrammer as a list of what
    the image lost. Three attempts, then keep the closest image and record the
@@ -259,8 +267,9 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
    section between two calls.
 7. **Check.** Deterministic rows: sources, complete, outline_coverage, grounded,
    cited, sourced, images, style, and, on a paper run, has_body and length.
-   Length is hard at 2000 words, whatever the profile commissioned. No model
-   votes here.
+   Length is hard at 2000 words, whatever the profile commissioned. The
+   `hosts` row grades only the references the librarian's wall applies to, and
+   a located cabinet source is not one. No model votes here.
 8. **Review.** The judge scores the rows a script cannot, including `depth`,
    and its verdict is a row in the failure signature rather than a separate veto.
 9. **Publish.** On request, and only after the paper passes.
@@ -359,6 +368,38 @@ reference is real gets you a confident yes. The only thing that catches a
 fabricated arXiv id or DOI is looking for it in the text that was actually
 retrieved. That is what `checks.ungrounded_identifiers` does, ported from the
 grounding guard in the articles v3 pipeline.
+
+## The locator is a cross-reference, not research
+
+The second brain is a cache of claims. A claim in it may be true and still have
+no public locator. The cabinet knows what it read. It does not know where the
+public copy lives. A cabinet claim needs a URL a reader can open before it may
+appear under `## References`.
+
+The locator turn does that one job. It is handed a title, a vendor, and the
+first twenty words of the claim, and it returns the page that carries that
+document. It is a cross-reference from title to URL, not research. The
+librarian's allowlist does not apply to it, because nobody asked the web where
+to look for this document. It holds neither `corpus_search` nor Context7: a
+cross-reference that could read the cabinet would confirm the cabinet with
+itself.
+
+No URL, or a page that does not support the claim, is a miss. The finding is
+dropped from the section and recorded in `knowledge/<id>/unresolved.json` with
+the reason. The gap pass then researches that question on the live web, so a
+dropped cabinet claim costs coverage rather than truth.
+
+One write reaches the brain: `url:` on a SourceDocument that already exists.
+`rkc.attach_url` edits that one line and refuses anything that is not an http
+or https URL. `corpus_search` stays read only.
+
+The run-level cache is `knowledge/located.json`, keyed by source hash, so one
+source costs one turn however many claims came out of it. The brain write means
+the next run pays nothing for the same source.
+
+#384 is the belt at assemble time. It labels or drops whatever reference
+still reaches the public list. It does not replace the locator, which is what
+gives the claim a real URL in the first place.
 
 ## What this folder is not
 

@@ -180,6 +180,18 @@ def test_the_word_floor_in_the_spec_matches_the_code():
     assert "never the check floor" in spec
 
 
+def test_the_spec_names_the_unresolved_file_the_code_writes():
+    """The SPEC names the file the locator's misses land in, and `sections` owns
+    the name. A run that drops a cabinet claim writes it to
+    `knowledge/<id>/unresolved.json`, and a reader who cannot find that file
+    reads the drop as a bug rather than as the record it is.
+    """
+    import sections  # noqa: PLC0415
+
+    spec = (FOLDER / "SPEC.md").read_text(encoding="utf-8")
+    assert f"`knowledge/<id>/{sections.UNRESOLVED_FILE}`" in spec
+
+
 def test_the_spec_names_every_profile_the_code_has():
     import loop  # noqa: PLC0415
 
