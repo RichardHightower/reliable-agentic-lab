@@ -294,6 +294,7 @@ def test_every_role_gets_its_prompt_from_the_plugin(fake_sdk, work):
         "research-source-librarian",
         "research-researcher",
         "research-verifier",
+        "research-locator",
         "research-section-judge",
         "research-ledger",
         "research-diagrammer",
@@ -304,6 +305,25 @@ def test_every_role_gets_its_prompt_from_the_plugin(fake_sdk, work):
     for name, agent in agents.items():
         assert len(agent.prompt) > 400, name
         assert agent.description, name
+
+
+def test_the_locator_card_carries_no_allowlist_and_the_researcher_still_does():
+    """One card is filtered and one is not, and the difference is the whole turn.
+
+    The researcher is told exactly where to search. The locator is looking for
+    wherever a cabinet source was actually published, so a domain filter written
+    for the researcher's question would hide the page.
+    """
+    import source_policy  # noqa: PLC0415
+
+    agents = roles.PLUGIN / "agents"
+    locator = (agents / "research-locator.md").read_text(encoding="utf-8")
+    researcher = (agents / "research-researcher.md").read_text(encoding="utf-8")
+
+    for domain in source_policy.SEED_ALLOWLIST:
+        assert domain not in locator, domain
+    assert "search_domain_filter" in locator
+    assert "docs.langchain.com" in researcher
 
 
 def test_a_reader_carries_the_write_tools_as_a_deny_list(fake_sdk, work):

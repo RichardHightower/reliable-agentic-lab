@@ -53,6 +53,7 @@ LOOPS = {
         "source_librarian",
         "researcher",
         "verifier",
+        "locator",
         "section_judge",
         "ledger",
         "diagrammer",
@@ -77,6 +78,10 @@ PURPOSE = {
     "code_implementer": "Writes the code until the tests pass. Cannot touch tests.",
     "researcher": "Calls the corpus first, then the live tool boundary, and returns findings. Writes nothing.",
     "verifier": "Checks a claim against the corpus and a second live source. Writes nothing.",
+    "locator": (
+        "Finds the public page for one cabinet source. A cross-reference, not "
+        "research. Holds no write path and no corpus tool."
+    ),
     "section_judge": "Grades one section against its outline row. Holds no write path.",
     "ledger": "Extracts the section's facts and terms. Python appends the ledger. Holds no write path.",
     "diagrammer": "Draws the figures and runs the renderer. Writes diagrams only.",
@@ -92,6 +97,7 @@ READERS = (
     "judge",
     "researcher",
     "verifier",
+    "locator",
     "outliner",
     "outline_judge",
     "section_judge",
@@ -104,6 +110,12 @@ TOOLS_FOR_READER = {
     "judge": (*READ_TOOLS, "Bash"),
     "researcher": (*READ_TOOLS, "WebSearch"),
     "verifier": ("Read", *SEARCH_TOOLS),
+    "locator": (
+        "Read",
+        "WebSearch",
+        "mcp__perplexity__perplexity_search",
+        "mcp__perplexity__perplexity_ask",
+    ),
     "outliner": READ_TOOLS,
     "outline_judge": READ_TOOLS,
     "section_judge": READ_TOOLS,
@@ -196,6 +208,12 @@ OVERRIDES: dict[tuple[str, str], dict] = {
         "model": "claude-sonnet-5",
     },
     ("research", "verifier"): {
+        "model": "claude-sonnet-5",
+    },
+    ("research", "locator"): {
+        # No `corpus_search` and no Context7. A cross-reference that could read
+        # the cabinet would confirm the cabinet with itself, and the whole point
+        # of this turn is to find the page a reader outside the cabinet can open.
         "model": "claude-sonnet-5",
     },
     ("research", "section_judge"): {

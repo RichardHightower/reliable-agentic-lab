@@ -20,7 +20,7 @@ def test_the_orchestrator_only_spawns(loop):
     assert not orchestrator.can_write
 
 
-def test_the_research_cast_is_thirteen_roles():
+def test_the_research_cast_is_fourteen_roles():
     assert roleplan.LOOPS["research"] == (
         "orchestrator",
         "outliner",
@@ -29,6 +29,7 @@ def test_the_research_cast_is_thirteen_roles():
         "source_librarian",
         "researcher",
         "verifier",
+        "locator",
         "section_judge",
         "ledger",
         "diagrammer",
@@ -50,6 +51,7 @@ def test_the_research_cast_needs_no_contract():
         "outline_judge",
         "researcher",
         "verifier",
+        "locator",
         "section_judge",
         "ledger",
         "diagrammer",
@@ -70,6 +72,18 @@ def test_no_role_in_this_cast_holds_a_shell():
     from "a wrong paper" to "anything this machine can run"."""
     roles = roleplan.plan(None, "research")
     assert [name for name, role in roles.items() if "Bash" in role.tools] == []
+
+
+def test_the_locator_reaches_perplexity_and_nothing_in_the_cabinet():
+    """A cross-reference that could read the cabinet confirms it with itself."""
+    tools = roleplan.plan(None, "research")["locator"].tools
+    assert "mcp__perplexity__perplexity_search" in tools
+    assert "mcp__perplexity__perplexity_ask" in tools
+    assert "WebSearch" in tools
+    assert "mcp__corpus__corpus_search" not in tools
+    assert "mcp__context7__resolve-library-id" not in tools
+    assert "mcp__context7__query-docs" not in tools
+    assert "Bash" not in tools
 
 
 def test_the_verifier_reaches_the_corpus_and_both_live_servers():

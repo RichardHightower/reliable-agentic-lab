@@ -42,6 +42,7 @@ Plus the research record that produced them, as an RKC knowledge bundle under
 | source_librarian | read tools | nothing |
 | researcher | read tools, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
 | verifier | `Read`, `corpus_search`, `WebSearch`, filtered Perplexity, Context7 | nothing |
+| locator | `Read`, `WebSearch`, unfiltered Perplexity | nothing |
 | section_judge | read tools | nothing |
 | ledger | `Read` | nothing |
 | diagrammer | read tools | nothing |
