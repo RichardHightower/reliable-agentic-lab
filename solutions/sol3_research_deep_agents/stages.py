@@ -228,13 +228,29 @@ def record_findings(
     """
     subject = question.get("subject", "topic")
     supplied_urls = [str(item.get("url", "")) for item in reply.get("sources", [])]
+    # The allowlist has nothing to say about these, so the claim filter below
+    # would drop every reference to one, and a claim that named only its
+    # cabinet source would silently inherit every other source in the answer.
+    located_urls = {
+        str(item.get("url", "")).strip()
+        for item in reply.get("sources", [])
+        if str(item.get("located_from", "") or "")
+    }
     allowlist = source_policy.merge_allowlist(
         supplied_urls, seed=seed if seed is not None else source_policy.SEED_ALLOWLIST
     )
     source_ids = []
     for item in reply.get("sources", []):
         url = str(item.get("url", "")).strip()
-        if not source_policy.url_allowed(url, allowlist):
+        located_from = str(item.get("located_from", "") or "")
+        if located_from:
+            # `paper._locate_cabinet_sources` cross-referenced a source the
+            # cabinet already held. The librarian never admitted a domain for
+            # it, because nobody asked the web for it, so the allowlist has
+            # nothing to say. The bar is only that a reader can open it.
+            if not (url.lower().startswith(("http://", "https://")) and source_policy.host(url)):
+                continue
+        elif not source_policy.url_allowed(url, allowlist):
             continue
         source = ledger.add_source(
             evidence.SourceDocument(
@@ -243,6 +259,7 @@ def record_findings(
                 subject=subject,
                 vendor=item.get("vendor", ""),
                 body=item.get("quote", ""),
+                located_from=located_from,
             )
         )
         source_ids.append(source.id)
@@ -254,7 +271,9 @@ def record_findings(
             continue
         # A claim may name its own subset of sources. When it names none, it
         # inherits every source this answer produced.
-        wanted = source_policy.filter_urls(item.get("source_urls") or [], allowlist)
+        named = [str(url).strip() for url in (item.get("source_urls") or [])]
+        wanted = source_policy.filter_urls(named, allowlist)
+        wanted += [url for url in named if url in located_urls and url not in wanted]
         ids = [
             sid
             for sid in source_ids
@@ -785,7 +804,12 @@ def assemble_gate(
 ) -> paper_check.PaperScore:
     _, urls = numbering(ledger)
     score = paper_check.check(
-        body, urls, ledger=ledger, charts=charts, allowed_domains=allowed_domains
+        body,
+        urls,
+        ledger=ledger,
+        charts=charts,
+        allowed_domains=allowed_domains,
+        located=[source.url for source in ledger.bibliography() if source.located_from],
     )
     if not score.passed:
         raise GateFailed(

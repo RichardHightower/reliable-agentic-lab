@@ -286,6 +286,7 @@ def test_build_paper_agents_compiles_one_direct_graph_per_role(fake_langchain, f
         "outline_judge",
         "researcher",
         "verifier",
+        "locator",
         "section_judge",
         "ledger",
         "diagrammer",
@@ -305,3 +306,70 @@ def test_build_agent_can_turn_on_parent_debug(fake_langchain, fake_deepagents, t
     roles.build_agent(None, loop="paper", repo=tmp_path, debug=True)
     assert fake_deepagents["debug"] is True
     assert all("debug" not in spec for spec in fake_deepagents["subagents"])
+
+
+# -- the locator: one tool, and it is not search ----------------------------
+
+
+def test_the_locator_holds_exactly_locate(fake_langchain):
+    specs = by_name(roles.subagents_for(None, "paper", backend=Boundary(), docs_backend=Boundary(), repo=Path(".")))
+    assert names(specs["locator"]) == ["locate"]
+
+
+def test_the_researcher_never_gets_locate(fake_langchain):
+    """An open-web call inside the researcher would walk around the allowlist."""
+    specs = by_name(roles.subagents_for(None, "paper", backend=Boundary(), docs_backend=Boundary(), repo=Path(".")))
+    for role in specs:
+        if role != "locator":
+            assert "locate" not in names(specs[role]), role
+
+
+def test_the_locator_cannot_write(fake_langchain):
+    spec = by_name(roles.subagents_for(None, "paper", backend=Boundary(), repo=Path(".")))["locator"]
+    assert {"operations": ["write"], "paths": ["/**"], "mode": "deny"} in spec["permissions"]
+
+
+def test_locate_tool_reports_a_miss_rather_than_an_empty_string(fake_langchain):
+    class NoWeb:
+        name = "stub"
+        cost_per_call = 0.0
+
+        def locate(self, question):
+            import research  # noqa: PLC0415
+
+            return research.Finding(question, "", note="nothing came back")
+
+    assert roles.locate_tool(NoWeb())("q").startswith("NO ANSWER.")
+
+
+def test_the_locator_card_names_no_allowlist_domain():
+    """A domain in the card is a filter, and this turn is not filtered."""
+    import source_policy  # noqa: PLC0415
+
+    card = (roles.SKILLS_DIR / "locator" / "SKILL.md").read_text(encoding="utf-8")
+    for entry in source_policy.SEED_ALLOWLIST:
+        assert entry not in card, entry
+
+
+def test_the_researcher_card_still_says_the_search_is_filtered():
+    card = (roles.SKILLS_DIR / "researcher" / "SKILL.md").read_text(encoding="utf-8")
+    assert "domain-filtered" in card
+    assert "corpus_search" in card and "source_urls" in card
+
+
+def test_corpus_search_prints_a_url_only_when_the_hit_has_one(fake_langchain, tmp_path):
+    import corpus  # noqa: PLC0415
+
+    hits = [
+        corpus.Hit(key="b:c1", claim="c", quote="q", source_title="T", url="https://a.example/p"),
+        corpus.Hit(key="b:c2", claim="c", quote="q", source_title="T"),
+    ]
+    search = roles.corpus_search_tool([tmp_path])
+    monkey = corpus.search
+    corpus.search = lambda *_a, **_k: hits
+    try:
+        text = search("q")
+    finally:
+        corpus.search = monkey
+    assert text.count("URL: https://a.example/p") == 1
+    assert text.count("URL:") == 1

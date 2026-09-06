@@ -240,3 +240,86 @@ def test_a_valueless_front_matter_url_falls_through_to_the_body(tmp_path):
     """`url:` with nothing after it parses to a dict. It is not a url."""
     root = _url_brain(tmp_path, "url:\n", "https://example.org/body\n\nRetrieved.\n")
     assert _url_hit(root).url == "https://example.org/body"
+
+
+# -- attach_url: the one write path onto a brain ----------------------------
+
+
+def _url_source(root: Path) -> Path:
+    return root / "research" / "sources" / "source.url-probe.01TEST.md"
+
+
+def test_attach_url_writes_the_line_and_the_next_search_carries_it(tmp_path):
+    root = _url_brain(tmp_path, "", "Retrieved for the sol3 fixture corpus.\n")
+    assert _url_hit(root).url == ""
+
+    written = corpus.attach_url(root, URL_SHA, "https://arxiv.org/abs/2503.13657")
+
+    assert written == _url_source(root)
+    assert 'url: "https://arxiv.org/abs/2503.13657"' in written.read_text(encoding="utf-8")
+    corpus.clear_cache()
+    assert _url_hit(root).url == "https://arxiv.org/abs/2503.13657"
+
+
+def test_attach_url_replaces_an_existing_url_line(tmp_path):
+    root = _url_brain(tmp_path, 'url: "https://example.org/old"\n', "Retrieved.\n")
+    corpus.attach_url(root, URL_SHA, "https://arxiv.org/abs/2503.13657")
+    text = _url_source(root).read_text(encoding="utf-8")
+    assert "https://example.org/old" not in text
+    assert text.count("url:") == 1
+
+
+def test_attach_url_mints_nothing_for_an_unknown_hash(tmp_path):
+    """The locator must never be able to create a source the run did not read."""
+    root = _url_brain(tmp_path, "", "Retrieved.\n")
+    before = _url_source(root).read_bytes()
+    sources = sorted((root / "research" / "sources").rglob("*.md"))
+
+    assert corpus.attach_url(root, "sha256:nobody", "https://arxiv.org/abs/2503.13657") is None
+
+    assert _url_source(root).read_bytes() == before
+    assert sorted((root / "research" / "sources").rglob("*.md")) == sources
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "ftp://example.org/paper",
+        "corpus:knowledge:claim.x",
+        "not-found",
+        "01JQZ8T9K3M4N5P6Q7R8S9T0V1",
+        "research/sources/source.x.md",
+        "https://",
+        'https://example.org/a"b',
+        "https://example.org/a\\b",
+        "",
+    ],
+)
+def test_a_refused_url_leaves_the_file_byte_identical(tmp_path, url):
+    root = _url_brain(tmp_path, "", "Retrieved.\n")
+    before = _url_source(root).read_bytes()
+
+    assert corpus.attach_url(root, URL_SHA, url) is None
+
+    assert _url_source(root).read_bytes() == before
+
+
+def test_a_misfiled_evidence_node_is_not_edited(tmp_path):
+    """An Evidence node carries a source_hash too. The type belt is what stops it."""
+    root = _url_brain(tmp_path, "", "Retrieved.\n")
+    stray = root / "research" / "sources" / "evidence.misfiled.md"
+    stray.write_text(
+        '---\ntype: "Evidence"\nid: "evidence.misfiled"\n'
+        f'source_hash: "{URL_SHA}"\n---\n\nA quote.\n',
+        encoding="utf-8",
+    )
+    before = stray.read_bytes()
+
+    written = corpus.attach_url(root, URL_SHA, "https://arxiv.org/abs/2503.13657")
+
+    assert stray.read_bytes() == before
+    assert written == _url_source(root)
+
+
+def test_attach_url_is_a_no_op_when_the_brain_has_no_sources(tmp_path):
+    assert corpus.attach_url(tmp_path / "empty", URL_SHA, "https://arxiv.org/abs/1") is None

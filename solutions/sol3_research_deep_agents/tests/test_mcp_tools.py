@@ -200,3 +200,97 @@ def test_auto_selection_never_falls_through_to_bing(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="paper-safe"):
         research.choose()
+
+
+# -- the locator's request: no filter at all --------------------------------
+
+
+@pytest.mark.parametrize("call", ["search", "ask"])
+def test_no_domain_filter_key_is_sent_when_the_filter_is_none_over_mcp(monkeypatch, call):
+    """`None` means omit the key. An empty list would be a filter admitting nothing."""
+    seen = {}
+
+    class Tool:
+        name = f"perplexity_{call}"
+
+        async def ainvoke(self, args):
+            seen.update(args)
+            return "result https://arxiv.org/abs/2503.13657 quoted source text"
+
+    monkeypatch.setattr(mcp_tools, "mcp_tools", lambda *_: [Tool()])
+    if call == "search":
+        mcp_tools.search_perplexity_mcp("q", None)
+    else:
+        mcp_tools.ask_perplexity_mcp("q", None)
+    assert "search_domain_filter" not in seen
+
+
+@pytest.mark.parametrize("call", ["search", "ask"])
+def test_a_tuple_filter_still_reaches_mcp(monkeypatch, call):
+    seen = {}
+
+    class Tool:
+        name = f"perplexity_{call}"
+
+        async def ainvoke(self, args):
+            seen.update(args)
+            return "result https://docs.langchain.com/x quoted source text"
+
+    monkeypatch.setattr(mcp_tools, "mcp_tools", lambda *_: [Tool()])
+    if call == "search":
+        mcp_tools.search_perplexity_mcp("q", ("docs.langchain.com",))
+    else:
+        mcp_tools.ask_perplexity_mcp("q", ("docs.langchain.com",))
+    assert seen["search_domain_filter"] == ["docs.langchain.com"]
+
+
+def _rest_probe(monkeypatch, seen, call):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            if call == "search":
+                return {
+                    "results": [
+                        {
+                            "title": "Paper",
+                            "url": "https://arxiv.org/abs/2503.13657",
+                            "snippet": "quoted evidence",
+                        }
+                    ]
+                }
+            return {
+                "choices": [{"message": {"content": "answer https://arxiv.org/abs/2503.13657"}}],
+                "citations": ["https://arxiv.org/abs/2503.13657"],
+            }
+
+    def post(*_args, **kwargs):
+        seen.update(kwargs["json"])
+        return Response()
+
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "k")
+    monkeypatch.setitem(sys.modules, "httpx", SimpleNamespace(post=post))
+
+
+@pytest.mark.parametrize("call", ["search", "ask"])
+def test_the_rest_body_has_no_domain_filter_key_when_the_filter_is_none(monkeypatch, call):
+    seen = {}
+    _rest_probe(monkeypatch, seen, call)
+    if call == "search":
+        mcp_tools.search_perplexity_rest("q", None)
+    else:
+        mcp_tools.ask_perplexity_rest("q", None)
+    assert "search_domain_filter" not in seen
+    assert seen["messages" if call == "ask" else "query"]
+
+
+@pytest.mark.parametrize("call", ["search", "ask"])
+def test_the_rest_body_carries_a_tuple_filter(monkeypatch, call):
+    seen = {}
+    _rest_probe(monkeypatch, seen, call)
+    if call == "search":
+        mcp_tools.search_perplexity_rest("q", ("docs.langchain.com",))
+    else:
+        mcp_tools.ask_perplexity_rest("q", ("docs.langchain.com",))
+    assert seen["search_domain_filter"] == ["docs.langchain.com"]

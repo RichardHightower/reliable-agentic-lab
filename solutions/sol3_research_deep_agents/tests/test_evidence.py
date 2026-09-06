@@ -133,3 +133,26 @@ def test_slug_is_deterministic(text, expected):
 
 def test_ids_do_not_collide():
     assert len({evidence.new_id() for _ in range(500)}) == 500
+
+
+def test_located_from_survives_write_and_load(tmp_path):
+    """`record_findings` reads the tag to admit a host no allowlist named."""
+    led = evidence.Ledger(tmp_path / "evidence")
+    source = led.add_source(
+        evidence.SourceDocument(
+            title="MAST",
+            url="https://arxiv.org/abs/2503.13657",
+            subject="exits",
+            located_from="knowledge:claim.mast",
+        )
+    )
+    plain = led.add_source(
+        evidence.SourceDocument(title="Docs", url="https://docs.claude.com/x", subject="exits")
+    )
+    assert "located_from" not in plain.to_markdown()
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load()
+
+    assert reloaded.sources[source.id].located_from == "knowledge:claim.mast"
+    assert reloaded.sources[plain.id].located_from == ""

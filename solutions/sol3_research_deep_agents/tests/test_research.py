@@ -345,3 +345,78 @@ def test_no_loops_import():
     )
     hits = [line for line in out.stdout.split("\n") if line and "/tests/" not in line]
     assert not hits, "\n".join(hits)
+
+
+# -- locate: one open-web call, no allowlist --------------------------------
+
+
+def test_locate_sends_no_domain_filter_and_keeps_every_citation(monkeypatch):
+    """A cabinet paper was published wherever it was published."""
+    calls = []
+
+    def search(question, domains, config=None):
+        calls.append(domains)
+        return mcp_tools.Answer(
+            text="The paper is at https://arxiv.org/abs/2503.13657",
+            citations=["https://arxiv.org/abs/2503.13657", "https://www.cnn.com/story"],
+            hits=2,
+            usable_quotes=True,
+            transport="perplexity-search-mcp",
+        )
+
+    monkeypatch.setattr(mcp_tools, "search_perplexity", search)
+    monkeypatch.setattr(
+        mcp_tools, "ask_perplexity", lambda *_: pytest.fail("locate never calls Ask")
+    )
+
+    finding = research.PerplexityBackend().locate("find the MAST paper")
+
+    assert calls == [None], "the locator turn sends no search_domain_filter"
+    assert finding.citations == [
+        "https://arxiv.org/abs/2503.13657",
+        "https://www.cnn.com/story",
+    ]
+    assert finding.usd == research.PerplexityBackend.cost_per_call
+
+
+def test_search_still_filters_while_locate_does_not(monkeypatch):
+    """The scout and allowlist path is untouched by the locator."""
+
+    def search(question, domains, config=None):
+        return mcp_tools.Answer(
+            text="A quoted official source https://docs.langchain.com/deep-agents",
+            citations=["https://www.cnn.com/story", "https://docs.langchain.com/deep-agents"],
+            hits=2,
+            usable_quotes=True,
+        )
+
+    monkeypatch.setattr(mcp_tools, "search_perplexity", search)
+
+    finding = research.PerplexityBackend().search("q")
+
+    assert finding.citations == ["https://docs.langchain.com/deep-agents"]
+
+
+def test_the_base_backend_locates_nothing_rather_than_guessing():
+    finding = research.Backend().locate("find the MAST paper")
+    assert finding.empty
+    assert "cannot locate" in finding.note
+
+
+def test_the_fixture_backend_locates_through_its_recorded_search():
+    backend = research.FixtureBackend(FIXTURE)
+    question = "What three exits does this repo's paper loop check, and in what order?"
+    assert backend.locate(question).answer == backend.search(question).answer
+
+
+def test_the_fallback_chain_locates_through_its_first_available_candidate():
+    """Without this the live chain would inherit the base class's miss."""
+
+    class Live(research.Backend):
+        name = "live"
+
+        def locate(self, question, reserve=None):
+            return research.Finding(question, "found", citations=["https://arxiv.org/abs/1"])
+
+    chain = research.FallbackBackend([Live()])
+    assert chain.locate("q").citations == ["https://arxiv.org/abs/1"]

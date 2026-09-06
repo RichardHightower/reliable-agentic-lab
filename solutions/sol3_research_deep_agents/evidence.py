@@ -195,6 +195,11 @@ class SourceDocument:
     body: str = ""
     id: str = ""
     captured_at: str = ""
+    # The corpus key this source was cross-referenced from, when the locator
+    # found the public page for something a second brain already held. Empty
+    # for everything the run retrieved off the web. `record_findings` reads it
+    # to admit a host no allowlist ever named, so it has to survive a resume.
+    located_from: str = ""
     # First-retrieval position. Persisted because reference numbers come from
     # it, and a resumed run that reloads in a different order renumbers the
     # whole bibliography. The ledger assigns it.
@@ -217,6 +222,7 @@ class SourceDocument:
                 "source_kind": "deep_research",
                 "source_hash": source_hash(self.body or self.url),
                 "url": self.url,
+                "located_from": self.located_from or None,
                 "captured_at": self.captured_at,
                 "seq": self.seq,
             }
@@ -433,6 +439,7 @@ class Ledger:
                         body=body,
                         id=fields["id"],
                         captured_at=fields.get("captured_at", ""),
+                        located_from=fields.get("located_from", ""),
                         seq=int(fields.get("seq", 0)),
                     )
                 )

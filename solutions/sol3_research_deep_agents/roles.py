@@ -262,6 +262,40 @@ def search_tool(backend, budget=None):
     return search
 
 
+def locate_tool(backend, budget=None):
+    """One open-web call, for the locator only.
+
+    The same boundary shape as `search`, pointed at a different question. The
+    difference is on the far side: `Backend.locate` sends no domain filter and
+    applies no allowlist to what comes back, because a cabinet source was
+    published wherever it was published and this run's admitted hosts were
+    chosen for a different question.
+    """
+    from langchain.tools import tool  # noqa: PLC0415
+    from research import Backend, BudgetExceeded  # noqa: PLC0415
+
+    @tool
+    def locate(question: str) -> str:
+        """Find the public page for one cabinet source. Open web, no domain filter."""
+        try:
+            if budget is not None:
+                budget.reserve_tool()
+            if isinstance(backend, Backend):
+                finding = backend.locate(question, budget.charge if budget is not None else None)
+            else:
+                if budget is not None:
+                    budget.charge(getattr(backend, "cost_per_call", 0.0))
+                finding = backend.locate(question)
+        except BudgetExceeded as exc:
+            return f"NO ANSWER. {exc}"
+        if finding.empty:
+            return f"NO ANSWER. {finding.note or 'the boundary returned nothing'}"
+        cites = " ".join(finding.citations) or "(no citations)"
+        return f"{finding.answer}\nCITATIONS: {cites}"
+
+    return locate
+
+
 def docs_tool(backend, budget=None):
     """Vendor documentation, for the verifier only.
 
@@ -381,9 +415,14 @@ def corpus_search_tool(roots: list | None):
             return f"no corpus hit for {query!r}"
         blocks = []
         for hit in hits:
-            blocks.append(
+            block = (
                 f"{hit.key}\nCLAIM: {hit.claim}\nQUOTE: {hit.quote}\nSOURCE: {hit.source_title}"
             )
+            # Only when the cabinet already knows the public page. Printing an
+            # empty `URL:` invites the researcher to fill one in.
+            if hit.url:
+                block += f"\nURL: {hit.url}"
+            blocks.append(block)
         return "\n\n".join(blocks)
 
     return corpus_search
@@ -466,6 +505,12 @@ def subagents_for(  # noqa: PLR0913  (one keyword per wiring point)
                 tools.append(docs_tool(docs_backend, budget))
             if backend is not None:
                 tools.append(search_tool(backend, budget))
+        # Exactly one tool, and it is not `search`. A locator that could search
+        # the filtered boundary would start researching the claim it was shown
+        # the head of, and a locator that held `corpus_search` would answer the
+        # question from the same cabinet entry it was asked to cross-reference.
+        if role.name == "locator" and backend is not None:
+            tools.append(locate_tool(backend, budget))
         if role.name == "planner":
             tools.append(second_brain_tool(brain))
         if role.name in ("researcher", "verifier"):

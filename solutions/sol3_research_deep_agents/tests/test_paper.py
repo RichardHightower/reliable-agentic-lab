@@ -820,3 +820,450 @@ def test_a_gate_failure_during_revise_escalates_instead_of_crashing(run_dir, stu
     failed = [name for name, entry in run.state.stages.items() if entry.status == pstate.FAILED]
     assert "review" in failed, failed
     assert (Path(run_dir) / pstate.STATE_FILE).exists(), "state must survive for --resume"
+
+
+# -- the locator: a cabinet claim is cross-referenced, or it is dropped -----
+
+CABINET_SHA = "sha256:00000000000000000000000000000000000000000000000000000000000003e9"
+LOCATED_URL = "https://arxiv.org/abs/2503.13657"
+CLAIM_TEXT = "A production loop checks done, then cost, then max turns before it exits."
+# `corpus` names a hit `<root directory>:<claim id>`, so both keys are known
+# before the pack is written. `test_the_probe_brain_packs_both_keys` proves it.
+KEY_ONE = "cabinet:claim.exits.1"
+KEY_TWO = "cabinet:claim.exits.2"
+HIT_REPLY = {"url": LOCATED_URL, "supports": True, "excerpt": "verbatim"}
+
+
+def _claim_file(root: Path, claim_id: str) -> None:
+    (root / "research" / "claims" / f"{claim_id}.md").write_text(
+        f'---\ntype: "Claim"\nid: "{claim_id}"\n'
+        f'description: "{CLAIM_TEXT}"\nconfidence: 0.9\n'
+        'links:\n  - rel: evidenced_by\n    target: "evidence.exits"\n'
+        f"---\n\n# Claim\n\n{CLAIM_TEXT}\n",
+        encoding="utf-8",
+    )
+
+
+def _cabinet_brain(tmp_path: Path, source_front: str = "", title: str = "Why Do Multi-Agent LLM Systems Fail?") -> Path:
+    """Two claims, one evidence node, one source. Both claims share the hash."""
+    import corpus  # noqa: PLC0415
+
+    corpus.clear_cache()
+    root = tmp_path / "cabinet"
+    research = root / "research"
+    for folder in ("claims", "evidence", "sources"):
+        (research / folder).mkdir(parents=True, exist_ok=True)
+    _claim_file(root, "claim.exits.1")
+    _claim_file(root, "claim.exits.2")
+    (research / "evidence" / "evidence.exits.md").write_text(
+        '---\ntype: "Evidence"\nid: "evidence.exits"\n'
+        'text: "Exit on done, then cost, then max turns."\n'
+        f'source_hash: "{CABINET_SHA}"\n---\n\nExit on done, then cost, then max turns.\n',
+        encoding="utf-8",
+    )
+    (research / "sources" / "source.exits.md").write_text(
+        '---\ntype: "SourceDocument"\nid: "source.exits"\n'
+        f'title: "{title}"\nvendor: "Berkeley"\n'
+        f'source_hash: "{CABINET_SHA}"\n{source_front}---\n\nA cabinet capture.\n',
+        encoding="utf-8",
+    )
+    return root
+
+
+def _researcher_reply(refs: list[str], extra: list[dict] | None = None) -> dict:
+    """One reply that cites the cabinet by key, plus one admitted web source."""
+    sources = [
+        {
+            "title": "Why Do Multi-Agent LLM Systems Fail?",
+            "url": f"corpus:{ref}",
+            "vendor": "Berkeley",
+            "quote": "Exit on done, then cost, then max turns.",
+        }
+        for ref in refs
+    ]
+    sources += extra or []
+    sources.append(
+        {
+            "title": "Deep Agents",
+            "url": "https://docs.langchain.com/deep-agents",
+            "vendor": "LangChain",
+            "quote": "The graph carries a recursion limit.",
+        }
+    )
+    return {
+        "answer": "Loops exit on done, then cost, then max turns.",
+        "sources": sources,
+        "claims": [
+            {"text": CLAIM_TEXT, "confidence": 0.8, "source_urls": [f"corpus:{refs[0]}"]},
+            {
+                "text": "Deep Agents carries a recursion limit.",
+                "confidence": 0.8,
+                "source_urls": ["https://docs.langchain.com/deep-agents"],
+            },
+        ],
+    }
+
+
+def _cabinet_run(run_dir, brain, reply: dict, locator):
+    """A run whose researcher cites the cabinet and whose locator the test owns.
+
+    `locator` is a reply dict, or None to let the fixture raise `GateFailed`
+    for a role it has never heard of.
+    """
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    fixture = paper.FixtureRunner(FIXTURES / "replies.json")
+    calls: list = []
+
+    class Runner:
+        # The live name, so the repository question is answered without a turn.
+        name = "deep_agents"
+
+        def ask(self, role, prompt):
+            calls.append((role, prompt))
+            if role == "locator":
+                if locator is None:
+                    return fixture.ask("locator", prompt)
+                return paper.Reply(data=dict(locator))
+            if role == "researcher":
+                return paper.Reply(data=json.loads(json.dumps(reply)))
+            return fixture.ask(role, prompt)
+
+    return build_run(run_dir, runner=Runner(), brains=[brain]), calls
+
+
+def _drive(run):
+    run.stage_corpus()
+    run.stage_plan()
+    return run.stage_search()
+
+
+def _roles(calls) -> list[str]:
+    return [role for role, _ in calls]
+
+
+def _urls(run) -> dict:
+    return {source.url: source for source in run.ledger.sources.values()}
+
+
+def _unresolved(run_dir) -> list[dict]:
+    payload = json.loads((Path(run_dir) / "corpus" / "unresolved.json").read_text())
+    return payload["unresolved"]
+
+
+def test_the_probe_brain_packs_both_keys(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path)
+    run, _ = _cabinet_run(run_dir, brain, _researcher_reply([KEY_ONE]), HIT_REPLY)
+    run.stage_corpus()
+    packed = json.loads((Path(run_dir) / "corpus" / "brain-pack.json").read_text())
+    assert set(packed["keys"]) == {KEY_ONE, KEY_TWO}
+
+
+def test_a_located_cabinet_source_enters_the_ledger_with_its_url(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path)
+    run, calls = _cabinet_run(run_dir, brain, _researcher_reply([KEY_ONE]), HIT_REPLY)
+
+    _drive(run)
+
+    sources = _urls(run)
+    assert LOCATED_URL in sources, sorted(sources)
+    assert sources[LOCATED_URL].located_from == KEY_ONE
+    assert not any(url.startswith("corpus:") for url in sources)
+    # The claim that named the key follows it to the located page, and binds
+    # to that source alone. A dropped reference would inherit every source in
+    # the answer, which is how a cabinet claim ends up citing an unrelated page.
+    cabinet_claims = [c for c in run.ledger.claims.values() if c.text == CLAIM_TEXT]
+    assert cabinet_claims
+    assert all(run.ledger.urls_for(claim.id) == [LOCATED_URL] for claim in cabinet_claims)
+    # The SourceDocument in the brain learned the public page.
+    assert f'url: "{LOCATED_URL}"' in (
+        brain / "research" / "sources" / "source.exits.md"
+    ).read_text(encoding="utf-8")
+    cache = json.loads((Path(run_dir) / "corpus" / "located.json").read_text())
+    assert cache[CABINET_SHA]["url"] == LOCATED_URL
+    assert "locator" in _roles(calls)
+
+
+def test_a_locator_miss_drops_the_source_and_records_the_key(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path)
+    run, _ = _cabinet_run(
+        run_dir,
+        brain,
+        _researcher_reply([KEY_ONE]),
+        {"url": "", "supports": False, "excerpt": ""},
+    )
+
+    _drive(run)
+
+    assert not any("arxiv" in url or url.startswith("corpus:") for url in _urls(run))
+    assert any(row["key"] == KEY_ONE for row in _unresolved(run_dir))
+
+
+def test_two_sources_sharing_one_hash_cost_one_locator_turn(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path)
+    run, calls = _cabinet_run(run_dir, brain, _researcher_reply([KEY_ONE, KEY_TWO]), HIT_REPLY)
+
+    _drive(run)
+
+    assert _roles(calls).count("locator") == 1
+
+
+def test_a_pack_hit_that_already_carries_a_url_costs_no_turn(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path, source_front=f'url: "{LOCATED_URL}"\n')
+    run, calls = _cabinet_run(run_dir, brain, _researcher_reply([KEY_ONE]), None)
+
+    _drive(run)
+
+    assert "locator" not in _roles(calls)
+    assert _urls(run)[LOCATED_URL].located_from == KEY_ONE
+
+
+def test_an_untagged_off_allowlist_url_is_still_refused(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path)
+    reply = _researcher_reply(
+        [KEY_ONE], extra=[{"title": "A post", "url": "https://medium.com/x", "quote": "q"}]
+    )
+    run, _ = _cabinet_run(run_dir, brain, reply, HIT_REPLY)
+
+    _drive(run)
+
+    assert not any("medium.com" in url for url in _urls(run))
+
+
+def test_a_locator_the_runtime_cannot_reach_is_a_miss_and_the_stage_completes(
+    run_dir, tmp_path, stub_renderer
+):
+    """`GateFailed` from the turn is an honest miss, not a dead stage."""
+    brain = _cabinet_brain(tmp_path)
+    run, _ = _cabinet_run(run_dir, brain, _researcher_reply([KEY_ONE]), None)
+
+    result = _drive(run)
+
+    assert result.name == "search"
+    assert any("no recorded reply" in row["reason"] for row in _unresolved(run_dir))
+    assert run.ledger.claims, "the admitted web claim still reached the ledger"
+
+
+def test_an_ambiguous_corpus_key_is_refused_rather_than_guessed(run_dir, tmp_path, stub_renderer):
+    """Two claims end in `.1`. Directory order must not settle which is cited."""
+    brain = _cabinet_brain(tmp_path)
+    _claim_file(brain, "claim.other.1")
+    run, calls = _cabinet_run(run_dir, brain, _researcher_reply(["1"]), HIT_REPLY)
+
+    _drive(run)
+
+    assert "locator" not in _roles(calls)
+    assert any("ambiguous corpus key" in row["reason"] for row in _unresolved(run_dir))
+    assert not any("arxiv" in url for url in _urls(run))
+
+
+def test_a_suffix_key_still_resolves(run_dir, tmp_path, stub_renderer):
+    """A model writes the claim id where the pack holds the whole key."""
+    brain = _cabinet_brain(tmp_path)
+    run, _ = _cabinet_run(run_dir, brain, _researcher_reply(["claim.exits.1"]), HIT_REPLY)
+
+    _drive(run)
+
+    assert _urls(run)[LOCATED_URL].located_from == KEY_ONE
+
+
+def test_an_unknown_corpus_key_is_recorded_and_costs_no_turn(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path)
+    run, calls = _cabinet_run(run_dir, brain, _researcher_reply(["cabinet:claim.nobody"]), HIT_REPLY)
+
+    _drive(run)
+
+    assert "locator" not in _roles(calls)
+    assert any(row["reason"] == "unresolved corpus key" for row in _unresolved(run_dir))
+
+
+def _locate_only(run_dir, brain, reply, locator):
+    """Drive the cross-reference alone, so the reply mutation is observable."""
+    run, _ = _cabinet_run(run_dir, brain, reply, locator)
+    run.stage_corpus()
+    run._locate_cabinet_sources({"subject": "s1"}, reply)
+    return reply
+
+
+def test_a_missed_source_item_is_removed_from_the_reply(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path)
+    reply = _locate_only(
+        run_dir,
+        brain,
+        _researcher_reply([KEY_ONE]),
+        {"url": "", "supports": False, "excerpt": ""},
+    )
+    assert [source["url"] for source in reply["sources"]] == [
+        "https://docs.langchain.com/deep-agents"
+    ]
+
+
+def test_a_missed_key_takes_the_claim_that_rested_on_it(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path)
+    reply = _locate_only(
+        run_dir,
+        brain,
+        _researcher_reply([KEY_ONE]),
+        {"url": "", "supports": False, "excerpt": ""},
+    )
+    assert [claim["text"] for claim in reply["claims"]] == [
+        "Deep Agents carries a recursion limit."
+    ]
+    assert _unresolved(run_dir)[0]["claims_dropped"] == [CLAIM_TEXT[:60]]
+
+
+def test_a_located_key_is_rewritten_on_the_source_item_and_the_claim(
+    run_dir, tmp_path, stub_renderer
+):
+    brain = _cabinet_brain(tmp_path)
+    reply = _locate_only(run_dir, brain, _researcher_reply([KEY_ONE]), HIT_REPLY)
+    assert reply["sources"][0]["url"] == LOCATED_URL
+    assert reply["sources"][0]["located_from"] == KEY_ONE
+    assert reply["claims"][0]["source_urls"] == [LOCATED_URL]
+
+
+def test_an_unresolved_key_is_removed_from_every_claim(run_dir, tmp_path, stub_renderer):
+    """A key the cabinet does not hold must not survive as a claim reference."""
+    brain = _cabinet_brain(tmp_path)
+    reply = _locate_only(run_dir, brain, _researcher_reply(["cabinet:claim.nobody"]), HIT_REPLY)
+    assert CLAIM_TEXT not in [claim["text"] for claim in reply["claims"]]
+    assert not any(url.startswith("corpus:") for url in (s["url"] for s in reply["sources"]))
+
+
+def test_a_source_with_no_title_is_a_miss_and_costs_no_turn(run_dir, tmp_path, stub_renderer):
+    """There is nothing to search for, so paying a turn to find out is waste."""
+    brain = _cabinet_brain(tmp_path, title="")
+    reply = _researcher_reply([KEY_ONE])
+    reply["sources"][0]["title"] = ""
+    run, calls = _cabinet_run(run_dir, brain, reply, HIT_REPLY)
+    run.stage_corpus()
+    run._locate_cabinet_sources({"subject": "s1"}, reply)
+
+    assert "locator" not in _roles(calls)
+    assert CLAIM_TEXT not in [claim["text"] for claim in reply["claims"]]
+    assert any(row["reason"] == "no title to locate" for row in _unresolved(run_dir))
+
+
+def test_a_claim_resting_only_on_a_missed_key_never_reaches_the_ledger(
+    run_dir, tmp_path, stub_renderer
+):
+    """No page, no claim. An empty `source_urls` would inherit the web source."""
+    brain = _cabinet_brain(tmp_path)
+    run, _ = _cabinet_run(
+        run_dir,
+        brain,
+        _researcher_reply([KEY_ONE]),
+        {"url": "", "supports": False, "excerpt": ""},
+    )
+
+    _drive(run)
+
+    assert CLAIM_TEXT not in [claim.text for claim in run.ledger.claims.values()]
+    assert not any(
+        "docs.langchain.com" in url
+        for claim in run.ledger.claims.values()
+        if claim.text == CLAIM_TEXT
+        for url in run.ledger.urls_for(claim.id)
+    )
+    assert any(row["claims_dropped"] == [CLAIM_TEXT[:60]] for row in _unresolved(run_dir))
+
+
+def test_a_claim_that_also_named_a_web_source_survives_the_miss(run_dir, tmp_path, stub_renderer):
+    brain = _cabinet_brain(tmp_path)
+    reply = _researcher_reply([KEY_ONE])
+    reply["claims"][0]["source_urls"] = [
+        f"corpus:{KEY_ONE}",
+        "https://docs.langchain.com/deep-agents",
+    ]
+    run, _ = _cabinet_run(run_dir, brain, reply, {"url": "", "supports": False, "excerpt": ""})
+
+    _drive(run)
+
+    kept = [claim for claim in run.ledger.claims.values() if claim.text == CLAIM_TEXT]
+    assert kept
+    assert all(
+        run.ledger.urls_for(claim.id) == ["https://docs.langchain.com/deep-agents"]
+        for claim in kept
+    )
+
+
+def test_a_reply_that_cites_the_pack_hits_public_url_is_tagged_without_a_turn(
+    run_dir, tmp_path, stub_renderer
+):
+    """The belt. The skill says cite the key; the outcome must not depend on it."""
+    brain = _cabinet_brain(tmp_path, source_front=f'url: "{LOCATED_URL}"\n')
+    reply = _researcher_reply([KEY_ONE])
+    # The researcher took the `URL:` line instead of the key.
+    reply["sources"][0]["url"] = LOCATED_URL
+    reply["claims"][0]["source_urls"] = [LOCATED_URL]
+    run, calls = _cabinet_run(run_dir, brain, reply, None)
+
+    _drive(run)
+
+    assert "locator" not in _roles(calls)
+    assert _urls(run)[LOCATED_URL].located_from == KEY_ONE
+    cabinet_claims = [c for c in run.ledger.claims.values() if c.text == CLAIM_TEXT]
+    assert cabinet_claims
+    assert all(run.ledger.urls_for(claim.id) == [LOCATED_URL] for claim in cabinet_claims)
+
+
+class RecordingBudget:
+    """A real budget that remembers the ceilings each request was opened with."""
+
+    def __init__(self, **kwargs):
+        import research  # noqa: PLC0415
+
+        self.inner = research.Budget(**kwargs)
+        self.events: list = []
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def __setattr__(self, name, value):
+        if name in ("inner", "events"):
+            super().__setattr__(name, value)
+        else:
+            setattr(self.inner, name, value)
+
+    def begin_request(self, max_calls=None, *, max_provider_calls=None):
+        self.events.append(("begin", max_calls, max_provider_calls))
+        self.inner.begin_request(max_calls, max_provider_calls=max_provider_calls)
+
+    def end_request(self):
+        self.events.append(("end", self.inner._tool_limit))
+        self.inner.end_request()
+
+
+def test_the_locator_turn_runs_under_a_one_call_ceiling_that_is_always_lifted(
+    run_dir, tmp_path, stub_renderer
+):
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    brain = _cabinet_brain(tmp_path)
+    reply = _researcher_reply([KEY_ONE])
+    fixture = paper.FixtureRunner(FIXTURES / "replies.json")
+    seen: list = []
+
+    class Runner:
+        name = "deep_agents"
+
+        def ask(self, role, prompt):
+            if role == "locator":
+                # The ceiling has to be live while the turn is in flight.
+                seen.append((run.budget._tool_limit, run.budget._request_limit))
+                return paper.Reply(data=dict(HIT_REPLY))
+            if role == "researcher":
+                return paper.Reply(data=json.loads(json.dumps(reply)))
+            return fixture.ask(role, prompt)
+
+    budget = RecordingBudget(max_usd=10.0, max_calls=50)
+    run = build_run(run_dir, runner=Runner(), brains=[brain], search_budget=budget)
+    _drive(run)
+
+    assert seen == [(1, 1)], seen
+    assert ("begin", 1, 1) in budget.events
+    assert budget.events.count(("begin", 1, 1)) == 1
+    assert sum(1 for event in budget.events if event[0] == "begin") == sum(
+        1 for event in budget.events if event[0] == "end"
+    )
+    assert budget.inner._tool_limit is None, "the ceiling outlived the turn"

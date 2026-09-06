@@ -16,6 +16,15 @@ official vendor documentation, approved vendor GitHub organizations, and this
 repository. Do not look for a second source on a blog, course site, DeepWiki,
 or a personal publication: those URLs cannot enter the ledger.
 
+## A corpus hit is a source too
+
+When `corpus_search` answers, report the hit in `sources` like any other
+source. Set `url` to its corpus key, exactly as `corpus_search` printed it,
+and set `title` from its `SOURCE:` line. Cite the key even when the hit also
+printed a `URL:` line. A claim that rests on that hit lists that same key in
+`source_urls`. Python resolves the key to a public page after you return; a
+key you retype from memory cannot be resolved.
+
 ## The rules
 
 State what the source says, not what you believe. When a source and your prior
