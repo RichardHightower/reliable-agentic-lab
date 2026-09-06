@@ -180,6 +180,16 @@ def main(argv: list[str] | None = None) -> int:
         help="continue from an approved or judged outline; re-judge if outline.json changed",
     )
     parser.add_argument(
+        "--reuse-research",
+        action="store_true",
+        help="keep findings, rewrite section drafts. Implied when --resume sees a new harness SHA.",
+    )
+    parser.add_argument(
+        "--reuse-drafts",
+        action="store_true",
+        help="keep stamped section bodies even if the harness SHA changed",
+    )
+    parser.add_argument(
         "--enforce-loop-doctrine",
         action="store_true",
         help="require the paper to teach done, then cost, then max turns. E2E only.",
@@ -285,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
         should_publish=args.publish,
         require_approval=args.approve,
         resume=args.resume,
+        reuse_research=args.reuse_research,
+        reuse_drafts=args.reuse_drafts,
         enforce_research_policy=True,
         enforce_loop_doctrine=args.enforce_loop_doctrine,
         brain=brains[0] if brains else None,

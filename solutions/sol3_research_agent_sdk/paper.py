@@ -151,6 +151,7 @@ class State:
     role: str = ""
     last_turn: dict | None = None
     query_timeout_s: int = 0
+    code_sha: str = ""
 
     @staticmethod
     def path(work_dir: Path) -> Path:
@@ -209,6 +210,8 @@ class Run:
     should_publish: bool = False
     require_approval: bool = False
     resume: bool = False
+    reuse_research: bool = False
+    reuse_drafts: bool = False
     # This run's admitted search domains. The `sources` phase sets it; until
     # then the seed applies, so a phase test that never runs that phase still
     # searches something.
@@ -1596,14 +1599,58 @@ CYCLE = [
 CYCLE_OUTPUT = ("sections",)
 
 
+def harness_sha() -> str:
+    """The commit this process is running. Empty when git is unavailable."""
+    try:
+        import subprocess  # noqa: PLC0415
+
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=FOLDER,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return ""
+
+
+def apply_harness_resume(run: Run) -> None:
+    """Refuse stamped bodies when the harness SHA changed, unless told not to."""
+    current = harness_sha()
+    if (
+        run.resume
+        and run.state.code_sha
+        and current
+        and run.state.code_sha != current
+        and not run.reuse_drafts
+    ):
+        run.reuse_research = True
+        run.log(
+            f"  harness {run.state.code_sha[:7]} -> {current[:7]}; "
+            "keeping findings, rewriting sections"
+        )
+    if current:
+        run.state.code_sha = current
+
+
 def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
     work = Path(run.work_dir)
     work.mkdir(parents=True, exist_ok=True)
     run.state.query_timeout_s = adapter.QUERY_TIMEOUT_SECONDS
     apply_allowlist(run)
+    apply_harness_resume(run)
 
     for number, name, output, phase in LINEAR:
-        if run.file(output).exists():
+        # Sections skip per section, not per phase. `claims.json` existing used
+        # to skip the whole loop, so a failed draft still re-paid Perplexity
+        # or was never retried (#360). Re-enter when research is on disk and
+        # the section is not stamped, or when the operator asked to rewrite.
+        if name == "sections" and run.file(output).exists() and not run.reuse_research:
+            if not section_loop.has_unstamped_research(run):
+                run.log(f"  {number} {name:<10} already done")
+                run.state.mark(name, "skipped")
+                continue
+        elif name != "sections" and run.file(output).exists():
             run.log(f"  {number} {name:<10} already done")
             run.state.mark(name, "skipped")
             continue

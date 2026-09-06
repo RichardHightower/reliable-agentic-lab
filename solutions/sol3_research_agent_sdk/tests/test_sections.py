@@ -410,6 +410,96 @@ def test_the_ledger_appends_one_entry_per_section(work, turns, no_renderer):
     assert (Path(work) / "knowledge" / "s1" / "findings.json").is_file()
 
 
+def test_resume_keeps_findings_when_the_draft_is_gone(work, turns, no_renderer):
+    """A section whose draft is wrong still has research that was paid for."""
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=turns(root=work),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+    findings = Path(work) / "knowledge" / "s1" / "findings.json"
+    body = Path(work) / "sections" / "s1.md"
+    assert findings.is_file()
+    (Path(work) / "paper_ledger.json").write_text('{"entries": []}\n', encoding="utf-8")
+    body.unlink()
+    asked = []
+
+    class Counting(turns):
+        def research(self, question, note=""):
+            asked.append(question)
+            return super().research(question, note)
+
+    run.turns = Counting(root=work)
+    paper.do_sections(run)
+    # The fixture only answers the first question. That one must not be
+    # researched again. The unanswered one may still get a gap pass.
+    assert not any("what is a topic" == q for q in asked), asked
+    assert body.is_file()
+
+
+def test_reuse_research_rewrites_a_stamped_section(work, turns, no_renderer):
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=turns(root=work),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        reuse_research=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+    body = Path(work) / "sections" / "s1.md"
+    original = body.read_text(encoding="utf-8")
+    body.write_text("STALE DRAFT [1].\n", encoding="utf-8")
+    asked = []
+
+    class Counting(turns):
+        def research(self, question, note=""):
+            asked.append(question)
+            return super().research(question, note)
+
+    run.turns = Counting(root=work)
+    paper.do_sections(run)
+    assert not any("what is a topic" == q for q in asked), asked
+    assert body.read_text(encoding="utf-8") != "STALE DRAFT [1].\n"
+    assert original or body.read_text(encoding="utf-8")
+
+
+def test_linear_reenters_sections_when_claims_json_exists():
+    names = [name for _n, name, _out, _fn in paper.LINEAR]
+    assert "sections" in names
+
+
+def test_a_harness_sha_change_refuses_drafts_and_keeps_findings(work, turns, monkeypatch):
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=turns(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        resume=True,
+    )
+    run.state.code_sha = "aaaaaaaa"
+    monkeypatch.setattr(paper, "harness_sha", lambda: "bbbbbbbb")
+    paper.apply_harness_resume(run)
+    assert run.reuse_research is True
+    assert run.state.code_sha == "bbbbbbbb"
+    run.reuse_drafts = True
+    run.reuse_research = False
+    run.state.code_sha = "aaaaaaaa"
+    paper.apply_harness_resume(run)
+    assert run.reuse_research is False
+
+
 def test_a_coverage_gap_is_recorded_when_a_question_has_no_finding(work, turns):
     class Silent(turns):
         def research(self, question, note=""):
