@@ -96,19 +96,48 @@ def _as_row(item: dict, source: str) -> dict:
     return row
 
 
+STOP_TERMS = frozenset(
+    "the and from that this with than more versus rather into over for its are was "
+    "use uses using needs before after which when where what why how not but all any "
+    "each one two three about their there these those between across within under "
+    "chart figure plot graph diagram table".split()
+)
+
+
+def _terms(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) >= 4 and w not in STOP_TERMS}
+
+
 def _rows_from_ledger(ledger, figure: dict) -> list[dict]:
+    """The ledger numbers a figure asked for, by its name.
+
+    This matched on every word over two letters in a 400-character
+    `data_needed`, so `the`, `and`, and `from` were terms and one hit on any
+    of them admitted a number. Every number in the ledger contains "the". The
+    first paper this port assembled plotted fifteen of them, trace counts and
+    percentages and a kappa and a multiplier, on one axis under a token-cost
+    caption, and the review judge called it incommensurable. It was.
+
+    The figure's name is the most specific thing the outliner wrote about it.
+    `token-cost-multipliers` admits the one ledger number that is a token
+    cost multiple and nothing else. A figure whose name has no usable words
+    keeps the wide match, and a figure the ledger cannot serve gets no rows,
+    which `do_charts` already reports as "no data" rather than drawing.
+    """
     entries = ledger.get("entries") if isinstance(ledger, dict) else ledger
     out = []
-    needle = (figure.get("data_needed") or figure.get("shows") or figure.get("name") or "").lower()
+    name_terms = _terms(str(figure.get("name") or "").replace("-", " ").replace("_", " "))
+    wide = _terms(figure.get("data_needed") or figure.get("shows") or "")
     for entry in entries or []:
         for number in entry.get("numbers") or []:
             measures = str(number.get("measures") or number.get("unit") or "")
-            if needle and needle not in measures.lower() and needle not in str(number.get("value") or "").lower():
-                # Keep every number if the needle is generic; otherwise require overlap.
-                terms = {w for w in re.findall(r"[a-z0-9]+", needle) if len(w) > 2}
-                blob = (measures + " " + str(number.get("value") or "")).lower()
-                if terms and not any(term in blob for term in terms):
-                    continue
+            blob = (measures + " " + str(number.get("value") or "")).lower()
+            terms = name_terms or wide
+            # A name with two real words must match two. `failure` alone
+            # admitted the inter-annotator kappa on "failure mode labels".
+            need = min(2, len(name_terms)) if name_terms else 1
+            if terms and sum(term in blob for term in terms) < need:
+                continue
             try:
                 value = float(str(number.get("value")).replace(",", ""))
             except (TypeError, ValueError):

@@ -187,3 +187,45 @@ def test_a_corpus_reference_is_not_a_host_to_check():
     sources = ["corpus:claude.md (research/x.md:68-69)", "https://arxiv.org/abs/2503.13657"]
     assert checks.disallowed_reference_hosts(sources, ["arxiv.org"]) == []
     assert checks.disallowed_reference_hosts(["https://medium.com/x"], ["arxiv.org"]) == ["https://medium.com/x"]
+
+
+# -- the ledger fallback answers the figure, not the ledger (#375) -------------
+
+_LEDGER = {"entries": [{"section_id": "s1", "numbers": [
+    {"measures": "traces annotated in the MAST study (more than 1,600)", "value": "1600"},
+    {"measures": "multi-agent frameworks from which MAST traces were drawn", "value": "7"},
+    {"measures": "inter-annotator agreement on MAST failure mode labels", "value": "0.88"},
+    {"measures": "share of failures attributed to system-design and specification issues", "value": "41.8"},
+    {"measures": "share of failures attributed to inter-agent misalignment", "value": "36.9"},
+    {"measures": "share of failures attributed to task verification", "value": "21.3"},
+    {"measures": "token cost multiple of Anthropic's multi-agent research system relative to chat", "value": "15"},
+    {"measures": "models evaluated in the Chroma Context Rot report", "value": "18"},
+]}]}
+
+
+def test_the_ledger_fallback_keeps_only_the_numbers_the_figure_is_named_for():
+    """Fifteen numbers of four kinds went on one axis. The name admits one."""
+    figure = {
+        "name": "token-cost-multipliers",
+        "shows": "Relative token cost of a single-agent chat baseline versus a multi-agent research system.",
+        "data_needed": "Reported token-cost multiples from the corpus: multi-agent systems use approximately 15x more tokens than chat.",
+    }
+    rows = charts._rows_from_ledger(_LEDGER, figure)
+    assert [r["y"] for r in rows] == [15.0], rows
+
+
+def test_the_ledger_fallback_matches_a_figure_about_failure_shares():
+    figure = {"name": "failure-share-by-category", "shows": "MAST failure categories."}
+    rows = charts._rows_from_ledger(_LEDGER, figure)
+    assert sorted(r["y"] for r in rows) == [21.3, 36.9, 41.8], rows
+
+
+def test_a_stopword_is_never_a_reason_to_admit_a_number():
+    figure = {"name": "chart", "data_needed": "the and from that with"}
+    rows = charts._rows_from_ledger(_LEDGER, figure)
+    # No real term at all, so every number is admitted. That is the wide
+    # match a figure with nothing to say falls back to, and it is not the bug.
+    assert len(rows) == 8
+    figure = {"name": "chart", "data_needed": "the report"}
+    rows = charts._rows_from_ledger(_LEDGER, figure)
+    assert [r["y"] for r in rows] == [18.0], "only the Chroma report row names a report"
