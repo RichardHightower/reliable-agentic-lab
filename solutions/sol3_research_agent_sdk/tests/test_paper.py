@@ -202,6 +202,53 @@ def test_assemble_keeps_a_marker_it_cannot_resolve(work, turns, no_renderer):
     assert "[fm-q9-99]" in (Path(work) / "paper.md").read_text()
 
 
+def test_the_paper_gate_honours_the_hosts_the_librarian_admitted(work, turns, no_renderer):
+    """`arxiv.org` was admitted for the run and the paper gate rejected it.
+
+    The gate read the seed list, which the librarian's admissions never reach.
+    The first paper this port assembled cited the MAST paper through arxiv and
+    failed `hosts` for it. A `corpus:` reference has no host and is exempt.
+    """
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    for claim in claims:
+        claim["source_url"] = "https://arxiv.org/abs/2503.13657"
+    (Path(work) / "claims.json").write_text(json.dumps({"claims": claims}), encoding="utf-8")
+    run.enforce_research_policy = True
+    run.allowed_domains = ("arxiv.org",)
+    score = paper.check(run)
+    hosts = next(row for row in score["checks"] if row["name"] == "hosts")
+    assert hosts["passed"], hosts
+
+
+def test_assembly_writes_the_section_heading_the_writer_left_out(work, turns, no_renderer):
+    """Two of three writers headed their section with its key questions and
+    never wrote the outline heading, so `outline_coverage` could not find the
+    section. Assembly owns the heading now. One the writer did write is kept,
+    not doubled.
+    """
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    outline = json.loads((Path(work) / "outline.approved.json").read_text())
+    outline = outline.get("outline", outline)
+    heading = outline["sections"][0]["heading"]
+    section = sorted((Path(work) / "sections").glob("*.md"))[0]
+    section.write_text("### A key question?\n\nBody text [1].\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count(f"## {heading}") == 1, body
+    section.write_text(f"## {heading}\n\nBody text [1].\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count(f"## {heading}") == 1, "the heading was doubled"
+
+
 # -- the whole run ----------------------------------------------------------
 
 

@@ -1263,6 +1263,14 @@ def assemble(run: Run) -> dict:
         text, found = checks.take_flags(text)
         flags += [{"section": section["id"], "flag": flag} for flag in found]
         text = _resolve_markers(text, numbers)
+        # Assembly owns the section heading. Two of three writers headed their
+        # section with its key questions and never wrote the outline heading,
+        # so `outline_coverage` could not find the section to grade. A heading
+        # the writer did include is kept, not doubled.
+        heading = str(section.get("heading") or "").strip()
+        first_line = text.strip().splitlines()[0].strip() if text.strip() else ""
+        if heading and first_line.lstrip("# ").strip().lower() != heading.lower():
+            parts += [f"## {heading}", ""]
         parts += [text.strip(), ""]
         for chart in _charts_for(run, section["id"]):
             rel = f"charts/{Path(chart['path']).name}"
@@ -1373,6 +1381,7 @@ def check(run: Run) -> dict:
         headings=[section["heading"] for section in planned["sections"]],
         outline=approved_outline(run),
         enforce_source_policy=run.enforce_research_policy,
+        allowed_domains=run.allowed_domains,
         enforce_loop_doctrine=run.enforce_loop_doctrine,
         min_words=checks.MIN_WORDS if run.enforce_research_policy else 0,
         min_section_words=checks.MIN_SECTION_WORDS if run.enforce_research_policy else 0,

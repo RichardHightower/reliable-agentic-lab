@@ -71,7 +71,7 @@ tasks:
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - test -x {{.RUN_PY}} || {{.PY}} -m venv {{.VENV}}
-      - '{{.RUN_PY}} -m pip install --quiet claude-agent-sdk pytest reportlab pypdf'
+      - '{{.RUN_PY}} -m pip install --quiet claude-agent-sdk pytest reportlab pypdf matplotlib'
       - task: renderer
       - task: image-gen
 
