@@ -4,12 +4,14 @@ Three runtimes enforce write scope three different ways. Plain Python uses a
 missing method. The Claude Agent SDK uses a tool list and a PreToolUse hook.
 Deep Agents uses a per-subagent tool list. All three read the same table.
 
-Four loops, four casts. The research cast is the largest, at eleven roles. A
+Four loops, four casts. The research cast is the largest, at fourteen roles. A
 role earns a line here by holding a tool set no other role holds, never by
 being another name for work an existing role already does. The researcher
 searches and cannot write. The verifier searches a second time and never sees
-the researcher's answer. The diagrammer returns figure source; Python writes
-it and runs the renderer. No role in this table holds `Bash`.
+the researcher's answer. The locator searches too, but only to cross-reference
+one cabinet source, and holds neither the researcher's corpus tool nor the
+verifier's full set. The diagrammer returns figure source; Python writes it
+and runs the renderer. No role in this table holds `Bash`.
 
 If the table and a runtime ever disagree, the runtime is wrong. This folder's
 own tests check the cast with no SDK installed.
