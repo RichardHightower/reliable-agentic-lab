@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -138,6 +139,38 @@ def _snapshot_failed_attempt(png: Path, backend: str) -> None:
             target.write_bytes(source.read_bytes())
 
 
+DECISION_NODE = re.compile(r"(\b\w+)\{([^{}\n]+)\}")
+
+
+def for_image_backend(source: Path) -> Path:
+    """The source the image backend may see. Same stem, no single-brace nodes.
+
+    Mermaid writes a decision node as `GATE{Gate}`. The renderer copies the
+    source into its prompt line for line, and the `imagen` CLI reads `{Gate}`
+    as an unfilled template variable and refuses:
+
+        Missing 1 required variable(s): {'Gate'}
+
+    Every backend then fails the same way and the run exits 2. The first live
+    run to reach the diagram phase died on it.
+
+    The renderer is a cached clone that `task setup` re-fetches, so the fix
+    lives here, before the handoff. `[Gate]` is a rectangle, `{Gate}` is a
+    diamond, and the image model draws from a description either way. The
+    stem is unchanged so the PNG lands where the caller expects. The original
+    file is not touched.
+    """
+    source = Path(source)
+    text = source.read_text(encoding="utf-8")
+    safe = DECISION_NODE.sub(r"\1[\2]", text)
+    if safe == text:
+        return source
+    staged = source.parent / ".imagen" / source.name
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.write_text(safe, encoding="utf-8")
+    return staged
+
+
 def render(source: Path, topic: str, out_dir: Path, theme: str = DEFAULT_THEME) -> Path | None:
     """Render with imagen-diagrams. The plugin owns backend selection and prompts."""
     out_dir = Path(out_dir)
@@ -145,7 +178,7 @@ def render(source: Path, topic: str, out_dir: Path, theme: str = DEFAULT_THEME) 
     ensure_theme()
     args = [
         "--source",
-        str(source),
+        str(for_image_backend(source)),
         "--topic",
         topic,
         "--theme",

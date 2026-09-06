@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pathlib
+
 import diagrams
 import pytest
 
@@ -232,3 +234,63 @@ def test_the_source_is_written_next_to_the_image(renderer, tmp_path):
     out = tmp_path / "diagrams"
     diagrams.draw(Drawer(), name="f", concept="c", section="s", topic="t", out_dir=out)
     assert (out / "f.mmd").read_text().startswith("flowchart LR")
+
+
+# -- the image backend never sees a single-brace node (#367) -------------------
+
+
+def test_a_decision_node_is_rewritten_for_the_image_backend(tmp_path):
+    """`GATE{Gate}` became `{Gate}` in the prompt and the imagen CLI read it as
+    an unfilled template variable. The first live run to reach the diagram
+    phase died on it, every backend the same way.
+    """
+    import diagrams  # noqa: PLC0415
+
+    src = tmp_path / "flow.mmd"
+    src.write_text(
+        "flowchart TD\n    A[Start] --> GATE{Gate}\n    GATE --> B((Done))\n"
+        "    B --> C{{Hex}}\n",
+        encoding="utf-8",
+    )
+    staged = diagrams.for_image_backend(src)
+    assert staged != src
+    assert staged.name == src.name, "the stem must not change"
+    text = staged.read_text()
+    assert "GATE[Gate]" in text
+    assert "{Gate}" not in text
+    assert "C{{Hex}}" in text, "a hexagon is not a decision node"
+    assert "B((Done))" in text
+    assert src.read_text().count("{Gate}") == 1, "the original is not touched"
+
+
+def test_a_source_with_no_decision_node_is_handed_over_as_is(tmp_path):
+    import diagrams  # noqa: PLC0415
+
+    src = tmp_path / "flow.mmd"
+    src.write_text("flowchart TD\n    A[Start] --> B[End]\n", encoding="utf-8")
+    assert diagrams.for_image_backend(src) == src
+
+
+def test_render_hands_the_backend_the_sanitized_source(tmp_path, monkeypatch):
+    """The call site, not the helper. A helper test stays green if `render`
+    keeps passing the raw path.
+    """
+    import subprocess  # noqa: PLC0415
+
+    import diagrams  # noqa: PLC0415
+
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+    seen = []
+
+    def fake_run(script, args):
+        seen.append(list(args))
+        return subprocess.CompletedProcess(args, returncode=diagrams.NO_BACKEND)
+
+    monkeypatch.setattr(diagrams, "_run", fake_run)
+    src = tmp_path / "flow.mmd"
+    src.write_text("flowchart TD\n    A --> GATE{Gate}\n", encoding="utf-8")
+    diagrams.render(src, "a topic", tmp_path / "out")
+    assert seen, "render never called the renderer"
+    handed = pathlib.Path(seen[0][seen[0].index("--source") + 1])
+    assert "{Gate}" not in handed.read_text(), handed
+    assert handed.name == src.name
