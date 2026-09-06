@@ -103,6 +103,8 @@ class Hit:
     vendor: str = ""
     source_kind: str = ""
     origin_path: str = ""
+    url: str = ""
+    source_hash: str = ""
     captured_at: str = ""
     subject: str = ""
     confidence: float = 0.0
@@ -310,6 +312,15 @@ def _find_record(root: Path, folder: str, record_id: str) -> Path | None:
     return matches[0] if matches else None
 
 
+def _first_url(body: str) -> str:
+    """The first body line that is a bare URL, or empty. Never invents one."""
+    for line in body.splitlines():
+        line = line.strip()
+        if line.startswith(("http://", "https://")):
+            return line
+    return ""
+
+
 def _find_source(root: Path, source_hash: str) -> dict:
     if not source_hash:
         return {}
@@ -321,8 +332,11 @@ def _find_source(root: Path, source_hash: str) -> dict:
         text = _read(path)
         if needle not in text:
             continue
-        meta, _ = parse_front_matter(text)
+        meta, body = parse_front_matter(text)
         if _unquote(meta.get("source_hash")) == needle or needle in text:
+            raw = meta.get("url")
+            front = _unquote(raw) if isinstance(raw, str) else ""
+            meta["url"] = front or _first_url(body)
             return meta
     return {}
 
@@ -389,6 +403,8 @@ def _hit_from_claim(root: Path, root_name: str, path: Path, query_terms: list[st
         vendor=_unquote(source_meta.get("vendor")),
         source_kind=_unquote(source_meta.get("source_kind")),
         origin_path=_unquote(source_meta.get("asset_path") or locator.asset_path),
+        url=_unquote(source_meta.get("url")),
+        source_hash=source_hashes[0] if source_hashes else "",
         captured_at=_unquote(source_meta.get("captured_at")),
         subject=subject,
         confidence=confidence_f,
@@ -479,6 +495,7 @@ def format_hits(hits: list[Hit]) -> str:
             f"  Quote: {hit.quote or '(no evidence quote)'}\n"
             f"  Source: {source}{loc}"
             + (f" ({hit.vendor})" if hit.vendor else "")
+            + (f"\n  URL: {hit.url}" if hit.url else "")
         )
     return "\n".join(blocks)
 
@@ -558,7 +575,8 @@ def pack(
                 "",
                 f"**Source.** {hit.source_title or 'unrecorded'}"
                 + (f" ({hit.vendor})" if hit.vendor else "")
-                + (f", {hit.source_kind}" if hit.source_kind else ""),
+                + (f", {hit.source_kind}" if hit.source_kind else "")
+                + (f" <{hit.url}>" if hit.url else ""),
                 "",
                 f"**Epistemic.** {hit.epistemic}  **Confidence.** {hit.confidence}",
                 "",

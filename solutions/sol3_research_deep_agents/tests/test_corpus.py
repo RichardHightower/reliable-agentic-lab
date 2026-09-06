@@ -146,3 +146,97 @@ def test_ingest_copies_onto_a_worktree_branch(tmp_path):
     assert result["ok"] is True
     assert result["copied"] == 1
     assert (knowledge / "research" / "claims" / "claim.x.md").read_text() == "a new claim\n"
+
+
+URL_SHA = "sha256:0000000000000000000000000000000000000000000000000000000000000388"
+
+
+def _url_brain(tmp_path: Path, source_front: str, source_body: str) -> Path:
+    """One claim, one evidence, one source. The source front matter and body vary."""
+    root = tmp_path / "urlbrain"
+    research = root / "research"
+    for folder in ("claims", "evidence", "sources"):
+        (research / folder).mkdir(parents=True, exist_ok=True)
+    (research / "claims" / "claim.url-probe.01TEST.md").write_text(
+        '---\ntype: "Claim"\nid: "claim.url-probe.01TEST"\n'
+        'description: "A locator needs a public url on the hit."\n'
+        "confidence: 0.9\n"
+        'links:\n  - rel: evidenced_by\n    target: "evidence.url-probe.01TEST"\n'
+        "---\n\n# Claim\n\nA locator needs a public url on the hit.\n",
+        encoding="utf-8",
+    )
+    (research / "evidence" / "evidence.url-probe.01TEST.md").write_text(
+        '---\ntype: "Evidence"\nid: "evidence.url-probe.01TEST"\n'
+        'text: "Quoted for the url probe."\n'
+        f'source_hash: "{URL_SHA}"\n'
+        'locator:\n  variant: "quote"\n'
+        '  asset_path: "research/source-assets/url-probe/original.md"\n'
+        "  start_line: 1\n  end_line: 2\n"
+        "---\n\nQuoted for the url probe.\n",
+        encoding="utf-8",
+    )
+    (research / "sources" / "source.url-probe.01TEST.md").write_text(
+        '---\ntype: "SourceDocument"\nid: "source.url-probe.01TEST"\n'
+        'title: "Url probe source"\nvendor: "Spillwave"\nsource_kind: "reference_doc"\n'
+        f'source_hash: "{URL_SHA}"\n'
+        f"{source_front}---\n\n{source_body}",
+        encoding="utf-8",
+    )
+    return root
+
+
+def _url_hit(root: Path):
+    hits = corpus.search("locator public url", [root], limit=5)
+    assert hits, "the probe brain has to yield its one claim"
+    return hits[0]
+
+
+def test_a_front_matter_url_wins_over_a_body_url(tmp_path):
+    root = _url_brain(
+        tmp_path,
+        'url: "https://arxiv.org/abs/2503.13657"\n',
+        "Retrieved for: locators\n\nhttps://example.org/decoy\n",
+    )
+    assert _url_hit(root).url == "https://arxiv.org/abs/2503.13657"
+
+
+def test_a_body_url_is_lifted_when_the_front_matter_has_none(tmp_path):
+    root = _url_brain(tmp_path, "", "https://example.org/paper\n\nRetrieved for: locators\n")
+    assert _url_hit(root).url == "https://example.org/paper"
+
+
+def test_a_capture_with_no_url_is_empty_and_does_not_crash(tmp_path):
+    root = _url_brain(tmp_path, "", "Retrieved for the sol3 fixture corpus.\n")
+    hit = _url_hit(root)
+    assert hit.url == ""
+    assert hit.source_title == "Url probe source"
+
+
+def test_a_hit_carries_the_evidence_source_hash(tmp_path):
+    root = _url_brain(tmp_path, "", "Retrieved for the sol3 fixture corpus.\n")
+    assert _url_hit(root).source_hash == URL_SHA
+
+
+def test_the_pack_carries_the_url_in_json_and_markdown(tmp_path):
+    root = _url_brain(tmp_path, 'url: "https://arxiv.org/abs/2503.13657"\n', "Retrieved.\n")
+    packed = corpus.pack("locator public url", [root], tmp_path / "pack", limit=5)
+    js = json.loads((tmp_path / "pack" / "brain-pack.json").read_text(encoding="utf-8"))
+    assert js["hits"][0]["url"] == "https://arxiv.org/abs/2503.13657"
+    assert js["hits"][0]["source_hash"] == URL_SHA
+    assert packed["hits"][0]["url"] == "https://arxiv.org/abs/2503.13657"
+    md = (tmp_path / "pack" / "brain-pack.md").read_text(encoding="utf-8")
+    source_line = "**Source.** Url probe source (Spillwave), reference_doc"
+    assert f"{source_line} <https://arxiv.org/abs/2503.13657>" in md
+
+
+def test_format_hits_shows_a_url_only_when_there_is_one():
+    with_url = corpus.Hit(key="b:c1", claim="c", quote="q", url="https://example.org/paper")
+    without = corpus.Hit(key="b:c2", claim="c", quote="q")
+    assert "  URL: https://example.org/paper" in corpus.format_hits([with_url])
+    assert "URL:" not in corpus.format_hits([without])
+
+
+def test_a_valueless_front_matter_url_falls_through_to_the_body(tmp_path):
+    """`url:` with nothing after it parses to a dict. It is not a url."""
+    root = _url_brain(tmp_path, "url:\n", "https://example.org/body\n\nRetrieved.\n")
+    assert _url_hit(root).url == "https://example.org/body"
