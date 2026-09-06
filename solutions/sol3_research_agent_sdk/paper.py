@@ -868,6 +868,9 @@ def diagram(run: Run) -> dict:
     return {"figures": len(figures), "rendered": len(drawn)}
 
 
+CHART_MIN_ROWS = 2
+
+
 def do_charts(run: Run) -> dict:
     """Render `kind: chart` figures from data tables and the ledger.
 
@@ -881,8 +884,16 @@ def do_charts(run: Run) -> dict:
     for figure in outlines.charts(drafted):
         name = figure.get("name") or "chart"
         rows = charts.collect(run.work_dir, figure, ledger)
-        if not rows:
-            run.log(f"    skipping chart {name!r}: no data")
+        # One value is a sentence, not a chart. The review judge on the first
+        # one-bar chart this port drew: "conveys exactly one number that line
+        # 21 already states in a sentence." It failed `figured` for that, and
+        # its caption failed `evidenced` against the body, on two attempts the
+        # writer could not fix because assembly appends the chart regardless.
+        if len(rows) < CHART_MIN_ROWS:
+            run.log(
+                f"    skipping chart {name!r}: "
+                + ("no data" if not rows else f"{len(rows)} value, a sentence, not a chart")
+            )
             skipped.append(name)
             continue
         spec = {}
@@ -1213,19 +1224,30 @@ def write_sections(run: Run) -> dict:
             break
         payload = by_id.get(section["id"], section)
         path = out / f"{section['id']}.md"
+        # The stamped draft, kept until a replacement exists. #353 closed this
+        # hole in `run_section`; this path had it open, and a kill during the
+        # rewrite cost three stamped sections twice in one evening (#377).
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
         path.unlink(missing_ok=True)
         bound = [c for c in usable if c["section"] == section["id"]]
         figures_here = [f for f in figures if f["section"] == section["id"] and f["path"]]
         relative = f"sections/{section['id']}.md"
         instruction = _section_instruction(payload, notes)
-        body = run.turns.write(payload, bound, figures_here, instruction, relative)
-        # The writer holds `Write` scoped to `sections/**` and is told to use
-        # it. Prefer the file, because a long section that round-trips through
-        # a message is the one that comes back truncated. Fall back to the
-        # message so a writer that only answered still produces a section.
+        try:
+            body = run.turns.write(payload, bound, figures_here, instruction, relative)
+        except TurnFailed:
+            run.log(f"    {section['id']}: the writer turn failed. Keeping the last draft.")
+            body = ""
+        except Escalate:
+            if existing:
+                path.write_text(existing, encoding="utf-8")
+            raise
         if not path.exists() or not path.read_text(encoding="utf-8").strip():
-            path.write_text((body or "").rstrip() + "\n", encoding="utf-8")
-            from_message += 1
+            if (body or "").strip():
+                path.write_text(body.rstrip() + "\n", encoding="utf-8")
+                from_message += 1
+            elif existing:
+                path.write_text(existing, encoding="utf-8")
         if run.enforce_research_policy and not run.exhausted():
             words = checks.word_count(path.read_text(encoding="utf-8"))
             if words < checks.MIN_SECTION_WORDS:
