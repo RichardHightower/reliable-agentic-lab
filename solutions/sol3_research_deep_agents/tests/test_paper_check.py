@@ -262,3 +262,46 @@ def test_a_short_paper_fails_the_hard_length_gate():
     assert not score.passed
     assert "length" in score.signature()
     assert "length" not in score.warnings()
+
+
+# -- a located cabinet reference is not the allowlist's business ------------
+
+ARXIV = "https://arxiv.org/abs/2503.13657"
+LOCATED = GOOD.replace("https://docs.langchain.com/one", ARXIV)
+
+
+def test_reference_hosts_passes_a_located_url():
+    score = gate(LOCATED, [ARXIV, URLS[1]], located=[ARXIV])
+    assert "reference_hosts" not in score.signature(), score.report()
+
+
+def test_reference_hosts_fails_the_same_url_untagged():
+    score = gate(LOCATED, [ARXIV, URLS[1]])
+    assert "reference_hosts" in score.signature()
+
+
+def test_assemble_gate_exempts_a_located_source_from_the_allowlist(monkeypatch):
+    """End to end: the ledger carries the tag, `assemble_gate` passes it down."""
+    import stages  # noqa: PLC0415
+
+    monkeypatch.setattr(paper_check, "MIN_WORDS", 0)
+    monkeypatch.setattr(paper_check, "MIN_SECTION_WORDS", 5)
+    ledger = evidence.Ledger("/nonexistent")
+    located = ledger.add_source(
+        evidence.SourceDocument(
+            title="MAST", url=ARXIV, subject="exits", located_from="knowledge:claim.mast"
+        )
+    )
+    plain = ledger.add_source(
+        evidence.SourceDocument(title="Docs", url=URLS[1], subject="exits")
+    )
+    ledger.add_claim(
+        evidence.Claim(text="a fact", subject="exits", source_ids=[located.id, plain.id])
+    )
+
+    assert stages.assemble_gate(LOCATED, ledger).passed
+
+    ledger.sources[located.id].located_from = ""
+    with pytest.raises(stages.GateFailed) as exc:
+        stages.assemble_gate(LOCATED, ledger)
+    assert "reference_hosts" in str(exc.value)

@@ -16,6 +16,11 @@ The researcher and the verifier hold `corpus_search`. That tool calls
 `search` and returns text. It holds no write path. A loop that can edit the
 brain can launder its own output into everyone's prior knowledge.
 
+`attach_url` is the one exception, and it is not a tool. Python calls it after
+the locator has found the public page for a source the cabinet already held.
+It writes one `url:` line onto a SourceDocument that already exists, or it
+writes nothing at all. It never mints a node.
+
     python3 corpus.py --demo
 """
 
@@ -29,6 +34,7 @@ import shutil
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 FOLDER = Path(__file__).resolve().parent
 FIXTURE_BRAIN = FOLDER / "tests" / "fixtures" / "brain"
@@ -341,6 +347,89 @@ def _find_source(root: Path, source_hash: str) -> dict:
     return {}
 
 
+def _front_matter(lines: list[str]) -> tuple[int, int] | None:
+    """(first front-matter line, index of the closing `---`), or None."""
+    if not lines or lines[0].strip() != "---":
+        return None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return 1, index
+    return None
+
+
+def _front_value(line: str) -> str:
+    """The value of one front-matter line, unquoted. The writer quotes strings."""
+    value = line.partition(":")[2].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
+def _public_url(url: str) -> bool:
+    """A URL a reader can open. Not a ULID, not a corpus key, not a repo path.
+
+    A raw `"` or `\\` is refused too. The url is written back JSON-quoted and
+    `parse_front_matter` does not unescape, so such a URL comes back corrupted.
+    A real locator carries neither raw; percent-encoded is fine.
+    """
+    parts = urlsplit(url or "")
+    return (
+        parts.scheme in ("http", "https")
+        and bool(parts.netloc)
+        and not re.search(r"\s", parts.netloc)
+        and '"' not in url
+        and "\\" not in url
+    )
+
+
+def attach_url(root: Path | str, source_hash: str, url: str) -> Path | None:
+    """Write `url:` onto the SourceDocument carrying this hash. Returns its path.
+
+    A text edit on the front matter, not a rewrite. Re-minting the node from
+    parsed fields would drop every field some other writer put on it, so
+    nothing else in the file moves.
+
+    The only write path this port has onto a second brain. An unknown hash or a
+    URL that is not http(s) returns None and leaves the file byte-identical:
+    `corpus_search` stays read only, and a locator that failed to resolve must
+    not become a fabricated citation.
+    """
+    if not source_hash or not _public_url(url):
+        return None
+    sources = Path(root) / "research" / "sources"
+    if not sources.is_dir():
+        return None
+    new_line = f"url: {json.dumps(url)}"
+    for path in sorted(sources.rglob("*.md")):
+        lines = _read(path).split("\n")
+        bounds = _front_matter(lines)
+        if bounds is None:
+            continue
+        start, end = bounds
+        front = lines[start:end]
+        # The folder says SourceDocument; the front matter has to agree. An
+        # Evidence node also carries a `source_hash`, and a misfiled one must
+        # not collect a `url:` that belongs to the source it quotes.
+        if not any(
+            line.startswith("type:") and _front_value(line) == "SourceDocument" for line in front
+        ):
+            continue
+        if not any(
+            line.startswith("source_hash:") and _front_value(line) == source_hash
+            for line in front
+        ):
+            continue
+        for index in range(start, end):
+            if lines[index].startswith("url:"):
+                lines[index] = new_line
+                break
+        else:
+            lines.insert(end, new_line)
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+    return None
+
+
 def _hit_from_claim(root: Path, root_name: str, path: Path, query_terms: list[str]) -> Hit | None:
     text = _read(path)
     if not text:
@@ -649,6 +738,23 @@ def demo() -> int:
         assert packed["keys"]
         assert (Path(tmp) / "ok" / "brain-pack.md").is_file()
         assert (Path(tmp) / "ok" / "brain-pack.json").is_file()
+
+        # The one write path onto a brain: a url onto a source that exists.
+        writable = Path(tmp) / "writable"
+        sources = writable / "research" / "sources"
+        sources.mkdir(parents=True)
+        source = sources / "source.demo.md"
+        source.write_text(
+            '---\ntype: "SourceDocument"\nid: "source.demo"\n'
+            'title: "Demo"\nsource_hash: "sha256:demo"\n---\n\nDemo capture.\n',
+            encoding="utf-8",
+        )
+        before = source.read_bytes()
+        assert attach_url(writable, "sha256:demo", "corpus:knowledge:claim.x") is None
+        assert attach_url(writable, "sha256:nope", "https://example.invalid/x") is None
+        assert source.read_bytes() == before, "a refused url must not touch the file"
+        assert attach_url(writable, "sha256:demo", "https://example.invalid/spec") == source
+        assert 'url: "https://example.invalid/spec"' in source.read_text(encoding="utf-8")
     print(
         f"corpus: ok ({len(claims)} claims, {len(hits)} exit hits, "
         f"{len(scoped)} harness-ch03 hits)."

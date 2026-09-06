@@ -45,6 +45,7 @@ LOOPS = {
         "source_librarian",
         "researcher",
         "verifier",
+        "locator",
         "section_judge",
         "ledger",
         "diagrammer",
@@ -92,6 +93,10 @@ PURPOSE = {
         "Proposes this topic's search domains. Python admits them. "
         "Holds no write path and no search tool."
     ),
+    "locator": (
+        "Finds the public page for one cabinet source. A cross-reference, not "
+        "research. Holds no write path and no corpus tool."
+    ),
     "section_judge": (
         "Grades one section against its outline row. Holds no write path."
     ),
@@ -111,6 +116,7 @@ READERS = (
     "outline_judge",
     "outline_editor",
     "source_librarian",
+    "locator",
     "section_judge",
     "ledger",
     "chartist",
@@ -124,6 +130,7 @@ TOOLS_FOR_READER = {
     "outline_judge": (*READ_TOOLS,),
     "outline_editor": (*READ_TOOLS,),
     "source_librarian": (*READ_TOOLS,),
+    "locator": (*READ_TOOLS,),
     "section_judge": (*READ_TOOLS,),
     "ledger": (*READ_TOOLS,),
     "chartist": (*READ_TOOLS,),

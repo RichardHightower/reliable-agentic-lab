@@ -36,6 +36,7 @@ from pathlib import Path
 
 import evidence
 import gates
+import locate
 import outline as outlines
 import research
 import sections
@@ -1067,6 +1068,273 @@ class Paper:
 
     # -- 2. search ---------------------------------------------------------
 
+    def _pack_hits(self) -> list[dict]:
+        """The hits `stage_corpus` wrote, or an empty list."""
+        path = self.work_dir / "corpus" / "brain-pack.json"
+        if not path.exists():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        return [hit for hit in (payload.get("hits") or []) if isinstance(hit, dict)]
+
+    def _resolve_pack_hit(self, pack: list[dict], key: str) -> tuple[dict | None, str]:
+        """The cabinet record behind one reference key, and why there is none.
+
+        The pack first, because it is already on disk and it is what this run
+        planned against. A model writes the bare claim id where the pack holds
+        `knowledge:claim.<subject>.<ULID>`, so an exact match alone rejects
+        keys that are real. A suffix counts only on a segment boundary, or a
+        short id would collide with the middle of an unrelated ULID.
+
+        Two candidates end the search. `corpus.resolve` returns the first claim
+        file whose name starts with the id, so falling through would settle the
+        ambiguity by directory order and cite whichever paper sorted first.
+        """
+        import corpus as corpus_mod  # noqa: PLC0415
+
+        if not key:
+            return None, "unresolved corpus key"
+        keys = [str(hit.get("key") or "") for hit in pack]
+        if key in keys:
+            return pack[keys.index(key)], ""
+        matches = [item for item in keys if item.endswith((f".{key}", f":{key}"))]
+        if len(matches) == 1:
+            return pack[keys.index(matches[0])], ""
+        if len(matches) > 1:
+            return None, "ambiguous corpus key: " + ", ".join(sorted(matches))
+        found = corpus_mod.resolve(key, list(self.brains))
+        return (found.as_dict(), "") if found is not None else (None, "unresolved corpus key")
+
+    def _located_cache(self) -> dict:
+        path = self.work_dir / "corpus" / "located.json"
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _write_located(self, cache: dict) -> None:
+        path = self.work_dir / "corpus" / "located.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(cache, indent=2) + "\n", encoding="utf-8")
+
+    def _record_unresolved(self, rows: list[dict]) -> None:
+        """Append the cabinet sources that could not be cross-referenced."""
+        if not rows:
+            return
+        path = self.work_dir / "corpus" / "unresolved.json"
+        existing: list = []
+        if path.exists():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                existing = payload.get("unresolved") or []
+            except (OSError, json.JSONDecodeError):
+                existing = []
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"unresolved": [*existing, *rows]}, indent=2) + "\n", encoding="utf-8"
+        )
+
+    @staticmethod
+    def _rewrite_claims(reply: dict, key: str, url: str) -> None:
+        """Point every claim that named this corpus key at the located URL.
+
+        A claim whose only reference is a corpus key is dropped by
+        `record_findings`, because the key is not an allowed URL. Rewriting the
+        reference is what keeps the claim and its source bound together.
+        """
+        for claim in reply.get("claims") or []:
+            if not isinstance(claim, dict):
+                continue
+            named = claim.get("source_urls") or []
+            claim["source_urls"] = [
+                url if locate.normalize_key(ref) == key else ref for ref in named
+            ]
+
+    @staticmethod
+    def _drop_key_from_claims(reply: dict, key: str) -> list[str]:
+        """Unbind a missed key, and drop the claims that rested on it alone.
+
+        If the page does not support the sentence, the sentence does not go in
+        the paper. Leaving the claim with an empty `source_urls` is worse than
+        dropping it: `record_findings` reads "names none" as "inherits every
+        source this answer produced", so a claim the cabinet could not back
+        would be published citing an unrelated web page.
+
+        A claim that also named an http source keeps that source and stays.
+        A claim that named nothing to begin with is not this pass's business.
+        """
+        kept: list = []
+        dropped: list[str] = []
+        for claim in reply.get("claims") or []:
+            if not isinstance(claim, dict):
+                kept.append(claim)
+                continue
+            named = claim.get("source_urls") or []
+            remaining = [ref for ref in named if locate.normalize_key(ref) != key]
+            claim["source_urls"] = remaining
+            if named and not remaining:
+                dropped.append(str(claim.get("text") or "")[:60])
+                continue
+            kept.append(claim)
+        reply["claims"] = kept
+        return dropped
+
+    def _locate_cabinet_sources(self, question: dict, reply: dict) -> dict:
+        """Give every cabinet source in one reply a URL a reader can open, or drop it.
+
+        A researcher that read `corpus_search` reports the hit as a source, and
+        the only reference it has is the corpus key. `corpus:knowledge:claim.x`
+        is not a bibliography entry, it is a string only this run understands.
+        This asks the locator once per source and writes the answer back onto
+        the reply, the SourceDocument in the brain, and a run-level cache.
+
+        A source that cannot be located is removed from the reply along with
+        every claim reference to it, and recorded in `corpus/unresolved.json`.
+        Dropping it is the point: an unlocatable cabinet claim must not reach
+        the paper wearing a reference nobody can follow.
+        """
+        import corpus as corpus_mod  # noqa: PLC0415
+
+        del question  # the log line is per question; the work is per source
+        sources = reply.get("sources") or []
+        pack = self._pack_hits()
+        # The belt. A researcher that cites the pack hit's public page instead
+        # of its key has cited the same cabinet source, and the run must not
+        # depend on which spelling the model chose: the skill says use the key,
+        # and this is what happens when it does not. No turn, no rewrite.
+        # First hit wins, and the pack is ranked, so two claims out of one
+        # paper tag with the better of the two keys rather than the later one.
+        public_keys: dict[str, str] = {}
+        for hit in pack:
+            public = str(hit.get("url") or "").strip()
+            if public.lower().startswith(("http://", "https://")):
+                public_keys.setdefault(public, str(hit.get("key") or ""))
+        cache = self._located_cache()
+        kept: list = []
+        unresolved: list[dict] = []
+        turns = hits = misses = 0
+
+        for item in sources:
+            if not isinstance(item, dict) or not locate.is_cabinet_url(item.get("url")):
+                tag = public_keys.get(str((item or {}).get("url") or "").strip())
+                if tag:
+                    item["located_from"] = tag
+                    hits += 1
+                kept.append(item)
+                continue
+
+            key = locate.normalize_key(item.get("url"))
+            hit, why = self._resolve_pack_hit(pack, key)
+            if hit is None:
+                unresolved.append(
+                    {
+                        "key": key,
+                        "title": str(item.get("title") or ""),
+                        "reason": why,
+                        "claims_dropped": self._drop_key_from_claims(reply, key),
+                    }
+                )
+                misses += 1
+                continue
+
+            pack_key = str(hit.get("key") or key)
+            title = str(item.get("title") or "") or str(hit.get("source_title") or "")
+            vendor = str(item.get("vendor") or "") or str(hit.get("vendor") or "")
+
+            # The cabinet already knows where the public copy lives. Paying a
+            # turn to rediscover it is money for an answer we hold.
+            public = str(hit.get("url") or "")
+            if public.startswith(("http://", "https://")):
+                self._attach(item, reply, key, pack_key, public, hit)
+                kept.append(item)
+                hits += 1
+                continue
+
+            # One source, one answer. Two claims out of the same paper are one
+            # turn, and the cache survives a stop between questions.
+            dedupe = str(hit.get("source_hash") or "") or pack_key
+            entry = cache.get(dedupe)
+            if entry is None:
+                if not title:
+                    unresolved.append(
+                        {
+                            "key": pack_key,
+                            "title": "",
+                            "reason": "no title to locate",
+                            "claims_dropped": self._drop_key_from_claims(reply, key),
+                        }
+                    )
+                    misses += 1
+                    continue
+                reason = "not found"
+                parsed = {"url": "", "supports": False, "excerpt": ""}
+                # One tool call, and one provider call inside it. The locator
+                # has no scout pass and no Ask repair, so a second request out
+                # of this turn is a locator researching the claim instead.
+                self.budget.begin_request(max_calls=1, max_provider_calls=1)
+                try:
+                    answer = self._ask("locator", locate.query_for(title, vendor, item.get("quote")))
+                    parsed = self._json_reply("locator", answer)
+                except (GateFailed, BudgetSpent) as exc:
+                    reason = str(exc)
+                finally:
+                    self.budget.end_request()
+                turns += 1
+                url = locate.admit(parsed)
+                entry = {
+                    "url": url,
+                    "supports": bool(url),
+                    "excerpt": str(parsed.get("excerpt") or ""),
+                    "key": pack_key,
+                    "reason": "" if url else reason,
+                }
+                cache[dedupe] = entry
+                # Before the next source, not at the end. A kill after a paid
+                # turn must not make the next run pay for it again.
+                self._write_located(cache)
+
+            url = locate.admit(entry)
+            if not url:
+                unresolved.append(
+                    {
+                        "key": pack_key,
+                        "title": title,
+                        "reason": str(entry.get("reason") or "not found"),
+                        "claims_dropped": self._drop_key_from_claims(reply, key),
+                    }
+                )
+                misses += 1
+                continue
+
+            source_hash = str(hit.get("source_hash") or "")
+            if source_hash:
+                for root in self.brains:
+                    if corpus_mod.attach_url(root, source_hash, url) is not None:
+                        break
+            self._attach(item, reply, key, pack_key, url, hit)
+            kept.append(item)
+            hits += 1
+
+        reply["sources"] = kept
+        self._record_unresolved(unresolved)
+        self.say(f"    locate: {turns} turns, {hits} hits, {misses} misses")
+        return {"turns": turns, "hits": hits, "misses": misses, "unresolved": unresolved}
+
+    def _attach(self, item: dict, reply: dict, key: str, pack_key: str, url: str, hit: dict) -> None:
+        """Install the located URL on the source item and on every claim."""
+        item["url"] = url
+        item["located_from"] = pack_key
+        if not item.get("title"):
+            item["title"] = str(hit.get("source_title") or "")
+        if not item.get("vendor"):
+            item["vendor"] = str(hit.get("vendor") or "")
+        self._rewrite_claims(reply, key, url)
+
     def stage_search(self, extra: str = "") -> StageResult:
         self._need_plan()
         usd = 0.0
@@ -1115,10 +1383,16 @@ class Paper:
             finally:
                 self.budget.end_request()
             usd += reply.usd
+            parsed = self._json_reply("researcher", reply)
+            # Before the ledger, not after. `record_findings` refuses a source
+            # whose URL fails the allowlist, and a corpus key fails it, so a
+            # cabinet source that is not cross-referenced here never reaches
+            # the bibliography at all.
+            self._locate_cabinet_sources(question, parsed)
             stages.record_findings(
                 self.ledger,
                 question,
-                self._json_reply("researcher", reply),
+                parsed,
                 seed=self.allowed_domains,
             )
             # Persist per question. A stop between questions must not discard

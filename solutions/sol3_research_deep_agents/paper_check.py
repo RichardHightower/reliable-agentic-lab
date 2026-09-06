@@ -350,6 +350,7 @@ def check(
     min_section_words: int | None = None,
     charts=None,
     allowed_domains=None,
+    located: list[str] | None = None,
 ) -> PaperScore:
     """Score a white paper. Every check here is arithmetic."""
     words_needed = MIN_WORDS if min_words is None else min_words
@@ -427,7 +428,12 @@ def check(
         if allowed_domains is not None
         else source_policy.merge_allowlist(urls)
     )
-    blocked = source_policy.unallowed_urls(urls, allowlist)
+    # A located reference is a cabinet source the locator found the public page
+    # for. The librarian never admitted a domain for it, because nobody asked
+    # the web for it, so grading it against this run's allowlist would reject a
+    # paper for citing the very document its second brain was built from.
+    exempt = {str(url) for url in (located or [])}
+    blocked = [url for url in source_policy.unallowed_urls(urls, allowlist) if url not in exempt]
     checks.append(
         Check(
             "reference_hosts",

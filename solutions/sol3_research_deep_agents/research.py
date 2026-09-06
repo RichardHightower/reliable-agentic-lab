@@ -305,6 +305,15 @@ class Backend:
     def search(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
         raise NotImplementedError
 
+    def locate(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        """Find the public page for one cabinet source. Default: an empty finding.
+
+        Not `NotImplementedError`. A backend that cannot search the open web
+        reports a miss rather than guessing, because a guessed URL becomes a
+        citation nobody can open.
+        """
+        return Finding(question, "", backend=self.name, note="this backend cannot locate")
+
 
 class FixtureBackend(Backend):
     """Recorded answers. Runs offline, in a room with no network."""
@@ -338,6 +347,10 @@ class FixtureBackend(Backend):
             citations=list(best.get("citations", [])),
             backend=self.name,
         )
+
+    def locate(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        """The recorded corpus has no filter, so locating is the same lookup."""
+        return self.search(question, reserve)
 
 
 class _BingResults(HTMLParser):
@@ -561,6 +574,33 @@ class PerplexityBackend(Backend):
             backend=self.name,
             usd=calls * self.cost_per_call,
             note=f"{calls} filtered Perplexity requests",
+        )
+
+    def locate(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        """One unfiltered search, and every citation the provider returned.
+
+        No `search_domain_filter` and no `filter_urls` afterwards. This turn is
+        looking for wherever a document was actually published, and this run's
+        admitted domains were chosen for a different question. Nothing that
+        comes back is admitted here either: `locate.admit` and the locator's
+        own `supports` flag decide, one URL at a time.
+        """
+        from mcp_tools import TransportUnavailable, search_perplexity  # noqa: PLC0415
+
+        try:
+            answer = self._call(search_perplexity, question, None, reserve)
+        except TransportUnavailable as exc:
+            return Finding(
+                question, "", backend=self.name, note=str(exc), provider_unavailable=True
+            )
+        self.transport = answer.transport
+        return Finding(
+            question=question,
+            answer=answer.text,
+            citations=list(answer.citations),
+            backend=self.name,
+            usd=self.cost_per_call,
+            note="one unfiltered Perplexity request",
         )
 
 
@@ -814,6 +854,30 @@ class FallbackBackend(Backend):
             "",
             backend=self.name,
             note="; ".join(notes) or "no paper-safe research backend is available",
+            provider_unavailable=True,
+        )
+
+    def locate(self, question: str, reserve: Callable[[float], None] | None = None) -> Finding:
+        """Same chain, the unfiltered call, and no repository shortcut.
+
+        Without this the chain would inherit the base class's empty finding and
+        the locator would miss every source on a live run, where `choose`
+        always returns this class.
+        """
+        notes = []
+        for candidate in self.candidates:
+            if not candidate.available():
+                continue
+            finding = candidate.locate(question, reserve)
+            self.last_backend = candidate
+            if not finding.provider_unavailable:
+                return finding
+            notes.append(f"{candidate.name}: {finding.note}")
+        return Finding(
+            question,
+            "",
+            backend=self.name,
+            note="; ".join(notes) or "no research backend can locate",
             provider_unavailable=True,
         )
 

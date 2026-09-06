@@ -11,6 +11,7 @@ READS_ONLY = (
     "outline_judge",
     "outline_editor",
     "source_librarian",
+    "locator",
     "section_judge",
     "ledger",
     "chartist",
@@ -18,7 +19,7 @@ READS_ONLY = (
 WRITES = ("planner", "verifier", "diagrammer", "writer")
 
 
-def test_paper_cast_is_thirteen_roles():
+def test_paper_cast_is_fourteen_roles():
     roles = roleplan.plan(None, "paper")
     assert list(roles) == [
         "orchestrator",
@@ -28,6 +29,7 @@ def test_paper_cast_is_thirteen_roles():
         "source_librarian",
         "researcher",
         "verifier",
+        "locator",
         "section_judge",
         "ledger",
         "diagrammer",

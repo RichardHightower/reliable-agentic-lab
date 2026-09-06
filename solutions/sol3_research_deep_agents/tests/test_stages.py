@@ -677,3 +677,38 @@ def test_review_gate_still_reports_rows_with_no_notes():
         stages.review_gate({"failed_rows": ["depth"], "notes": []})
     assert "depth" in str(exc.value)
     assert exc.value.signature == ("depth",)
+
+
+# -- a located cabinet source is admitted, an untagged one is not -----------
+
+LOCATED_URL = "https://arxiv.org/abs/2503.13657"
+
+
+def _record_one(url, **extra):
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "MAST", "url": url, **extra}],
+            "claims": [{"text": "a fact", "source_urls": [url]}],
+        },
+    )
+    return led
+
+
+def test_record_findings_admits_a_located_source_off_the_allowlist():
+    led = _record_one(LOCATED_URL, located_from="knowledge:claim.x")
+    urls = [source.url for source in led.sources.values()]
+    assert urls == [LOCATED_URL]
+    assert next(iter(led.sources.values())).located_from == "knowledge:claim.x"
+
+
+def test_record_findings_refuses_the_same_url_without_the_tag():
+    """arxiv.org is not on the allowlist. Only the cross-reference exempts it."""
+    assert _record_one(LOCATED_URL).sources == {}
+
+
+def test_a_located_tag_still_needs_an_openable_url():
+    assert _record_one("corpus:knowledge:claim.x", located_from="knowledge:claim.x").sources == {}

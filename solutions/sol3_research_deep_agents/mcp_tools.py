@@ -204,19 +204,28 @@ def perplexity_available() -> bool:
     return bool(os.environ.get("PERPLEXITY_API_KEY"))
 
 
+def _filtered(body: dict, domain_filter: tuple[str, ...] | None) -> dict:
+    """Add `search_domain_filter` to a request body, or leave it off entirely.
+
+    `None` is not "filter by nothing", it is "do not send the key". The locator
+    turn looks for whichever host actually published a document, and this run's
+    admitted domains were chosen for a different question. Sending an empty
+    list would be a filter that admits nothing.
+    """
+    if domain_filter is None:
+        return body
+    return {**body, "search_domain_filter": list(domain_filter)}
+
+
 def search_perplexity_mcp(
-    question: str, domain_filter: tuple[str, ...], config: dict | None = None
+    question: str, domain_filter: tuple[str, ...] | None, config: dict | None = None
 ) -> Answer:
-    """Ask the official MCP Search tool for a filtered result bundle."""
+    """Ask the official MCP Search tool for a result bundle."""
     tools = mcp_tools("perplexity", config)
     text = _call_mcp_tool(
         tools,
         "perplexity_search",
-        {
-            "query": question,
-            "max_results": 10,
-            "search_domain_filter": list(domain_filter),
-        },
+        _filtered({"query": question, "max_results": 10}, domain_filter),
     )
     citations = citations_from(text)
     return Answer(
@@ -228,7 +237,7 @@ def search_perplexity_mcp(
     )
 
 
-def search_perplexity_rest(question: str, domain_filter: tuple[str, ...]) -> Answer:
+def search_perplexity_rest(question: str, domain_filter: tuple[str, ...] | None) -> Answer:
     """Call Perplexity's Search API when the local MCP hop is unavailable."""
     key = os.environ.get("PERPLEXITY_API_KEY")
     if not key:
@@ -242,11 +251,7 @@ def search_perplexity_rest(question: str, domain_filter: tuple[str, ...]) -> Ans
         response = httpx.post(
             PERPLEXITY_SEARCH_URL,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={
-                "query": question,
-                "max_results": 10,
-                "search_domain_filter": list(domain_filter),
-            },
+            json=_filtered({"query": question, "max_results": 10}, domain_filter),
             timeout=HTTP_TIMEOUT,
         )
         response.raise_for_status()
@@ -279,9 +284,12 @@ def search_perplexity_rest(question: str, domain_filter: tuple[str, ...]) -> Ans
 
 
 def search_perplexity(
-    question: str, domain_filter: tuple[str, ...], config: dict | None = None
+    question: str, domain_filter: tuple[str, ...] | None, config: dict | None = None
 ) -> Answer:
-    """Filtered Search API, MCP first and the vendor REST endpoint second."""
+    """Search API, MCP first and the vendor REST endpoint second.
+
+    `domain_filter=None` sends no filter at all. That is the locator's request.
+    """
     if not perplexity_available():
         raise TransportUnavailable("PERPLEXITY_API_KEY is not set")
     try:
@@ -291,16 +299,13 @@ def search_perplexity(
 
 
 def ask_perplexity_mcp(
-    question: str, domain_filter: tuple[str, ...], config: dict | None = None
+    question: str, domain_filter: tuple[str, ...] | None, config: dict | None = None
 ) -> Answer:
     tools = mcp_tools("perplexity", config)
     text = _call_mcp_tool(
         tools,
         "perplexity_ask",
-        {
-            "messages": [{"role": "user", "content": question}],
-            "search_domain_filter": list(domain_filter),
-        },
+        _filtered({"messages": [{"role": "user", "content": question}]}, domain_filter),
     )
     return Answer(
         text=text,
@@ -310,7 +315,7 @@ def ask_perplexity_mcp(
     )
 
 
-def ask_perplexity_rest(question: str, domain_filter: tuple[str, ...]) -> Answer:
+def ask_perplexity_rest(question: str, domain_filter: tuple[str, ...] | None) -> Answer:
     """The vendor's OpenAI-shaped endpoint. `httpx` ships with this repo."""
     key = os.environ.get("PERPLEXITY_API_KEY")
     if not key:
@@ -324,11 +329,13 @@ def ask_perplexity_rest(question: str, domain_filter: tuple[str, ...]) -> Answer
         response = httpx.post(
             PERPLEXITY_URL,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={
-                "model": PERPLEXITY_MODEL,
-                "messages": [{"role": "user", "content": question}],
-                "search_domain_filter": list(domain_filter),
-            },
+            json=_filtered(
+                {
+                    "model": PERPLEXITY_MODEL,
+                    "messages": [{"role": "user", "content": question}],
+                },
+                domain_filter,
+            ),
             timeout=HTTP_TIMEOUT,
         )
         response.raise_for_status()
@@ -346,9 +353,9 @@ def ask_perplexity_rest(question: str, domain_filter: tuple[str, ...]) -> Answer
 
 
 def ask_perplexity(
-    question: str, domain_filter: tuple[str, ...], config: dict | None = None
+    question: str, domain_filter: tuple[str, ...] | None, config: dict | None = None
 ) -> Answer:
-    """Filtered Ask fallback, MCP first and REST second."""
+    """Ask fallback, MCP first and REST second. `None` sends no filter."""
     if not perplexity_available():
         raise TransportUnavailable("PERPLEXITY_API_KEY is not set")
     try:
