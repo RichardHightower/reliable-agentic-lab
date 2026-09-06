@@ -232,10 +232,26 @@ def _save_ledger(run, entries: list) -> None:
     run.write_json("paper_ledger.json", {"entries": entries})
 
 
-def _section_done(run, section_id: str) -> bool:
+def _load_findings_payload(run, section_id: str) -> dict:
+    path = run.file(f"knowledge/{section_id}/findings.json")
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _research_done(run, section_id: str) -> bool:
+    """Findings on disk, paid for, still good. Independent of the draft."""
+    payload = _load_findings_payload(run, section_id)
+    return bool(payload.get("findings"))
+
+
+def _section_stamped(run, section_id: str) -> bool:
     body = run.file("sections") / f"{section_id}.md"
-    findings = run.file(f"knowledge/{section_id}/findings.json")
-    if not body.exists() or not findings.exists():
+    if not body.exists() or not _research_done(run, section_id):
         return False
     for entry in _load_ledger(run):
         if entry.get("section_id") == section_id:
@@ -258,6 +274,36 @@ def _rows_for_editor(score, verdict: dict) -> list[str]:
     judge = [str(row) for row in (verdict or {}).get("failed_rows") or [] if row]
     return list(dict.fromkeys([*python, *judge]))
 
+
+def _section_done(run, section_id: str) -> bool:
+    """Skip the whole section on resume unless we were told to rewrite.
+
+    `--reuse-research` keeps findings and rewrites prose. `--reuse-drafts`
+    keeps the stamped body even when the harness SHA changed.
+    """
+    if getattr(run, "reuse_drafts", False):
+        return _section_stamped(run, section_id)
+    if getattr(run, "reuse_research", False):
+        return False
+    return _section_stamped(run, section_id)
+
+
+def has_unstamped_research(run) -> bool:
+    """Research on disk for a section that is not yet stamped."""
+    root = run.file("knowledge")
+    if not root.is_dir():
+        return False
+    for path in root.glob("*/findings.json"):
+        if _research_done(run, path.parent.name) and not _section_stamped(run, path.parent.name):
+            return True
+    return False
+
+
+def _answered(findings: list, text: str) -> bool:
+    return any(
+        (item.get("answers_question") == text or item.get("question") == text) and item.get("claim")
+        for item in findings
+    )
 
 
 def _evidence_blob(run, section_id: str, findings: list) -> str:
@@ -320,22 +366,22 @@ def run_section(run, section: dict) -> dict:
     knowledge = run.file(f"knowledge/{sid}")
     knowledge.mkdir(parents=True, exist_ok=True)
 
-    # 3b research
+    # 3b research. Findings are a skip key of their own (#360).
     findings: list[dict] = []
     queries: list[str] = []
-    if hasattr(run.turns, "research_section"):
-        result = run.turns.research_section(section, questions, note="")
-        findings = list(result.get("findings") or [])
-        queries = list(result.get("queries") or [])
-        if not findings:
-            for question in questions:
-                raw = run.turns.research(question["text"], "")
-                findings.extend(
-                    findings_from_research(raw, sid, question["text"], start=len(findings) + 1)
-                )
-                queries.append(question["text"])
-    else:
-        for question in questions:
+    loaded = _load_findings_payload(run, sid)
+    if loaded.get("findings"):
+        findings = list(loaded.get("findings") or [])
+        queries = list(loaded.get("queries") or [])
+        run.log(f"    section {sid} research already done")
+    unanswered = [q for q in questions if not _answered(findings, q["text"])]
+    if unanswered:
+        if hasattr(run.turns, "research_section") and not findings:
+            result = run.turns.research_section(section, questions, note="")
+            findings = list(result.get("findings") or [])
+            queries = list(result.get("queries") or [])
+            unanswered = [q for q in questions if not _answered(findings, q["text"])]
+        for question in unanswered:
             raw = run.turns.research(question["text"], "")
             findings.extend(
                 findings_from_research(raw, sid, question["text"], start=len(findings) + 1)
@@ -343,10 +389,14 @@ def run_section(run, section: dict) -> dict:
             queries.append(question["text"])
 
     # 3c gap pass
-    gaps = []
+    gaps = [
+        item
+        for item in (loaded.get("coverage_gaps") or [])
+        if not _answered(findings, item.get("question") or "")
+    ]
     answered = {f.get("answers_question") for f in findings if f.get("claim")}
     for question in questions:
-        if question["text"] in answered:
+        if question["text"] in answered or _answered(findings, question["text"]):
             continue
         try:
             if hasattr(run.turns, "gap_research"):
@@ -372,10 +422,21 @@ def run_section(run, section: dict) -> dict:
 
     # 3d verify
     verdicts: dict[str, dict] = {}
+    vpath = knowledge / "verdicts.json"
+    if vpath.exists() and loaded.get("findings"):
+        try:
+            for item in json.loads(vpath.read_text(encoding="utf-8")).get("verdicts") or []:
+                fid = item.get("finding_id") or ""
+                if fid:
+                    verdicts[fid] = item
+        except (OSError, json.JSONDecodeError):
+            verdicts = {}
     shaky = sorted(findings, key=lambda f: float(f.get("evidence_strength") or 0.5))
     cap = run.max_claims
     checked = 0
     for finding in shaky:
+        if finding.get("id") in verdicts:
+            continue
         epistemic = (finding.get("epistemic") or "").lower()
         origin = finding.get("origin") or (finding.get("source") or {}).get("kind")
         if origin == "corpus" and epistemic == "corroborated":
