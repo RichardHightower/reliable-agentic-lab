@@ -399,6 +399,65 @@ def test_a_registry_number_must_be_a_positive_integer(work):
             citations.load(work)
 
 
+def test_a_registry_key_must_be_a_url_a_reader_can_open(work):
+    """The one path #387 left: a hand-edited file, not the locator or `register`."""
+    path = Path(work) / ".harness"
+    path.mkdir(parents=True, exist_ok=True)
+    (path / citations.FILE).write_text(
+        json.dumps({"sources": {"corpus:knowledge:claim.x": 3, "https://a.invalid": 4}}),
+        encoding="utf-8",
+    )
+    import re  # noqa: PLC0415
+
+    with pytest.raises(RuntimeError, match=re.escape("corpus:knowledge:claim.x")):
+        citations.load(work)
+
+    # A registry of only http(s) keys still loads.
+    (path / citations.FILE).write_text(
+        json.dumps({"sources": {"https://a.invalid": 1, "https://b.invalid": 2}}),
+        encoding="utf-8",
+    )
+    assert citations.load(work) == {"https://a.invalid": 1, "https://b.invalid": 2}
+
+
+def test_assembly_refuses_a_hand_edited_non_http_key(work):
+    """The belt named in #384: `assemble` must not print a `corpus:` key.
+
+    #387 closed the locator and `register` paths. The one path left is a
+    registry hand-edited after the fact, which `_numbered` reads straight off
+    disk via `citations.load`. The run must stop before `paper.md` exists.
+    """
+    path = Path(work) / ".harness"
+    path.mkdir(parents=True, exist_ok=True)
+    (path / citations.FILE).write_text(
+        json.dumps({"sources": {"corpus:knowledge:claim.x": 3, "https://a.invalid": 4}}),
+        encoding="utf-8",
+    )
+    claims = [
+        {"id": "s1-f1", "text": "A", "source_url": "https://a.invalid",
+         "section": "s1", "status": "verified"},
+    ]
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=None,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=False,
+    )
+    run.write_json("claims.json", {"claims": claims})
+    outline = {"title": "T", "sections": [{"id": "s1", "heading": "One"}]}
+    run.write_json("outline.approved.json", outline)
+
+    import re  # noqa: PLC0415
+
+    with pytest.raises(RuntimeError, match=re.escape("corpus:knowledge:claim.x")):
+        paper.assemble(run)
+
+    assert not run.file("paper.md").exists(), "the run wrote paper.md past a bad registry key"
+
+
 def test_two_sources_may_not_share_a_number(work):
     path = Path(work) / ".harness"
     path.mkdir(parents=True, exist_ok=True)

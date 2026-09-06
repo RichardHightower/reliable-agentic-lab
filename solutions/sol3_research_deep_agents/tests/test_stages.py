@@ -254,6 +254,45 @@ def test_agreeing_twice_on_the_same_url_does_not_promote():
     assert claim.truth_state == evidence.SINGLE_SOURCE
 
 
+def test_a_url_missing_its_scheme_separator_adds_no_source():
+    """`httpsdocs.example.com` starts with `http` but is not a url a reader can
+    open. The old `url.startswith("http")` let it through, and `Ledger.load`'s
+    belt (#384) would then refuse the run's own resume."""
+    led = evidence.Ledger("/nonexistent")
+    a = led.add_source(evidence.SourceDocument(title="a", url="https://a.example", subject="s"))
+    claim = led.add_claim(evidence.Claim(text="x", subject="s", source_ids=[a.id], important=True))
+    stages.apply_verification(
+        led,
+        {
+            "checked": [
+                {
+                    "claim_id": claim.id,
+                    "second_source_url": "httpsdocs.example.com",
+                    "corroborate_status": "agreed",
+                    "quote": "q",
+                }
+            ]
+        },
+    )
+    assert claim.source_ids == [a.id], "a malformed url was added as a source"
+    assert "httpsdocs.example.com" not in {src.url for src in led.sources.values()}
+
+    stages.apply_verification(
+        led,
+        {
+            "checked": [
+                {
+                    "claim_id": claim.id,
+                    "second_source_url": "https://c.example",
+                    "corroborate_status": "agreed",
+                    "quote": "q",
+                }
+            ]
+        },
+    )
+    assert "https://c.example" in {src.url for src in led.sources.values()}
+
+
 def test_disagreement_contradicts():
     led, claims = ledger_with(truth=evidence.PROPOSED)
     stages.apply_verification(
