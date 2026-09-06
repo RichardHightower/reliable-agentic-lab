@@ -431,8 +431,14 @@ def test_a_runtime_that_cannot_search_reports_a_miss():
 
 def test_a_generating_turn_carries_the_grounding_contract(work):
     backend = Backend([result(structured={"answer": "", "sources": [], "claims": []})])
-    t.SdkTurns(backend=backend, work_dir=work).research("q")
-    assert "grounding_contract" in backend.prompts[0][0]
+    turns = t.SdkTurns(backend=backend, work_dir=work)
+    turns.research("q")
+    prompt = backend.prompts[0][0]
+    assert "grounding_contract" in prompt
+    # The locator is the one turn that searches off the allowlist. The
+    # researcher is not, and adding the locator must not have loosened it.
+    assert "Search only these domains" in prompt
+    assert turns.allowed_domains[0] in prompt
 
 
 def test_sdk_research_cannot_return_a_deepwiki_claim(work):
