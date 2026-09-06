@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import citations
 import corpus
 import paper
 import pytest
@@ -493,3 +494,241 @@ def test_a_spent_budget_locates_nothing(work, brain, turns):
 
     assert stub.locate_calls == []
     assert [row["reason"] for row in unresolved_of(work)] == ["cost budget spent"]
+
+
+# -- the gates behind the drop (#392) ----------------------------------------
+
+CNN_URL = "https://www.cnn.com/2025/01/01/story"
+CNN_TEXT = "The press reported a multi agent outage."
+
+
+def corroborated(claim: dict) -> dict:
+    """A cabinet claim two agents in the brain already agreed on."""
+    return {**claim, "epistemic": "corroborated"}
+
+
+def wordy(base):
+    """A base whose section body clears the prose rows a policy run turns on.
+
+    `enforce_research_policy=True` is what makes `paper.check` grade the
+    `hosts` row, and it also turns on the section gate. The default stub writer
+    answers in four lines, which the gate reads as an unwritten section.
+    """
+
+    class Wordy(base):
+        def write(self, section, claims, figures, notes, path=""):
+            self.asked.append(("write", section["id"], notes, path))
+            lines = [f"## {section['heading']}", ""]
+            for claim in claims:
+                lines += [f"{claim['text']} [{claim.get('number', 1)}]", ""]
+            for question in section.get("key_questions") or []:
+                marker = f"[{claims[0].get('number', 1)}]" if claims else ""
+                lines += [f"This section answers: {question} {marker}".strip(), ""]
+            lines += ["word " * 120, ""]
+            body = "\n".join(lines)
+            if self.root is not None and path:
+                target = Path(self.root) / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(body, encoding="utf-8")
+            return body
+
+    return Wordy
+
+
+def policy_drive(work, brain_root, stub):
+    """A run under the research policy, with an allowlist that has no arxiv.org."""
+    return drive(
+        work,
+        brain_root,
+        stub,
+        enforce_research_policy=True,
+        allowed_domains=("docs.langchain.com",),
+    )
+
+
+def references_block(work) -> str:
+    body = (Path(work) / "paper.md").read_text(encoding="utf-8")
+    return body.split("## References", 1)[1] if "## References" in body else ""
+
+
+def rows_of(score: dict) -> dict:
+    return {row["name"]: row for row in score["checks"]}
+
+
+def verdicts_of(work, sid="s1") -> list[dict]:
+    path = Path(work) / "knowledge" / sid / "verdicts.json"
+    return json.loads(path.read_text(encoding="utf-8"))["verdicts"] if path.exists() else []
+
+
+def test_a_located_cabinet_source_reaches_the_bibliography_and_clears_the_hosts_row(
+    work, brain, turns
+):
+    """The paper gate never admitted arxiv.org, and the locator found it there.
+
+    The librarian was asked about hosts to search. It was never asked about the
+    public copy of a paper the cabinet already held, so the `hosts` row does
+    not judge that reference.
+    """
+    stub = make_turns(
+        wordy(turns),
+        [
+            (
+                "s1",
+                [
+                    ("what fails first", [cabinet_claim(ALPHA, ALPHA_TEXT)]),
+                    ("what else is known", [web_claim()]),
+                ],
+            )
+        ],
+        answers={SHARED_TITLE: {"url": FOUND_URL, "supports": True, "excerpt": "abstract"}},
+    )
+    run = policy_drive(work, brain, stub)
+    paper.assemble(run)
+    score = paper.check(run)
+
+    refs = references_block(work)
+    assert FOUND_URL in refs, refs
+    assert "corpus:" not in refs and "knowledge:" not in refs, refs
+    assert rows_of(score)["hosts"]["passed"], rows_of(score)["hosts"]
+    assert citations.load(work)[FOUND_URL] >= 1, citations.load(work)
+
+
+def test_a_web_host_the_librarian_never_admitted_is_still_walled(work, brain, turns):
+    """Exempting the cabinet reference must not open the wall for everything."""
+    stub = make_turns(
+        wordy(turns),
+        [
+            (
+                "s1",
+                [
+                    ("what fails first", [cabinet_claim(ALPHA, ALPHA_TEXT)]),
+                    (
+                        "what the press said",
+                        [{"text": CNN_TEXT, "source_url": CNN_URL, "quote": CNN_TEXT}],
+                    ),
+                ],
+            )
+        ],
+        answers={SHARED_TITLE: {"url": FOUND_URL, "supports": True, "excerpt": "abstract"}},
+    )
+    run = policy_drive(work, brain, stub)
+    paper.assemble(run)
+    score = paper.check(run)
+
+    hosts = rows_of(score)["hosts"]
+    assert not hosts["passed"], hosts
+    assert "cnn.com" in hosts["detail"], hosts
+    assert "arxiv.org" not in hosts["detail"], hosts
+
+
+def test_a_cabinet_claim_the_locator_missed_leaves_no_trace_in_the_paper(work, brain, turns):
+    """Corroborated in the brain is not a public URL. Run 21 published one."""
+    stub = make_turns(
+        wordy(turns),
+        [
+            (
+                "s1",
+                [
+                    ("what fails first", [corroborated(cabinet_claim(ALPHA, ALPHA_TEXT))]),
+                    ("what else is known", [web_claim()]),
+                ],
+            )
+        ],
+        answers={SHARED_TITLE: {"url": "", "supports": False, "excerpt": ""}},
+    )
+    run = policy_drive(work, brain, stub)
+    paper.assemble(run)
+    paper.check(run)
+
+    dropped = unresolved_of(work)
+    assert [row["key"] for row in dropped] == [ALPHA], dropped
+    gone = dropped[0]["id"]
+
+    assert ALPHA_TEXT not in [f.get("claim") for f in findings_of(work)]
+    assert gone not in [row.get("finding_id") for row in verdicts_of(work)]
+    assert gone not in [
+        row.get("finding_id")
+        for row in json.loads((Path(work) / "verdicts.json").read_text(encoding="utf-8"))["verdicts"]
+    ]
+    assert ALPHA_TEXT not in [claim.get("text") for claim in stub.written_claims]
+    assert [key for key in citations.load(work) if key.startswith("corpus:")] == []
+    body = (Path(work) / "paper.md").read_text(encoding="utf-8")
+    assert ALPHA_TEXT not in body and ALPHA not in body, body
+
+
+def test_a_corroborated_cabinet_finding_with_no_public_url_goes_to_the_verifier(
+    work, brain, turns, monkeypatch
+):
+    """The belt behind the drop, with the drop itself bypassed.
+
+    Two things had to hold at once for run 21 to publish a `corpus:` key as a
+    reference: the verify skip stamped it `verified` without a turn, and the
+    registry handed it a number. This proves both, in the loop.
+    """
+    monkeypatch.setattr(
+        sections, "locate_cabinet_findings", lambda run, findings: (list(findings), [])
+    )
+
+    class Unclear(turns):
+        def __init__(self, *, verdict="unclear", **kwargs):
+            super().__init__(verdict=verdict, **kwargs)
+
+    key = "knowledge:claim.x"
+    stub = make_turns(
+        Unclear,
+        [
+            (
+                "s1",
+                [
+                    ("what fails first", [corroborated(cabinet_claim(key, ALPHA_TEXT))]),
+                    ("what else is known", [web_claim()]),
+                ],
+            )
+        ],
+    )
+    run = make_run(work, brain, stub)
+    paper.prior_art(run)
+    paper.plan(run)
+    with pytest.raises(RuntimeError, match=r"corpus:knowledge:claim\.x"):
+        paper.do_sections(run)
+
+    stamped = {row["finding_id"]: row for row in verdicts_of(work)}
+    assert stamped, "the section stopped before it wrote a verdict"
+    cabinet = [
+        f["id"]
+        for f in findings_of(work)
+        if (f.get("source") or {}).get("url_or_path") == f"corpus:{key}"
+    ]
+    assert cabinet, findings_of(work)
+    assert stamped[cabinet[0]]["state"] != "verified", stamped
+    assert ("verify", ALPHA_TEXT) in stub.asked, stub.asked
+    assert [
+        key
+        for key in citations.load(work)
+        if not key.lower().startswith(("http://", "https://"))
+    ] == []
+
+
+def test_a_corroborated_cabinet_finding_with_a_public_url_still_skips_the_verifier(
+    work, brain, turns
+):
+    """The skip is a saved turn, not a hole. A located source keeps it."""
+    stub = make_turns(
+        turns,
+        [
+            (
+                "s1",
+                [
+                    ("what loses the middle", [corroborated(cabinet_claim(MIDDLE, MIDDLE_TEXT))]),
+                    ("what else is known", [web_claim()]),
+                ],
+            )
+        ],
+    )
+    drive(work, brain, stub)
+
+    located = [f for f in findings_of(work) if f["source"]["url_or_path"] == MIDDLE_URL]
+    assert located, findings_of(work)
+    notes = {row["finding_id"]: row for row in verdicts_of(work)}
+    assert notes[located[0]["id"]]["note"] == "cross_checked: corpus", notes
+    assert ("verify", MIDDLE_TEXT) not in stub.asked, stub.asked

@@ -482,7 +482,10 @@ def disallowed_reference_hosts(sources: list[str], allowed_domains=None) -> list
     the wall was the seed list, which has no `arxiv.org`, so the first paper
     this port assembled was rejected for citing the MAST paper through a host
     the run had admitted hours earlier. A `corpus:` reference names a claim in
-    the brain, not a web host, and is not this row's business.
+    the brain, not a web host, and is not this row's business. Nor is a located
+    cabinet source: the locator found the public copy of a paper the cabinet
+    already held, which is a cross-reference the librarian never admitted, so
+    the caller passes those references separately.
     """
     # Seed or admitted. The librarian proposes domains, and the seed is where
     # the GitHub orgs live: `github.com/anthropics`, `github.com/langchain-ai`.
@@ -531,6 +534,7 @@ def check(
     outline: dict | None = None,
     enforce_source_policy: bool = False,
     allowed_domains=None,
+    host_sources: list[str] | None = None,
     enforce_loop_doctrine: bool = False,
     min_words: int = 0,
     min_section_words: int = 0,
@@ -546,7 +550,11 @@ def check(
     checks.append(Check("sources", bool(sources), f"{len(sources)} sources retrieved"))
 
     if enforce_source_policy:
-        rejected = disallowed_reference_hosts(sources, allowed_domains)
+        # `host_sources` is the subset the allowlist governs. The caller drops
+        # the located cabinet references from it, because the librarian never
+        # admitted a domain for a paper the cabinet already held.
+        graded = sources if host_sources is None else host_sources
+        rejected = disallowed_reference_hosts(graded, allowed_domains)
         checks.append(
             Check(
                 "hosts",

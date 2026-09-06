@@ -240,3 +240,37 @@ def test_has_body_counts_the_prose_under_a_sections_subheadings():
 
     body = "## One\n\n### Q1?\n\n" + ("word " * 60) + "\n\n## Two\n\n" + ("word " * 60)
     assert sections_without_prose(body, 50) == []
+
+
+def test_the_hosts_row_grades_only_the_references_the_caller_hands_it():
+    """A located cabinet source is a public copy of a paper the brain held.
+
+    The librarian was asked which hosts to search. It was never asked about
+    arxiv.org, so the wall rejected the paper's own primary source. The
+    `sources` row still counts every reference.
+    """
+    body = "# T\n\n## A\n\nA claim [1]. Another claim [2].\n"
+    arxiv = "https://arxiv.org/abs/2503.13657"
+    langchain = "https://docs.langchain.com/oss/python/langchain/overview"
+
+    exempt = checks.check(
+        body,
+        [arxiv, langchain],
+        enforce_source_policy=True,
+        allowed_domains=(),
+        host_sources=[langchain],
+    )
+    rows = {row.name: row for row in exempt.checks}
+    assert rows["hosts"].passed, rows["hosts"]
+    assert rows["sources"].detail == "2 sources retrieved", rows["sources"]
+
+    walled = checks.check(
+        body,
+        [arxiv, langchain],
+        enforce_source_policy=True,
+        allowed_domains=(),
+    )
+    rows = {row.name: row for row in walled.checks}
+    assert not rows["hosts"].passed, rows["hosts"]
+    assert "arxiv.org" in rows["hosts"].detail, rows["hosts"]
+    assert rows["sources"].detail == "2 sources retrieved", rows["sources"]

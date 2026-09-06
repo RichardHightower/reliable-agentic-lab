@@ -47,6 +47,22 @@ def test_an_unreadable_registry_stops_the_run(work):
         citations.load(work)
 
 
+def test_a_reference_a_reader_cannot_open_never_takes_a_number(work):
+    """Run 21 printed `corpus:knowledge:claim.x` as bibliography entry 1.
+
+    A number here is a promise the paper will print the url beside it. The
+    locator either finds the public copy or drops the finding, so anything else
+    arriving here is a hole in that pass.
+    """
+    for bad in ("corpus:knowledge:claim.x", "not-found"):
+        with pytest.raises(RuntimeError, match="reader can open"):
+            citations.register(work, [bad])
+        assert citations.load(work) == {}, "a rejected url still reached the file"
+
+    # An empty slot is a finding with no source, not a bad citation.
+    assert citations.register(work, ["", "https://a.invalid"]) == {"https://a.invalid": 1}
+
+
 def _finding(fid: str, url: str) -> dict:
     return {"id": fid, "claim": f"A claim from {url}.", "source": {"url_or_path": url}}
 
