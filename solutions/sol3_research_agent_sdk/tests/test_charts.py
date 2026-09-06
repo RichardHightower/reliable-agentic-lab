@@ -131,3 +131,56 @@ def test_assemble_embeds_a_rendered_chart(work, turns):
 def test_linear_runs_charts_after_diagram():
     names = [name for _n, name, _out, _fn in paper.LINEAR]
     assert names.index("diagram") < names.index("charts")
+
+
+# -- the renderer is named, and a label is a name (#371) ------------------------
+
+
+def test_the_sidecar_names_the_renderer_that_drew_the_chart(tmp_path):
+    """matplotlib was not installed, the ImportError was swallowed, and a
+    stdlib fallback with no text drew the first paper's chart. The review
+    judge called it an unlabeled dump. Nothing on disk said why.
+    """
+    spec = {"name": "c", "type": "bar", "x": "k", "y": "v", "section": "s1"}
+    rows = [{"k": "a", "v": 1, "source": "u"}, {"k": "b", "v": 2, "source": "u"}]
+    side = charts.render(spec, rows, tmp_path)
+    assert side["renderer"] == "matplotlib", side
+
+
+def test_a_swallowed_renderer_error_is_named_in_the_sidecar(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise ImportError("No module named 'matplotlib'")
+
+    monkeypatch.setattr(charts, "_matplotlib_png", boom)
+    spec = {"name": "c", "type": "bar", "x": "k", "y": "v", "section": "s1"}
+    rows = [{"k": "a", "v": 1, "source": "u"}]
+    side = charts.render(spec, rows, tmp_path)
+    assert side["renderer"].startswith("stdlib fallback (ImportError"), side
+
+
+def test_a_sentence_length_tick_label_is_cut_to_a_name(tmp_path, monkeypatch):
+    """What `set_xticks` receives, not the PNG's size, which is fixed either way."""
+    import matplotlib.axes  # noqa: PLC0415
+
+    seen = []
+    original = matplotlib.axes.Axes.set_xticks
+
+    def record(self, ticks, labels=None, **kw):
+        seen.append(list(labels or []))
+        return original(self, ticks, labels, **kw)
+
+    monkeypatch.setattr(matplotlib.axes.Axes, "set_xticks", record)
+    long = "traces annotated in the MAST study (more than 1,600), across seven frameworks"
+    charts._matplotlib_png(tmp_path / "c.png", [long, "b"], [1.0, 2.0], {}, "bar")
+    assert seen, "set_xticks never ran"
+    assert all(len(lab) <= charts.TICK_LABEL_CHARS for lab in seen[-1]), seen[-1]
+    assert seen[-1][0].endswith("…") and seen[-1][1] == "b"
+
+
+def test_a_corpus_reference_is_not_a_host_to_check():
+    """`corpus:` names a claim in the brain. It has no host and is not this row's business."""
+    import checks  # noqa: PLC0415
+
+    sources = ["corpus:claude.md (research/x.md:68-69)", "https://arxiv.org/abs/2503.13657"]
+    assert checks.disallowed_reference_hosts(sources, ["arxiv.org"]) == []
+    assert checks.disallowed_reference_hosts(["https://medium.com/x"], ["arxiv.org"]) == ["https://medium.com/x"]

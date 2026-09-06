@@ -156,13 +156,21 @@ def render(spec: dict, rows: list[dict], out_dir: Path | str) -> dict:
     kind = spec.get("type") or "bar"
     if kind not in ALLOWED_TYPES:
         kind = "bar"
+    # The stdlib fallback draws bars and cannot write text: no ticks, no axis
+    # labels, no title. The first paper this port assembled carried one, and
+    # the review judge called it an unlabeled dump, correctly. matplotlib was
+    # not installed and the ImportError was swallowed here. The sidecar names
+    # the renderer so that can never be invisible again.
+    renderer = "matplotlib"
     try:
         _matplotlib_png(png, labels, values, spec, kind)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        renderer = f"stdlib fallback ({type(exc).__name__}: {str(exc)[:80]})"
         _stdlib_png(png, labels, values)
     sidecar = {
         "name": name,
         "type": kind,
+        "renderer": renderer,
         "caption": spec.get("caption") or name,
         "xlabel": spec.get("xlabel") or spec.get("x") or "",
         "ylabel": spec.get("ylabel") or spec.get("y") or "",
@@ -178,6 +186,9 @@ def render(spec: dict, rows: list[dict], out_dir: Path | str) -> dict:
     return sidecar
 
 
+TICK_LABEL_CHARS = 28
+
+
 def _matplotlib_png(path: Path, labels: list[str], values: list[float], spec: dict, kind: str) -> None:
     import matplotlib
 
@@ -187,6 +198,9 @@ def _matplotlib_png(path: Path, labels: list[str], values: list[float], spec: di
     fig, ax = plt.subplots(figsize=(7.2, 4.0), facecolor="#FFFFFF")
     ax.set_facecolor("#FFFFFF")
     xs = list(range(len(values)))
+    # A tick label is a name, not a sentence. Fifteen sentence-length labels
+    # overlapped into a smear and pushed the plot into a corner.
+    labels = [lab if len(lab) <= TICK_LABEL_CHARS else lab[: TICK_LABEL_CHARS - 1] + "…" for lab in labels]
     navy = "#102A56"
     blue = "#2F6FED"
     if kind == "line":

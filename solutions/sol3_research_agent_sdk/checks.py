@@ -435,9 +435,22 @@ def doctrine_failure(body: str) -> str | None:
     return None
 
 
-def disallowed_reference_hosts(sources: list[str]) -> list[str]:
-    """References from blogs and DeepWiki never become a paper's bibliography."""
-    return [url for url in sources if not source_policy.is_allowed_url(url)]
+def disallowed_reference_hosts(sources: list[str], allowed_domains=None) -> list[str]:
+    """References from blogs and DeepWiki never become a paper's bibliography.
+
+    `allowed_domains` is what the librarian admitted for this run. Without it
+    the wall was the seed list, which has no `arxiv.org`, so the first paper
+    this port assembled was rejected for citing the MAST paper through a host
+    the run had admitted hours earlier. A `corpus:` reference names a claim in
+    the brain, not a web host, and is not this row's business.
+    """
+    domains = tuple(allowed_domains) if allowed_domains else source_policy.SEED_ALLOWLIST
+    return [
+        url
+        for url in sources
+        if not str(url).startswith("corpus:")
+        and not source_policy.is_allowed_url(url, allowed_domains=domains)
+    ]
 
 
 def word_count(body: str) -> int:
@@ -471,6 +484,7 @@ def check(
     headings: list[str] | None = None,
     outline: dict | None = None,
     enforce_source_policy: bool = False,
+    allowed_domains=None,
     enforce_loop_doctrine: bool = False,
     min_words: int = 0,
     min_section_words: int = 0,
@@ -485,7 +499,7 @@ def check(
     checks.append(Check("sources", bool(sources), f"{len(sources)} sources retrieved"))
 
     if enforce_source_policy:
-        rejected = disallowed_reference_hosts(sources)
+        rejected = disallowed_reference_hosts(sources, allowed_domains)
         checks.append(
             Check(
                 "hosts",
