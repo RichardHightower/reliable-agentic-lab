@@ -1268,8 +1268,16 @@ def assemble(run: Run) -> dict:
         # so `outline_coverage` could not find the section to grade. A heading
         # the writer did include is kept, not doubled.
         heading = str(section.get("heading") or "").strip()
-        first_line = text.strip().splitlines()[0].strip() if text.strip() else ""
-        if heading and first_line.lstrip("# ").strip().lower() != heading.lower():
+        lines = text.strip().splitlines()
+        first_line = lines[0].strip() if lines else ""
+        if heading and first_line.lstrip("# ").strip().lower() == heading.lower():
+            # The writer wrote it, at whatever level it chose. One wrote the
+            # section heading as `# `, an H1 beside the paper's own title,
+            # and the gate that reads `## ` could not find the section.
+            # Assembly owns the level, not only the presence.
+            lines[0] = f"## {heading}"
+            text = "\n".join(lines)
+        elif heading:
             parts += [f"## {heading}", ""]
         parts += [text.strip(), ""]
         for chart in _charts_for(run, section["id"]):
