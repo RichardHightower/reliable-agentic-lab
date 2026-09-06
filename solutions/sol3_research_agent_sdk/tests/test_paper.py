@@ -254,6 +254,14 @@ def test_assembly_writes_the_section_heading_the_writer_left_out(work, turns, no
     body = (Path(work) / "paper.md").read_text()
     assert body.count(f"## {heading}") == 1, body
     assert f"\n# {heading}" not in body, "the writer's H1 survived"
+    # A writer that headed its sub-sections `## ` put them at the section's
+    # level. Every row that reads by level then saw the section end at its
+    # first sub-heading. Assembly demotes them.
+    section.write_text(f"## {heading}\n\n## A sub-point\n\nBody text [1].\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert "\n### A sub-point\n" in body, body
+    assert "\n## A sub-point\n" not in body
 
 
 # -- the whole run ----------------------------------------------------------

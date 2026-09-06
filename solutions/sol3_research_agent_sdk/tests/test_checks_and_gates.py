@@ -171,3 +171,53 @@ def test_the_paper_gate_rejects_svg_and_plain_png_diagrams():
 def test_heading_case_and_depth_are_noise():
     assert checks.missing_sections("### the PROBLEM", ["The problem"]) == []
     assert checks.missing_sections("## A\n\ntext\n\n## B", ["A", "B"]) == []
+
+
+# -- the paper gate on its first real paper (#371, run 18) ---------------------
+
+
+def test_hosts_allows_the_seed_and_the_admitted_list_together():
+    """The librarian's list replaced the seed, and the seed is where the GitHub
+    orgs live. The paper was rejected for citing the vendors' own repositories.
+    """
+    from checks import disallowed_reference_hosts  # noqa: PLC0415
+
+    sources = ["https://github.com/anthropics/claude-code/issues/1", "https://arxiv.org/abs/1"]
+    assert disallowed_reference_hosts(sources, ["arxiv.org"]) == []
+
+
+def test_hosts_ignores_anything_that_is_not_a_url():
+    from checks import disallowed_reference_hosts  # noqa: PLC0415
+
+    sources = ["not-found", "research/source-assets/abc/original.md (corpus file)", "corpus:x"]
+    assert disallowed_reference_hosts(sources, ["arxiv.org"]) == []
+    assert disallowed_reference_hosts(["https://medium.com/x"], ["arxiv.org"]) == ["https://medium.com/x"]
+
+
+def test_section_bodies_run_to_the_next_heading_of_the_same_or_higher_level():
+    """A writer that names its questions as sub-headings has a section whose
+    text is under those sub-headings. Ending at any heading found nothing.
+    """
+    from checks import section_bodies  # noqa: PLC0415
+
+    body = "## One\n\n### Q1?\n\nanswer one\n\n### Q2?\n\nanswer two\n\n## Two\n\nprose two\n"
+    bodies = section_bodies(body)
+    assert "answer one" in bodies["one"] and "answer two" in bodies["one"]
+    assert "prose two" not in bodies["one"]
+    assert "prose two" in bodies["two"]
+
+
+def test_outline_coverage_finds_a_question_named_under_a_subheading():
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "One", "key_questions": [
+        "What stops the loop? (Answered by the pack: knowledge:claim.x.01M0.)"]}]}
+    body = "## One\n\n### What stops the loop?\n\nA rubric [1].\n"
+    assert outline_coverage_gaps(body, outline) == []
+
+
+def test_has_body_counts_the_prose_under_a_sections_subheadings():
+    from checks import sections_without_prose  # noqa: PLC0415
+
+    body = "## One\n\n### Q1?\n\n" + ("word " * 60) + "\n\n## Two\n\n" + ("word " * 60)
+    assert sections_without_prose(body, 50) == []
