@@ -247,6 +247,13 @@ def test_assembly_writes_the_section_heading_the_writer_left_out(work, turns, no
     paper.assemble(run)
     body = (Path(work) / "paper.md").read_text()
     assert body.count(f"## {heading}") == 1, "the heading was doubled"
+    # A writer that wrote it at the wrong level. The paper had two H1s and
+    # `outline_coverage` could not find the section under `## `.
+    section.write_text(f"# {heading}\n\nBody text [1].\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count(f"## {heading}") == 1, body
+    assert f"\n# {heading}" not in body, "the writer's H1 survived"
 
 
 # -- the whole run ----------------------------------------------------------
