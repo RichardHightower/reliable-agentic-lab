@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import charts
+import pytest
 import checks
 import paper
 
@@ -141,6 +142,7 @@ def test_the_sidecar_names_the_renderer_that_drew_the_chart(tmp_path):
     stdlib fallback with no text drew the first paper's chart. The review
     judge called it an unlabeled dump. Nothing on disk said why.
     """
+    pytest.importorskip("matplotlib")
     spec = {"name": "c", "type": "bar", "x": "k", "y": "v", "section": "s1"}
     rows = [{"k": "a", "v": 1, "source": "u"}, {"k": "b", "v": 2, "source": "u"}]
     side = charts.render(spec, rows, tmp_path)
@@ -160,6 +162,7 @@ def test_a_swallowed_renderer_error_is_named_in_the_sidecar(tmp_path, monkeypatc
 
 def test_a_sentence_length_tick_label_is_cut_to_a_name(tmp_path, monkeypatch):
     """What `set_xticks` receives, not the PNG's size, which is fixed either way."""
+    matplotlib = pytest.importorskip("matplotlib")
     import matplotlib.axes  # noqa: PLC0415
 
     seen = []
