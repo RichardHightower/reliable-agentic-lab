@@ -243,6 +243,23 @@ def _section_done(run, section_id: str) -> bool:
     return False
 
 
+def _rows_for_editor(score, verdict: dict) -> list[str]:
+    """Python rows plus judge rows, in that order, no duplicates.
+
+    `length` never reaches the judge's `failed_rows`. On a Python-only
+    failure the live editor was told 'Fix only these rows: the rows named
+    below' because `failed_rows` was empty (#349).
+    """
+    python = []
+    if score is not None:
+        # `length` is advisory since #366, so it is not in `signature()`. The
+        # editor still has to hear the row name; `advisories()` is that list.
+        python = list(score.signature()) + list(score.advisories())
+    judge = [str(row) for row in (verdict or {}).get("failed_rows") or [] if row]
+    return list(dict.fromkeys([*python, *judge]))
+
+
+
 def _evidence_blob(run, section_id: str, findings: list) -> str:
     parts = [f.get("quote") or "" for f in findings]
     parts += [f.get("claim") or "" for f in findings]
@@ -474,10 +491,12 @@ def run_section(run, section: dict) -> dict:
         for line in cuts:
             run.log(f"    {sid} context: {line}")
         instruction = _section_instruction(section, retry_note)
-        if last_verdict.get("failed_rows"):
+        edit_rows = _rows_for_editor(last_score, last_verdict)
+        edit_verdict = {**last_verdict, "failed_rows": edit_rows}
+        if edit_rows:
             instruction = (
                 f"{instruction}\n\nEdit mode. Fix only these rows: "
-                f"{', '.join(last_verdict['failed_rows'])}. Add no facts."
+                f"{', '.join(edit_rows)}. Add no facts."
             )
         existing = ""
         if path.exists():
@@ -499,7 +518,7 @@ def run_section(run, section: dict) -> dict:
                 body = run.turns.edit_section(
                     section,
                     existing,
-                    last_verdict,
+                    edit_verdict,
                     relative,
                     note=last_score.report() if last_score else "",
                     claims=bound,
