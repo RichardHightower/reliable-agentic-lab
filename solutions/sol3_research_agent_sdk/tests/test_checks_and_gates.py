@@ -40,6 +40,25 @@ def test_a_missing_figure_fails(tmp_path):
     assert bad.signature() == ("images",)
 
 
+def test_a_rendered_diagram_absent_from_the_paper_fails_images():
+    """Zero links used to pass, because the row only validated links that exist."""
+    body = "A point [1]."
+    diagrams = [
+        {
+            "name": "loop-and-harness-architecture",
+            "path": "diagrams/loop-and-harness-architecture_imagen.png",
+        }
+    ]
+    score = checks.check(body, ["https://a"], diagrams=diagrams)
+    assert score.signature() == ("images",), score.report()
+    placed = checks.check(
+        body + "\n\n![loop](diagrams/loop-and-harness-architecture_imagen.png)\n",
+        ["https://a"],
+        diagrams=diagrams,
+    )
+    assert "images" not in placed.signature(), placed.report()
+
+
 def test_a_remote_figure_is_not_this_checks_problem(tmp_path):
     body = "A point [1].\n\n![f](https://example.invalid/x.png)"
     assert checks.check(body, ["https://a"], base_dir=tmp_path).passed

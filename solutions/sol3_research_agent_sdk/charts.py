@@ -201,6 +201,7 @@ def render(spec: dict, rows: list[dict], out_dir: Path | str) -> dict:
         "type": kind,
         "renderer": renderer,
         "caption": spec.get("caption") or name,
+        "title": spec.get("title") or spec.get("caption") or name,
         "xlabel": spec.get("xlabel") or spec.get("x") or "",
         "ylabel": spec.get("ylabel") or spec.get("y") or "",
         "section": spec.get("section") or "",
@@ -232,6 +233,9 @@ def _matplotlib_png(path: Path, labels: list[str], values: list[float], spec: di
     labels = [lab if len(lab) <= TICK_LABEL_CHARS else lab[: TICK_LABEL_CHARS - 1] + "…" for lab in labels]
     navy = "#102A56"
     blue = "#2F6FED"
+    title = str(spec.get("title") or spec.get("caption") or spec.get("name") or "").strip()
+    if title:
+        ax.set_title(title, color=navy)
     if kind == "line":
         ax.plot(xs, values, color=blue, marker="o", linewidth=2)
         ax.set_xticks(xs, labels, rotation=20, ha="right")
