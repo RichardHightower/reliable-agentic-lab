@@ -1601,6 +1601,11 @@ def check(run: Run) -> dict:
         outline=approved_outline(run),
         enforce_source_policy=run.enforce_research_policy,
         allowed_domains=run.allowed_domains,
+        # The allowlist grades what the librarian admitted. A located cabinet
+        # source is a public copy of a paper the brain already held, and the
+        # librarian was never asked about its host, so the hosts row does not
+        # judge it. The `sources` row still counts every reference.
+        host_sources=[ref["url"] for ref in refs if ref.get("origin") != "corpus"],
         enforce_loop_doctrine=run.enforce_loop_doctrine,
         min_words=checks.MIN_WORDS if run.enforce_research_policy else 0,
         min_section_words=checks.MIN_SECTION_WORDS if run.enforce_research_policy else 0,

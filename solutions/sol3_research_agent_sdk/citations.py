@@ -70,12 +70,26 @@ def register(work_dir, urls) -> dict[str, int]:
     Append-only by construction: `max` of the numbers in hand, plus one, for
     each url the registry has not seen. A url already numbered keeps its
     number, whatever order this section met it in.
+
+    A number here is a promise that the paper will print the url beside it, so
+    only something a reader can open may take one. `corpus:knowledge:claim.x`
+    took number 1 in run 21 and was published as a bibliography entry. The
+    locator now either finds the public copy or drops the finding, so a
+    non-http url arriving here is a hole in that pass, not a citation.
     """
     known = load(work_dir)
     next_number = max(known.values(), default=0) + 1
     for url in urls:
         url = str(url or "")
-        if not url or url in known:
+        if not url:
+            continue
+        if not url.lower().startswith(("http://", "https://")):
+            raise RuntimeError(
+                f"{url!r} is not a url a reader can open, so it may not take a "
+                "citation number. The locator should have found its public copy "
+                "or dropped the finding before the section reached the writer."
+            )
+        if url in known:
             continue
         known[url] = next_number
         next_number += 1

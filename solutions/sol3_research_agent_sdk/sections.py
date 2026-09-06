@@ -617,7 +617,18 @@ def run_section(run, section: dict) -> dict:
             continue
         epistemic = (finding.get("epistemic") or "").lower()
         origin = finding.get("origin") or (finding.get("source") or {}).get("kind")
-        if origin == "corpus" and epistemic == "corroborated":
+        # A corroborated cabinet claim skips the verifier because two agents in
+        # the brain already agreed. That is an argument about the claim, not
+        # about the reference: a skip with no public URL stamps `verified` on a
+        # row no reader can open. The locator runs before this, so a cabinet
+        # finding that got here without an http URL is one it could not place,
+        # and it goes to the verifier like anything else.
+        located = str((finding.get("source") or {}).get("url_or_path") or "").lower()
+        if (
+            origin == "corpus"
+            and epistemic == "corroborated"
+            and located.startswith(("http://", "https://"))
+        ):
             verdicts[finding["id"]] = {
                 "finding_id": finding["id"],
                 "state": "verified",
