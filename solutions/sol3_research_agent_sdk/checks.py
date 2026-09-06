@@ -332,6 +332,29 @@ def drop_owned_headings(body: str) -> str:
     return "\n".join(out)
 
 
+def section_bodies(body: str) -> dict[str, str]:
+    """Each heading's text, running until the next heading of the same or a
+    higher level. Keyed by the heading, lowercased.
+
+    Two rows ended a section at the next heading of any level. A writer that
+    names its key questions as sub-headings then has a section whose "body" is
+    the blank line before its first sub-heading: `has_body` saw 0 words and
+    `outline_coverage` saw none of the questions, both under a section that
+    was complete on the page.
+    """
+    matches = list(SECTION_HEADING.finditer(body))
+    out: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        level = len(match.group(1))
+        end = len(body)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        out[match.group(2).strip().lower()] = body[match.end() : end]
+    return out
+
+
 def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
     """Approved sections missing from the paper, or key questions never named.
 
@@ -341,13 +364,7 @@ def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
     """
     if not outline:
         return []
-    matches = list(HEADING.finditer(body))
-    bodies: dict[str, str] = {}
-    for index, match in enumerate(matches):
-        heading = match.group(1).strip().lower()
-        start = match.end()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
-        bodies[heading] = body[start:end]
+    bodies = section_bodies(body)
     gaps = []
     for section in outline.get("sections") or []:
         heading = (section.get("heading") or "").strip()
@@ -357,8 +374,11 @@ def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
             continue
         text = bodies[key].lower()
         for question in section.get("key_questions") or []:
-            named = question if not isinstance(question, dict) else question.get("text") or ""
-            if str(named).strip().lower() not in text:
+            # The question, not the researcher's note stapled to it. #351
+            # applied this at the section gate; the paper gate kept matching
+            # the raw 460-character string and could never find it.
+            named = question_text(question)
+            if named and named.lower() not in text:
                 gaps.append(f"section {heading!r} never names {named!r}")
     return gaps
 
@@ -444,11 +464,18 @@ def disallowed_reference_hosts(sources: list[str], allowed_domains=None) -> list
     the run had admitted hours earlier. A `corpus:` reference names a claim in
     the brain, not a web host, and is not this row's business.
     """
-    domains = tuple(allowed_domains) if allowed_domains else source_policy.SEED_ALLOWLIST
+    # Seed or admitted. The librarian proposes domains, and the seed is where
+    # the GitHub orgs live: `github.com/anthropics`, `github.com/langchain-ai`.
+    # Honouring the admitted list alone dropped those, and the paper was
+    # rejected for citing the vendors' own repositories.
+    domains = tuple(source_policy.SEED_ALLOWLIST) + tuple(allowed_domains or ())
+    # A host check reads hosts. A `corpus:` key, a brain file path, or a
+    # `not-found` placeholder has none, and each was rejected as a disallowed
+    # host on the first real paper. Only a URL with a scheme is this row's.
     return [
         url
         for url in sources
-        if not str(url).startswith("corpus:")
+        if str(url).lower().startswith(("http://", "https://"))
         and not source_policy.is_allowed_url(url, allowed_domains=domains)
     ]
 
@@ -461,13 +488,12 @@ def sections_without_prose(body: str, min_words: int) -> list[str]:
     if min_words <= 0:
         return []
     thin = []
-    matches = list(SECTION_HEADING.finditer(body))
-    for index, match in enumerate(matches):
+    for match in SECTION_HEADING.finditer(body):
         heading = match.group(2).strip()
         if heading.lower() in PROSE_EXEMPT:
             continue
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
-        chunk = IMAGE.sub("", FENCE.sub("", body[match.end() : end]))
+        chunk = section_bodies(body).get(heading.lower(), "")
+        chunk = IMAGE.sub("", FENCE.sub("", chunk))
         words = re.findall(r"\b[\w'-]+\b", chunk)
         if len(words) < min_words:
             thin.append(f"{heading} ({len(words)} words)")

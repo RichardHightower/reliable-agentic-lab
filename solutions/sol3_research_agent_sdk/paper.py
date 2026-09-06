@@ -1071,6 +1071,16 @@ def maybe_write(run: Run) -> dict:
 USABLE = ("verified", "disputed", "unverified")
 
 
+def _demote_subheadings(text: str, heading: str) -> str:
+    """Every `## ` in a section body other than its own heading becomes `### `."""
+    out = []
+    for line in text.splitlines():
+        if line.startswith("## ") and line[3:].strip().lower() != heading.lower():
+            line = "#" + line
+        out.append(line)
+    return "\n".join(out)
+
+
 def _resolve_markers(text: str, numbers: dict[str, int]) -> str:
     """Rewrite a finding-id citation to the reference number of its source.
 
@@ -1279,6 +1289,11 @@ def assemble(run: Run) -> dict:
             text = "\n".join(lines)
         elif heading:
             parts += [f"## {heading}", ""]
+        # The section's heading is the only `## ` it owns. A writer that
+        # headed its sub-sections `## ` put them at the section's own level,
+        # and every row that reads the paper by heading level then saw the
+        # section end at its first sub-heading. Demote everything below.
+        text = _demote_subheadings(text, heading)
         parts += [text.strip(), ""]
         for chart in _charts_for(run, section["id"]):
             rel = f"charts/{Path(chart['path']).name}"
