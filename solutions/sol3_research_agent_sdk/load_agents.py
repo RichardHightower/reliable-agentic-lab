@@ -218,6 +218,17 @@ VERIFY_SCHEMA = _schema(
     ["verdict", "source_url", "excerpt"],
 )
 
+# A cross-reference, not a verdict. The locator either found a page it read or
+# it did not, and Python decides whether the URL is admissible.
+LOCATE_SCHEMA = _schema(
+    {
+        "url": {"type": "string"},
+        "supports": {"type": "boolean"},
+        "excerpt": {"type": "string"},
+    },
+    ["url", "supports", "excerpt"],
+)
+
 DIAGRAM_SCHEMA = _schema(
     {
         "language": {"type": "string", "enum": ["mermaid", "plantuml"]},

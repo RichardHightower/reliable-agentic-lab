@@ -397,6 +397,38 @@ def test_the_verify_prompt_carries_the_claim_and_nothing_else(work):
     assert "Search for it yourself" in prompt
 
 
+def test_the_locate_prompt_asks_for_an_unfiltered_cross_reference(work):
+    """The one turn in this port that must not be filtered to the allowlist.
+
+    A cabinet source is published wherever its publisher put it, and this run's
+    admitted domains were chosen to answer a different question.
+    """
+    from load_agents import LOCATE_SCHEMA  # noqa: PLC0415
+
+    backend = Backend([result(structured={"url": "", "supports": False, "excerpt": ""})])
+    t.SdkTurns(backend=backend, work_dir=work).locate(
+        "Attention Is All You Need", "Google", "The transformer replaces recurrence with"
+    )
+    prompt, _allow, output_format = backend.prompts[0]
+    assert prompt.startswith("Use the research-locator agent.")
+    assert "Attention Is All You Need" in prompt
+    assert "Google" in prompt
+    assert "The transformer replaces recurrence with" in prompt
+    assert "search_domain_filter" in prompt
+    assert output_format is LOCATE_SCHEMA
+    # Not the verifier's schema wearing a new name. A locate turn returns a
+    # page or a miss; it has no verdict to give.
+    assert output_format["schema"]["required"] == ["url", "supports", "excerpt"]
+
+
+def test_a_runtime_that_cannot_search_reports_a_miss():
+    """A guessed URL is worse than no URL. Both twins say so."""
+    miss = {"url": "", "supports": False, "excerpt": ""}
+    assert t.Turns().locate("A Paper", "Anthropic", "head") == miss
+    offline = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
+    assert offline.locate("A Paper", "Anthropic", "head") == miss
+
+
 def test_a_generating_turn_carries_the_grounding_contract(work):
     backend = Backend([result(structured={"answer": "", "sources": [], "claims": []})])
     t.SdkTurns(backend=backend, work_dir=work).research("q")

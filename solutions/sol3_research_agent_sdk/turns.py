@@ -31,6 +31,7 @@ from load_agents import (
     FINDINGS_SCHEMA,
     GROUNDING,
     LEDGER_SCHEMA,
+    LOCATE_SCHEMA,
     OUTLINE_SCHEMA,
     OUTLINE_VERDICT_SCHEMA,
     SOURCE_ALLOWLIST_SCHEMA,
@@ -213,6 +214,15 @@ class Turns:
 
     def verify(self, claim: str) -> dict:
         raise NotImplementedError
+
+    def locate(self, title: str, vendor: str, claim_head: str) -> dict:
+        """Find the public page for one cabinet source. Default: a miss.
+
+        Not `NotImplementedError`. A runtime that cannot search reports a miss
+        rather than guessing, because a guessed URL becomes a citation nobody
+        can open.
+        """
+        return {"url": "", "supports": False, "excerpt": ""}
 
     def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
         raise NotImplementedError
@@ -533,6 +543,22 @@ class SdkTurns(Turns):
             "research-verifier",
             f"Independently check this claim. Search for it yourself: {claim}",
             VERIFY_SCHEMA,
+        )
+
+    def locate(self, title: str, vendor: str, claim_head: str) -> dict:
+        # No `search_domain_filter`. This turn is looking for wherever the
+        # document was actually published, and this run's admitted domains were
+        # chosen for a different question.
+        return self._json(
+            "research-locator",
+            "Find the public page that carries this source. This is a "
+            "cross-reference, not research.\n"
+            f"Title: {title or '(none)'}\n"
+            f"Vendor: {vendor or '(none)'}\n"
+            f"The claim begins: {claim_head}\n"
+            "Do not pass search_domain_filter. Any host is admissible. Never "
+            "invent a URL: a page you did not open is a miss.",
+            LOCATE_SCHEMA,
         )
 
     def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
@@ -1039,6 +1065,10 @@ class OfflineTurns(Turns):
                 "queries_used": [claim[:80]],
             }
         return {"verdict": "unclear", "source_url": "", "excerpt": "", "queries_used": [claim[:80]]}
+
+    # No `locate` here. The fixture is a recorded corpus, not the open web, so
+    # the offline twin wants exactly the base class's miss. Restating it would
+    # be a hunk no test could tell from its parent.
 
     def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
         if name == "trust-boundary":
