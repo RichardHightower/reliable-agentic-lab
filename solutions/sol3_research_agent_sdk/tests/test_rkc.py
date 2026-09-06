@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 
+import corpus
+import pytest
 import rkc
+import roles
 
 
 def test_the_self_check_runs():
@@ -239,3 +243,150 @@ def test_ingest_does_not_overwrite_an_existing_claim(tmp_path):
     assert result["ok"] is True
     assert result["copied"] == 0
     assert (dest / "claim.x.md").read_text() == "original\n"
+
+
+# attach_url: the one write path this port has onto a second brain.
+
+ATTACH_SHA = "sha256:0000000000000000000000000000000000000000000000000000000000000389"
+
+
+def _attach_brain(tmp_path):
+    """One claim, one evidence, one source. The source has no `url:` yet."""
+    root = tmp_path / "knowledge"
+    rkc.write_node(
+        root,
+        "SourceDocument",
+        {
+            "id": "source.attach-url.01TEST",
+            "title": "Attach url source",
+            "vendor": "Spillwave",
+            "source_kind": "reference_doc",
+            "source_hash": ATTACH_SHA,
+            "captured_at": "2026-01-01T00:00:00Z",
+        },
+        "Retrieved for the attach_url check. No bare link in the body.",
+    )
+    rkc.write_node(
+        root,
+        "Evidence",
+        {
+            "id": "evidence.attach-url.01TEST",
+            "title": "Quote for the attach_url check",
+            "kind": "quote",
+            "text": "An attached url reaches the hit.",
+            "source_hash": ATTACH_SHA,
+            "locator": {
+                "variant": "quote",
+                "asset_path": "research/source-assets/attach/original.md",
+            },
+        },
+        "An attached url reaches the hit.",
+    )
+    rkc.write_node(
+        root,
+        "Claim",
+        {
+            "id": "claim.attach-url.01TEST",
+            "title": "An attached url reaches the hit.",
+            "description": "An attached url reaches the hit.",
+            "confidence": 0.9,
+            "links": [{"rel": "evidenced_by", "target": "evidence.attach-url.01TEST"}],
+        },
+        "# Claim\n\nAn attached url reaches the hit.",
+    )
+    return root
+
+
+def _attach_source(root):
+    return next((root / "research" / "sources").glob("source*.md"))
+
+
+def _attach_hit(root):
+    corpus.clear_cache()
+    hits = corpus.search("attached url reaches the hit", [root], limit=5)
+    assert hits, "the probe brain has to yield its one claim"
+    return hits[0]
+
+
+def test_attach_url_reaches_the_hit_and_the_pack(tmp_path):
+    """A locator resolved to a paper has to survive as far as `brain-pack.json`."""
+    root = _attach_brain(tmp_path)
+    path = rkc.attach_url(root, ATTACH_SHA, "https://arxiv.org/abs/2503.13657")
+    assert path == _attach_source(root)
+    assert 'url: "https://arxiv.org/abs/2503.13657"' in path.read_text(encoding="utf-8")
+    assert _attach_hit(root).url == "https://arxiv.org/abs/2503.13657"
+
+    corpus.pack("attached url reaches the hit", [root], tmp_path / "pack", limit=5)
+    packed = json.loads((tmp_path / "pack" / "brain-pack.json").read_text(encoding="utf-8"))
+    assert packed["hits"][0]["url"] == "https://arxiv.org/abs/2503.13657"
+
+
+def test_attach_url_leaves_every_other_field_alone(tmp_path):
+    """A text edit, not a re-mint. `write_node` would drop what it did not write."""
+    root = _attach_brain(tmp_path)
+    before = _attach_source(root).read_text(encoding="utf-8").splitlines()
+    after = rkc.attach_url(root, ATTACH_SHA, "https://arxiv.org/abs/2503.13657")
+    lines = after.read_text(encoding="utf-8").splitlines()
+    assert [line for line in lines if not line.startswith("url:")] == before
+
+
+def test_an_unknown_hash_mints_nothing(tmp_path):
+    """A miss is a miss. It must not create a node or touch one."""
+    root = _attach_brain(tmp_path)
+    before = {p: p.read_bytes() for p in sorted((root / "research").rglob("*")) if p.is_file()}
+    assert rkc.attach_url(root, "sha256:notinthisbrain", "https://arxiv.org/abs/2503.13657") is None
+    after = {p: p.read_bytes() for p in sorted((root / "research").rglob("*")) if p.is_file()}
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "ftp://example.org/x",
+        "corpus:knowledge:claim.x",
+        "not-found",
+        "01M0Y8EYEG6KGA2FDTZEJFKVNS",
+        "research/sources/x.md",
+        "https://",
+        'https://example.org/a?b=1&c="x"',
+        "https://example.org/a\\b",
+    ],
+)
+def test_a_locator_that_is_not_a_public_url_is_refused(tmp_path, bad):
+    """A failed lookup must not become a fabricated citation."""
+    root = _attach_brain(tmp_path)
+    source = _attach_source(root)
+    before = source.read_bytes()
+    assert rkc.attach_url(root, ATTACH_SHA, bad) is None
+    assert source.read_bytes() == before
+
+
+def test_a_second_attach_replaces_the_line(tmp_path):
+    root = _attach_brain(tmp_path)
+    rkc.attach_url(root, ATTACH_SHA, "https://example.org/first")
+    path = rkc.attach_url(root, ATTACH_SHA, "https://arxiv.org/abs/2503.13657")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert [line for line in lines if line.startswith("url:")] == [
+        'url: "https://arxiv.org/abs/2503.13657"'
+    ]
+    assert _attach_hit(root).url == "https://arxiv.org/abs/2503.13657"
+
+
+def test_the_corpus_tool_still_has_no_write_path(fake_sdk, tmp_path):
+    """`attach_url` is a Python call. The cast still gets search and nothing else."""
+    fake_sdk()
+    server = roles.corpus_mcp_server([tmp_path])
+    assert [item.mcp_name for item in server["tools"]] == ["corpus_search"]
+
+
+def test_a_misfiled_evidence_node_is_not_a_source_document(tmp_path):
+    """Evidence carries a `source_hash` too. The folder is not proof of the type."""
+    root = _attach_brain(tmp_path)
+    evidence = next((root / "research" / "evidence").glob("*.md"))
+    misfiled = root / "research" / "sources" / evidence.name
+    misfiled.write_text(evidence.read_text(encoding="utf-8"), encoding="utf-8")
+    _attach_source(root).unlink()
+
+    before = misfiled.read_bytes()
+    assert rkc.attach_url(root, ATTACH_SHA, "https://arxiv.org/abs/2503.13657") is None
+    assert misfiled.read_bytes() == before

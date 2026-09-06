@@ -36,6 +36,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 AUTHOR = "sol3-research-agent-sdk"
 
@@ -158,6 +159,89 @@ def write_node(root: Path, node_type: str, fields: dict, body: str) -> Path:
     path = folder / f"{fields['id']}.md"
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
+
+
+def _front_matter(lines: list[str]) -> tuple[int, int] | None:
+    """(first front-matter line, index of the closing `---`), or None."""
+    if not lines or lines[0].strip() != "---":
+        return None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return 1, index
+    return None
+
+
+def _front_value(line: str) -> str:
+    """The value of one front-matter line, unquoted. `_yaml_value` quotes strings."""
+    value = line.partition(":")[2].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
+def _public_url(url: str) -> bool:
+    """A URL a reader can open. Not a ULID, not a corpus key, not a repo path.
+
+    A raw `"` or `\\` is refused too. `_yaml_value` JSON-escapes both, and the
+    reader in `corpus.parse_front_matter` does not unescape, so such a URL comes
+    back corrupted. A real locator carries neither raw; percent-encoded is fine.
+    """
+    parts = urlsplit(url or "")
+    return (
+        parts.scheme in ("http", "https")
+        and bool(parts.netloc)
+        and not re.search(r"\s", parts.netloc)
+        and '"' not in url
+        and "\\" not in url
+    )
+
+
+def attach_url(root: Path | str, source_hash: str, url: str) -> Path | None:
+    """Write `url:` onto the SourceDocument carrying this hash. Returns its path.
+
+    A text edit on the front matter, not a rewrite. `write_node` regenerates a
+    node from fields and skips empty ones, so re-minting this node would drop
+    every field some other writer put on it. Nothing else in the file moves.
+
+    The only write path this port has onto a second brain. An unknown hash or a
+    URL that is not http(s) returns None and leaves the file byte-identical:
+    `corpus_search` stays read only, and a locator that failed to resolve must
+    not become a fabricated citation.
+    """
+    if not source_hash or not _public_url(url):
+        return None
+    sources = Path(root) / "research" / FOLDER_FOR["SourceDocument"]
+    if not sources.is_dir():
+        return None
+    new_line = f"url: {_yaml_value(url)}"
+    for path in sorted(sources.rglob("*.md")):
+        lines = path.read_text(encoding="utf-8").split("\n")
+        bounds = _front_matter(lines)
+        if bounds is None:
+            continue
+        start, end = bounds
+        front = lines[start:end]
+        # The folder says SourceDocument; the front matter has to agree. An
+        # Evidence node also carries a `source_hash`, and a misfiled one must
+        # not collect a `url:` that belongs to the source it quotes.
+        if not any(
+            line.startswith("type:") and _front_value(line) == "SourceDocument" for line in front
+        ):
+            continue
+        if not any(
+            line.startswith("source_hash:") and _front_value(line) == source_hash
+            for line in front
+        ):
+            continue
+        for index in range(start, end):
+            if lines[index].startswith("url:"):
+                lines[index] = new_line
+                break
+        else:
+            lines.insert(end, new_line)
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+    return None
 
 
 def _claim_kind(text: str) -> str:
@@ -647,6 +731,18 @@ def demo() -> int:
         if 'status: "rejected"' in p.read_text()
     ]
     assert len(rejected) == 1, "the contradicted claim was not recorded"
+
+    # The one write path onto a brain: a url onto a source that already exists.
+    source = next((root / "research" / "sources").glob("*.md"))
+    digest = _front_value(
+        next(line for line in source.read_text().splitlines() if line.startswith("source_hash:"))
+    )
+    before = source.read_bytes()
+    assert attach_url(root, digest, "corpus:knowledge:claim.x") is None, "a corpus key is not a url"
+    assert source.read_bytes() == before, "a refused url must not touch the file"
+    assert attach_url(root, "sha256:nope", "https://example.invalid/x") is None
+    assert attach_url(root, digest, "https://example.invalid/spec") == source
+    assert 'url: "https://example.invalid/spec"' in source.read_text()
 
     ok, note = validate(root)
     assert ok, note
