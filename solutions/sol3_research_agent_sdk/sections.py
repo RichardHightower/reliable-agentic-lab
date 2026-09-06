@@ -19,12 +19,20 @@ from pathlib import Path
 
 import checks
 import citations
+import corpus
 import gates
+import locate
 import outline as outlines
+import rkc
 from turns import Escalate, TurnFailed
 
 LIVE_SEARCHES_PER_QUESTION = 2
 LIVE_SEARCHES_PER_SECTION = 8
+# One locator answer per source, for the whole run. Two sections citing the
+# same paper pay for one turn.
+LOCATED_FILE = "knowledge/located.json"
+# Per section, beside findings.json: what the locator could not place, and why.
+UNRESOLVED_FILE = "unresolved.json"
 # The attempts one section gets, covering the first draft, every deterministic
 # repair, and every judge repair from one budget. Three was silently the whole
 # story: `--max-iterations` drives the whole-paper cycle in `paper.py`, not
@@ -355,6 +363,170 @@ def _write_findings(run, section_id: str, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _pack_hits(run) -> list[dict]:
+    """The corpus pack's hits, or an empty list. A missing pack is not an error."""
+    path = run.file("corpus/brain-pack.json")
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [hit for hit in (payload.get("hits") or []) if isinstance(hit, dict)]
+
+
+def _resolve_hit(run, pack: list[dict], key: str) -> tuple[dict | None, str]:
+    """The cabinet record behind one reference key, and why there is none.
+
+    The pack first, because it is already in memory and it is what the outline
+    was planned against. `outlines.resolve_ref` is the rule the outline gate
+    applies to a `corpus_ref`, so a key the outliner could cite is a key this
+    can find: exact, or a suffix on a segment boundary.
+
+    Two candidates end the search. `corpus.resolve` returns the first claim file
+    whose name starts with the id, so falling through would settle the ambiguity
+    by directory order and cite whichever paper sorted first.
+    """
+    if not key:
+        return None, "unresolved corpus key"
+    keys = [str(hit.get("key") or "") for hit in pack]
+    resolved, matches = outlines.resolve_ref(key, keys)
+    if resolved:
+        return pack[keys.index(resolved)], ""
+    if len(matches) > 1:
+        return None, "ambiguous corpus key: " + ", ".join(sorted(matches))
+    found = corpus.resolve(key, run.corpus_roots())
+    return (found.as_dict(), "") if found is not None else (None, "unresolved corpus key")
+
+
+def _unlocated(finding: dict, key: str, reason: str) -> dict:
+    """One row of `unresolved.json`: what was dropped, and why."""
+    return {
+        "id": finding.get("id") or "",
+        "key": key,
+        "title": (finding.get("source") or {}).get("title") or "",
+        "reason": str(reason),
+    }
+
+
+def _load_located(run) -> dict:
+    path = run.file(LOCATED_FILE)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def locate_cabinet_findings(run, findings: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Give every cabinet finding a URL a reader can open, or drop it.
+
+    Run 21 published `corpus:knowledge:claim.x` as a bibliography entry. The
+    cabinet knows what it read and not where the public copy lives, so this
+    asks the locator once per source and writes the answer back onto the
+    SourceDocument, the pack-fed finding, and a run-level cache.
+
+    A finding that cannot be located does not continue down the section
+    pipeline. It is returned in the second list instead, which is why this runs
+    before the gap pass: the question it answered becomes a gap and gets
+    researched on the live web.
+    """
+    kept: list[dict] = []
+    unlocated: list[dict] = []
+    cache = _load_located(run)
+    pack = _pack_hits(run)
+    turns = found = missed = 0
+
+    for finding in findings:
+        source = finding.get("source") or {}
+        if not locate.is_cabinet(finding):
+            kept.append(finding)
+            continue
+        if str(source.get("url_or_path") or "").startswith(("http://", "https://")):
+            kept.append(finding)
+            continue
+
+        key = locate.normalize_key(source.get("ref") or source.get("url_or_path") or "")
+        hit, why = _resolve_hit(run, pack, key)
+        if hit is None:
+            unlocated.append(_unlocated(finding, key, why))
+            missed += 1
+            continue
+
+        pack_key = str(hit.get("key") or key)
+        # The claim carried the text; the cabinet carries the bibliography.
+        if not source.get("title"):
+            source["title"] = str(hit.get("source_title") or "")
+        if not source.get("vendor"):
+            source["vendor"] = str(hit.get("vendor") or "")
+        source["ref"] = pack_key
+        finding["source"] = source
+
+        public = str(hit.get("url") or "")
+        if public.startswith(("http://", "https://")):
+            source["url_or_path"] = public
+            source["located_from"] = pack_key
+            kept.append(finding)
+            continue
+
+        # One source, one answer. Two claims out of the same paper are one turn.
+        dedupe = str(hit.get("source_hash") or "") or pack_key
+        entry = cache.get(dedupe)
+        if entry is None:
+            if not hit.get("source_title"):
+                unlocated.append(_unlocated(finding, pack_key, "no title to locate"))
+                missed += 1
+                continue
+            spent = run.exhausted()
+            if spent:
+                unlocated.append(_unlocated(finding, pack_key, spent))
+                missed += 1
+                continue
+            reason = "not found"
+            try:
+                reply = run.turns.locate(**locate.query_for(finding))
+            except (TurnFailed, Escalate) as exc:
+                reply = {"url": "", "supports": False, "excerpt": ""}
+                reason = str(exc)
+            turns += 1
+            url = locate.admit(reply)
+            entry = {
+                "url": url,
+                "supports": bool(url),
+                "excerpt": str(reply.get("excerpt") or ""),
+                "key": pack_key,
+                "reason": "" if url else reason,
+            }
+            cache[dedupe] = entry
+            # Before the next finding, not at the end. A kill after a paid turn
+            # must not make the next run pay for it again.
+            run.write_json(LOCATED_FILE, cache)
+
+        url = locate.admit(entry)
+        if not url:
+            unlocated.append(_unlocated(finding, pack_key, entry.get("reason") or "not found"))
+            missed += 1
+            continue
+
+        source_hash = str(hit.get("source_hash") or "")
+        if source_hash:
+            for root in run.corpus_roots():
+                if rkc.attach_url(root, source_hash, url) is not None:
+                    break
+        source["url_or_path"] = url
+        source["kind"] = "corpus"
+        source["located_from"] = pack_key
+        finding["origin"] = "corpus"
+        kept.append(finding)
+        found += 1
+
+    sid = next((f.get("section_id") for f in findings if f.get("section_id")), "")
+    run.log(f"    {sid} locate: {turns} turns, {found} hits, {missed} misses")
+    return kept, unlocated
+
+
 def run_section(run, section: dict) -> dict:
     """Steps 3a to 3h for one approved section."""
     sid = section["id"]
@@ -387,6 +559,12 @@ def run_section(run, section: dict) -> dict:
                 findings_from_research(raw, sid, question["text"], start=len(findings) + 1)
             )
             queries.append(question["text"])
+
+    # 3b-bis locate. Every cabinet finding gets a URL a reader can open, or it
+    # leaves the pipeline here. Before the gap pass, so a question whose only
+    # finding was unlocated is researched again on the live web.
+    findings, unlocated = locate_cabinet_findings(run, findings)
+    run.write_json(f"knowledge/{sid}/{UNRESOLVED_FILE}", {"unresolved": unlocated})
 
     # 3c gap pass
     gaps = [
