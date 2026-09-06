@@ -229,3 +229,37 @@ def test_a_stopword_is_never_a_reason_to_admit_a_number():
     figure = {"name": "chart", "data_needed": "the report"}
     rows = charts._rows_from_ledger(_LEDGER, figure)
     assert [r["y"] for r in rows] == [18.0], "only the Chroma report row names a report"
+
+
+# -- one value is a sentence, not a chart (#378) -------------------------------
+
+
+def test_do_charts_skips_a_figure_the_ledger_serves_with_one_number(work, turns, monkeypatch):
+    """The review judge: "conveys exactly one number that line 21 already states
+    in a sentence." It failed `figured`, its caption failed `evidenced`, and the
+    writer could not remove it because assembly appends it regardless.
+    """
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import diagrams  # noqa: PLC0415
+
+    monkeypatch.setattr(diagrams, "available", lambda: False)
+    run = paper.Run(
+        topic="a topic", work_dir=work, turns=turns(root=work),
+        state=paper.State.load_or_new(work, "a topic"), brain=None,
+        log=lambda *a: None, enforce_research_policy=False,
+    )
+    paper.prior_art(run); paper.plan(run)
+    stamped = json.loads((Path(work) / "outline.approved.json").read_text())
+    outline = stamped.get("outline", stamped)
+    outline["sections"][0]["figures"] = [{"name": "token-cost-multipliers", "kind": "chart",
+                                          "shows": "token cost", "data_needed": "the 15x multiple"}]
+    (Path(work) / "outline.approved.json").write_text(json.dumps(stamped), encoding="utf-8")
+    (Path(work) / "paper_ledger.json").write_text(json.dumps({"entries": [{"section_id": "s1", "numbers": [
+        {"measures": "token cost multiple of the multi-agent system", "value": "15"},
+        {"measures": "traces annotated in the study", "value": "1600"},
+    ]}]}), encoding="utf-8")
+    meta = paper.do_charts(run)
+    assert meta["skipped"] == 1, meta
+    assert meta["rendered"] == 0, meta

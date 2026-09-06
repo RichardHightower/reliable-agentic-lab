@@ -264,6 +264,37 @@ def test_assembly_writes_the_section_heading_the_writer_left_out(work, turns, no
     assert "\n## A sub-point\n" not in body
 
 
+def test_a_failed_rewrite_keeps_the_stamped_section_it_was_replacing(work, turns, no_renderer):
+    """`write_sections` unlinked the draft and called the writer with no copy kept.
+
+    A kill during the rewrite cost three stamped sections twice in one evening.
+    #353 closed this in `run_section`. This is the other path.
+    """
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    section = sorted((Path(work) / "sections").glob("*.md"))[0]
+    section.write_text("The stamped draft [1].\n", encoding="utf-8")
+
+    class Down(type(run.turns)):
+        def write(self, section, claims, figures, notes, path=""):
+            raise TurnFailed("the writer is down")
+
+    run.turns = Down(root=work)
+    paper.write_sections(run)
+    assert section.read_text() == "The stamped draft [1].\n", "the draft was lost"
+
+    class Ceiling(type(run.turns)):
+        def write(self, section, claims, figures, notes, path=""):
+            raise Escalate("the runtime hit its ceiling")
+
+    run.turns = Ceiling(root=work)
+    with pytest.raises(Escalate):
+        paper.write_sections(run)
+    assert section.read_text() == "The stamped draft [1].\n", "the draft was lost on Escalate"
+
+
 # -- the whole run ----------------------------------------------------------
 
 
