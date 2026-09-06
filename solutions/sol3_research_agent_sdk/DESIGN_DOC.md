@@ -31,7 +31,7 @@ This standalone Claude Agent SDK solution turns a topic into an evidence-backed 
 
 ### Quality requirements
 
-- The researcher, verifier, and judge cannot write the paper.
+- The researcher, verifier, locator, and judge cannot write the paper.
 - Only the writer has a folder-limited `Write` permission; Python writes structured phase artifacts.
 - No role has `Bash`; rendering runs with fixed Python arguments.
 - MCP providers are declared in code and fail closed when unavailable.
@@ -74,6 +74,7 @@ sol3_research_agent_sdk/
 ├── paper.py                  Phase orchestration and assembly
 ├── gates.py                  Pass, retry, and escalation rules
 ├── evidence.py               Claims, sources, and findings
+├── locate.py                 Cabinet cross-reference and URL admission
 ├── source_policy.py          Approved-host and citation filtering
 ├── diagrams.py               Source-to-figure rendering and audit
 ├── paper_check.py            Deterministic paper assertions
@@ -87,6 +88,7 @@ sol3_research_agent_sdk/
 | `loop.py` | Parses topic, budget, backend, and publication intent. |
 | `research.py` | Retrieves filtered source evidence while checking spend during work. |
 | `evidence.py` | Represents claims and independent verification outcomes. |
+| `locate.py` | Picks the cabinet findings and admits the URL the locator returns. |
 | `paper.py` | Reuses completed phase artifacts and assembles the final Markdown. |
 | `diagrams.py` | Tracks source figure generation and bounded fidelity redraws. |
 | `paper_check.py` | Enforces sources, grounding, citations, images, and style. |
@@ -112,6 +114,16 @@ flowchart TD
     Retry -- No --> Research
     Retry -- Yes --> Escalate([Keep evidence and report failure])
 ```
+
+Locate runs inside each section, after research and before the gap pass. The
+locator receives one source title, one vendor, and the head of one claim, and it
+returns the public page that carries that document. It holds no corpus tool, so
+it cannot confirm the cabinet with itself. Python admits the answer and writes
+`url:` onto the matching SourceDocument in the brain. It caches the result in
+`knowledge/located.json`, so a second claim from the same source costs no turn.
+A source it cannot place is dropped from the section and recorded in
+`knowledge/<id>/unresolved.json`. The gap pass then researches that question
+again on the live web.
 
 Retries are at the unit level, not a whole expensive research pass. A pass that later exceeds a budget is not discarded if all deterministic checks have completed. Source: [`docs/diagrams/workflow.mmd`](docs/diagrams/workflow.mmd).
 
@@ -196,6 +208,8 @@ Risks include source-provider cost and availability, prompt or renderer fidelity
 | Term | Meaning |
 | --- | --- |
 | Atomic claim | A small factual statement with source and verification evidence. |
+| Cabinet claim | A claim the second brain already holds. It needs a public URL before it can be cited. |
+| Locator | The role that cross-references one cabinet source title to the public page a reader can open. |
 | Finding | Verification result for a claim. |
 | Knowledge bundle | Retained source, claim, evidence, and finding artifacts. |
 | Secret Gist | Unlisted GitHub Gist; possession of the URL gives access. |

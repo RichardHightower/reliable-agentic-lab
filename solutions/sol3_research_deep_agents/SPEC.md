@@ -29,6 +29,7 @@ This folder imports no shared engine. Every module below is a copy, and
 | `adapter.py` | Deep Agents results into a `DoerResult` |
 | `mcp_tools.py` | `.mcp.json`, and the fallbacks under it |
 | `corpus.py` | Second-brain search, pack, and opt-in ingest |
+| `locate.py` | Cabinet cross-reference: the locator's question and the URL admission |
 | `outline.py` | Outline validator, stamp, and plan lift |
 | `sections.py` | Per-section check, judge, and ledger |
 | `charts.py` | Python-rendered data charts and the charted row |
@@ -51,6 +52,7 @@ outline_editor    no      nothing
 source_librarian  no      nothing
 researcher        no      nothing
 verifier          yes     evidence/**   (denied: paper/**)
+locator           no      nothing
 section_judge     no      nothing
 ledger            no      nothing
 diagrammer        yes     diagrams/*.mmd, diagrams/*.puml   (denied: paper/**, evidence/**)
@@ -93,7 +95,7 @@ agent writes anywhere it likes.
 | # | Stage | Model? | Its gate |
 | --- | --- | --- | --- |
 | 1 | plan | yes | Three to twelve questions, each with a check, at most six important |
-| 2 | search | yes | Every claim names a source that resolves |
+| 2 | search | yes | Every claim names a source that resolves. Every cabinet source is located first, and one that cannot be located is dropped with its claims into `corpus/unresolved.json` |
 | 3 | verify | yes | Every important claim has a decided truth state, and anything past the cap says it was skipped |
 | 4 | outline | yes | Every body section names claim ids that exist and may be used |
 | 5 | diagram | yes | At most twelve nodes, alt text present, and the pinned plugin judge accepts a `*_imagen.png` |
@@ -184,6 +186,22 @@ offline lane still runs.
 Python sends each provider the admitted list and drops every returned URL that
 does not pass the same policy. The paper gate repeats that check against the
 rendered references.
+
+The locator is the one exception, and it is a cross-reference rather than a
+search. The second brain is a cache of claims, and a claim in it may be true and
+still have no public locator. Before the ledger sees a reply,
+`_locate_cabinet_sources` gives every cabinet source a URL a reader can open, by
+one `locate` call per source. That tool sends no domain filter. Nobody asked the
+web where to look for a document the cabinet already holds. The locator holds no
+corpus tool, because a cross-reference that could read the cabinet would confirm
+the cabinet with itself. A located source carries
+`located_from`, which is the corpus key it came from, and `reference_hosts`
+exempts it from the allowlist for that reason. The answers cache in
+`corpus/located.json`, so one source costs one turn however many claims cite it.
+`corpus.attach_url` writes `url:` onto the SourceDocument in the brain, so the
+next run pays nothing. A source with no URL is a miss, and so is a page that
+does not support the claim. The locator drops it with every claim that named it,
+and records it in `corpus/unresolved.json`.
 
 For each planned question, Perplexity runs Scout then Retrieve within the one
 researcher tool invocation. Scout may add only `docs.`, `reference.`, or

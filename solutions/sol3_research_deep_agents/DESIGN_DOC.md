@@ -31,7 +31,7 @@ This Deep Agents solution produces a cited research brief or an evidence-backed 
 
 ### Quality requirements
 
-- Writer, verifier, and diagrammer have distinct write paths; reviewer and researcher have none.
+- Writer, verifier, and diagrammer have distinct write paths; reviewer, researcher, and locator have none.
 - Tool lists, custom path checks, virtual filesystem mounts, and disabled general-purpose subagents form four fences.
 - No Bing fallback is used for normal auto research.
 - `task test`, `task table`, and `task checks` are offline.
@@ -75,9 +75,10 @@ sol3_research_deep_agents/
 ├── stages.py                 Stage-level validation
 ├── gates.py                  Done, retry, cost, and turn decisions
 ├── roles.py                  Deep Agents construction and fences
-├── roleplan.py               Seven-role scopes
+├── roleplan.py               Fourteen-role scopes
 ├── research.py               Filtered provider boundary and cost control
 ├── evidence.py               Source, claim, and corroboration model
+├── locate.py                 Cabinet cross-reference and URL admission
 ├── diagrams.py               Mermaid and PlantUML publication figures
 ├── paper_check.py            Final hard checks
 ├── publish.py                Opt-in secret Gist publication
@@ -90,6 +91,7 @@ sol3_research_deep_agents/
 | `roles.py` | Builds role-specific graphs and removes filesystem escape paths. |
 | `research.py` | Selects a filtered provider chain and enforces spending limits. |
 | `evidence.py` | Models sources, claims, findings, and corroboration. |
+| `locate.py` | Builds the locator's question and admits the URL it returns. |
 | `diagrams.py` | Enforces source inventory and image-fidelity acceptance. |
 | `paper_check.py` | Validates references, citations, body, images, style, and exit wording. |
 
@@ -114,6 +116,17 @@ flowchart TD
     Exit -- Retryable --> Search
     Exit -- Cost or max turns --> Escalate([Keep checkpoint and evidence])
 ```
+
+Locate runs inside the search stage, on each reply, before the ledger records
+it. The locator receives one source title, one vendor, and one quote, and it
+returns the public page that carries that document. Its single `locate` tool
+sends no domain filter and reads no corpus, so the cross-reference cannot
+confirm the cabinet with itself. Python admits the URL, stamps `located_from`
+on the source, writes `url:` onto the SourceDocument in the brain, and caches
+the answer in `corpus/located.json`. A source it cannot place is dropped with
+every claim that named it and recorded in `corpus/unresolved.json`. The
+`reference_hosts` gate exempts a located source, because the librarian never
+admitted a domain for a document the cabinet already held.
 
 The cost test happens before every model call and has headroom based on observed role cost. Source: [`docs/diagrams/workflow.mmd`](docs/diagrams/workflow.mmd).
 
@@ -193,7 +206,9 @@ Risks include provider availability, image-backend availability, non-public Gist
 
 | Term | Meaning |
 | --- | --- |
+| Cabinet claim | A claim the second brain already holds. It needs a public URL before it can be cited. |
 | Cross-checked | A verifier independently retrieved evidence for a claim. |
+| Locator | The role that cross-references one cabinet source title to the public page a reader can open. |
 | Fixture backend | Recorded offline research source used for deterministic runs. |
 | Checkpoint | State that allows completed pipeline stages to be skipped on resume. |
 | Figure fidelity | Whether the rendered image retains the meaning and labels of its source. |
