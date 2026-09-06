@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import evidence
 import pytest
 
@@ -156,3 +158,24 @@ def test_located_from_survives_write_and_load(tmp_path):
 
     assert reloaded.sources[source.id].located_from == "knowledge:claim.mast"
     assert reloaded.sources[plain.id].located_from == ""
+
+
+def test_a_hand_edited_non_http_source_url_stops_a_resume(tmp_path):
+    """#384: `record_findings` and `apply_verification` guard live ingest, so
+    the one path left for a `corpus:`/`knowledge:` key to reach the ledger is a
+    hand-edited evidence file. A resume must refuse it, not print it."""
+    root = tmp_path / "evidence"
+    root.mkdir()
+    bad = evidence.SourceDocument(title="Bad", url="corpus:knowledge:claim.x", subject="exits")
+    (root / f"{bad.id}.md").write_text(bad.to_markdown(), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match=re.escape("corpus:knowledge:claim.x")):
+        evidence.Ledger(root).load()
+
+    # An https url in the same shape of file still loads.
+    good_root = tmp_path / "evidence-good"
+    good_root.mkdir()
+    good = evidence.SourceDocument(title="Good", url="https://a.example", subject="exits")
+    (good_root / f"{good.id}.md").write_text(good.to_markdown(), encoding="utf-8")
+    loaded = evidence.Ledger(good_root).load()
+    assert loaded.sources[good.id].url == "https://a.example"

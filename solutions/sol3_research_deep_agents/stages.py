@@ -422,7 +422,7 @@ def apply_verification(ledger: evidence.Ledger, report: dict) -> dict:
         status = row.get("corroborate_status")
         if status == "agreed":
             url = str(row.get("second_source_url", "")).strip()
-            if url.startswith("http"):
+            if url.lower().startswith(("http://", "https://")):
                 source = ledger.add_source(
                     evidence.SourceDocument(
                         title=row.get("quote", "")[:60] or url,

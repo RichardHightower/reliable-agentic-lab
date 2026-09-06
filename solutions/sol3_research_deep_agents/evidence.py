@@ -422,6 +422,12 @@ class Ledger:
         Sources are re-sorted by `seq` at the end. The file listing is sorted by
         id, and two ids minted in the same millisecond sort by their random
         tail, so without this a resume renumbers the references.
+
+        `record_findings` and `apply_verification` only ever write a url a
+        reader can open (or one cross-referenced from the cabinet, still
+        checked at that call site). A file here with anything else is
+        hand-edited, not something this run wrote, and the bibliography must
+        not print it.
         """
         if not self.root.is_dir():
             return self
@@ -430,10 +436,17 @@ class Ledger:
             kind = fields.get("type")
             body = body.strip()
             if kind == "SourceDocument":
+                url = fields.get("url", "")
+                if not str(url).lower().startswith(("http://", "https://")):
+                    raise RuntimeError(
+                        f"{path} gives its source the url {url!r}. The ledger may "
+                        "hold only public URLs. Repair the file or start a fresh "
+                        "work directory."
+                    )
                 self.add_source(
                     SourceDocument(
                         title=fields.get("title", ""),
-                        url=fields.get("url", ""),
+                        url=url,
                         subject="",
                         vendor=fields.get("vendor", ""),
                         body=body,

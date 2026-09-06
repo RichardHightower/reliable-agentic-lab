@@ -30,7 +30,11 @@ def _path(work_dir) -> Path:
 
 
 def load(work_dir) -> dict[str, int]:
-    """The url-to-number map this run has already committed to."""
+    """The url-to-number map this run has already committed to.
+
+    Every key must be a url a reader can open, the same rule `register` holds
+    a new one to, checked again here because a saved file can be hand-edited.
+    """
     path = _path(work_dir)
     if not path.exists():
         return {}
@@ -46,6 +50,14 @@ def load(work_dir) -> dict[str, int]:
     raw = payload.get("sources") or {}
     out: dict[str, int] = {}
     for url, number in raw.items():
+        # `register` never writes anything else, so a key here that is not a
+        # url a reader can open is a hand-edited file, not a run's own history.
+        if not str(url).lower().startswith(("http://", "https://")):
+            raise RuntimeError(
+                f"{path} gives {url!r} a citation number. The registry may hold "
+                "only public URLs. Repair the file or start a fresh work "
+                "directory."
+            )
         # A bool is an int in Python, and a float coerces without complaint.
         # Either one in this file means the map was written by something other
         # than `register`, and a wrong number is worse than a missing one.

@@ -5,9 +5,9 @@ The Agent SDK enforces scope in two places, and you need both.
     tools=[...]        decides whether a role can write at all
     PreToolUse hook    decides which paths it may write
 
-Ten of the eleven roles hold no `Edit` and no `Write`, so for them there is
-nothing for a hook to guard. The writer holds `Write`, scoped to `sections/**`,
-and the hook is what keeps it there and out of `paper.md`.
+Thirteen of the fourteen roles hold no `Edit` and no `Write`, so for them there
+is nothing for a hook to guard. The writer holds `Write`, scoped to
+`sections/**`, and the hook is what keeps it there and out of `paper.md`.
 
 One hook serves the whole cast, not one hook per writer. sol1 registers one per
 writing role because the enhancer has exactly one. That does not generalize:
