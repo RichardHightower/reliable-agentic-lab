@@ -581,6 +581,7 @@ class _Recorder:
         self.judge_passes = judge_passes
         self.calls: list[tuple] = []
         self.edit_notes: list[str] = []
+        self.edit_verdicts: list[dict] = []
         self.judged_bodies: list[str] = []
 
     def __getattr__(self, name):
@@ -597,6 +598,7 @@ class _Recorder:
     def edit_section(self, section, body, verdict, path="", note="", claims=None):
         self.calls.append(("edit_section", section["id"]))
         self.edit_notes.append(note)
+        self.edit_verdicts.append(dict(verdict or {}))
         target = Path(self.root) / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body, encoding="utf-8")
@@ -646,6 +648,18 @@ def test_the_editor_is_told_the_deterministic_row_it_must_fix(work, turns):
     assert recorder.edit_notes, "the editor never ran"
     assert any("length" in note for note in recorder.edit_notes), recorder.edit_notes
     assert any("words" in note for note in recorder.edit_notes), recorder.edit_notes
+    assert recorder.edit_verdicts, "the editor never received a verdict"
+    rows = recorder.edit_verdicts[0].get("failed_rows") or []
+    assert "length" in rows, rows
+
+
+def test_rows_for_editor_names_a_python_only_failure():
+    score = checks.Score(checks=[checks.Check("length", False, "1912 words", advisory=True)])
+    rows = sections._rows_for_editor(score, {"passed": True, "failed_rows": []})
+    assert rows == ["length"]
+    blocking = checks.Score(checks=[checks.Check("coverage", False, "unnamed")])
+    mixed = sections._rows_for_editor(blocking, {"failed_rows": ["depth"]})
+    assert mixed == ["coverage", "depth"]
 
 
 def test_the_judge_does_not_grade_a_section_python_already_rejected(work, turns):
