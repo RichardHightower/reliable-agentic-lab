@@ -113,6 +113,17 @@
     }
   },
   "researcher": {
+    "This is a briefing, not research": {
+      "data": {
+        "headings": ["Background", "Mechanism", "Evidence", "Limitations"],
+        "domains": [
+          {"host": "arxiv.org", "org_type": "preprint"},
+          {"host": ".gov", "org_type": "government"}
+        ],
+        "titles": ["A flagship work"]
+      },
+      "usd": 0.01
+    },
     "What three exits does this repo's paper loop check, and in what order?": {
       "data": {
         "answer": "The reference loop checks done, then cost, then max turns. Vendor runtimes document turn or recursion limits as stopping guardrails.",

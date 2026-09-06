@@ -51,6 +51,28 @@ MAX_CLAIMS = 40
 MAX_WORDS = 2000
 EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
+SCOUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "headings": {"type": "array", "items": {"type": "string"}},
+        "titles": {"type": "array", "items": {"type": "string"}},
+        "domains": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "host": {"type": "string"},
+                    "org_type": {"type": "string"},
+                },
+                "required": ["host", "org_type"],
+            },
+        },
+    },
+    "required": ["headings", "domains"],
+}
+
 
 
 class TurnFailed(RuntimeError):
@@ -175,6 +197,10 @@ class Turns:
 
     def source_allowlist(self, topic: str, headings: list, prior_art: str = "") -> dict:
         raise NotImplementedError
+
+    def scout(self, topic: str) -> dict:
+        """A map of the field, not research. Override to call a model."""
+        return {"headings": [], "domains": [], "titles": []}
 
     def plan(
         self, topic: str, prior_art: str, budget: dict | None = None, note: str = "", brief: str = ""
@@ -328,7 +354,9 @@ class SdkTurns(Turns):
             f"corpus reference key does. Put those keys on corpus_refs[]. Only keys "
             f"from the pack are valid, and a key is the whole "
             f"`<root>:claim.<subject>.<ULID>` string. A bare ULID is not a key.\n"
-            f"{prior_art[:2000]}"
+            "A scout briefing, if present in the notes below, is a map of "
+            "headings and hosts, not evidence. Do not cite it. Research has not run.\n"
+            f"{prior_art[:4000]}"
             if prior_art
             else "There is no corpus pack for this topic. Outline from the topic alone."
         )
@@ -411,7 +439,7 @@ class SdkTurns(Turns):
         cannot search to decide where to search, and Python admits the result.
         """
         sections = "\n".join(f"- {heading}" for heading in headings if heading)
-        known = f"\n\nHosts the curated corpus already cites:\n{prior_art[:1500]}" if prior_art else ""
+        known = f"\n\nHosts the curated corpus already cites:\n{prior_art[:3000]}" if prior_art else ""
         return self._json(
             "research-source-librarian",
             f"Name the domains this paper should search.\n\nTopic: {topic}\n\n"
@@ -420,9 +448,28 @@ class SdkTurns(Turns):
             "host and an org_type from the schema enum. Name hosts, not journal "
             "titles. `.gov`, `.edu`, and `.int` may be whole top level domains; "
             "no other TLD is admitted. Cable news and encyclopedias are dropped "
-            "under every type. Fewer good hosts beats a padded list."
+            "under every type. Fewer good hosts beats a padded list. A scout "
+            "briefing, if present, lists candidate hosts; propose from the "
+            "headings and that map. Do not search."
             f"{known}",
             SOURCE_ALLOWLIST_SCHEMA,
+        )
+
+    def scout(self, topic: str) -> dict:
+        """One cheap map of the field when the cabinet missed. Not research."""
+        return self._json(
+            "research-researcher",
+            "Map the field for a white paper. This is a briefing, not research. "
+            "Do not return claims, quotes, or citation numbers.\n\n"
+            f"Topic: {topic}\n\n"
+            "Return JSON with headings (5-8 standard section titles for this "
+            "kind of paper), domains (canonical hosts with org_type from "
+            f"{', '.join(source_policy.ORG_TYPES)}; at most "
+            f"{source_policy.MAX_PERPLEXITY_DOMAINS}), and titles (a few "
+            "flagship works, names only). Prefer arxiv.org, .gov, .edu, .int, "
+            "peer-reviewed publishers, and official documentation. Not blogs, "
+            "not encyclopedias, not cable news.",
+            SCOUT_SCHEMA,
         )
 
     def edit_outline(self, drafted: dict, note: str = "") -> dict:

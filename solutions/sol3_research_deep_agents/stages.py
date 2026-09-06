@@ -48,6 +48,7 @@ CITATION = re.compile(r"\[(\d+)\]")
 
 STAGE_ORDER = (
     "corpus",
+    "scout",
     "plan",
     "sources",
     "search",

@@ -114,12 +114,19 @@ def test_the_live_wiring_records_a_turn(fake_sdk, tmp_path):
     Nothing ran the one-argument lambda in `loop.py` against the keywords
     `SdkTurns._ask` sends it, so a `TypeError` reached only the live path.
 
-    The outliner reply here is deliberately unusable. The run fails, and it
-    must fail on the reply rather than on the callback, with the turn counted.
+    The first live call used to be the outliner. A thin pack now scouts
+    first (#367); that failure is a note. The outliner reply is still
+    deliberately unusable. The run fails, and it must fail on the reply
+    rather than on the callback, with the turn counted.
     """
     from conftest import FakeResultMessage  # noqa: PLC0415
 
-    fake_sdk([FakeResultMessage(result="not an outline", total_cost_usd=0.4)])
+    fake_sdk(
+        [
+            FakeResultMessage(result="not a briefing", total_cost_usd=0.2),
+            FakeResultMessage(result="not an outline", total_cost_usd=0.4),
+        ]
+    )
     work = tmp_path / "work"
     code = loop.main(
         [
@@ -141,6 +148,8 @@ def test_the_live_wiring_records_a_turn(fake_sdk, tmp_path):
         json.loads(line)
         for line in (work / ".harness" / "turns.jsonl").read_text().splitlines()
     ]
-    assert rows[0]["role"] == "research-outliner"
-    assert rows[0]["usd"] == 0.4
+    roles = [row["role"] for row in rows]
+    assert "research-researcher" in roles
+    assert "research-outliner" in roles
+    assert rows[0]["usd"] in (0.2, 0.4)
     assert "elapsed_s" in rows[0]

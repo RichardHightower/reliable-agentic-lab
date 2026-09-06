@@ -5,6 +5,7 @@ what lets a phase slot in later without renumbering the run records that
 already exist on disk.
 
     0 corpus_pack read the configured brains   -> corpus/brain-pack.md
+    0 scout       briefing on a thin pack      -> corpus/scout-briefing.json
     1 outline     two-level outline, judged -> outline.approved.json
     2 sections    per-section research/write -> sections/*.md, paper_ledger.json
     4 diagram     figures, rendered         -> diagrams.json
@@ -369,6 +370,119 @@ def corpus_pack(run: Run) -> dict:
     }
 
 
+def _load_json(run: Run, name: str) -> dict:
+    path = run.file(name)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _briefing_markdown(run: Run) -> str:
+    """The map, if the scout actually ran. A skipped briefing is not a map."""
+    payload = _load_json(run, "corpus/scout-briefing.json")
+    if not payload or payload.get("skipped"):
+        return ""
+    path = run.file("corpus/scout-briefing.md")
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def _prior_for_roles(run: Run) -> str:
+    pack_path = run.file("corpus/brain-pack.md")
+    pack = pack_path.read_text(encoding="utf-8") if pack_path.exists() else ""
+    briefing = _briefing_markdown(run)
+    if pack and briefing:
+        return f"{pack}\n\n{briefing}"
+    return briefing or pack
+
+
+def _write_briefing(run: Run, payload: dict) -> None:
+    run.write_json("corpus/scout-briefing.json", payload)
+    lines = ["# Scout briefing", ""]
+    if payload.get("skipped"):
+        lines += [f"Skipped: {payload.get('reason') or 'pack is thick'}", ""]
+    else:
+        headings = payload.get("headings") or []
+        titles = payload.get("titles") or []
+        admitted = payload.get("admitted") or []
+        if headings:
+            lines += ["## Candidate headings", ""]
+            lines += [f"- {item}" for item in headings]
+            lines.append("")
+        if admitted:
+            lines += ["## Admitted hosts", ""]
+            lines += [f"- {item}" for item in admitted]
+            lines.append("")
+        if titles:
+            lines += ["## Flagship titles", ""]
+            lines += [f"- {item}" for item in titles]
+            lines.append("")
+        lines += [
+            "This is a map, not evidence. The outline judge must not treat it as research.",
+            "",
+        ]
+    run.file("corpus/scout-briefing.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def scout(run: Run) -> dict:
+    """A cheap map of the field when the cabinet missed. Not a gate.
+
+    Fat pack: skip. Thin pack: one researcher turn. Failure is a note.
+    """
+    pack = _load_json(run, "corpus/brain-pack.json")
+    if not pack.get("corpus_thin", True):
+        payload = {
+            "skipped": True,
+            "reason": "pack is thick",
+            "headings": [],
+            "titles": [],
+            "admitted": [],
+            "dropped": [],
+            "proposed": [],
+        }
+        _write_briefing(run, payload)
+        return {"skipped": True, "hits": len(pack.get("hits") or [])}
+
+    proposal: dict = {"headings": [], "domains": [], "titles": []}
+    ask = getattr(run.turns, "scout", None)
+    if ask is not None:
+        try:
+            proposal = ask(run.topic) or proposal
+        except Escalate:
+            raise
+        except Exception as exc:
+            run.log(f"    scout failed: {exc}; outlining from the topic")
+    proposed = []
+    for item in proposal.get("domains") or []:
+        if isinstance(item, str):
+            proposed.append({"host": item, "org_type": "preprint"})
+        elif isinstance(item, dict):
+            proposed.append(item)
+    if not any(str(item.get("host") or "").lower() == "arxiv.org" for item in proposed):
+        proposed.append({"host": "arxiv.org", "org_type": "preprint"})
+    decided = source_policy.admit(proposed)
+    payload = {
+        "skipped": False,
+        "headings": [str(h) for h in (proposal.get("headings") or []) if str(h).strip()][:8],
+        "titles": [str(t) for t in (proposal.get("titles") or []) if str(t).strip()][:8],
+        "proposed": decided["proposed"],
+        "admitted": decided["admitted"],
+        "dropped": decided["dropped"],
+    }
+    _write_briefing(run, payload)
+    return {
+        "skipped": False,
+        "headings": len(payload["headings"]),
+        "admitted": len(payload["admitted"]),
+        "dropped": len(payload["dropped"]),
+    }
+
+
 # Old name. Tests and greps that still say prior_art keep working.
 prior_art = corpus_pack
 
@@ -405,10 +519,11 @@ def _budget_for(run: Run) -> dict:
 
 
 def _call_outliner(run: Run, note: str) -> dict:
-    pack_path = run.file("corpus/brain-pack.md")
-    prior_text = pack_path.read_text(encoding="utf-8") if pack_path.exists() else ""
+    prior_text = _prior_for_roles(run)
     args = (run.topic, prior_text, _budget_for(run), note)
-    method = getattr(run.turns, "outline", run.turns.plan)
+    method = getattr(run.turns, "outline", None)
+    if method is None:
+        method = run.turns.plan
     drafted = method(*args, brief=run.brief) if run.brief else method(*args)
     if not isinstance(drafted, dict):
         raise RunFailed("the outliner returned no outline object")
@@ -949,8 +1064,7 @@ def source_allowlist(run: Run) -> dict:
     """
     drafted = outlines.load_approved(run.read_json("outline.approved.json"))
     headings = [section.get("heading") for section in drafted.get("sections") or []]
-    pack = run.file("corpus/brain-pack.md")
-    prior = pack.read_text(encoding="utf-8") if pack.exists() else ""
+    prior = _prior_for_roles(run)
 
     proposal: dict = {"domains": []}
     ask = getattr(run.turns, "source_allowlist", None)
@@ -1574,6 +1688,7 @@ def edit_paper(run: Run) -> dict:
 
 LINEAR = [
     (0, "corpus_pack", "corpus/brain-pack.json", corpus_pack),
+    (0, "scout", "corpus/scout-briefing.json", scout),
     (1, "outline", "outline.approved.json", do_outline),
     (1, "sources", "corpus/source_allowlist.json", source_allowlist),
     (2, "sections", "claims.json", do_sections),

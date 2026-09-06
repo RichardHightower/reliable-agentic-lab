@@ -364,6 +364,55 @@ class DeepAgentsRunner(Runner):
         return parent, delegated
 
 
+def _write_briefing(work_dir: Path, payload: dict) -> None:
+    dest = Path(work_dir) / "corpus"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "scout-briefing.json").write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
+    lines = ["# Scout briefing", ""]
+    if payload.get("skipped"):
+        lines += [f"Skipped: {payload.get('reason') or 'pack is thick'}", ""]
+    else:
+        headings = payload.get("headings") or []
+        titles = payload.get("titles") or []
+        admitted = payload.get("admitted") or []
+        if headings:
+            lines += ["## Candidate headings", ""]
+            lines += [f"- {item}" for item in headings]
+            lines.append("")
+        if admitted:
+            lines += ["## Admitted hosts", ""]
+            lines += [f"- {item}" for item in admitted]
+            lines.append("")
+        if titles:
+            lines += ["## Flagship titles", ""]
+            lines += [f"- {item}" for item in titles]
+            lines.append("")
+        lines += [
+            "This is a map, not evidence. The outline judge must not treat it as research.",
+            "",
+        ]
+    (dest / "scout-briefing.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def _briefing_markdown(work_dir: Path) -> str:
+    """The map, if the scout actually ran. A skipped briefing is not a map."""
+    path = Path(work_dir) / "corpus" / "scout-briefing.json"
+    if not path.exists():
+        return ""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict) or payload.get("skipped"):
+        return ""
+    md = Path(work_dir) / "corpus" / "scout-briefing.md"
+    if not md.exists():
+        return ""
+    return md.read_text(encoding="utf-8")
+
+
 @dataclass
 class Paper:
     """One run. Owns the budget, the state file, and the order of the stages."""
@@ -673,16 +722,111 @@ class Paper:
             summary=f"{packed.get('hits') or 0} hits, thin={packed.get('corpus_thin')}",
         )
 
+    def stage_scout(self, extra: str = "") -> StageResult:
+        """A cheap map of the field when the cabinet missed. Not a gate.
+
+        Fat pack: skip. Thin pack: one researcher turn. Failure is a note.
+        Copied from the Agent SDK port, not imported.
+        """
+        pack_path = self.work_dir / "corpus" / "brain-pack.json"
+        pack = {}
+        if pack_path.exists():
+            try:
+                packed = json.loads(pack_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                packed = {}
+            pack = packed if isinstance(packed, dict) else {}
+        if not pack.get("corpus_thin", True):
+            payload = {
+                "skipped": True,
+                "reason": "pack is thick",
+                "headings": [],
+                "titles": [],
+                "admitted": [],
+                "dropped": [],
+                "proposed": [],
+            }
+            _write_briefing(self.work_dir, payload)
+            return StageResult(
+                "scout",
+                artifacts={"skipped": True, "hits": len(pack.get("hits") or [])},
+                summary="skipped, pack is thick",
+            )
+
+        proposal: dict = {"headings": [], "domains": [], "titles": []}
+        usd = 0.0
+        try:
+            reply = self._ask(
+                "researcher",
+                "Map the field for a white paper. This is a briefing, not research. "
+                "Do not return claims, quotes, or citation numbers.\n\n"
+                f"Topic: {self.topic}\n\n"
+                "Return JSON with headings (5-8 standard section titles for this "
+                "kind of paper), domains (canonical hosts with org_type from "
+                f"{', '.join(source_policy.ORG_TYPES)}; at most "
+                f"{source_policy.MAX_PERPLEXITY_DOMAINS}), and titles (a few "
+                "flagship works, names only). Prefer arxiv.org, .gov, .edu, .int, "
+                "peer-reviewed publishers, and official documentation. Not blogs, "
+                "not encyclopedias, not cable news."
+                + extra,
+            )
+            usd = reply.usd
+            parsed = self._json_reply("researcher", reply)
+            if isinstance(parsed, dict):
+                proposal = parsed
+        except BudgetSpent:
+            raise
+        except Exception as exc:
+            self.say(f"  scout failed: {exc}; outlining from the topic")
+
+        proposed = []
+        for item in proposal.get("domains") or []:
+            if isinstance(item, str):
+                proposed.append({"host": item, "org_type": "preprint"})
+            elif isinstance(item, dict):
+                proposed.append(item)
+        if not any(str(item.get("host") or "").lower() == "arxiv.org" for item in proposed):
+            proposed.append({"host": "arxiv.org", "org_type": "preprint"})
+        decided = source_policy.admit(proposed)
+        payload = {
+            "skipped": False,
+            "headings": [str(h) for h in (proposal.get("headings") or []) if str(h).strip()][:8],
+            "titles": [str(t) for t in (proposal.get("titles") or []) if str(t).strip()][:8],
+            "proposed": decided["proposed"],
+            "admitted": decided["admitted"],
+            "dropped": decided["dropped"],
+        }
+        _write_briefing(self.work_dir, payload)
+        return StageResult(
+            "scout",
+            usd=usd,
+            artifacts={
+                "skipped": False,
+                "headings": len(payload["headings"]),
+                "admitted": len(payload["admitted"]),
+                "dropped": len(payload["dropped"]),
+            },
+            summary=f"{len(payload['headings'])} headings, {len(payload['admitted'])} hosts",
+        )
+
     def stage_plan(self, extra: str = "") -> StageResult:
         path = self.work_dir / "plan.json"
         usd = 0.0
         if path.exists() and not extra:
             self.plan = json.loads(path.read_text(encoding="utf-8"))
         else:
+            briefing = _briefing_markdown(self.work_dir)
+            map_note = (
+                "\n\nThe scout briefing below is a map of the field, not evidence. "
+                "Do not cite it. Research has not run.\n"
+                + briefing
+                if briefing
+                else ""
+            )
             reply = self._ask(
                 "planner",
                 f"Topic: {self.topic}\n\nWrite plan.json for a technical white paper "
-                f"on this topic.\n{extra}",
+                f"on this topic.\n{extra}{map_note}",
             )
             usd = reply.usd
             # The Deep Agents planner owns exactly one scoped write:
@@ -864,6 +1008,9 @@ class Paper:
             headings = [section.get("heading") for section in self.plan.get("sections") or []]
         pack = self.work_dir / "corpus" / "brain-pack.md"
         prior = pack.read_text(encoding="utf-8") if pack.exists() else ""
+        briefing = _briefing_markdown(self.work_dir)
+        if briefing:
+            prior = f"{prior}\n\n{briefing}" if prior else briefing
 
         proposal: dict = {"domains": []}
         usd = 0.0
@@ -879,8 +1026,10 @@ class Paper:
                 "hosts, not journal titles. `.gov`, `.edu`, and `.int` may be "
                 "whole top level domains; no other TLD is admitted. Cable news "
                 "and encyclopedias are dropped under every type. Fewer good "
-                "hosts beats a padded list."
-                + (f"\n\nHosts the curated corpus already cites:\n{prior[:1500]}" if prior else "")
+                "hosts beats a padded list. A scout briefing, if present, "
+                "lists candidate hosts; propose from the headings and that "
+                "map. Do not search."
+                + (f"\n\nHosts the curated corpus already cites:\n{prior[:3000]}" if prior else "")
                 + extra,
             )
             usd = reply.usd
