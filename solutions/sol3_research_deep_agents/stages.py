@@ -103,8 +103,13 @@ def parse_json(text: str) -> dict:
 # -- 1. plan --------------------------------------------------------------
 
 
-def plan_gate(plan: dict) -> None:
-    """Count what a plan must have. No opinion about whether it is a good plan."""
+def plan_gate(plan: dict, *, loop_doctrine: bool = True) -> None:
+    """Count what a plan must have. No opinion about whether it is a good plan.
+
+    `loop_doctrine` is the seminar's own topic, not a property every paper has.
+    Off, any topic's own first question is fine. On, question one is bound to
+    this repository's exit order, unchanged from before the flag existed.
+    """
     misses = []
     questions = plan.get("questions") or []
     if not MIN_QUESTIONS <= len(questions) <= MAX_QUESTIONS:
@@ -112,7 +117,11 @@ def plan_gate(plan: dict) -> None:
             f"there are {len(questions)} questions. "
             f"Write between {MIN_QUESTIONS} and {MAX_QUESTIONS}."
         )
-    if questions and questions[0].get("question", "").strip() != EXIT_DOCTRINE_QUESTION:
+    if (
+        loop_doctrine
+        and questions
+        and questions[0].get("question", "").strip() != EXIT_DOCTRINE_QUESTION
+    ):
         misses.append(
             "the first question must ask what three exits this repo's paper loop checks, in order."
         )
@@ -801,6 +810,8 @@ def assemble_gate(
     ledger: evidence.Ledger,
     charts: list | None = None,
     allowed_domains: tuple[str, ...] | None = None,
+    *,
+    loop_doctrine: bool = True,
 ) -> paper_check.PaperScore:
     _, urls = numbering(ledger)
     score = paper_check.check(
@@ -810,6 +821,7 @@ def assemble_gate(
         charts=charts,
         allowed_domains=allowed_domains,
         located=[source.url for source in ledger.bibliography() if source.located_from],
+        loop_doctrine=loop_doctrine,
     )
     if not score.passed:
         raise GateFailed(

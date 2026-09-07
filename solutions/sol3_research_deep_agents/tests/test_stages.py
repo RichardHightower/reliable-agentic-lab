@@ -568,6 +568,27 @@ def test_assemble_gate_raises_on_a_failing_paper():
     assert "hard gates" in str(exc.value)
 
 
+def test_assemble_gate_passes_the_doctrine_flag_through_to_paper_check(monkeypatch):
+    """#406: `assemble_gate` decides nothing about the doctrine itself. It is
+    only the wire between the run and `paper_check.check`."""
+    import paper_check
+
+    led, _ = ledger_with()
+    seen = {}
+
+    def fake_check(body, sources, **kwargs):
+        seen.update(kwargs)
+        return paper_check.PaperScore(checks=[paper_check.Check("stub", True)])
+
+    monkeypatch.setattr(stages.paper_check, "check", fake_check)
+
+    stages.assemble_gate("# T\n\nbody\n", led, loop_doctrine=False)
+    assert seen["loop_doctrine"] is False
+
+    stages.assemble_gate("# T\n\nbody\n", led, loop_doctrine=True)
+    assert seen["loop_doctrine"] is True
+
+
 # -- the verification cap --------------------------------------------------
 
 
@@ -676,6 +697,48 @@ def test_plan_requires_the_repo_exit_order_question_first():
     plan["questions"][0]["question"] = "Which exit happens first?"
     with pytest.raises(stages.GateFailed, match="first question"):
         stages.plan_gate(plan)
+
+
+def test_a_plan_for_any_other_topic_does_not_need_the_doctrine_question():
+    """#406: the doctrine was the seminar's own topic, bound as a Python
+    constant. Off, a plan for a topic that has nothing to do with this repo
+    carries no forced first question and no section about it."""
+    creatine_plan = {
+        "title": "Creatine supplementation for preventing muscle loss during a calorie deficit",
+        "questions": [
+            {
+                "id": "q1",
+                "question": "What dosing protocol saturates intramuscular phosphocreatine?",
+                "check": "a loading and maintenance dose with a citation",
+                "important": True,
+            },
+            {"id": "q2", "question": "What percentage of lean mass is typically lost in a deficit?", "check": "a study"},
+            {"id": "q3", "question": "What RCTs measured lean mass retention with creatine?", "check": "a named RCT"},
+        ],
+        "sections": [
+            {
+                "heading": "Mechanism",
+                "objective": "Explain phosphocreatine buffering.",
+                "abstract": "Creatine raises intramuscular phosphocreatine.",
+                "key_questions": ["what dosing protocol saturates intramuscular phosphocreatine"],
+            },
+        ],
+        "diagrams": [],
+    }
+    stages.plan_gate(creatine_plan, loop_doctrine=False)  # must not raise
+
+    normalized = stages.normalize_plan(dict(creatine_plan))
+    doctrine_words = ("exit", "cost", "max turns")
+    for section in normalized["sections"]:
+        heading = section.get("heading", "").lower()
+        questions = " ".join(section.get("key_questions") or []).lower()
+        assert not any(word in heading for word in doctrine_words), section
+        assert not any(word in questions for word in doctrine_words), section
+
+    # On, the same plan is still held to the doctrine, unchanged from before
+    # the flag existed.
+    with pytest.raises(stages.GateFailed, match="first question"):
+        stages.plan_gate(creatine_plan, loop_doctrine=True)
 
 
 def test_review_gate_never_attaches_a_note_to_the_wrong_row():

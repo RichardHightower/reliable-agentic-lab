@@ -156,13 +156,22 @@ def extract_json(text: str) -> dict | None:
     return None
 
 
-def bind_exit_doctrine(plan: dict) -> dict:
+def bind_exit_doctrine(plan: dict, *, enforce_loop_doctrine: bool = True) -> dict:
     """Make the Agent SDK planner's first question non-optional.
 
-    The planner prompt tells the model this rule, but a prompt is not a gate.
-    Bind the question here at the structured-output boundary while leaving the
-    generic Python phase tests free to supply their minimal synthetic plans.
+    No production code calls this. The outline-first rewrite dropped the call
+    site along with the flat `questions` list this function edits; the modern
+    outline schema carries questions as per-section `key_questions` instead.
+    Kept for the one test that documents the old binding, so a future caller
+    that needs it back finds the shape already flag-aware.
+
+    `enforce_loop_doctrine` is the same flag `paper.Run.enforce_loop_doctrine`
+    already gates the assembled-body check with. Off, this is a no-op: the
+    seminar's own exit order is not every topic's business, and only the
+    commissioning brief for that one paper still asks for it in prose.
     """
+    if not enforce_loop_doctrine:
+        return plan
     sections = plan.get("sections") or []
     if not sections:
         return plan

@@ -435,6 +435,11 @@ class Paper:
     require_approval: bool = False
     resume: bool = False
     outline_judge_rounds: int = OUTLINE_JUDGE_ROUNDS
+    # The seminar's own paper taught this repository's exit order as its
+    # subject. Any other topic plans without it. On restores today's
+    # behavior: the doctrine question is bound, the repository answers it,
+    # and the assembled body is graded on naming it.
+    loop_doctrine: bool = False
 
     state: pstate.PaperState = field(init=False)
     ledger: evidence.Ledger = field(init=False)
@@ -824,10 +829,18 @@ class Paper:
                 if briefing
                 else ""
             )
+            # The skill only binds a first question the delegation message
+            # names. Off, the planner writes any first question the topic
+            # earns; nothing here mentions exits, cost, or max turns.
+            doctrine_note = (
+                f"\n\nRequired first question, exactly: {stages.EXIT_DOCTRINE_QUESTION}"
+                if self.loop_doctrine
+                else ""
+            )
             reply = self._ask(
                 "planner",
                 f"Topic: {self.topic}\n\nWrite plan.json for a technical white paper "
-                f"on this topic.\n{extra}{map_note}",
+                f"on this topic.\n{extra}{map_note}{doctrine_note}",
             )
             usd = reply.usd
             # The Deep Agents planner owns exactly one scoped write:
@@ -841,7 +854,7 @@ class Paper:
                 else reply.json()
             )
         self.plan = stages.normalize_plan(self.plan)
-        stages.plan_gate(self.plan)
+        stages.plan_gate(self.plan, loop_doctrine=self.loop_doctrine)
         path.write_text(json.dumps(self.plan, indent=2), encoding="utf-8")
         usd += self._approve_outline()
         self.state.record("plan", path)
@@ -1357,7 +1370,7 @@ class Paper:
             # Deep Agents researcher and its single filtered search tool.
             repository_report = (
                 research.repository_doctrine_report(question["question"])
-                if self.runner.name == "deep_agents"
+                if self.loop_doctrine and self.runner.name == "deep_agents"
                 else None
             )
             if repository_report is not None:
@@ -1863,7 +1876,11 @@ class Paper:
 
         body = brief.strip_em_dashes(body)
         score = stages.assemble_gate(
-            body, self.ledger, charts=self._loaded_charts(), allowed_domains=self.allowed_domains
+            body,
+            self.ledger,
+            charts=self._loaded_charts(),
+            allowed_domains=self.allowed_domains,
+            loop_doctrine=self.loop_doctrine,
         )
         self.paper_path.write_text(body, encoding="utf-8")
         # A warning is not a failure. Filing both under one key made a short

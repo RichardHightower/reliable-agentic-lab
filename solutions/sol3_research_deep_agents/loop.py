@@ -86,6 +86,7 @@ def run_paper(args) -> int:
         ingest_brain=Path(args.ingest_brain) if args.ingest_brain else None,
         require_approval=args.approve,
         resume=args.resume,
+        loop_doctrine=args.loop_doctrine,
     )
     try:
         return run.run()
@@ -143,6 +144,14 @@ def main(argv: list[str] | None = None) -> int:
         "--debug",
         action="store_true",
         help="stream parent-graph and delegated-subgraph diagnostics to stderr (live runs only)",
+    )
+    paper_args.add_argument(
+        "--loop-doctrine",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="bind the repo's own exit-order question and grade it. Off by "
+        "default; on for the seminar's own loop-engineering paper. "
+        "--no-loop-doctrine turns it back off after a Taskfile default.",
     )
     args = parser.parse_args(argv)
 

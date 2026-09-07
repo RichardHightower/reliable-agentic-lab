@@ -546,6 +546,17 @@ def test_bind_exit_doctrine_still_exists_for_the_commissioning_brief():
     assert bound["questions"][0]["text"] == t.EXIT_DOCTRINE_QUESTION
 
 
+def test_bind_exit_doctrine_is_a_no_op_when_the_flag_is_off():
+    """#406: `enforce_loop_doctrine` is the one switch. Off, the question is
+    never bound, whoever calls this."""
+    plan = {
+        "sections": [{"id": "problem"}],
+        "questions": [{"id": "q1", "text": "other", "section": "problem"}],
+    }
+    bound = t.bind_exit_doctrine(dict(plan), enforce_loop_doctrine=False)
+    assert bound == plan
+
+
 def test_each_turn_declares_the_scope_it_may_write(work):
     backend = Backend([result(structured={"language": "mermaid", "source": "", "caption": ""})])
     t.SdkTurns(backend=backend, work_dir=work).diagram("pipeline", "c")

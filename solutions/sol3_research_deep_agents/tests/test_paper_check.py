@@ -76,6 +76,29 @@ def test_exit_doctrine_is_local_not_the_first_terms_in_the_whole_paper():
     assert "exit_doctrine" not in gate(body, URLS).signature()
 
 
+def test_exit_doctrine_is_opt_in_off_by_default_for_any_other_topic():
+    """#406: the doctrine is the seminar's own topic, not every paper's."""
+    creatine = (
+        "# Creatine and lean mass\n\n"
+        "## Abstract\n\nCreatine plausibly protects lean mass in a deficit. [1]\n\n"
+        "## Introduction\n\nA calorie deficit risks lean mass loss during training. [1]\n\n"
+        "## Limitations\n\nTrial evidence is thin. [2]\n\n"
+        "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
+    )
+    off = gate(creatine, URLS, loop_doctrine=False)
+    assert "exit_doctrine" not in [c.name for c in off.checks]
+    assert off.passed, off.report()
+
+    on = gate(creatine, URLS, loop_doctrine=True)
+    assert "exit_doctrine" in on.signature()
+
+
+def test_exit_doctrine_still_grades_the_recorded_topic_with_the_flag_on():
+    """Flag on is unchanged: the seminar's own paper still names the order
+    and still passes the row."""
+    assert "exit_doctrine" not in gate(GOOD, URLS, loop_doctrine=True).signature()
+
+
 def test_limitations_cannot_deny_a_cited_official_langgraph_page():
     contradiction = GOOD.replace(
         "This paper measures two runtimes only.",

@@ -26,6 +26,21 @@ def test_cost_beats_max_turns():
     assert stop["reason"] == "cost"
 
 
+def test_loop_doctrine_defaults_off(tmp_path):
+    """#406: the seminar's own topic is opt-in for every other topic."""
+    import research  # noqa: PLC0415
+
+    fixtures = Path(__file__).resolve().parents[1] / "fixtures" / "paper"
+    run = paper.Paper(
+        topic="anything",
+        runner=paper.FixtureRunner(fixtures / "replies.json"),
+        backend=research.FixtureBackend(fixtures / "research.json"),
+        work_dir=tmp_path,
+        quiet=True,
+    )
+    assert run.loop_doctrine is False
+
+
 def test_max_turns_is_the_last_exit():
     stop = paper.check_stop(done=False, spent_usd=0.0, max_usd=5.0, exhausted=True)
     assert stop["reason"] == "max turns"
@@ -171,6 +186,186 @@ def test_the_live_planner_file_is_the_plan_not_its_tool_receipt(offline, run_dir
 
     assert result.artifacts["questions"] == 3
     assert offline.plan["title"] == expected["title"]
+
+
+CREATINE_PLAN = {
+    "title": "Creatine supplementation for preventing muscle loss during a calorie deficit",
+    "audience": "sports nutrition researchers",
+    "questions": [
+        {
+            "id": "q1",
+            "subject": "mechanism",
+            "question": "What dosing protocol saturates intramuscular phosphocreatine?",
+            "check": "a loading and maintenance dose with a citation",
+            "important": True,
+        },
+        {
+            "id": "q2",
+            "subject": "baseline-loss",
+            "question": "What percentage of lean mass is typically lost during a calorie deficit?",
+            "check": "a named study",
+            "important": True,
+        },
+        {
+            "id": "q3",
+            "subject": "trials",
+            "question": "What RCTs measured lean mass retention with creatine during a deficit?",
+            "check": "a named RCT",
+            "important": False,
+        },
+    ],
+    "sections": [
+        {
+            "heading": "Abstract",
+            "objective": "State the thesis, the evidence behind it, and the limit, in one paragraph.",
+            "abstract": "Creatine plausibly protects lean mass during a deficit; this reviews the evidence.",
+            "key_questions": ["what does this paper claim", "what evidence supports it"],
+        },
+        {
+            "heading": "Introduction",
+            "objective": "Name the problem, who has it, and what this paper settles about it.",
+            "abstract": "Resistance-trained people cutting calories risk losing muscle alongside fat.",
+            "key_questions": ["who faces this problem", "what does this paper settle"],
+        },
+        {
+            "heading": "Mechanism of Creatine Action",
+            "objective": "Explain phosphocreatine buffering and its dosing protocol.",
+            "abstract": "Creatine raises intramuscular phosphocreatine, supporting training volume.",
+            "key_questions": [
+                "What dosing protocol saturates intramuscular phosphocreatine?",
+                "how does phosphocreatine buffering work",
+            ],
+        },
+        {
+            "heading": "Trial Evidence",
+            "objective": "Present named RCTs and their effect sizes.",
+            "abstract": "A small set of controlled trials directly test creatine during a deficit.",
+            "key_questions": [
+                "What RCTs measured lean mass retention with creatine during a deficit?",
+                "What percentage of lean mass is typically lost during a calorie deficit?",
+            ],
+        },
+        {
+            "heading": "Limitations",
+            "objective": "Name what this review does not settle.",
+            "abstract": "Trial evidence directly on a deficit is thin.",
+            "key_questions": ["where does the evidence run out", "what is understudied"],
+        },
+        {
+            "heading": "References",
+            "objective": "List every source the body cites, in citation order.",
+            "abstract": "Generated from the evidence ledger.",
+            "key_questions": ["which sources does the body cite", "which of them are primary"],
+        },
+    ],
+    "diagrams": [
+        {
+            "name": "phosphocreatine-pathway",
+            "kind": "mermaid",
+            "shows": "the pathway from creatine ingestion to phosphocreatine saturation",
+        }
+    ],
+    "notes": ["no prior research found on this topic"],
+}
+
+
+def test_stage_assemble_passes_the_doctrine_flag_to_assemble_gate(run_dir, stub_renderer, monkeypatch):
+    """#406: `stage_assemble` must forward `self.loop_doctrine`, not the
+    default, or a run built with the flag off would still be graded on it."""
+    from conftest import build_run  # noqa: PLC0415
+
+    seen = {}
+    real_assemble_gate = stages.assemble_gate
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real_assemble_gate(*args, **kwargs)
+
+    monkeypatch.setattr(stages, "assemble_gate", spy)
+
+    run = build_run(run_dir, loop_doctrine=False)
+    assert run.run() == 0
+    assert seen["loop_doctrine"] is False
+
+
+def test_stage_plan_does_not_force_the_doctrine_question_when_the_flag_is_off(run_dir, stub_renderer):
+    """#406: off, a plan for a topic with nothing to do with this repo is
+    accepted as written, with no forced first question."""
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    class Runner(paper.FixtureRunner):
+        def ask(self, role, prompt):
+            if role == "planner":
+                return paper.Reply(data=dict(CREATINE_PLAN))
+            return super().ask(role, prompt)
+
+    run = build_run(run_dir, runner=Runner(FIXTURES / "replies.json"), loop_doctrine=False)
+
+    run.stage_plan()  # must not raise
+
+    assert run.plan["questions"][0]["question"] != stages.EXIT_DOCTRINE_QUESTION
+    doctrine_words = ("exit", "cost", "max turns")
+    for section in run.plan["sections"]:
+        heading = section.get("heading", "").lower()
+        text = " ".join(section.get("key_questions") or []).lower()
+        assert not any(word in heading for word in doctrine_words), section
+        assert not any(word in text for word in doctrine_words), section
+
+
+class RecordingPlannerRunner(paper.FixtureRunner):
+    """Records every prompt the planner role saw, and answers normally."""
+
+    def __init__(self, path):
+        super().__init__(path)
+        self.planner_prompts: list[str] = []
+
+    def ask(self, role, prompt):
+        if role == "planner":
+            self.planner_prompts.append(prompt)
+        return super().ask(role, prompt)
+
+
+def _plan_run(topic: str, loop_doctrine: bool, work_dir) -> paper.Paper:
+    import research  # noqa: PLC0415
+    from conftest import FIXTURES  # noqa: PLC0415
+
+    return paper.Paper(
+        topic=topic,
+        runner=RecordingPlannerRunner(FIXTURES / "replies.json"),
+        backend=research.FixtureBackend(FIXTURES / "research.json"),
+        work_dir=work_dir,
+        quiet=True,
+        loop_doctrine=loop_doctrine,
+    )
+
+
+def test_stage_plan_requires_the_first_question_at_the_prompt_seam_only_when_on(
+    run_dir, stub_renderer
+):
+    """#406: the skill no longer hard-codes the doctrine question. Python
+    names it in the delegation message, and only when the flag is on."""
+    off_run = _plan_run("Creatine and lean mass", False, run_dir)
+    off_run.stage_plan()
+    off_prompt = off_run.runner.planner_prompts[0]
+    assert "Required first question" not in off_prompt
+    assert "exit" not in off_prompt.lower()
+    assert "doctrine" not in off_prompt.lower()
+
+    on_run = _plan_run(
+        "Exit conditions in production agent loops", True, run_dir.parent / "run-doctrine-on"
+    )
+    on_run.stage_plan()
+    on_prompt = on_run.runner.planner_prompts[0]
+    assert f"Required first question, exactly: {stages.EXIT_DOCTRINE_QUESTION}" in on_prompt
+
+
+def test_the_planner_skill_no_longer_hard_codes_the_doctrine_question():
+    """#406: the live planner reads this file. If it still forced the
+    question here, the flag on the Python side would not matter."""
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "planner" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert stages.EXIT_DOCTRINE_QUESTION not in skill
 
 
 def test_cost_carries_forward_across_a_resume(offline, run_dir):
@@ -658,6 +853,32 @@ def test_live_search_records_the_repo_question_without_a_model_query(offline):
         finding.subject == first["subject"] and finding.claim_ids
         for finding in offline.ledger.findings.values()
     )
+
+
+def test_the_repository_shortcut_is_never_consulted_when_the_flag_is_off(offline, monkeypatch):
+    """#406: off, even a deep_agents runner asks the researcher like any other
+    question, rather than answering the doctrine question from this repo."""
+    import research  # noqa: PLC0415
+
+    offline.loop_doctrine = False
+    offline.stage_plan()
+    delegated = offline.runner
+
+    class LiveLikeRunner:
+        name = "deep_agents"
+
+        def ask(self, role, prompt):
+            return delegated.ask(role, prompt)
+
+    offline.runner = LiveLikeRunner()
+    calls = []
+    monkeypatch.setattr(
+        research, "repository_doctrine_report", lambda q: calls.append(q) or None
+    )
+
+    offline.stage_search()
+
+    assert not calls, "the repository shortcut must not fire when the flag is off"
 
 
 # -- the money exit, and the turn log ---------------------------------------

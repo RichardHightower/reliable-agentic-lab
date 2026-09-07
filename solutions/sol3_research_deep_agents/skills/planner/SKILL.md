@@ -25,15 +25,12 @@ Good: "What is the documented context window limit for the Claude Agent SDK
 subagent, and where is it stated?" Check: "a version number and a URL on an
 official docs page".
 
-## The first question is not optional
+## The first question, when one is required
 
-Make question one exactly:
-
-> What three exits does this repo's paper loop check, and in what order?
-
-Its answer must cite this repository. The paper teaches the local doctrine:
-`done`, then `cost`, then `max turns`. Do not replace that question with a
-generic vendor-runtime question.
+The delegation message sometimes names a required first question, word for
+word, quoted after "Required first question, exactly:". When it does, make
+question one exactly that text, unchanged. When it does not, plan the first
+question from the topic like any other.
 
 ## Mark what matters
 
@@ -67,10 +64,10 @@ Every section is an object, never a bare heading string. Write four fields:
 | `abstract` | two or three sentences saying what the section argues |
 | `key_questions` | at least two of your own questions, the ones this section answers |
 
-The objective must not restate the heading. "Explain exit conditions." fails a
+The objective must not restate the heading. "Explain the mechanism." fails a
 deterministic check, because it says nothing the heading did not already say.
-Write the point instead: "Show the three exits this loop checks, in order, and
-why the order is that one."
+Write the point instead: "Show how the mechanism produces the effect, and why
+that path is the one the evidence supports."
 
 Put each question under the section that answers it. Nothing reassigns them
 later, and a question filed under an unrelated heading is what the plan judge
@@ -99,10 +96,10 @@ Write `plan.json` exactly:
   ],
   "sections": [
     {
-      "heading": "Exit conditions",
-      "objective": "Show the three exits this loop checks, in order, and why the order is that one.",
-      "abstract": "Done, then cost, then max turns. Each one is arithmetic, not a model's opinion.",
-      "key_questions": ["what three exits does the loop check", "what happens when none is set"]
+      "heading": "Mechanism",
+      "objective": "Explain the mechanism behind the effect, and cite the source that documents it.",
+      "abstract": "State the mechanism in one or two sentences, then the evidence that supports it.",
+      "key_questions": ["what causes the effect", "what evidence documents the mechanism"]
     }
   ],
   "diagrams": [{"name": "kebab-name", "kind": "mermaid", "shows": "..."}],

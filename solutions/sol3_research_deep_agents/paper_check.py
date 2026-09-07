@@ -351,6 +351,7 @@ def check(
     charts=None,
     allowed_domains=None,
     located: list[str] | None = None,
+    loop_doctrine: bool = True,
 ) -> PaperScore:
     """Score a white paper. Every check here is arithmetic."""
     words_needed = MIN_WORDS if min_words is None else min_words
@@ -444,15 +445,18 @@ def check(
         )
     )
 
-    checks.append(
-        Check(
-            "exit_doctrine",
-            has_exit_doctrine(body),
-            "the body names done, then cost, then max turns"
-            if has_exit_doctrine(body)
-            else "name done, then cost, then max turns in that order",
+    # The seminar's own topic, not a property every paper has. Off, no paper
+    # is held to a doctrine that has nothing to do with its subject.
+    if loop_doctrine:
+        checks.append(
+            Check(
+                "exit_doctrine",
+                has_exit_doctrine(body),
+                "the body names done, then cost, then max turns"
+                if has_exit_doctrine(body)
+                else "name done, then cost, then max turns in that order",
+            )
         )
-    )
 
     checks.append(
         Check(
