@@ -64,6 +64,45 @@ def test_a_reply_with_no_json_fails_the_gate():
         stages.parse_json("no object here")
 
 
+# A shortened stand-in for the recorded #407 truncated outline_editor reply:
+# an opening fence and a valid start, then a stop mid-section with no
+# balanced close and no closing fence.
+TRUNCATED_JSON = (
+    '```json\n{\n  "title": "T",\n  "sections": [\n'
+    '    {"heading": "A", "figures": [],'
+)
+
+
+def test_parse_json_still_raises_on_a_cut_off_reply():
+    """No behavior change here. Only the caller's log line changes (#407)."""
+    with pytest.raises(GateFailed):
+        stages.parse_json(TRUNCATED_JSON)
+
+
+def test_reply_was_truncated_flags_an_unbalanced_open_brace():
+    assert stages.reply_was_truncated(TRUNCATED_JSON)
+
+
+def test_reply_was_truncated_leaves_a_non_json_reply_alone():
+    assert not stages.reply_was_truncated("sorry, I cannot do that")
+
+
+def test_reply_was_truncated_leaves_a_complete_reply_alone():
+    assert not stages.reply_was_truncated('```json\n{"a": 1}\n```')
+
+
+def test_reply_was_truncated_ignores_a_brace_inside_a_string_value():
+    """A claim's own prose can carry a stray `{`. Only structural braces
+    count."""
+    complete = '{"title": "T", "abstract": "the loop uses { and } for scope"}'
+    assert not stages.reply_was_truncated(complete)
+
+
+def test_reply_was_truncated_ignores_a_brace_inside_a_complete_fenced_reply():
+    complete = '```json\n{"title": "T", "note": "a config like {\\"a\\": 1}"}\n```'
+    assert not stages.reply_was_truncated(complete)
+
+
 # -- 1. plan ---------------------------------------------------------------
 
 

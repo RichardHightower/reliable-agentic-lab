@@ -904,7 +904,10 @@ class Paper:
         try:
             edited = self._json_reply("outline_editor", reply)
         except GateFailed as exc:
-            self.say(f"  outline editor returned no outline: {exc}")
+            if stages.reply_was_truncated(reply.text):
+                self.say(f"  outline editor reply was cut off at {len(reply.text)} characters")
+            else:
+                self.say(f"  outline editor returned no outline: {exc}")
             return None, usd
         if not isinstance(edited, dict):
             return None, usd
@@ -941,15 +944,33 @@ class Paper:
         if not judged_path.exists() or self.resume:
             previous: tuple[str, ...] | None = None
             rounds = max(1, int(self.outline_judge_rounds))
+            # A pack with zero hits cannot support or contradict any claim
+            # this outline makes, so `corpus_fit` against it is re-filed as
+            # `flow` below. Checked once: the pack does not change between
+            # judge rounds. A missing brain-pack.json also reads as empty,
+            # which is harmless now that the finding is relabeled rather
+            # than dropped.
+            pack_empty = not self._pack_hits()
             for round_no in range(1, rounds + 1):
                 reply = self._ask(
                     "outline_judge",
                     "Grade this outline against logical flow, completeness, titles, "
-                    "and corpus_fit. Do not re-litigate Python's validator.\n"
+                    "and corpus_fit. Do not re-litigate Python's validator."
+                    + (
+                        " The corpus pack is empty for this topic, so corpus_fit "
+                        "passes by definition; do not fail it for that."
+                        if pack_empty
+                        else ""
+                    )
+                    + "\n"
                     + outlines.for_judge(drafted),
                 )
                 usd += reply.usd
                 verdict = self._json_reply("outline_judge", reply)
+                if pack_empty:
+                    verdict, refiled = outlines.refile_corpus_fit(verdict)
+                    if refiled:
+                        self.say("    outline judge: corpus_fit refiled as flow, the pack is empty")
                 (self.work_dir / "outline-verdict.json").write_text(
                     json.dumps(verdict, indent=2) + "\n", encoding="utf-8"
                 )

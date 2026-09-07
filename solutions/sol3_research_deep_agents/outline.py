@@ -534,3 +534,44 @@ def judge_signature(verdict: dict) -> tuple[str, ...]:
         }
     )
     return tuple(rules) if rules else ("outline",)
+
+
+CORPUS_FIT_REFILE_PREFIX = (
+    "Filed by the judge as corpus_fit; the pack is empty, so it is graded as flow: "
+)
+
+
+def refile_corpus_fit(verdict: dict) -> tuple[dict, bool]:
+    """Re-file every `corpus_fit` blocking issue as `flow`, keeping its detail.
+
+    An empty corpus pack has no claims to agree or disagree with, so a
+    `corpus_fit` verdict against it is not really a corpus complaint. What the
+    judge found can still be real, though: a recorded run's `corpus_fit`
+    detail against an empty pack was actually a claims-to-support mismatch, a
+    genuine coherence defect the judge filed under the wrong rule for lack of
+    a better one. Dropping it lost a real finding; re-filing it as `flow`
+    keeps the finding, the detail, and the editor's chance to fix it. Only the
+    label was wrong.
+
+    The caller checks the pack is actually empty before calling this; a pack
+    with hits still grades `corpus_fit` the normal way, unrelabeled.
+
+    Returns the verdict unchanged, and `False`, when there was no
+    `corpus_fit` issue to refile. `passed` is left exactly as the judge set
+    it: refiling a row never turns a fail into a pass on its own.
+    """
+    issues = verdict.get("blocking_issues") or []
+    if not any(isinstance(issue, dict) and issue.get("rule") == "corpus_fit" for issue in issues):
+        return verdict, False
+    refiled = dict(verdict)
+    refiled["blocking_issues"] = [
+        {
+            **issue,
+            "rule": "flow",
+            "detail": CORPUS_FIT_REFILE_PREFIX + str(issue.get("detail") or ""),
+        }
+        if isinstance(issue, dict) and issue.get("rule") == "corpus_fit"
+        else issue
+        for issue in issues
+    ]
+    return refiled, True

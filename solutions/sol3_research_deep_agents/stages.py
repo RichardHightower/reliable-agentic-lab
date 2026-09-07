@@ -100,6 +100,28 @@ def parse_json(text: str) -> dict:
         raise GateFailed(f"the JSON did not parse: {exc}.", ("bad_json",)) from exc
 
 
+def reply_was_truncated(text: str) -> bool:
+    """A reply that stopped mid-object rather than one that was never JSON.
+
+    `parse_json` raises the same error for both: a model that answered in
+    prose, and a model that hit its output ceiling three sections into a
+    JSON object. The two need different retries, so tell them apart by
+    counting braces. A generation cut off mid-object always leaves more `{`
+    than `}`; a reply that was simply never JSON, or one with a stray typo,
+    almost never does. An opening fence with no closing fence is the other
+    tell: the model stopped before it could close its own code block.
+    """
+    fenced = FENCED_JSON.search(text)
+    body = fenced.group(1) if fenced else text
+    if body.find("{") < 0:
+        return False
+    # A brace inside a quoted string value is not structural. Blank out every
+    # string literal first, or a claim's own prose ("the loop uses { and }")
+    # reads as an unclosed object.
+    stripped = re.sub(r'"(?:\\.|[^"\\])*"', '""', body)
+    return stripped.count("{") > stripped.count("}")
+
+
 # -- 1. plan --------------------------------------------------------------
 
 
