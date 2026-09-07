@@ -176,6 +176,9 @@ def build_run(work_dir: Path, **kwargs):
         backend=research.FixtureBackend(FIXTURES / "research.json"),
         work_dir=work_dir,
         quiet=True,
+        # The recorded fixture is the seminar's own loop paper, so it keeps
+        # the doctrine question and grade a caller does not explicitly drop.
+        loop_doctrine=kwargs.pop("loop_doctrine", True),
         **kwargs,
     )
 

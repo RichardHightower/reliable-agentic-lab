@@ -9,6 +9,7 @@ import load_agents
 import outline as outlines
 import paper
 import pytest
+import turns as t
 
 
 def sample_section(sid="s1", heading="The problem", **over):
@@ -436,6 +437,37 @@ def test_doctrine_is_off_by_default(work, turns):
     names = [row["name"] for row in score["checks"]]
     assert "doctrine" not in names
     assert "outline_coverage" in names
+
+
+def test_doctrine_still_grades_the_paper_when_the_flag_is_on(work, turns):
+    """#406: `enforce_loop_doctrine` is the one switch. On, the row is still
+    graded, unchanged from before the off-by-default flag existed."""
+    run = make_run(work, turns(), enforce_loop_doctrine=True)
+    paper.prior_art(run)
+    paper.do_outline(run)
+    paper.do_research(run)
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    score = paper.check(run)
+    names = [row["name"] for row in score["checks"]]
+    assert "doctrine" in names
+
+
+def test_the_offline_recorded_outline_still_carries_the_doctrine_question():
+    """The recorded fixture (`OfflineTurns`, the offline backend `task run
+    --backend fixture` uses) is topic-agnostic: it hardcodes the doctrine
+    question into its first section regardless of the check-time flag."""
+    import research  # noqa: PLC0415
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
+    offline = t.OfflineTurns(backend=research.FixtureBackend(fixture))
+    drafted = offline.outline("a topic", "")
+    all_questions = " ".join(
+        question for section in drafted["sections"] for question in section.get("key_questions", [])
+    )
+    assert t.EXIT_DOCTRINE_QUESTION in all_questions
 
 
 # -- corpus references ------------------------------------------------------

@@ -48,6 +48,16 @@ GRAPH_MAX_TOKENS = 4_096
 # E2E. Section prompts ask for 400 to 1200 words; the transport ceiling
 # must accommodate the writer's larger structured turn as well.
 WRITER_MAX_TOKENS = 4_096
+# The planner writes plan.json and the outline editor re-emits the whole
+# outline every round; `outlines.judge_signature` gives it no way to send back
+# only the changed section. A recorded live run truncated an outline_editor
+# reply at 8,451 characters inside the shared 4,096-token `GRAPH_MAX_TOKENS`
+# ceiling while restating a 9-section, 10,571-byte outline: about 2.1
+# characters per token for JSON this densely keyed, well under prose's usual
+# 4. Doubling the ceiling for just these two roles leaves room for eight or
+# more sections without raising it for every other, much smaller, structured
+# reply (a judge verdict, a research finding, a chart spec).
+OUTLINE_MAX_TOKENS = 8_192
 MODEL_TIMEOUT_SECONDS = 120
 MODEL_MAX_RETRIES = 0
 
@@ -85,6 +95,11 @@ def bounded_model(model: str, *, max_tokens: int):
 def bounded_writer_model(model: str):
     """Bound both the writer's prose and its larger structured outline turn."""
     return bounded_model(model, max_tokens=WRITER_MAX_TOKENS)
+
+
+def bounded_outline_model(model: str):
+    """Bound the planner and the outline editor, which both re-emit a whole outline."""
+    return bounded_model(model, max_tokens=OUTLINE_MAX_TOKENS)
 
 RESEARCHER_RESPONSE = {
     "type": "object",
@@ -626,7 +641,9 @@ def build_agent(  # noqa: PLR0913  (one keyword per wiring point)
         if spec["name"] == "writer":
             item["model"] = writer_model
         elif spec["name"] == "outline-editor":
-            item["model"] = bounded_model(EDITOR_MODEL, max_tokens=GRAPH_MAX_TOKENS)
+            item["model"] = bounded_outline_model(EDITOR_MODEL)
+        elif spec["name"] == "planner":
+            item["model"] = bounded_outline_model(model)
         subagents.append(item)
 
     memory = ["/memory/AGENTS.md"] if MEMORY_FILE.exists() else None
@@ -703,13 +720,19 @@ def build_paper_agents(  # noqa: PLR0913 (the dependencies are deliberate wiring
     )
     runtime_model = bounded_model(model, max_tokens=GRAPH_MAX_TOKENS)
     writer_model = bounded_writer_model(model)
+    outline_model = bounded_outline_model(model)
     agents: dict[str, object] = {}
     for spec in subagents_for(
         contract, loop, backend, docs_backend=docs_backend, budget=budget, repo=root, brain=brain
     ):
         item = dict(spec)
         permissions = _as_permissions(spec["permissions"])
-        role_model = writer_model if spec["name"] == "writer" else runtime_model
+        if spec["name"] == "writer":
+            role_model = writer_model
+        elif spec["name"] in ("planner", "outline-editor"):
+            role_model = outline_model
+        else:
+            role_model = runtime_model
         agents[spec["name"].replace("-", "_")] = create_deep_agent(
             model=role_model,
             system_prompt=spec["system_prompt"],

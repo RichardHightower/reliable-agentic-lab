@@ -92,6 +92,46 @@ def test_paper_debug_flag_reaches_the_paper_builder(monkeypatch):
     assert seen["debug"] is True
 
 
+def test_loop_doctrine_flag_reaches_the_paper_builder(monkeypatch):
+    """#406: off unless the operator passes it."""
+    seen = {}
+
+    class Run:
+        def run(self):
+            return 0
+
+    monkeypatch.setattr(loop, "second_brain", lambda: None)
+    monkeypatch.setattr("paper.build", lambda topic, **kwargs: (seen.update(topic=topic, **kwargs), Run())[1])
+
+    assert loop.main(["--paper", "--topic", "creatine and lean mass"]) == 0
+    assert seen["loop_doctrine"] is False
+
+    seen.clear()
+    assert loop.main(["--paper", "--topic", "loop engineering", "--loop-doctrine"]) == 0
+    assert seen["loop_doctrine"] is True
+
+
+def test_no_loop_doctrine_wins_after_loop_doctrine(monkeypatch):
+    """A Taskfile default of --loop-doctrine must still be overridable per
+    invocation: the last flag on the line wins."""
+    seen = {}
+
+    class Run:
+        def run(self):
+            return 0
+
+    monkeypatch.setattr(loop, "second_brain", lambda: None)
+    monkeypatch.setattr("paper.build", lambda topic, **kwargs: (seen.update(topic=topic, **kwargs), Run())[1])
+
+    assert (
+        loop.main(
+            ["--paper", "--topic", "creatine and lean mass", "--loop-doctrine", "--no-loop-doctrine"]
+        )
+        == 0
+    )
+    assert seen["loop_doctrine"] is False
+
+
 def test_the_second_brain_is_never_required(monkeypatch):
     monkeypatch.setenv("SECOND_BRAIN", "/definitely/not/here")
     assert loop.second_brain() is None

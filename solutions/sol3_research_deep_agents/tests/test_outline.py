@@ -297,11 +297,12 @@ def test_a_single_section_is_never_dropped():
 class EditorRunner(paper.FixtureRunner):
     """Records what the editor was asked, and answers with a narrow repair."""
 
-    def __init__(self, path, *, reply=None, boom=False):
+    def __init__(self, path, *, reply=None, boom=False, raw_text=None):
         super().__init__(path)
         self.asked: list[tuple[str, str]] = []
         self.reply = reply
         self.boom = boom
+        self.raw_text = raw_text
 
     def ask(self, role, prompt):
         self.asked.append((role, prompt))
@@ -309,6 +310,11 @@ class EditorRunner(paper.FixtureRunner):
             return super().ask(role, prompt)
         if self.boom:
             raise RuntimeError("the editor is unavailable")
+        if self.raw_text is not None:
+            # No `response_format` binds this role. A live reply that hit its
+            # output ceiling comes back as unstructured, unbalanced text, not
+            # as `data`.
+            return paper.Reply(text=self.raw_text, data=None, usd=0.25)
         return paper.Reply(text="", data=self.reply, usd=0.25)
 
 
@@ -374,6 +380,36 @@ def test_an_editor_that_raises_does_not_lose_the_round(run_dir, stub_renderer):
     edited, usd = run._edit_outline(drafted, failing_verdict())
     assert edited is None
     assert usd == 0.0
+
+
+# A shortened stand-in for the recorded truncated reply (#407): an opening
+# fence and a valid outline, then a stop mid-section with no balanced close
+# and no closing fence.
+TRUNCATED_EDITOR_REPLY = (
+    '```json\n{\n  "title": "T",\n  "sections": [\n'
+    '    {"heading": "A", "objective": "o", "abstract": "a", '
+    '"key_questions": ["q1", "q2"], "figures": [],'
+)
+
+
+def test_a_cut_off_editor_reply_is_named_as_such(run_dir, stub_renderer, capsys):
+    """The old message, 'the reply held no JSON object', blamed the parser for
+    a ceiling problem. #407 names the ceiling instead."""
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    runner = EditorRunner(FIXTURES / "replies.json", raw_text=TRUNCATED_EDITOR_REPLY)
+    run = build_run(run_dir, runner=runner)
+    run.run()
+    drafted = judged_outline(run_dir)
+    run.quiet = False
+
+    edited, usd = run._edit_outline(drafted, failing_verdict())
+
+    assert edited is None
+    assert usd == 0.25, "a cut-off reply is still counted as an editor miss, same as any other"
+    out = capsys.readouterr().out
+    assert f"outline editor reply was cut off at {len(TRUNCATED_EDITOR_REPLY)} characters" in out
+    assert "the reply held no JSON object" not in out
 
 
 def test_the_editor_holds_no_write_path():
@@ -470,3 +506,185 @@ def test_a_repaired_outline_is_rejudged_without_replanning(run_dir, stub_rendere
     assert (pathlib.Path(run_dir) / "outline.approved.json").exists()
     written = json.loads((pathlib.Path(run_dir) / "outline.json").read_text())
     assert written["sections"][0]["objective"] == "Repaired by the editor."
+
+
+# -- corpus_fit on an empty pack (#407) --------------------------------------
+
+
+def _corpus_fit_only_verdict():
+    return {
+        "passed": False,
+        "score": 0.5,
+        "blocking_issues": [
+            {"rule": "corpus_fit", "detail": "claims_to_support do not match the pack"}
+        ],
+        "actionable_changes": [],
+    }
+
+
+def _corpus_fit_and_flow_verdict():
+    return {
+        "passed": False,
+        "score": 0.2,
+        "blocking_issues": [
+            {"rule": "corpus_fit", "detail": "claims_to_support do not match the pack"},
+            {"rule": "flow", "detail": "section 2 wanders off topic"},
+        ],
+        "actionable_changes": ["Keep section 2 on topic."],
+    }
+
+
+def _brain_with_a_hit(tmp_path):
+    """One claim whose text overlaps the fixture topic, so the pack is not empty."""
+    root = tmp_path / "cabinet"
+    claims = root / "research" / "claims"
+    claims.mkdir(parents=True, exist_ok=True)
+    text = "A production agent loop names its own exit conditions before it stops."
+    (claims / "claim.exits.1.md").write_text(
+        '---\ntype: "Claim"\nid: "claim.exits.1"\n'
+        f'description: "{text}"\nconfidence: 0.9\n---\n\n# Claim\n\n{text}\n',
+        encoding="utf-8",
+    )
+    return root
+
+
+class JudgeRunner(paper.FixtureRunner):
+    """Always answers `outline_judge` with one fixed verdict. Records roles."""
+
+    def __init__(self, path, verdict):
+        super().__init__(path)
+        self.verdict = verdict
+        self.roles: list[str] = []
+
+    def ask(self, role, prompt):
+        self.roles.append(role)
+        if role == "outline_judge":
+            return paper.Reply(text="", data=dict(self.verdict), usd=0.1)
+        return super().ask(role, prompt)
+
+
+def test_corpus_fit_is_refiled_as_flow_on_an_empty_pack(run_dir, stub_renderer):
+    """No brain, no hits: a corpus_fit-only verdict is still a fail. Python
+    relabels the row `flow`, keeps the detail, and it still reaches the
+    editor, unlike a row that was simply dropped."""
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    class Runner(paper.FixtureRunner):
+        def __init__(self, path):
+            super().__init__(path)
+            self.editor_prompts: list[str] = []
+
+        def ask(self, role, prompt):
+            if role == "outline_judge":
+                return paper.Reply(text="", data=_corpus_fit_only_verdict(), usd=0.1)
+            if role == "outline_editor":
+                self.editor_prompts.append(prompt)
+                raise RuntimeError("stop short of a real edit; only the prompt matters here")
+            return super().ask(role, prompt)
+
+    runner = Runner(FIXTURES / "replies.json")
+    run = build_run(run_dir, runner=runner)
+    run.outline_judge_rounds = 2
+    run.stage_corpus("")
+
+    with pytest.raises(paper.OutlineRejected):
+        run.stage_plan("")
+
+    verdict = json.loads((pathlib.Path(run_dir) / "outline-verdict.json").read_text())
+    assert verdict["passed"] is False
+    assert [issue["rule"] for issue in verdict["blocking_issues"]] == ["flow"]
+    detail = verdict["blocking_issues"][0]["detail"]
+    assert detail.startswith("Filed by the judge as corpus_fit")
+    assert "claims_to_support do not match the pack" in detail
+
+    assert runner.editor_prompts, "the refiled finding must still reach the editor"
+    assert "claims_to_support do not match the pack" in runner.editor_prompts[0]
+
+
+def test_corpus_fit_still_fails_against_a_pack_with_hits(run_dir, tmp_path, stub_renderer):
+    """The same verdict, against a pack the corpus actually populated, is
+    graded the normal way: it still fails."""
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    brain = _brain_with_a_hit(tmp_path)
+    runner = JudgeRunner(FIXTURES / "replies.json", _corpus_fit_only_verdict())
+    run = build_run(run_dir, runner=runner, brains=[brain])
+    run.outline_judge_rounds = 1
+    run.stage_corpus("")
+    assert run._pack_hits(), "the fixture brain must actually produce a hit"
+
+    with pytest.raises(paper.OutlineRejected):
+        run.stage_plan("")
+
+    verdict = json.loads((pathlib.Path(run_dir) / "outline-verdict.json").read_text())
+    assert verdict["passed"] is False
+    assert [issue["rule"] for issue in verdict["blocking_issues"]] == ["corpus_fit"]
+
+
+def test_a_real_flow_issue_survives_refiling_the_corpus_fit_issue(run_dir, stub_renderer):
+    """Refiling relabels only the corpus_fit row. A flow issue the judge
+    already filed correctly reaches the editor untouched, alongside it."""
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    class Runner(paper.FixtureRunner):
+        def __init__(self, path):
+            super().__init__(path)
+            self.editor_prompts: list[str] = []
+
+        def ask(self, role, prompt):
+            if role == "outline_judge":
+                return paper.Reply(text="", data=_corpus_fit_and_flow_verdict(), usd=0.1)
+            if role == "outline_editor":
+                self.editor_prompts.append(prompt)
+                raise RuntimeError("stop short of a real edit; only the prompt matters here")
+            return super().ask(role, prompt)
+
+    runner = Runner(FIXTURES / "replies.json")
+    run = build_run(run_dir, runner=runner)
+    run.outline_judge_rounds = 2
+    run.stage_corpus("")
+
+    with pytest.raises(paper.OutlineRejected):
+        run.stage_plan("")
+
+    verdict = json.loads((pathlib.Path(run_dir) / "outline-verdict.json").read_text())
+    assert [issue["rule"] for issue in verdict["blocking_issues"]] == ["flow", "flow"]
+    details = [issue["detail"] for issue in verdict["blocking_issues"]]
+    assert any(d == "section 2 wanders off topic" for d in details)
+    refiled = [d for d in details if d.startswith("Filed by the judge as corpus_fit")]
+    assert refiled and "claims_to_support do not match the pack" in refiled[0]
+
+    assert runner.editor_prompts, "both rows must still reach the editor"
+    assert "wanders off topic" in runner.editor_prompts[0]
+    assert "claims_to_support do not match the pack" in runner.editor_prompts[0]
+
+
+def test_the_judge_prompt_names_the_empty_pack_only_when_it_is_empty(run_dir, tmp_path, stub_renderer):
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    class PromptRunner(paper.FixtureRunner):
+        def __init__(self, path):
+            super().__init__(path)
+            self.judge_prompts: list[str] = []
+
+        def ask(self, role, prompt):
+            if role == "outline_judge":
+                self.judge_prompts.append(prompt)
+                return paper.Reply(
+                    text="", data={"passed": True, "score": 1.0, "blocking_issues": [], "actionable_changes": []}
+                )
+            return super().ask(role, prompt)
+
+    empty_runner = PromptRunner(FIXTURES / "replies.json")
+    empty_run = build_run(run_dir, runner=empty_runner)
+    empty_run.stage_corpus("")
+    empty_run.stage_plan("")
+    assert "corpus_fit passes by definition" in empty_runner.judge_prompts[0]
+
+    thick_run_dir = run_dir.parent / "run-thick"
+    brain = _brain_with_a_hit(tmp_path)
+    thick_runner = PromptRunner(FIXTURES / "replies.json")
+    thick_run = build_run(thick_run_dir, runner=thick_runner, brains=[brain])
+    thick_run.stage_corpus("")
+    thick_run.stage_plan("")
+    assert "corpus_fit passes by definition" not in thick_runner.judge_prompts[0]

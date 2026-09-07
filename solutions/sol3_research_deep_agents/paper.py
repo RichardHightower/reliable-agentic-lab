@@ -435,6 +435,11 @@ class Paper:
     require_approval: bool = False
     resume: bool = False
     outline_judge_rounds: int = OUTLINE_JUDGE_ROUNDS
+    # The seminar's own paper taught this repository's exit order as its
+    # subject. Any other topic plans without it. On restores today's
+    # behavior: the doctrine question is bound, the repository answers it,
+    # and the assembled body is graded on naming it.
+    loop_doctrine: bool = False
 
     state: pstate.PaperState = field(init=False)
     ledger: evidence.Ledger = field(init=False)
@@ -824,10 +829,18 @@ class Paper:
                 if briefing
                 else ""
             )
+            # The skill only binds a first question the delegation message
+            # names. Off, the planner writes any first question the topic
+            # earns; nothing here mentions exits, cost, or max turns.
+            doctrine_note = (
+                f"\n\nRequired first question, exactly: {stages.EXIT_DOCTRINE_QUESTION}"
+                if self.loop_doctrine
+                else ""
+            )
             reply = self._ask(
                 "planner",
                 f"Topic: {self.topic}\n\nWrite plan.json for a technical white paper "
-                f"on this topic.\n{extra}{map_note}",
+                f"on this topic.\n{extra}{map_note}{doctrine_note}",
             )
             usd = reply.usd
             # The Deep Agents planner owns exactly one scoped write:
@@ -841,7 +854,7 @@ class Paper:
                 else reply.json()
             )
         self.plan = stages.normalize_plan(self.plan)
-        stages.plan_gate(self.plan)
+        stages.plan_gate(self.plan, loop_doctrine=self.loop_doctrine)
         path.write_text(json.dumps(self.plan, indent=2), encoding="utf-8")
         usd += self._approve_outline()
         self.state.record("plan", path)
@@ -891,7 +904,10 @@ class Paper:
         try:
             edited = self._json_reply("outline_editor", reply)
         except GateFailed as exc:
-            self.say(f"  outline editor returned no outline: {exc}")
+            if stages.reply_was_truncated(reply.text):
+                self.say(f"  outline editor reply was cut off at {len(reply.text)} characters")
+            else:
+                self.say(f"  outline editor returned no outline: {exc}")
             return None, usd
         if not isinstance(edited, dict):
             return None, usd
@@ -928,15 +944,33 @@ class Paper:
         if not judged_path.exists() or self.resume:
             previous: tuple[str, ...] | None = None
             rounds = max(1, int(self.outline_judge_rounds))
+            # A pack with zero hits cannot support or contradict any claim
+            # this outline makes, so `corpus_fit` against it is re-filed as
+            # `flow` below. Checked once: the pack does not change between
+            # judge rounds. A missing brain-pack.json also reads as empty,
+            # which is harmless now that the finding is relabeled rather
+            # than dropped.
+            pack_empty = not self._pack_hits()
             for round_no in range(1, rounds + 1):
                 reply = self._ask(
                     "outline_judge",
                     "Grade this outline against logical flow, completeness, titles, "
-                    "and corpus_fit. Do not re-litigate Python's validator.\n"
+                    "and corpus_fit. Do not re-litigate Python's validator."
+                    + (
+                        " The corpus pack is empty for this topic, so corpus_fit "
+                        "passes by definition; do not fail it for that."
+                        if pack_empty
+                        else ""
+                    )
+                    + "\n"
                     + outlines.for_judge(drafted),
                 )
                 usd += reply.usd
                 verdict = self._json_reply("outline_judge", reply)
+                if pack_empty:
+                    verdict, refiled = outlines.refile_corpus_fit(verdict)
+                    if refiled:
+                        self.say("    outline judge: corpus_fit refiled as flow, the pack is empty")
                 (self.work_dir / "outline-verdict.json").write_text(
                     json.dumps(verdict, indent=2) + "\n", encoding="utf-8"
                 )
@@ -1357,7 +1391,7 @@ class Paper:
             # Deep Agents researcher and its single filtered search tool.
             repository_report = (
                 research.repository_doctrine_report(question["question"])
-                if self.runner.name == "deep_agents"
+                if self.loop_doctrine and self.runner.name == "deep_agents"
                 else None
             )
             if repository_report is not None:
@@ -1863,7 +1897,11 @@ class Paper:
 
         body = brief.strip_em_dashes(body)
         score = stages.assemble_gate(
-            body, self.ledger, charts=self._loaded_charts(), allowed_domains=self.allowed_domains
+            body,
+            self.ledger,
+            charts=self._loaded_charts(),
+            allowed_domains=self.allowed_domains,
+            loop_doctrine=self.loop_doctrine,
         )
         self.paper_path.write_text(body, encoding="utf-8")
         # A warning is not a failure. Filing both under one key made a short

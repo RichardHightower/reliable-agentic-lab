@@ -253,13 +253,21 @@ def test_build_agent_passes_every_subagent_permission(fake_langchain, fake_deepa
             assert all(path.startswith("/") for path in permission.paths)
 
 
+def test_outline_max_tokens_is_wider_than_the_shared_graph_ceiling():
+    """#407: the recorded truncation happened inside `GRAPH_MAX_TOKENS`. The
+    outline-emitting roles need more room than that shared default."""
+    assert roles.OUTLINE_MAX_TOKENS > roles.GRAPH_MAX_TOKENS
+
+
 def test_build_agent_binds_the_bounded_model_to_writer_only(
     fake_langchain, fake_deepagents, tmp_path, monkeypatch
 ):
     graph_model = object()
     writer_model = object()
+    outline_model = object()
     monkeypatch.setattr(roles, "bounded_model", lambda _model, **_kwargs: graph_model)
     monkeypatch.setattr(roles, "bounded_writer_model", lambda _model: writer_model)
+    monkeypatch.setattr(roles, "bounded_outline_model", lambda _model: outline_model)
 
     roles.build_agent(None, loop="paper", repo=tmp_path)
 
@@ -267,13 +275,48 @@ def test_build_agent_binds_the_bounded_model_to_writer_only(
     assert fake_deepagents["model"] is graph_model
     assert specs["writer"]["model"] is writer_model
     # The editor also gets its own model, and a stronger one. It repairs what
-    # the judge faulted, so it has to keep pace with the judge.
-    assert specs["outline-editor"]["model"] is graph_model
+    # the judge faulted, so it has to keep pace with the judge. Both it and
+    # the planner re-emit a whole outline, so both share the wider output cap.
+    assert specs["outline-editor"]["model"] is outline_model
+    assert specs["planner"]["model"] is outline_model
     assert all(
         "model" not in specs[name]
         for name in specs
-        if name not in ("writer", "outline-editor")
+        if name not in ("writer", "outline-editor", "planner")
     )
+
+
+def test_build_paper_agents_bounds_the_outline_editor_and_planner_output(
+    fake_langchain, fake_deepagents, tmp_path, monkeypatch
+):
+    """The live per-role pipeline shares one `create_deep_agent` call site, so
+    this is the options-building seam: assert on the model roles.py computes
+    for each role, the same seam a revert of the cap would have to touch."""
+    import sys
+
+    calls = []
+
+    def recording_create(**kwargs):
+        calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(sys.modules["deepagents"], "create_deep_agent", recording_create)
+
+    outline_model = object()
+    plain_model = object()
+    monkeypatch.setattr(roles, "bounded_outline_model", lambda _model: outline_model)
+    monkeypatch.setattr(roles, "bounded_model", lambda _model, **_kwargs: plain_model)
+
+    roles.build_paper_agents(None, loop="paper", repo=tmp_path)
+
+    by_role = {
+        call["system_prompt"].split(".", 1)[0].removeprefix("You are the "): call["model"]
+        for call in calls
+    }
+    assert by_role["outline_editor"] is outline_model
+    assert by_role["planner"] is outline_model
+    assert by_role["researcher"] is plain_model
+    assert by_role["outline_judge"] is plain_model
 
 
 def test_build_paper_agents_compiles_one_direct_graph_per_role(fake_langchain, fake_deepagents, tmp_path):

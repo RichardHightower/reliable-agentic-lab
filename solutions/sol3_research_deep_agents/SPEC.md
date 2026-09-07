@@ -225,7 +225,9 @@ runs do not select it.
 
 The paper gate also requires the body to name the local three exits in order:
 `done`, then `cost`, then `max turns`. The planner's first question asks that
-exactly and must be grounded in this repository.
+exactly and must be grounded in this repository. This doctrine is opt-in
+through `--loop-doctrine`, off by default, and on for the seminar's own
+loop-engineering paper.
 
 ## Build it step by step
 

@@ -122,6 +122,19 @@ def test_the_assembler_abstract_is_not_held_to_the_section_floor():
     assert "has_body" not in score.signature(), score.report()
 
 
+def test_the_doctrine_row_is_absent_when_the_flag_is_off():
+    """#406: off by default, any topic's paper is not held to the local exit
+    doctrine, and the row is never even graded."""
+    body = (
+        "# T\n\n## Mechanism\n\n"
+        "Creatine raises intramuscular phosphocreatine stores [1].\n\n"
+        "## References\n\n1. https://docs.langchain.com/oss/python/langchain/overview\n"
+    )
+    score = checks.check(body, ["https://docs.langchain.com/oss/python/langchain/overview"])
+    assert "doctrine" not in [c.name for c in score.checks]
+    assert score.passed, score.report()
+
+
 def test_the_paper_gate_requires_done_then_cost_then_max_turns_in_figure_one():
     body = (
         "# T\n\n## Control\n\n"
