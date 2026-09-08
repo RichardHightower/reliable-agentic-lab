@@ -399,13 +399,31 @@ def glossary_host_terms(terms, allowed_domains=None) -> list[str]:
     return [term for term in terms if term.strip().lower().split("/")[0] in hosts or term.strip().lower() in hosts]
 
 
+# Irregular plurals a paper actually reaches for. The regular suffix rules
+# below cannot fold "criteria" to "criterion": neither form ends in `s`,
+# `es`, or `ies`. Checked first, both directions, so either surface form
+# folds to the singular. Copied from the SDK port, not imported.
+IRREGULAR_PLURALS = {
+    "criteria": "criterion",
+    "phenomena": "phenomenon",
+    "analyses": "analysis",
+    "hypotheses": "hypothesis",
+    "indices": "index",
+}
+_IRREGULAR_FOLD = {**IRREGULAR_PLURALS, **{singular: singular for singular in IRREGULAR_PLURALS.values()}}
+
+
 def _stem(word: str) -> str:
-    """A crude plural fold: trailing `ies` to `y`, else strip a trailing
-    `es` or `s`. Not a real stemmer, only enough that a term defined
-    singular and used plural, or the reverse, is not graded as two words.
-    Copied from the SDK port, not imported.
+    """A crude plural fold. An irregular pair folds first, from a fixed
+    table (exit criteria / exit criterion and the like). Anything else
+    folds by suffix: trailing `ies` to `y`, else strip a trailing `es` or
+    `s`. Not a real stemmer, only enough that a term defined singular and
+    used plural, or the reverse, is not graded as two words. Copied from
+    the SDK port, not imported.
     """
     word = word.lower()
+    if word in _IRREGULAR_FOLD:
+        return _IRREGULAR_FOLD[word]
     if word.endswith("ies") and len(word) > 3:
         return word[:-3] + "y"
     if word.endswith("es") and len(word) > 2:
@@ -1223,6 +1241,11 @@ def demo() -> None:
     assert glossary_unused(plural_only) == []
     self_defined = "A point about the process.\n\n## Glossary\n\n**orchestrator.** The orchestrator sequences roles.\n"
     assert glossary_unused(self_defined) == []
+
+    # Follow-up: an irregular plural is folded from a fixed table, not a
+    # suffix rule, since "criteria" does not end in s, es, or ies.
+    irregular = "The run checks one exit criterion.\n\n## Glossary\n\n**exit criteria.** What a run must clear before it stops.\n"
+    assert glossary_unused(irregular) == []
 
     print("paper_check: all demo assertions passed")
 

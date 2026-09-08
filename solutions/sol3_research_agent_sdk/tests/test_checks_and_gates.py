@@ -528,6 +528,19 @@ def test_a_plural_or_self_defined_term_does_not_fail_glossary_exact():
     assert "glossary_exact" not in checks.check(self_defined, ["https://a"], enforce_structure=True).signature()
 
 
+def test_an_irregular_plural_matches_its_singular():
+    """Follow-up from the PR #499 judge: the regular suffix fold cannot turn
+    "criteria" into "criterion", since neither ends in s, es, or ies. A
+    fixed table of irregular pairs is checked first."""
+    body = (
+        "The run checks one exit criterion [1].\n\n"
+        "## Glossary\n\n"
+        "**exit criteria.** What a run must clear before it stops.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "glossary_exact" not in checks.check(body, ["https://a"], enforce_structure=True).signature()
+
+
 def test_structural_rows_are_off_by_default():
     """`enforce_structure` defaults false, so a body carrying both glossary
     defects passes when the caller does not opt in, and an existing narrow

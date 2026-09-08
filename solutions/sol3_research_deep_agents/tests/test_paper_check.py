@@ -591,6 +591,20 @@ def test_a_plural_or_self_defined_term_does_not_fail_glossary_exact():
     assert "glossary_exact" not in gate(self_defined, enforce_structure=True).signature()
 
 
+def test_an_irregular_plural_matches_its_singular():
+    """Follow-up from the PR #499 judge: the regular suffix fold cannot turn
+    "criteria" into "criterion", since neither ends in s, es, or ies. A
+    fixed table of irregular pairs is checked first."""
+    body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper measures two runtimes only, against one exit criterion. [2]",
+    ).replace(
+        "## References",
+        "## Glossary\n\n**exit criteria.** What a run must clear before it stops.\n\n## References",
+    )
+    assert "glossary_exact" not in gate(body, enforce_structure=True).signature()
+
+
 def test_a_term_used_only_inside_inline_code_still_fails_glossary_exact():
     """Finding #3: the SDK masks inline code before this search with
     `_mask_code`. This port must too, so a term seen only inside a single
