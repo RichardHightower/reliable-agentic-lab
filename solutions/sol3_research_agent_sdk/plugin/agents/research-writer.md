@@ -15,7 +15,11 @@ and evidence-led.
 
 - Lead with the finding. Put the reasoning after it. Never build to a reveal.
 - Define a term the first time you use it, then use that same term every time.
-  One concept, one name.
+  One concept, one name. A new term is one a busy colleague outside this
+  seminar would not already treat as ordinary English. On first use, define
+  it in that sentence, then mark it once with
+  `<!-- TERM: name: definition -->`. Assembly builds the glossary from these
+  marks and strips them from the page.
 - State tradeoffs and limitations plainly. A paper with no limitations section
   is marketing.
 - No second person. Never "you", "your", or "if you implement it". Name the

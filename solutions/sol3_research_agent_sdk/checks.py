@@ -665,14 +665,55 @@ def glossary_host_terms(terms, allowed_domains=None) -> list[str]:
     return [term for term in terms if term.strip().lower().split("/")[0] in hosts or term.strip().lower() in hosts]
 
 
+def _stem(word: str) -> str:
+    """A crude plural fold: trailing `ies` to `y`, else strip a trailing
+    `es` or `s`. Not a real stemmer, only enough that a term defined
+    singular and used plural, or the reverse, is not graded as two words.
+    """
+    word = word.lower()
+    if word.endswith("ies") and len(word) > 3:
+        return word[:-3] + "y"
+    if word.endswith("es") and len(word) > 2:
+        return word[:-2]
+    if word.endswith("s") and len(word) > 1:
+        return word[:-1]
+    return word
+
+
+WORD = re.compile(r"[A-Za-z][\w'-]*")
+
+
+def _term_used(term: str, prose: str) -> bool:
+    """Whether `term`'s stemmed words appear as a run inside `prose`.
+
+    A literal phrase match rejected "one exit criterion" for the glossary
+    term "exit criteria". Comparing stems catches the regular plural or
+    singular a sentence actually used.
+    """
+    wanted = [_stem(w) for w in WORD.findall(term)]
+    if not wanted:
+        return False
+    found = [_stem(w) for w in WORD.findall(prose)]
+    span = len(wanted)
+    return any(found[i : i + span] == wanted for i in range(len(found) - span + 1))
+
+
 def glossary_unused(body: str) -> list[str]:
-    """Glossary entries for a term the body never uses outside the glossary."""
+    """Glossary entries for a term the body never uses.
+
+    "Uses" is generous on purpose. A stemmed match counts. A term repeated
+    inside its own definition also counts: that sentence is the one the
+    writer's own `TERM` marker carried, not the glossary inventing a use.
+    """
     terms = glossary_terms(body)
     if not terms:
         return []
     prose = _mask_code(_mask_section(body, "glossary"))
-    return [term for term in terms if not re.search(r"\b" + re.escape(term) + r"\b", prose, re.I)]
-
+    return [
+        term
+        for term, definition in terms.items()
+        if not _term_used(term, prose) and not _term_used(term, definition)
+    ]
 
 def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
     """Approved sections missing from the paper, or key questions never named.
@@ -1626,6 +1667,13 @@ def demo() -> int:
     assert glossary_unused("## Glossary\n\n**widget.** Unused.\n") == ["widget"]
     assert glossary_unused("## Body\n\nno glossary here") == []
     assert glossary_host_terms(["docs.langchain.com", "widget"]) == ["docs.langchain.com"]
+
+    # Follow-up from the PR #499 judge: a stemmed match, and a term repeated
+    # inside its own definition, both count as used.
+    plural_only = "A point about workflows.\n\n## Glossary\n\n**workflow.** A sequence of steps a run executes.\n"
+    assert glossary_unused(plural_only) == []
+    self_defined = "A point about the process.\n\n## Glossary\n\n**orchestrator.** The orchestrator sequences roles.\n"
+    assert glossary_unused(self_defined) == []
 
     print("checks: ok")
     return 0

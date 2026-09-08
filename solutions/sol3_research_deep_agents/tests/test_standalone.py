@@ -81,3 +81,10 @@ def test_the_writer_card_forbids_second_person():
     body = (ROOT / "skills" / "writer" / "SKILL.md").read_text(encoding="utf-8")
     assert body.lower().count("second person") == 1
     assert body.lower().count("narration of the run") == 1
+
+
+def test_the_writer_card_teaches_the_term_marker():
+    """The Glossary has no producer without this: the writer must be told
+    the TERM marker syntax, once."""
+    body = (ROOT / "skills" / "writer" / "SKILL.md").read_text(encoding="utf-8")
+    assert body.count("TERM:") == 1

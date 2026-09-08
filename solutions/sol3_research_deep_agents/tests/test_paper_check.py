@@ -570,6 +570,42 @@ def test_a_search_host_in_the_glossary_fails():
     assert "glossary_exact" in score.signature(), score.report()
 
 
+def test_a_plural_or_self_defined_term_does_not_fail_glossary_exact():
+    """Follow-up from the PR #499 judge: a literal phrase match rejected
+    "one exit criterion" for a glossary term used only in its plural. A
+    stemmed match counts, and so does a term repeated inside its own
+    definition, which is the writer's own marked sentence."""
+    plural_only = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper measures two runtimes only, across several workflows. [2]",
+    ).replace(
+        "## References",
+        "## Glossary\n\n**workflow.** A sequence of steps a run executes.\n\n## References",
+    )
+    assert "glossary_exact" not in gate(plural_only, enforce_structure=True).signature()
+
+    self_defined = GOOD.replace(
+        "## References",
+        "## Glossary\n\n**orchestrator.** The orchestrator sequences roles.\n\n## References",
+    )
+    assert "glossary_exact" not in gate(self_defined, enforce_structure=True).signature()
+
+
+def test_a_term_used_only_inside_inline_code_still_fails_glossary_exact():
+    """Finding #3: the SDK masks inline code before this search with
+    `_mask_code`. This port must too, so a term seen only inside a single
+    backtick span is not credited as used."""
+    body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper measures two runtimes only, per `workflow` config. [2]",
+    ).replace(
+        "## References",
+        "## Glossary\n\n**workflow.** A sequence of steps a run executes.\n\n## References",
+    )
+    score = gate(body, enforce_structure=True)
+    assert "glossary_exact" in score.signature(), score.report()
+
+
 def test_structural_rows_are_off_by_default():
     """`enforce_structure` defaults false, so a body carrying both glossary
     defects passes when the caller does not opt in, and an existing narrow

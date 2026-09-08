@@ -506,6 +506,28 @@ def test_a_search_host_in_the_glossary_fails():
     assert "glossary_exact" in score.signature(), score.report()
 
 
+def test_a_plural_or_self_defined_term_does_not_fail_glossary_exact():
+    """Follow-up from the PR #499 judge: a literal phrase match rejected
+    "one exit criterion" for a glossary term used only in its plural. A
+    stemmed match counts, and so does a term repeated inside its own
+    definition, which is the writer's own marked sentence."""
+    plural_only = (
+        "A point about workflows [1].\n\n"
+        "## Glossary\n\n"
+        "**workflow.** A sequence of steps a run executes.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "glossary_exact" not in checks.check(plural_only, ["https://a"], enforce_structure=True).signature()
+
+    self_defined = (
+        "A point about the process [1].\n\n"
+        "## Glossary\n\n"
+        "**orchestrator.** The orchestrator sequences roles.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "glossary_exact" not in checks.check(self_defined, ["https://a"], enforce_structure=True).signature()
+
+
 def test_structural_rows_are_off_by_default():
     """`enforce_structure` defaults false, so a body carrying both glossary
     defects passes when the caller does not opt in, and an existing narrow
