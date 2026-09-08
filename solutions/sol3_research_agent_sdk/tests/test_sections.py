@@ -1163,6 +1163,22 @@ def test_the_follow_pass_stops_at_the_run_cap(work, turns, monkeypatch):
 # -- #474: the counter-evidence pass -----------------------------------------
 
 
+def test_a_sole_support_claim_is_a_generalizing_candidate():
+    """A finding that is the only support for a `claims_to_support` item is
+    selected even with no generalizing phrase in its text. Port-specific:
+    the Deep Agents twin has no outline yet at this pipeline stage, so it
+    selects by the regex alone."""
+    section = _section(claims_to_support=["The problem is structural."])
+    findings = [
+        {"id": "s1-f1", "claim": "The problem is structural because of the retry loop."},
+        {"id": "s1-f2", "claim": "A separate finding about something else."},
+    ]
+    candidates = sections.generalizing_claims(findings, section)
+    assert [f["id"] for f in candidates] == ["s1-f1"]
+    assert findings[0]["generalizing"] is True
+    assert not findings[1].get("generalizing")
+
+
 def test_a_generalizing_claim_with_no_counter_search_fails():
     """`counterweighed` names the claim when a generalizing finding was
     never checked for counter-evidence. A recorded miss passes."""
