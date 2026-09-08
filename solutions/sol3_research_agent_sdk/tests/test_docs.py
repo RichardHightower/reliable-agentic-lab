@@ -22,6 +22,11 @@ import roles
 
 FOLDER = Path(__file__).resolve().parents[1]
 SKILL = FOLDER / "plugin" / "skills" / "research-loop" / "SKILL.md"
+AGENTS = FOLDER / "plugin" / "agents"
+
+# One house style, published once. Cards cite it rather than each keeping its
+# own copy of the rules. #453 #466.
+STYLE_URL = "https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style"
 
 CAST = roleplan.plan(None, "research")
 
@@ -208,3 +213,74 @@ def test_the_writer_card_and_the_grounding_contract_teach_the_term_marker():
     card = (FOLDER / "plugin" / "agents" / "research-writer.md").read_text(encoding="utf-8")
     assert card.count("TERM:") == 1
     assert load_agents.GROUNDING.count("TERM:") == 1
+
+
+# -- P8, cards cite the house style page -------------------------------------
+
+
+def test_both_writer_cards_cite_the_style_page():
+    """#453 #466: the writer follows one house style, published once on the
+    wiki. This port's half of the pair; the Deep Agents copy carries the
+    other half of the same test."""
+    card = (AGENTS / "research-writer.md").read_text(encoding="utf-8")
+    assert STYLE_URL in card
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "research-judge.md",
+        "research-section-judge.md",
+        "research-outline-judge.md",
+        "research-outline-editor.md",
+    ],
+)
+def test_every_judge_card_cites_the_style_page(name):
+    """The paper judge, the section judge, and the outline pair all grade or
+    repair against the page named here, not a private copy of the rules."""
+    card = (AGENTS / name).read_text(encoding="utf-8")
+    assert STYLE_URL in card
+
+
+def test_the_voice_row_does_not_repeat_a_python_row():
+    """`voice` stops re-reporting a row Python already fails: a contraction,
+    a Latin abbreviation, second person, a marketing verb, a policy leak, or
+    an em dash. Naming one again duplicates a mechanical check."""
+    card = (AGENTS / "research-judge.md").read_text(encoding="utf-8")
+    match = re.search(r"^\|\s*`voice`\s*\|(.*)\|\s*$", card, re.M)
+    assert match, "no `voice` row in research-judge.md"
+    row = match.group(1).lower()
+    banned = (
+        "contraction",
+        "latin abbreviation",
+        "e.g.",
+        "i.e.",
+        "etc.",
+        "second person",
+        "marketing",
+        "policy leak",
+        "em dash",
+    )
+    hits = [term for term in banned if term in row]
+    assert not hits, f"voice row repeats a Python row: {hits}"
+
+
+def test_the_check_module_docstring_lists_belt_rows_against_judge_rows():
+    """`checks.__doc__` names every row `check()` appends and every row
+    `research-judge.md` grades, matching the house style page's ownership
+    table."""
+    import checks  # noqa: PLC0415
+
+    src = Path(checks.__file__).read_text(encoding="utf-8")
+    body = src.split("def check(", 1)[1].split("\ndef section_check(", 1)[0]
+    belt_rows = set(re.findall(r'Check\(\s*"([a-zA-Z_]\w*)"', body))
+    assert belt_rows, "no Check(\"name\" calls found in checks.check()"
+    doc = checks.__doc__ or ""
+    missing_belt = sorted(row for row in belt_rows if row not in doc)
+    assert not missing_belt, f"docstring omits belt row(s): {missing_belt}"
+
+    card = (AGENTS / "research-judge.md").read_text(encoding="utf-8")
+    judge_rows = set(re.findall(r"^\|\s*`(\w+)`\s*\|", card, re.M))
+    assert judge_rows, "no judge rows found in research-judge.md"
+    missing_judge = sorted(row for row in judge_rows if row not in doc)
+    assert not missing_judge, f"docstring omits judge row(s): {missing_judge}"
