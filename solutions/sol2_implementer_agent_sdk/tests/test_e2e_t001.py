@@ -400,6 +400,26 @@ def test_the_summary_reports_the_cap_it_applied_and_keeps_the_raw_event_log(
     assert "raw: .harness/last-sdk-e2e-raw-0-test.txt" in summary
 
 
+def test_redact_widens_to_tilde_home_ghp_tokens_and_bearer_headers():
+    """#545 follow-up. The judge's own probe table showed a `~/`-shorthand
+    home path, a `ghp_...` token, and a `Bearer ...` header all passing
+    through `_redact` unchanged. Close the gap it measured."""
+    text = (
+        "cwd: ~/work/northwind-field-crm\n"
+        "token: ghp_abcdefghijklmnopqrstuvwxyz0123456789\n"
+        "Authorization: Bearer abc.def.ghi\n"
+    )
+
+    redacted = e2e_t001._redact(text)
+
+    assert "~/work" not in redacted
+    assert "<HOME>" in redacted
+    assert "ghp_" not in redacted
+    assert "<REDACTED-KEY>" in redacted
+    assert "Bearer abc.def.ghi" not in redacted
+    assert "Bearer <REDACTED-TOKEN>" in redacted
+
+
 def test_the_raw_log_survives_cleanup_via_raw_log_dir_with_secrets_stripped(
     tmp_path, monkeypatch
 ):

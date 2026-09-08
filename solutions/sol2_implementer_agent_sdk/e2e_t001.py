@@ -237,15 +237,25 @@ def sdk_options_with_budget(target, role_name: str, per_query_usd: float, cwd: P
     )
 
 
-_KEY_PATTERN = re.compile(r"sk-ant-[A-Za-z0-9_-]+")
+_KEY_PATTERN = re.compile(r"sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]+")
+# #545 follow-up. A `~/...` shorthand path never gets caught by the literal
+# `str(Path.home())` replace below: it is a different string for the same
+# place. `Bearer <token>` is the header shape, not a key prefix, so it needs
+# its own pattern rather than a wider `_KEY_PATTERN`.
+_HOME_TILDE_PATTERN = re.compile(r"~/[^\s'\"]*")
+_BEARER_PATTERN = re.compile(r"Bearer\s+\S+")
 
 
 def _redact(text: str) -> str:
-    """#543. Strip what a durable, checked-in copy must never carry: the
-    operator's own home directory, and anything shaped like a live key.
-    `docs/status/` is a git-tracked path; the worktree's own copy this
-    replaces stays wherever `--repo` names, cleaned up by hand."""
+    """#543, widened by #545 follow-up. Strip what a durable, checked-in
+    copy must never carry: the operator's own home directory (resolved or
+    `~/`-shorthand), anything shaped like a live key (`sk-ant-...`,
+    `ghp_...`), and a bearer auth header. `docs/status/` is a git-tracked
+    path; the worktree's own copy this replaces stays wherever `--repo`
+    names, cleaned up by hand."""
     text = text.replace(str(Path.home()), "<HOME>")
+    text = _HOME_TILDE_PATTERN.sub("<HOME>", text)
+    text = _BEARER_PATTERN.sub("Bearer <REDACTED-TOKEN>", text)
     return _KEY_PATTERN.sub("<REDACTED-KEY>", text)
 
 

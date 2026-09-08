@@ -17,7 +17,13 @@ FOLDER = Path(__file__).resolve().parents[1]
 REPO_ROOT = FOLDER.parents[1]
 STATUS_DIR = REPO_ROOT / "docs" / "status"
 
-REQUIRED_LINES = ("Doer:", "Gate:", "Tests written in code phase:")
+REQUIRED_LINES = (
+    "Doer:",
+    "Gate:",
+    "Spend:",
+    "Unknown-spend turns:",
+    "Tests written in code phase:",
+)
 
 
 def test_live_t001_trace_names_doer_gate_and_tests_written_flag():
