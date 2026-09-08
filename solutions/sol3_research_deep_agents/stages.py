@@ -512,8 +512,16 @@ def record_findings(
     )
 
 
-def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
-    """Every question produced at least one cited claim, or the paper has no evidence."""
+def search_gate(ledger: evidence.Ledger, plan: dict, *, unmet: dict[str, str] | None = None) -> None:
+    """Every question produced at least one cited claim, or the paper has no evidence.
+
+    `unmet`, when given, is `Paper.evidence_shortfall_unmet`: question ids
+    whose one `evidence_requirements` turn is already spent and the block
+    is still short. Judge revision on #520, blocking finding 1: a question
+    in `unmet` is accepted as a named gap, not failed again here, or a
+    shortfall that survives its one turn would end the run instead of
+    travelling as a gap the way the ticket and the plan both require.
+    """
     if not ledger.claims:
         raise GateFailed(
             "no question produced a cited claim. Every claim needs a source URL.",
@@ -535,8 +543,17 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
             "is refused; name the coverage gap instead.",
             ("unanswered_important",),
         )
+    unmet = unmet or {}
     shortfalls = []
     for question in important:
+        if (question.get("id") or "") in unmet:
+            continue
+        # The doctrine question is a fact read from checked-in Python, not a
+        # researched claim, whatever `evidence_requirements` a plan gives
+        # it; `_research_shortfalls` already exempts it from a turn for the
+        # same reason `stage_search`'s own repository shortcut does.
+        if str(question.get("question", "")).strip() == EXIT_DOCTRINE_QUESTION:
+            continue
         reason = evidence_shortfall(ledger, question)
         if reason:
             shortfalls.append(f"{question.get('id')}: {reason}")
@@ -560,12 +577,24 @@ def evidence_shortfall(ledger: evidence.Ledger, question: dict) -> str:
 
     `study_types`/`min_count`: how many distinct sources bound to this
     question's own claims carry a tier (`source.tier`, from
-    `source_policy.tier_for()`, never a note) in the required set.
+    `source_policy.tier_for()`, never a note) in the required set. A
+    source that is only there because a follow hit appended the primary
+    study a review or preprint summarizes does not count on its own:
+    `claim.via_source_ids` names it, excluded here the same way
+    `evidence.corroborate` excludes it, so a review plus the primary it
+    routes to is one source, not two. Judge revision on #520, blocking
+    finding 4.
+
     `recency_years`, when given: a source with a year counts only inside
-    the window; a source with no year is neither counted nor penalized,
-    there is nothing here to check. `populations`: each named term must
-    appear, word-bounded, in the pooled text of this question's own bound
-    claims -- the ledger's own words, never a model's opinion.
+    the window. A source with no year does not satisfy a window: there is
+    nothing here to confirm it is recent, so it is dropped from the count
+    rather than assumed to qualify. Judge revision on #520, follow-up 2.
+
+    `populations`: each named term must appear, word-bounded, in the
+    pooled text of only the claims whose sources counted toward
+    `min_count` -- a population named solely by a claim resting on a
+    source the wrong tier, or outside the window, does not satisfy the
+    requirement. Judge revision on #520, follow-up 4.
 
     An absent or empty block needs nothing: this is a grading function, not
     the hard requirement, which is `plan_gate`'s job.
@@ -583,7 +612,8 @@ def evidence_shortfall(ledger: evidence.Ledger, question: dict) -> str:
         for cid in finding.claim_ids
     }
     claims = [ledger.claims[cid] for cid in claim_ids if cid in ledger.claims]
-    source_ids = {sid for claim in claims for sid in claim.source_ids}
+    via = {sid for claim in claims for sid in claim.via_source_ids}
+    source_ids = {sid for claim in claims for sid in claim.source_ids} - via
     sources = [ledger.sources[sid] for sid in source_ids if sid in ledger.sources]
 
     recency_years = reqs.get("recency_years")
@@ -592,16 +622,17 @@ def evidence_shortfall(ledger: evidence.Ledger, question: dict) -> str:
     def counts(source: evidence.SourceDocument) -> bool:
         if (source.tier or "") not in study_types:
             return False
+        if not recency_years:
+            return True
         year = str(source.year or "").strip()
-        if recency_years and year.isdigit():
-            return int(year) >= this_year - int(recency_years)
-        return True
+        return year.isdigit() and int(year) >= this_year - int(recency_years)
 
     matched = [source for source in sources if counts(source)]
     if len(matched) < min_count:
         return f"needs {min_count} {'/'.join(sorted(set(study_types)))}, has {len(matched)}"
 
-    pooled = " ".join(claim.text for claim in claims)
+    matched_ids = {source.id for source in matched}
+    pooled = " ".join(claim.text for claim in claims if set(claim.source_ids) & matched_ids)
     missing_populations = [
         population
         for population in (reqs.get("populations") or [])

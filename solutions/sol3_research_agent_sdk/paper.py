@@ -183,6 +183,21 @@ class State:
     last_turn: dict | None = None
     query_timeout_s: int = 0
     code_sha: str = ""
+    # #473 #474, judge revision on #520 item 11b. `Run.follow_used` and
+    # `Run.counter_used` were plain in-memory fields with nowhere to
+    # persist to, so a fresh process (`--reuse-research`, or any resume
+    # that reconstructs `Run`) started the per-run follow/counter budget
+    # over. Mirrors the Deep Agents port's own `state.follow_used` /
+    # `state.counter_used`.
+    follow_used: int = 0
+    counter_used: int = 0
+    # #475, judge revision on #520, blocking finding 1. Question text ->
+    # the measured shortfall, for a question whose one evidence_requirements
+    # turn is spent and the block is still not met. Being in this dict is
+    # what tells `checks.section_check`'s `evidence_requirements_met` row
+    # to pass the question as a named gap rather than fail the section
+    # over it, and tells `sections.py`'s gap pass not to ask again.
+    evidence_shortfall_unmet: dict[str, str] = field(default_factory=dict)
 
     @staticmethod
     def path(work_dir: Path) -> Path:
@@ -235,9 +250,11 @@ class Run:
     # #473. Bounds the follow-turn pass across the whole run, not per section:
     # `follow_used` below is the running count `sections.follow_primary_sources`
     # checks and increments on every call, so section eight cannot spend the
-    # same budget section one already did. Not persisted to disk, the same
-    # simplification `max_claims`'s per-section reset already lives with; a
-    # resumed run in a new process starts the count over.
+    # same budget section one already did. Loaded from `state.follow_used`
+    # in `__post_init__` and written back on every increment, so a fresh
+    # process (`--reuse-research`, or any resume that reconstructs `Run`)
+    # sees what an earlier attempt already spent. Judge revision on #520,
+    # item 11b: this used to reset to zero every new process.
     max_follow: int = MAX_FOLLOW
     follow_used: int = field(default=0, init=False)
     # #474. Bounds the counter-evidence pass across the whole run, the same
@@ -275,6 +292,15 @@ class Run:
     # stubs carry no `evidence_requirements` block.
     require_evidence_requirements: bool = False
     log: object = print
+
+    def __post_init__(self) -> None:
+        # Judge revision on #520, item 11b: `follow_used`/`counter_used`
+        # were plain fields with nowhere to persist to; a fresh process
+        # reconstructing `Run` (`--reuse-research`, or `apply_harness_resume`)
+        # started the per-run budget over. Loaded here, the same way Deep
+        # Agents' `Paper.__post_init__` loads its own.
+        self.follow_used = self.state.follow_used
+        self.counter_used = self.state.counter_used
 
     # -- files -------------------------------------------------------------
 
@@ -515,8 +541,11 @@ def scout(run: Run) -> dict:
         # flagship titles is retried once, the missing field named in the
         # retry prompt. `scout` is a `LINEAR` phase, skipped on any resume
         # once `corpus/scout-briefing.json` exists, so this can only ever
-        # fire once per run: a `TypeError` here means a `turns.scout` still
-        # on the pre-#475, one-argument shape, retried anyway with no note.
+        # fire once per run. A `TypeError` here means a `turns.scout` still
+        # on the pre-#475, one-argument shape: skip the retry rather than
+        # re-asking the identical prompt with no note, a second paid turn
+        # that cannot answer any differently than the first. Judge revision
+        # on #520, follow-up 5.
         if proposal.get("headings") and not proposal.get("titles"):
             try:
                 retry = ask(
@@ -525,7 +554,7 @@ def scout(run: Run) -> dict:
                     "titles: list a few flagship works for this field, by name.",
                 )
             except TypeError:
-                retry = ask(run.topic)
+                retry = {}
             except Escalate:
                 raise
             except Exception as exc:
@@ -1198,17 +1227,32 @@ def source_allowlist(run: Run) -> dict:
     }
 
 
+def _normalize_title(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+# #475. A scout title counts as retrieved only on a normalized exact match,
+# or a token-set overlap of at least 0.8 against an admitted source's own
+# title. One shared word, even a distinctive one, is not enough: judge
+# revision on #520, follow-up 1, found a never-retrieved flagship work
+# reading as retrieved on one word shared with an unrelated source, such as
+# "trial" or "study".
+TITLE_OVERLAP_MIN = 0.8
+
+
 def _title_retrieved(title: str, sources: list[dict]) -> bool:
-    """Loose overlap: the scout's title shares a distinctive word with an
-    admitted source's own title. Word-length 4+ only, so a short common word
-    like "the" or "of" cannot count as a match. #475"""
-    wanted = {w for w in re.findall(r"[a-z]{4,}", str(title or "").lower())}
-    if not wanted:
+    normalized_wanted = _normalize_title(title)
+    wanted = set(re.findall(r"[a-z0-9]{4,}", normalized_wanted))
+    if not normalized_wanted or not wanted:
         return False
-    return any(
-        wanted & {w for w in re.findall(r"[a-z]{4,}", str(source.get("title") or "").lower())}
-        for source in sources
-    )
+    for source in sources:
+        normalized_found = _normalize_title(source.get("title") or "")
+        if normalized_wanted == normalized_found:
+            return True
+        found = set(re.findall(r"[a-z0-9]{4,}", normalized_found))
+        if found and len(wanted & found) / min(len(wanted), len(found)) >= TITLE_OVERLAP_MIN:
+            return True
+    return False
 
 
 def _scout_title_status(run: Run, sources: list[dict]) -> list[dict]:

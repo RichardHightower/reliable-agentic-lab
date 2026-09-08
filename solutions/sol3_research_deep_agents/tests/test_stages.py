@@ -336,6 +336,66 @@ def test_search_gate_fails_a_shortfall_and_passes_a_met_requirement():
     stages.search_gate(met, plan_dict)  # must not raise
 
 
+def test_search_gate_accepts_a_question_already_marked_unmet():
+    """Judge revision on #520, blocking finding 1: a question graded and
+    still short after its one turn is a named gap, not a gate failure. Only
+    a question never graded at all still fails the gate."""
+    plan_dict = {
+        "questions": [
+            {
+                "id": "q1",
+                "subject": "s1",
+                "important": True,
+                "evidence_requirements": evidence_requirements(min_count=2),
+            }
+        ]
+    }
+    short = _ledger_with_source("preprint_or_compilation")
+    stages.search_gate(short, plan_dict, unmet={"q1": "needs 2 primary_trial, has 0"})  # must not raise
+    with pytest.raises(GateFailed, match="evidence_requirements shortfall"):
+        stages.search_gate(short, plan_dict, unmet={})
+
+
+def test_evidence_shortfall_excludes_a_review_counted_via_its_primary():
+    """A review plus the primary it summarizes is one source, not two.
+    Judge revision on #520, blocking finding 4."""
+    led = evidence.Ledger("/nonexistent")
+    review = led.add_source(
+        evidence.SourceDocument(title="Review", url="https://a.example/review", subject="s1", tier="narrative_review", year="2024")
+    )
+    primary = led.add_source(
+        evidence.SourceDocument(title="Primary", url="https://a.example/primary", subject="s1", tier="primary_trial", year="2024")
+    )
+    claim = led.add_claim(
+        evidence.Claim(
+            text="a fact",
+            subject="s1",
+            source_ids=[review.id, primary.id],
+            via_source_ids=[review.id],
+        )
+    )
+    led.add_finding(evidence.Finding(question="q", subject="s1", claim_ids=[claim.id]))
+    question = {
+        "id": "q1",
+        "subject": "s1",
+        "evidence_requirements": evidence_requirements(study_types=["primary_trial"], min_count=1),
+    }
+    assert stages.evidence_shortfall(led, question) == ""
+
+    question["evidence_requirements"]["min_count"] = 2
+    reason = stages.evidence_shortfall(led, question)
+    assert "has 1" in reason, "the review does not count a second time via its primary"
+
+    # A review plus a genuinely unrelated primary, bound some other way,
+    # still counts as two.
+    unrelated = led.add_source(
+        evidence.SourceDocument(title="Unrelated", url="https://a.example/unrelated", subject="s1", tier="primary_trial", year="2024")
+    )
+    second_claim = led.add_claim(evidence.Claim(text="another fact", subject="s1", source_ids=[unrelated.id]))
+    led.add_finding(evidence.Finding(question="q2", subject="s1", claim_ids=[second_claim.id]))
+    assert stages.evidence_shortfall(led, question) == ""
+
+
 def headings(plan):
     return [stages.plan_heading(item) for item in plan["sections"]]
 
@@ -1561,6 +1621,71 @@ def test_the_fixture_pipeline_runs_a_generalizing_claim_through_the_counter_pass
 # -- #475: the shortfall pass, the scout retry, and title status -----------
 
 
+def test_a_fixture_backed_shortfall_completes_the_run_not_a_crash(run_dir):
+    """Judge revision on #520, follow-up 3: a question the recorded fixture
+    cannot possibly satisfy, run against the real `FixtureRunner` and
+    `FixtureBackend` end to end through `stage_plan` and `stage_search`,
+    completes with the shortfall recorded rather than escalating. `q3`
+    (maker-checker), not important in the recorded plan, is marked
+    important here and given a block no fixture reply can meet, rather
+    than editing the shared `fixtures/paper/replies.json` every other test
+    in this file also reads.
+    """
+    run = build_run(run_dir)
+    run.stage_plan()
+    q3 = next(q for q in run.plan["questions"] if q["id"] == "q3")
+    q3["important"] = True
+    q3["evidence_requirements"] = {
+        "study_types": ["primary_trial"],
+        "min_count": 5,
+        "recency_years": 5,
+        "populations": [],
+    }
+    result = run.stage_search()  # must not raise
+    assert result.name == "search"
+    assert "q3" in run.evidence_shortfall_unmet
+    assert "needs 5" in run.evidence_shortfall_unmet["q3"]
+    # The gate itself, called again standalone, also accepts it.
+    stages.search_gate(run.ledger, run.plan, unmet=run.evidence_shortfall_unmet)
+
+
+# -- item 11b, PR #518 re-verification follow-up -----------------------------
+
+
+def test_a_fresh_paper_reloads_follow_and_counter_used_from_state(run_dir):
+    """A fresh `Paper` built on a work dir that already spent some of the
+    per-run follow and counter budget must see that spend, not start a new
+    process with a fresh `max_follow`/`max_counter`. #473 #474, follow-up
+    to the #518 re-verification: this is the E5 fix's own guard, given a
+    test to lock it in."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    run.follow_used = 3
+    run.state.follow_used = 3
+    run.counter_used = 2
+    run.state.counter_used = 2
+    run.state.save()
+
+    resumed = build_run(run_dir, runner=_CountingRunner())
+    assert resumed.follow_used == 3
+    assert resumed.counter_used == 2
+
+
+def test_a_negative_max_counter_clamps_to_zero_not_a_tail_slice(run_dir):
+    """`remaining = max(0, self.max_counter - self.counter_used)` already
+    clamps a negative `max_counter` to zero before it ever reaches a slice
+    bound; a bare `candidates[:self.max_counter]` would instead have sliced
+    off all but the last `|max_counter|` candidates, Python's own footgun
+    for a negative index. Locked in against a regression, item 11c of the
+    #518 re-verification follow-up."""
+    run = build_run(run_dir, runner=_CountingRunner(), max_counter=-1)
+    for i in range(3):
+        run.ledger.add_claim(
+            evidence.Claim(text=f"The result never changed by more than {i} percent.", subject="s")
+        )
+    run._counter_evidence()
+    assert run.runner.prompts == []
+
+
 def test_a_shortfall_gets_one_research_turn_and_is_not_repeated(run_dir):
     """One important question short of its `evidence_requirements` gets
     exactly one extra turn; a second call, mirroring a `stage_search`
@@ -1580,8 +1705,11 @@ def test_a_shortfall_gets_one_research_turn_and_is_not_repeated(run_dir):
     }
     run._research_shortfalls()
     assert len(run.runner.prompts) == 1
-    assert "q1" in run.evidence_shortfall_asked
-    assert run.state.evidence_shortfall_asked == ["q1"]
+    # _CountingRunner's reply carries no claims, so the shortfall survives
+    # the one turn: this is what makes it `unmet`, not resolved.
+    assert "q1" in run.evidence_shortfall_unmet
+    assert "needs 1" in run.evidence_shortfall_unmet["q1"]
+    assert run.state.evidence_shortfall_unmet == {"q1": run.evidence_shortfall_unmet["q1"]}
 
     run._research_shortfalls()
     assert len(run.runner.prompts) == 1, "already asked, not asked again"
@@ -1590,7 +1718,7 @@ def test_a_shortfall_gets_one_research_turn_and_is_not_repeated(run_dir):
 def test_a_met_question_gets_no_shortfall_turn(run_dir):
     run = build_run(run_dir, runner=_CountingRunner())
     source = run.ledger.add_source(
-        evidence.SourceDocument(title="Src", url="https://a.example/rct", subject="s1", tier="primary_trial")
+        evidence.SourceDocument(title="Src", url="https://a.example/rct", subject="s1", tier="primary_trial", year="2024")
     )
     claim = run.ledger.add_claim(evidence.Claim(text="a fact", subject="s1", source_ids=[source.id]))
     run.ledger.add_finding(evidence.Finding(question="q", subject="s1", claim_ids=[claim.id]))
@@ -1632,7 +1760,30 @@ def test_stage_scout_retries_once_when_titles_are_empty(run_dir):
     assert run.state.scout_retried is True
 
 
+class _FullScoutRunner(paper.Runner):
+    """Headings and titles both present on the first pass. Judge revision on
+    #520, follow-up 6: this test's own name must actually drive a full
+    scout, not an empty one that never needed retrying in the first place.
+    """
+
+    name = "full-scout"
+
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    def ask(self, role: str, prompt: str) -> paper.Reply:
+        self.prompts.append(prompt)
+        return paper.Reply(data={"headings": ["Background"], "domains": [], "titles": ["A flagship"]})
+
+
 def test_a_full_scout_is_not_retried(run_dir):
+    run = build_run(run_dir, runner=_FullScoutRunner())
+    run.stage_scout()
+    assert len(run.runner.prompts) == 1, "titles already present: no retry needed"
+    assert run.scout_retried is False
+
+
+def test_a_resumed_scout_retry_is_not_spent_twice(run_dir):
     run = build_run(run_dir, runner=_ScoutRetryRunner())
     run.stage_scout()
     resumed = build_run(run_dir, runner=_ScoutRetryRunner())

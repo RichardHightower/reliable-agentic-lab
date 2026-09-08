@@ -1058,6 +1058,9 @@ class OfflineTurns(Turns):
         # clinical one: `other` is the honest tier for a doc page or a
         # vendor repository, the same default `source_policy.tier_for`
         # gives any record with no PubMed, arXiv, or Crossref match.
+        # `recency_years: 0` -- no window: the fixture's own placeholder
+        # sources carry no publication year, and #520's follow-up 2 makes
+        # a yearless source fail a window that is actually set.
         def q(text: str) -> dict:
             return {
                 "text": text,
@@ -1065,7 +1068,7 @@ class OfflineTurns(Turns):
                 "evidence_requirements": {
                     "study_types": ["other"],
                     "min_count": 1,
-                    "recency_years": 10,
+                    "recency_years": 0,
                     "populations": [],
                 },
             }

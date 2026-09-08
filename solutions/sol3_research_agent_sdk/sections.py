@@ -275,8 +275,10 @@ def attributed(finding: dict, source_text: str) -> bool:
 
 
 def _flatten_for_grading(findings: list[dict]) -> list[dict]:
-    """Raw findings, reduced to the `{tier, year, text}` shape
-    `checks.evidence_requirements_met` grades. #475"""
+    """Raw findings, reduced to the `{tier, year, text, url}` shape
+    `checks.evidence_requirements_met` grades. `url` is what that function
+    dedupes `min_count` on: two findings citing one URL are one source, not
+    two. #475"""
     flattened = []
     for finding in findings:
         source = finding.get("source") or {}
@@ -285,6 +287,7 @@ def _flatten_for_grading(findings: list[dict]) -> list[dict]:
                 "tier": source.get("evidence_tier") or "",
                 "year": source.get("year") or "",
                 "text": f"{finding.get('claim') or ''} {finding.get('quote') or ''}",
+                "url": source.get("url_or_path") or "",
             }
         )
     return flattened
@@ -438,6 +441,11 @@ def follow_primary_sources(run, findings: list[dict], sid: str) -> None:
             result = {"found": False}
         _apply_follow_result(run, finding, result)
         run.follow_used += 1
+        run.state.follow_used = run.follow_used
+        try:
+            run.state.save(run.work_dir)
+        except OSError:
+            pass  # telemetry never fails a run
 
 
 # #474. A generalizing claim ruled a lever out from one datapoint (#474's own
@@ -600,6 +608,11 @@ def counter_evidence_pass(run, findings: list[dict], section: dict) -> None:
                 hit = True
         finding["counter"] = "hit" if hit else "miss"
         run.counter_used += 1
+        run.state.counter_used = run.counter_used
+        try:
+            run.state.save(run.work_dir)
+        except OSError:
+            pass  # telemetry never fails a run
 
 
 # A claim describes the world. These phrases describe the search instead, and
@@ -707,6 +720,14 @@ def _claims_for_writer(
             text = f"{text} (no contrary evidence found in this search)."
         elif counter == "capped":
             text = f"{text} ({CAPPED_NOTE}; hedge like a single source)."
+        shortfall = finding.get("evidence_shortfall") or ""
+        if shortfall:
+            # #475, judge revision on #520, blocking finding 1: the one
+            # shortfall turn is spent and the block is still short. The
+            # writer is told outright, the same way `secondary` and
+            # `capped` already are, rather than left to infer a gap it was
+            # never taught.
+            text = f"{text} (evidence requirement not fully met: {shortfall}. Hedge accordingly.)"
         usable.append(
             {
                 "id": finding["id"],
@@ -1126,13 +1147,19 @@ def run_section(run, section: dict) -> dict:
         if not _answered(findings, item.get("question") or "")
     ]
     answered = {f.get("answers_question") for f in findings if f.get("claim")}
+    unmet_shortfalls = getattr(getattr(run, "state", None), "evidence_shortfall_unmet", None) or {}
     for question in questions:
         bound = [f for f in findings if f.get("answers_question") == question["text"]]
         unanswered = question["text"] not in answered and not _answered(findings, question["text"])
         requirements = question.get("evidence_requirements") or {}
+        # #475, judge revision on #520, blocking finding 1 and 2. A question
+        # already graded and accepted as unmet is not asked again, and does
+        # not fail the section a second time: the shortfall already
+        # travelled as a named coverage gap once, the one turn it gets.
+        already_unmet = question["text"] in unmet_shortfalls
         met, reason = (
             (True, "")
-            if not requirements
+            if not requirements or already_unmet
             else checks.evidence_requirements_met(requirements, _flatten_for_grading(bound))
         )
         if not unanswered and met:
@@ -1161,6 +1188,19 @@ def run_section(run, section: dict) -> dict:
             gaps.append({"question": question["text"], "queries": list(queries)})
         elif not met:
             gaps.append({"question": question["text"], "queries": list(queries), "reason": reason})
+            if requirements and hasattr(run, "state"):
+                # The one shot is spent and it is still short. Persist so a
+                # resume or `--reuse-research` does not spend a second turn
+                # on the same question, and stamp every bound finding so
+                # the writer's brief carries the hedge the way a
+                # single-source claim is hedged.
+                run.state.evidence_shortfall_unmet[question["text"]] = reason
+                try:
+                    run.state.save(run.work_dir)
+                except OSError:
+                    pass
+                for finding in bound:
+                    finding["evidence_shortfall"] = reason
         queries.append(question["text"])
 
     # 3c-bis metadata. One pass, after every research path for this section
@@ -1416,6 +1456,9 @@ def run_section(run, section: dict) -> dict:
             evidence=_evidence_blob(run, sid, findings),
             word_target=int(section.get("word_target") or 0),
             figures_given=figures,
+            evidence_requirements_unmet=getattr(
+                getattr(run, "state", None), "evidence_shortfall_unmet", None
+            ),
         )
         (knowledge / "section-check.json").write_text(
             json.dumps(last_score.to_dict(), indent=2) + "\n", encoding="utf-8"

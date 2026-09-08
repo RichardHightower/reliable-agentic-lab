@@ -1920,15 +1920,24 @@ def evidence_requirements_met(requirements: dict, findings: list[dict]) -> tuple
     """Grade a question's bound evidence against its own `evidence_requirements`
     block. #475
 
-    `findings` is a flat `{"tier", "year", "text"}` shape both call sites
-    build: the pre-write research path (`sections.py`, from a finding's
-    nested `source`) and `section_check`'s post-write row (from the writer's
-    bound claims). `study_types`/`min_count`: how many findings carry a tier
-    in the required set. `recency_years`, when given: a finding with a year
-    counts only inside the window; a finding with no year is neither
-    counted nor penalized, there is nothing here to check. `populations`:
-    each named term must appear, word-bounded, in the pooled text -- the
-    ledger's own words, never a model's opinion.
+    `findings` is a flat `{"tier", "year", "text", "url"}` shape both call
+    sites build: the pre-write research path (`sections.py`, from a
+    finding's nested `source`) and `section_check`'s post-write row (from
+    the writer's bound claims, `source_url`). `study_types`/`min_count`:
+    how many distinct URLs among the findings carry a tier in the required
+    set -- two claims lifted from one reply cite one URL and must count as
+    one source, not two. Judge revision on #520, blocking finding 3.
+
+    `recency_years`, when given: a finding with a year counts only inside
+    the window. A finding with no year does not satisfy a window: there is
+    nothing here to confirm it is recent, so it is dropped from the count
+    rather than assumed to qualify. Judge revision on #520, follow-up 2.
+
+    `populations`: each named term must appear, word-bounded, in the
+    pooled text of only the findings whose URL counted toward `min_count`
+    -- a population named solely by a finding resting on the wrong tier,
+    or outside the window, does not satisfy the requirement. Judge
+    revision on #520, follow-up 4.
 
     Returns `(True, "")` when nothing is required, an absent or empty
     block: this is a grading function, not the hard requirement, which is
@@ -1940,22 +1949,26 @@ def evidence_requirements_met(requirements: dict, findings: list[dict]) -> tuple
     if not study_types or min_count < 1:
         return True, ""
 
+    def _key(finding: dict) -> str:
+        return str(finding.get("url") or finding.get("source_url") or id(finding))
+
     recency_years = requirements.get("recency_years")
     this_year = datetime.now(timezone.utc).year
 
     def counts(finding: dict) -> bool:
         if (finding.get("tier") or "") not in study_types:
             return False
+        if not recency_years:
+            return True
         year = str(finding.get("year") or "").strip()
-        if recency_years and year.isdigit():
-            return int(year) >= this_year - int(recency_years)
-        return True
+        return year.isdigit() and int(year) >= this_year - int(recency_years)
 
-    matched = [finding for finding in findings if counts(finding)]
-    if len(matched) < min_count:
-        return False, f"needs {min_count} {'/'.join(sorted(set(study_types)))}, has {len(matched)}"
+    matching = [finding for finding in findings if counts(finding)]
+    matched_keys = {_key(finding) for finding in matching}
+    if len(matched_keys) < min_count:
+        return False, f"needs {min_count} {'/'.join(sorted(set(study_types)))}, has {len(matched_keys)}"
 
-    pooled = " ".join(str(finding.get("text") or "") for finding in findings)
+    pooled = " ".join(str(f.get("text") or "") for f in findings if _key(f) in matched_keys)
     missing_populations = [
         population
         for population in (requirements.get("populations") or [])
@@ -1982,6 +1995,7 @@ def section_check(
     evidence: str = "",
     word_target: int = 0,
     figures_given: list | None = None,
+    evidence_requirements_unmet: dict[str, str] | None = None,
 ) -> Score:
     """Eleven deterministic rows on one section, before any judge."""
     section = section or {}
@@ -2185,12 +2199,22 @@ def section_check(
     # missing block is a hard failure, not here. `question_id` on a bound
     # finding is the question's own text (`sections._finding_from_claim`'s
     # `answers_question`), never a synthesized id, so this matches on text.
+    #
+    # Judge revision on #520, blocking finding 1: a question already
+    # graded once, whose one shortfall turn is spent and the block is
+    # still short (`evidence_requirements_unmet`), passes here. Only a
+    # question never graded at all still fails the row; the measured
+    # shortfall already travels as a named coverage gap, not a second
+    # section failure on top of it.
+    unmet = evidence_requirements_unmet or {}
     shortfalls = []
     for question in section.get("key_questions") or []:
         requirements = outlines.question_evidence_requirements(question)
         if not requirements:
             continue
         text = outlines.question_text(question)
+        if text in unmet:
+            continue
         bound = [f for f in findings if (f.get("question_id") or "") == text]
         met, reason = evidence_requirements_met(requirements, bound)
         if not met:

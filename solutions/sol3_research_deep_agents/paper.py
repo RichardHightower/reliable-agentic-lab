@@ -447,17 +447,30 @@ def _write_briefing(work_dir: Path, payload: dict) -> None:
     (dest / "scout-briefing.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-# #475. Loose overlap: the scout's title shares a distinctive word with an
-# admitted source's own title. Word-length 4+ only, the same threshold
-# `sections._shares_terms` uses for the counter-evidence pass, so a short
-# common word like "the" or "of" cannot count as a match.
+def _normalize_title(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+# #475. A scout title counts as retrieved only on a normalized exact match,
+# or a token-set overlap of at least 0.8 against an admitted source's own
+# title. One shared word, even a distinctive one, is not enough: judge
+# revision on #520, follow-up 1, found a never-retrieved flagship work
+# reading as retrieved on one word shared with an unrelated source, such as
+# "trial" or "study".
+TITLE_OVERLAP_MIN = 0.8
+
+
 def _scout_title_retrieved(title: str, sources) -> bool:
-    wanted = {w for w in re.findall(r"[a-z]{4,}", str(title or "").lower())}
-    if not wanted:
+    normalized_wanted = _normalize_title(title)
+    wanted = set(re.findall(r"[a-z0-9]{4,}", normalized_wanted))
+    if not normalized_wanted or not wanted:
         return False
     for source in sources:
-        found = {w for w in re.findall(r"[a-z]{4,}", str(getattr(source, "title", "") or "").lower())}
-        if wanted & found:
+        normalized_found = _normalize_title(getattr(source, "title", "") or "")
+        if normalized_wanted == normalized_found:
+            return True
+        found = set(re.findall(r"[a-z0-9]{4,}", normalized_found))
+        if found and len(wanted & found) / min(len(wanted), len(found)) >= TITLE_OVERLAP_MIN:
             return True
     return False
 
@@ -1826,6 +1839,16 @@ class Paper:
             qid = question.get("id") or ""
             if qid in self.evidence_shortfall_unmet:
                 continue
+            # This one question is about checked-in Python, answered by
+            # `stage_search`'s own repository lookup, never a model. Asking
+            # a researcher turn about it here would be the same mistake
+            # `stage_search`'s own comment already refuses. #475
+            if (
+                self.loop_doctrine
+                and self.runner.name == "deep_agents"
+                and research.repository_doctrine_report(question["question"]) is not None
+            ):
+                continue
             reason = stages.evidence_shortfall(self.ledger, question)
             if not reason:
                 continue
@@ -2174,6 +2197,27 @@ class Paper:
             )
             briefs = "\n".join(stages.claim_brief(self.ledger, cid, index) for cid in claim_ids)
             word_range = _section_word_range(heading, len(claim_ids))
+            # #475, judge revision on #520: a question graded and still
+            # short after its one shot travels as a named gap, not a run
+            # failure. The section that answers it is told to hedge its
+            # generalizations the same way a single-source claim is
+            # hedged, so the paper does not overstate what a thin ledger
+            # supports.
+            subjects = {self.ledger.claim(cid).subject for cid in claim_ids if self.ledger.claim(cid)}
+            shortfalls = [
+                self.evidence_shortfall_unmet[qid]
+                for question in self.plan.get("questions", [])
+                if question.get("subject") in subjects
+                and (qid := question.get("id") or "") in self.evidence_shortfall_unmet
+            ]
+            hedge = (
+                "Evidence requirements were not fully met for this section: "
+                f"{'; '.join(shortfalls)}. Hedge every generalization here the way "
+                "a single-source claim is hedged: say what the evidence shows is "
+                "limited, not settled.\n"
+                if shortfalls
+                else ""
+            )
             if heading.strip().lower() == "abstract":
                 # Every other section is already stamped by the time this
                 # runs. The writer may state only what that body states, and
@@ -2190,14 +2234,14 @@ class Paper:
                     "\"proves\", \"definitively\", \"conclusively\", or \"establishes "
                     "that\" for a claim the body hedges.\n"
                     f"Purpose: {section.get('purpose', '')}\n"
-                    f"Audience: {self.plan['audience']}\n{extra}\n\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n"
                     f"The paper body, already written:\n{written_body}\n\n"
                 )
             else:
                 lead = (
                     f"Write the {heading!r} section of {self.plan['title']!r}.\n"
                     f"Purpose: {section.get('purpose', '')}\n"
-                    f"Audience: {self.plan['audience']}\n{extra}\n\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n"
                 )
             reply = self._ask(
                 "writer",

@@ -352,8 +352,9 @@ def test_a_retry_that_still_finds_no_titles_keeps_the_first_proposal(work):
 
 
 def test_an_old_style_scout_with_no_note_argument_is_not_retried_into_a_crash(work):
-    """A `turns.scout` still on the pre-#475 one-argument shape is retried
-    anyway, without the note, rather than crashing the run."""
+    """A `turns.scout` still on the pre-#475 one-argument shape does not
+    crash the run; the retry is skipped rather than paid for twice with an
+    identical, note-less prompt. Judge revision on #520, follow-up 5."""
 
     class OldScout:
         def __init__(self):
@@ -368,4 +369,4 @@ def test_an_old_style_scout_with_no_note_argument_is_not_retried_into_a_crash(wo
     run.write_json("corpus/brain-pack.json", {"corpus_thin": True, "hits": []})
     meta = paper.scout(run)
     assert meta["skipped"] is False
-    assert len(turns.asked) == 2
+    assert len(turns.asked) == 1, "the retry is skipped, not paid for twice"
