@@ -507,12 +507,12 @@ def test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass(tmp_pa
     branch, in the "approach" section. `OfflineTurns` inherits the base
     `counter_search` miss, so the candidate resolves to "miss", not "hit".
 
-    #524: pinned to `PINNED_COUNTER_CLAIM_ID`, not to whether the
-    candidate set is merely non-empty. `_shares_terms`'s own coincidental
-    overlap picks this claim today; the id is now the contract, not the
-    coincidence, so a `fixtures/research.json` re-key that swaps which
-    claim happens to share a word with its `claims_to_support` entry fails
-    this test on the row that actually matters."""
+    #524: pinned to a named claim id, not to whether the candidate set is
+    merely non-empty. `_shares_terms`'s own coincidental overlap picks this
+    claim today; the id is now the contract, not the coincidence, so a
+    `fixtures/research.json` re-key that swaps which claim happens to
+    share a word with its `claims_to_support` entry fails this test on the
+    row that actually matters."""
     import json  # noqa: PLC0415
     from pathlib import Path  # noqa: PLC0415
 

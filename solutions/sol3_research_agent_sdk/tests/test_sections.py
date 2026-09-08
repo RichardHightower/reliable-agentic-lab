@@ -76,6 +76,26 @@ def test_section_check_coverage_passes_when_the_body_answers_the_question():
     assert "coverage" not in score.signature(), score.to_dict()["checks"]
 
 
+def test_section_check_coverage_needs_a_third_of_the_questions_terms():
+    """#510. `section_check`'s own coverage row scales with the question the
+    same way `checks.outline_coverage_gaps` does: a nine-term question
+    needs a third of its terms, not the old flat floor of two.
+    """
+    long_question = (
+        "How does the retry ledger track a stale approval stamp across a "
+        "resumed run and an escalation boundary?"
+    )
+    section = _section(word_target=80, key_questions=[long_question])
+
+    two_terms = "The retry path checks a stamp before it runs again [1]. " + ("word " * 80)
+    score = checks.section_check(two_terms, section=section, findings=[{"number": 1}])
+    assert "coverage" in score.signature()
+
+    three_terms = "The retry ledger checks a stamp before an escalation [1]. " + ("word " * 80)
+    score = checks.section_check(three_terms, section=section, findings=[{"number": 1}])
+    assert "coverage" not in score.signature(), score.to_dict()["checks"]
+
+
 def test_section_check_cited_accepts_the_finding_id_the_writer_holds():
     """The researcher keys findings `fm-q1-03`, so that is what the writer cites.
 
