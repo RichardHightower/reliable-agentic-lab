@@ -2210,7 +2210,7 @@ def test_figure_block_rejects_any_non_plugin_asset():
     figure = Figure("loop")
     figure.png = type("P", (), {"name": "loop.svg"})()
     with pytest.raises(GateFailed) as exc:
-        stages.figure_block(figure)
+        stages.figure_block(figure, 1)
     assert exc.value.signature == ("figure_asset",)
 
 

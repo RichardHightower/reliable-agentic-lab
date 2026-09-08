@@ -108,19 +108,25 @@ STAGE_ORDER = (
     "outline",
     "charts",
     "write",
-    # P9, #477. Between write and review, not after assemble: `stage_review`
+    # `diagram` moved here from right after `outline` (#476): a figure is
+    # commissioned from the bound claims of the section that carries it, and
+    # those claims do not exist until the section is written.
+    #
+    # #464 moved `diagram` ahead of `trim`, the opposite of its #476 order:
+    # `trim` now also adds an in-text `Figure N` mention for every figure a
+    # section carries, which it cannot do before a figure has a number, and
+    # a figure has no number until `diagram` renders it. `stage_diagram`
+    # re-stamps `diagrams.json`'s own `sections_sha` after `trim` finishes
+    # (`_restamp_diagram_guard`), so a caveat cut or an added mention does
+    # not make a future resume's cache look stale and re-spend a render it
+    # does not need.
+    "diagram",
+    # P9, #477. Between diagram and review, not after assemble: `stage_review`
     # is the reviewer the creatine run's `no_filler` complaint named, and it
     # grades `self.written` directly, before assembly exists. A repeat
     # caught after assembly would leave the reviewer grading a body that
     # already failed this row.
     "trim",
-    # `diagram` moved here from right after `outline` (#476): a figure is
-    # commissioned from the bound claims of the section that carries it, and
-    # those claims do not exist until the section is written. After `trim`,
-    # not before: `trim` can rewrite `self.written` (repeat removal), and the
-    # `sections_sha` guard should hash the section text the paper actually
-    # publishes, not a draft `trim` is about to change out from under it.
-    "diagram",
     "review",
     "assemble",
     "publish",
@@ -1383,14 +1389,17 @@ def review_gate(verdict: dict) -> None:
 # -- 8. assemble ----------------------------------------------------------
 
 
-def figure_block(figure, figures_dir: str = "figures") -> str:
+def figure_block(figure, number: int, figures_dir: str = "figures") -> str:
+    """The image line and its `Figure N.` caption, from the figure's own
+    alt text. #413, #464.
+    """
     target = figure.best
     if target is None or not target.name.endswith("_imagen.png"):
         raise GateFailed(
             f"figure {figure.name!r} has no judged imagen-diagrams PNG.",
             ("figure_asset",),
         )
-    return f"![{figure.alt}]({figures_dir}/{target.name})"
+    return f"![{figure.alt}]({figures_dir}/{target.name})\n\nFigure {number}. {figure.alt}"
 
 
 def render_reference(source: evidence.SourceDocument) -> str:
@@ -1433,6 +1442,7 @@ def assemble(
     figures: list,
     ledger: evidence.Ledger,
     charts: list | None = None,
+    skipped_figures: list[dict] | None = None,
 ) -> str:
     """Stitch the paper. Pure Python, deterministic, no model call.
 
@@ -1447,6 +1457,12 @@ def assemble(
     used_figures: set[str] = set()
     charts = [item for item in (charts or []) if item.get("path")]
     glossary: dict[str, str] = {}
+    # #464. One counter, spent as charts and diagrams are placed, body
+    # order, contiguous from one. A chart and a diagram share the same
+    # sequence: a reader counts figures on the page, not by kind.
+    figure_number = 0
+    skips = list(skipped_figures or [])
+    noted_skips: set[int] = set()
 
     parts = [f"# {plan.get('title', 'Untitled')}", ""]
     for section in outline.get("sections", []):
@@ -1473,14 +1489,28 @@ def assemble(
             rel = f"charts/{Path(chart['path']).name}"
             caption = chart.get("caption") or chart.get("name") or rel
             if rel not in (body or ""):
+                figure_number += 1
                 parts.append(f"![{caption}]({rel})")
+                parts.append("")
+                parts.append(f"Figure {figure_number}. {caption}")
                 parts.append("")
         for name in section.get("figures", []) or []:
             figure = by_name.get(name)
             if figure is not None and name not in used_figures:
-                parts.append(figure_block(figure))
+                figure_number += 1
+                parts.append(figure_block(figure, figure_number))
                 parts.append("")
                 used_figures.add(name)
+        # #386, #464. A skip is not silence: it is named, with its reason,
+        # under the section that asked for it. A blockquote so `cited`
+        # never reads it as an unsourced claim, the same free ride an
+        # image's own caption paragraph already gets.
+        for skip in skips:
+            if skip.get("section") not in (sid, heading) or id(skip) in noted_skips:
+                continue
+            noted_skips.add(id(skip))
+            parts.append(f"> {skip['name']} was not shown: {skip['reason']}.")
+            parts.append("")
 
     # A rendered figure the outline never placed still belongs in the paper. It
     # cost a render, and dropping it silently hides that the outline drifted.
@@ -1489,8 +1519,18 @@ def assemble(
         parts.append("## Figures")
         parts.append("")
         for figure in orphans:
-            parts.append(figure_block(figure))
+            figure_number += 1
+            parts.append(figure_block(figure, figure_number))
             parts.append("")
+
+    # A skip with no owning section (an empty `section`, or one that never
+    # matched a planned section id) still gets a note, not silence, just
+    # not one a specific section can claim.
+    for skip in skips:
+        if id(skip) in noted_skips:
+            continue
+        parts.append(f"> {skip['name']} was not shown: {skip['reason']}.")
+        parts.append("")
 
     # No captured term means no section, not an empty one. Alphabetical, case
     # insensitive, so "Loop" and "loop" do not sort by accident of case.
@@ -1513,6 +1553,7 @@ def assemble_gate(
     *,
     loop_doctrine: bool = True,
     outline: dict | None = None,
+    skipped_figures: list[dict] | None = None,
 ) -> paper_check.PaperScore:
     _, urls = numbering(ledger)
     score = paper_check.check(
@@ -1530,6 +1571,7 @@ def assemble_gate(
         # "?"; this lets it also catch a heading that repeats a key
         # question verbatim without the question mark.
         outline=outline,
+        skipped_figures=skipped_figures,
     )
     if not score.passed:
         raise GateFailed(
