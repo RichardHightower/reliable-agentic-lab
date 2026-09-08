@@ -408,6 +408,101 @@ def test_a_failed_rewrite_keeps_the_stamped_section_it_was_replacing(work, turns
     assert section.read_text() == "The stamped draft [1].\n", "the draft was lost on Escalate"
 
 
+# -- #476: the sections_sha guard, and the claims that reach the diagrammer --
+
+
+def _diagram_ready(work, run):
+    """An outline with one figure, one section, one ledger claim, and the
+    section's body on disk: enough for `paper.diagram` to commission from,
+    without paying for research, write, or a real render."""
+    outline = {
+        "title": "T",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "One",
+                "figures": [{"kind": "diagram", "name": "f1", "shows": "the loop"}],
+            }
+        ],
+    }
+    run.write_json(
+        "paper_ledger.json",
+        {
+            "entries": [
+                {
+                    "section_id": "s1",
+                    "claims": [
+                        {"claim": "Creatine increased fat-free mass.", "ref": "1", "confidence": 0.5}
+                    ],
+                }
+            ]
+        },
+    )
+    sections_dir = Path(work) / "sections"
+    sections_dir.mkdir(parents=True, exist_ok=True)
+    (sections_dir / "s1.md").write_text("Body text.\n", encoding="utf-8")
+    return outline
+
+
+def test_the_diagrammer_receives_the_bound_claims_of_its_section(work, turns, monkeypatch):
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+
+    calls = []
+
+    def fake_draw(turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None):
+        calls.append(list(claims or []))
+        return diagrams.Figure(name=name, section=section, path=f"diagrams/{name}_imagen.png")
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    assert calls == [["Creatine increased fat-free mass."]]
+
+
+def test_a_second_write_attempt_does_not_recommission_a_figure(work, turns, monkeypatch):
+    """#476's `sections_sha` guard: one diagrammer turn across two calls to
+    `paper.diagram`, when the section files have not changed between them."""
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+
+    calls = []
+
+    def fake_draw(turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None):
+        calls.append(name)
+        return diagrams.Figure(name=name, section=section, path=f"diagrams/{name}_imagen.png")
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    assert len(calls) == 1
+    paper.diagram(run)
+    assert len(calls) == 1, "an unchanged sections_sha must not recommission a figure"
+
+
+def test_a_changed_section_recommissions_its_figure(work, turns, monkeypatch):
+    """The `sections_sha` guard is not a permanent skip."""
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+
+    calls = []
+
+    def fake_draw(turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None):
+        calls.append(name)
+        return diagrams.Figure(name=name, section=section, path=f"diagrams/{name}_imagen.png")
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    assert len(calls) == 1
+
+    (Path(work) / "sections" / "s1.md").write_text(
+        "Body text, rewritten.\n", encoding="utf-8"
+    )
+    paper.diagram(run)
+    assert len(calls) == 2, "a changed section must recommission its figure"
+
+
 # -- the whole run ----------------------------------------------------------
 
 
