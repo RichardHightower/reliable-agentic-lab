@@ -375,6 +375,39 @@ def test_the_recorded_fixture_paper_passes_the_ste_belt(tmp_path):
     assert checks.noun_stacks(body) == []
 
 
+def test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass(tmp_path):
+    """#474 follow-up F7: the counter-evidence pass runs for real against
+    the recorded fixture, offline, no network. No claim's text in this
+    fixture matches the `GENERALIZING` regex, so the candidate this run
+    finds comes from the SDK-only selection criterion,
+    `generalizing_claims`'s sole-support-for-a-`claims_to_support`-item
+    branch, in the "approach" section. `OfflineTurns` inherits the base
+    `counter_search` miss, so the candidate resolves to "miss", not "hit"."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0
+    generalizing = []
+    for path in (work / "knowledge").glob("*/findings.json"):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        generalizing.extend(f for f in payload.get("findings") or [] if f.get("generalizing"))
+    assert generalizing, "no candidate was selected against the recorded fixture"
+    assert all(f.get("counter") in ("hit", "miss", "capped") for f in generalizing)
+
+
 # -- P2, person and marketing verbs -------------------------------------------
 
 
