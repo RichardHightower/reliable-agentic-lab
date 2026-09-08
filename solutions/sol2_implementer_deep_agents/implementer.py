@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -187,6 +189,138 @@ def _code_prompt(
     return extra + "\n\n" + body
 
 
+def _worktree(repo: Path, ticket_id: str) -> Path:
+    """An isolated git worktree for one ticket. Every run mutates this tree,
+    never the caller's repo.
+
+    Path: a sibling of the resolved repo, `<repo>.worktrees/<ticket_id>`.
+    Never `tempfile.gettempdir()` (a per-user, OS-reaped path on darwin, and
+    `/tmp` is a symlink `git worktree list` will not match) and never
+    `repo.name` alone: every fixture repo in the tests is named "repo" with
+    ticket "T001", so a basename key would collide. A sibling of the
+    *resolved* repo does not, because two different fixture repos resolve to
+    two different parents.
+
+    An existing, registered worktree is reused by this same deterministic
+    path; that determinism is what a future `--resume` (A6) needs. A path
+    that exists but is not a registered worktree is a leftover, and
+    `git worktree add` never runs on top of one.
+    """
+    repo = Path(repo).resolve()
+    path = repo.parent / f"{repo.name}.worktrees" / ticket_id
+
+    listing = subprocess.run(
+        ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        raise ContractError(
+            "the target repo is not a git repository; the implementer isolates "
+            "every run in a worktree"
+        )
+    registered = {
+        Path(line[len("worktree ") :]).resolve()
+        for line in listing.stdout.splitlines()
+        if line.startswith("worktree ")
+    }
+
+    if path.exists():
+        if path.resolve() not in registered:
+            raise ContractError(
+                f"{path} exists but is not a registered git worktree of {repo}. "
+                "Remove it by hand, or run a different --ticket."
+            )
+        # Reused. There is no --resume flag yet (A6 adds one), so every run
+        # here is a fresh run: reset the worktree to HEAD before the
+        # baseline, rather than carrying the last attempt's code forward.
+        # -fd, not -x, so a gitignored .venv the bootstrap step symlinked in
+        # is left alone.
+        _git(path, "reset", "--hard", "HEAD")
+        _git(path, "clean", "-fd")
+        harness_dir = path / ".harness"
+        if harness_dir.exists():
+            shutil.rmtree(harness_dir)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        branch = f"implementer/{ticket_id}"
+        added = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-B", branch, str(path), "HEAD"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if added.returncode != 0:
+            raise ContractError(f"git worktree add failed for {path}: {added.stderr.strip()}")
+
+    _bootstrap(repo, path)
+    _copy_ticket(repo, path, ticket_id)
+    return path
+
+
+def _git(cwd: Path, *args: str) -> None:
+    proc = subprocess.run(
+        ["git", "-C", str(cwd), *args], text=True, capture_output=True, check=False
+    )
+    if proc.returncode != 0:
+        raise ContractError(f"git {' '.join(args)} failed in {cwd}: {proc.stderr.strip()}")
+
+
+def _bootstrap(repo: Path, path: Path) -> None:
+    """A worktree checks out tracked files only, and `.venv/` is gitignored.
+    Share the source repo's venv when there is one, so the worktree's own
+    Taskfile-resolved interpreter exists without a reinstall. `setup` is a
+    required task (`contract.py:22`), so the fallback invents no spec the
+    target does not already declare.
+    """
+    target_venv = path / ".venv"
+    if target_venv.exists():
+        return
+    source_venv = repo / ".venv"
+    if source_venv.is_dir():
+        target_venv.symlink_to(source_venv)
+        return
+    result = Contract(path).run("setup")
+    if not result.ok:
+        raise ContractError(
+            f"no {target_venv}/bin/python: no {source_venv} to symlink from, and "
+            f"`task setup` failed in {path} (exit {result.exit_code})"
+        )
+
+
+def _copy_ticket(repo: Path, path: Path, ticket_id: str) -> None:
+    """The enhancer's ticket edit is often uncommitted. `git worktree add`
+    checks out HEAD only, so copy the ticket bytes across by hand before a
+    live doer, whose cwd is the worktree, would read a stale one.
+
+    `.loop.yml` is copied only when the worktree has none at all: a target
+    repo may never track it, and a worktree checkout would then lack it too.
+    """
+    tickets_path = Contract(repo).tickets.get("path", "tickets")
+    source_dir = repo / tickets_path
+    if source_dir.is_dir():
+        target_dir = path / tickets_path
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for match in source_dir.glob(f"{ticket_id}*.md"):
+            shutil.copy2(match, target_dir / match.name)
+    source_loop = repo / ".loop.yml"
+    target_loop = path / ".loop.yml"
+    if source_loop.is_file() and not target_loop.exists():
+        shutil.copy2(source_loop, target_loop)
+
+
+def _remove_worktree(repo: Path, path: Path) -> None:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "worktree", "remove", str(path), "--force"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise ContractError(f"git worktree remove failed for {path}: {proc.stderr.strip()}")
+
+
 def run(  # noqa: PLR0915
     *,
     repo: str | Path,
@@ -194,15 +328,25 @@ def run(  # noqa: PLR0915
     doer: str | doers.Backend = "reference",
     budget: int | None = None,
     write_trace: bool = True,
+    cleanup: bool = False,
 ) -> dict:
     """Run one implementer loop against a target repo.
 
     Long on purpose. The eight steps in the module docstring appear here in
     order, so the file reads as the sequence it enforces. Hiding half of them
     behind helpers would satisfy a linter and cost the reader the loop.
+
+    Everything after the ticket read runs inside an isolated git worktree,
+    never the caller's repo (`_worktree`). `repo` names the source; `target`
+    is rebound to the worktree once it exists, and everything the loop
+    writes -- steps.jsonl, .harness, the receipt -- lands there.
     """
     contract = Contract(repo)
     contract.validate()
+    source_repo = contract.repo
+
+    worktree = _worktree(source_repo, ticket_id)
+    contract = Contract(worktree)
     target = contract.repo
 
     the_ticket = tickets.load(target, ticket_id, contract.tickets.get("path", "tickets"))
@@ -281,7 +425,7 @@ def run(  # noqa: PLR0915
                 "test phase wrote outside its scope: " + ", ".join(sorted(scope_violations))
             )
             trace["red_ids"] = sorted(red_ids)
-            return _finish(contract, trace, write_trace)
+            return _finish(contract, trace, write_trace, source_repo=source_repo, cleanup=cleanup)
 
         if not contract.rubric.get("require_red", True) or red_ids:
             break
@@ -309,7 +453,7 @@ def run(  # noqa: PLR0915
             )
             trace["red_ids"] = []
             trace["scope_violations"] = list(scope_violations)
-            return _finish(contract, trace, write_trace)
+            return _finish(contract, trace, write_trace, source_repo=source_repo, cleanup=cleanup)
         previous_test_signature = signature
 
     trace["red_ids"] = sorted(red_ids)
@@ -394,7 +538,7 @@ def run(  # noqa: PLR0915
     trace["gate"] = decision.gate
     trace["reason"] = decision.reason
     trace["plan"] = plan.summary()
-    return _finish(contract, trace, write_trace)
+    return _finish(contract, trace, write_trace, source_repo=source_repo, cleanup=cleanup)
 
 
 def _mark_proven(plan: steps.Plan, passing: set[str], repo: Path) -> steps.Plan:
@@ -423,7 +567,14 @@ def _mark_proven(plan: steps.Plan, passing: set[str], repo: Path) -> steps.Plan:
     return plan
 
 
-def _finish(contract: Contract, trace: dict, write_trace: bool) -> dict:
+def _finish(
+    contract: Contract,
+    trace: dict,
+    write_trace: bool,
+    *,
+    source_repo: Path | None = None,
+    cleanup: bool = False,
+) -> dict:
     trace.setdefault("gate", gates.ESCALATE)
     if write_trace:
         out = contract.repo / ".harness"
@@ -432,7 +583,27 @@ def _finish(contract: Contract, trace: dict, write_trace: bool) -> dict:
         (out / "last-implementer.json").write_text(json.dumps(trace, indent=2), encoding="utf-8")
         exit_code = 0 if trace.get("gate") == gates.PASS else 1
         receipt.write(contract.repo, exit_code, list(trace.get("red_ids") or []))
+    if source_repo is not None:
+        # Never removed automatically. `cleanup` is the one explicit flag
+        # that does; otherwise `main` prints the path and the command to do
+        # it by hand.
+        trace["source_repo"] = str(source_repo)
+        trace["worktree"] = str(contract.repo)
+        trace["worktree_removed"] = cleanup
+        if cleanup:
+            _remove_worktree(source_repo, contract.repo)
     return trace
+
+
+def _print_worktree_status(trace: dict) -> None:
+    worktree = trace.get("worktree")
+    if not worktree:
+        return
+    if trace.get("worktree_removed"):
+        print(f"worktree removed: {worktree}")
+        return
+    print(f"worktree: {worktree}")
+    print(f"remove it with: git -C {trace.get('source_repo', '')} worktree remove {worktree}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -445,13 +616,25 @@ def main(argv: list[str] | None = None) -> int:
         help="none | reference | reference:<ref> | claude | codex | grok | opencode",
     )
     parser.add_argument("--budget", type=int, default=None)
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="remove the worktree after the run. Never automatic otherwise.",
+    )
     args = parser.parse_args(argv)
 
-    trace = run(repo=args.repo, ticket_id=args.ticket, doer=args.doer, budget=args.budget)
+    trace = run(
+        repo=args.repo,
+        ticket_id=args.ticket,
+        doer=args.doer,
+        budget=args.budget,
+        cleanup=args.cleanup,
+    )
     print(trace.get("rubric", ""))
     print()
     print(f"gate: {trace['gate']}")
     print(f"reason: {trace['reason']}")
+    _print_worktree_status(trace)
     return 0 if trace["gate"] == gates.PASS else 1
 
 

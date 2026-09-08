@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 import contract as contract_mod
 import doers
@@ -61,6 +64,25 @@ state: ready
 ## Acceptance criteria
 
 - (AC-1) greet() returns hello
+"""
+
+REAL_TEST_TASKFILE = """\
+version: '3'
+vars:
+  PY: .venv/bin/python
+tasks:
+  setup:
+    cmds: [echo setup]
+  test:
+    cmds:
+      - mkdir -p reports
+      - "{{.PY}} -m pytest tests -q --junitxml=reports/junit.xml"
+  e2e:
+    cmds: [echo e2e]
+  lint:
+    cmds: [echo lint]
+  format-check:
+    cmds: [echo format-check]
 """
 
 
@@ -211,7 +233,7 @@ def test_red_gate_escalates_after_two_silent_test_turns(tmp_path, monkeypatch):
     assert trace["red_ids"] == []
     assert "test_phase" in trace
     assert backend.calls == 2
-    assert (repo / ".harness" / "last-implementer.json").exists()
+    assert (Path(trace["repo"]) / ".harness" / "last-implementer.json").exists()
 
 
 def test_red_gate_escalates_with_the_old_wording_at_budget_one(tmp_path, monkeypatch):
@@ -311,7 +333,7 @@ def test_red_gate_keeps_a_test_phase_scope_violation(tmp_path, monkeypatch):
     assert trace["gate"] == "escalate"
     assert trace["test_phase"]["violations"]
     assert any("app/leaked.py" in item for item in trace["scope_violations"])
-    assert (repo / "app" / "leaked.py").exists()
+    assert (Path(trace["repo"]) / "app" / "leaked.py").exists()
     assert backend.calls == 1
 
 
@@ -340,8 +362,9 @@ def test_happy_path_passes_the_rubric(tmp_path, monkeypatch):
     assert trace["gate"] == "pass"
     assert "the rubric is green" in trace["reason"]
     assert trace["judge"]["done"] is True
-    assert (repo / "tests" / "test_greet.py").exists()
-    assert (repo / "app" / "greet.py").exists()
+    written = Path(trace["repo"])
+    assert (written / "tests" / "test_greet.py").exists()
+    assert (written / "app" / "greet.py").exists()
     assert "tests/test_greet.py" in trace["test_phase"]["files"]
 
 
@@ -462,15 +485,21 @@ def test_ac_1_backend_and_ui_use_display_name():
     assert iteration["gate"] == "pass"
     assert "the rubric is green" in iteration["reason"]
     assert iteration["judge_done"] is True
-    plan = (repo / "steps.jsonl").read_text(encoding="utf-8")
+    written = Path(trace["repo"])
+    plan = (written / "steps.jsonl").read_text(encoding="utf-8")
     assert "display_name" in plan
     assert '"role": "test_implementer"' in plan
     assert '"role": "code_implementer"' in plan
-    assert test_path.read_text(encoding="utf-8") == renamed_test
-    assert backend_path.read_text(encoding="utf-8") == renamed_backend
-    assert form_path.read_text(encoding="utf-8") == renamed_form
-    assert "task_title" not in backend_path.read_text(encoding="utf-8")
-    assert "taskTitle" not in form_path.read_text(encoding="utf-8")
+    written_test = written / "tests" / "test_task_fields.py"
+    written_backend = written / "app" / "task_fields.py"
+    written_form = written / "app" / "templates" / "task_form.html"
+    assert written_test.read_text(encoding="utf-8") == renamed_test
+    assert written_backend.read_text(encoding="utf-8") == renamed_backend
+    assert written_form.read_text(encoding="utf-8") == renamed_form
+    assert "task_title" not in written_backend.read_text(encoding="utf-8")
+    assert "taskTitle" not in written_form.read_text(encoding="utf-8")
+    # The original tree, still on its seed commit, never saw the rename.
+    assert test_path.read_text(encoding="utf-8") != renamed_test
 
 
 def test_a_retry_carries_the_failed_rows_and_test_ids(tmp_path, monkeypatch):
@@ -720,10 +749,248 @@ def test_happy_path_writes_the_three_claim_receipt(tmp_path, monkeypatch):
             [("app/greet.py", "def greet():\n    return 'hello'\n")],
         ]
     )
-    implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
-    path = repo / ".harness" / "receipt.json"
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+    path = Path(trace["repo"]) / ".harness" / "receipt.json"
     assert path.exists()
     payload = __import__("json").loads(path.read_text(encoding="utf-8"))
     assert "tree_hash" in payload
     assert "green" in payload
     assert "written_at" in payload
+
+
+# -- A4 (#431). Isolated git worktree -----------------------------------
+
+
+def test_worktree_runs_the_real_suite_and_parses_junit(tmp_path):
+    """No monkeypatch: contract.run("test") against a fresh worktree proves
+    the .venv bootstrap actually works, because the worktree's own linked
+    interpreter has to run pytest and write a real junit.xml for this to
+    pass."""
+    repo = _git_repo(tmp_path / "repo")
+    (repo / "Taskfile.yml").write_text(REAL_TEST_TASKFILE, encoding="utf-8")
+    (repo / "tests" / "test_sample.py").write_text(
+        "def test_ok():\n    assert True\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "Taskfile.yml", "tests/test_sample.py"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "a real test task"], cwd=repo, check=True, capture_output=True
+    )
+    # Untracked on purpose: the bootstrap step has to symlink this itself,
+    # never one `git worktree add` happens to check out. Not .resolve(): a
+    # venv's own python is a symlink chain down to the system interpreter,
+    # and resolving it away would point at a plain install with no venv
+    # structure at all.
+    venv_root = Path(sys.executable).parent.parent
+    (repo / ".venv").symlink_to(venv_root)
+
+    worktree = implementer._worktree(repo, "T001")
+    result = contract_mod.Contract(worktree).run("test")
+
+    assert result.junit.exists
+    assert result.junit.tests == 1
+    assert result.junit.failures == 0
+    assert (worktree / ".venv").exists()
+
+
+def test_two_repos_named_repo_get_different_worktrees(tmp_path, monkeypatch):
+    """Every fixture repo in this file is named "repo" with ticket T001, so a
+    worktree keyed on repo.name alone collides. A sibling of the resolved
+    repo does not: two repos under two different parents never share one."""
+    repo_a = _git_repo(tmp_path / "a" / "repo")
+    repo_b = _git_repo(tmp_path / "b" / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+
+    def scripted_runs():
+        return [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ]
+
+    _patch_runs(monkeypatch, scripted_runs())
+    backend_a = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'A'\n")],
+        ]
+    )
+    trace_a = implementer.run(repo=repo_a, ticket_id="T001", doer=backend_a, budget=1)
+
+    _patch_runs(monkeypatch, scripted_runs())
+    backend_b = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'B'\n")],
+        ]
+    )
+    trace_b = implementer.run(repo=repo_b, ticket_id="T001", doer=backend_b, budget=1)
+
+    assert trace_a["gate"] == "pass"
+    assert trace_b["gate"] == "pass"
+    worktree_a, worktree_b = Path(trace_a["repo"]), Path(trace_b["repo"])
+    assert worktree_a != worktree_b
+    assert (worktree_a / "app" / "greet.py").read_text(encoding="utf-8") == (
+        "def greet():\n    return 'A'\n"
+    )
+    assert (worktree_b / "app" / "greet.py").read_text(encoding="utf-8") == (
+        "def greet():\n    return 'B'\n"
+    )
+
+
+def test_original_tree_stays_clean_and_gains_no_harness(tmp_path, monkeypatch):
+    """Everything after the ticket read binds to the worktree. The original
+    stays porcelain-clean and never grows a .harness of its own."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    backend = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    assert trace["gate"] == "pass"
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=repo, text=True, capture_output=True, check=True
+    )
+    assert status.stdout == ""
+    assert not (repo / ".harness").exists()
+    assert Path(trace["repo"]) != repo.resolve()
+
+
+def test_rerun_without_resume_starts_from_a_reset_tree(tmp_path, monkeypatch):
+    """There is no --resume flag yet (A6 adds one). A second run of the same
+    ticket resets the reused worktree before its own baseline: a file only
+    the first run wrote is gone before the second run does anything."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    first_backend = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [
+                ("app/greet.py", "def greet():\n    return 'hello'\n"),
+                ("app/leftover.txt", "from the first run\n"),
+            ],
+        ]
+    )
+    first = implementer.run(repo=repo, ticket_id="T001", doer=first_backend, budget=1)
+    worktree = Path(first["repo"])
+    assert (worktree / "app" / "leftover.txt").exists()
+
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    second_backend = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+    second = implementer.run(repo=repo, ticket_id="T001", doer=second_backend, budget=1)
+
+    assert Path(second["repo"]) == worktree
+    assert not (worktree / "app" / "leftover.txt").exists()
+
+
+def test_non_git_target_raises_contract_error(repo):
+    """git worktree add fails on a plain directory. The `repo` fixture
+    (conftest.py) builds exactly that: a Taskfile and a role table, no .git."""
+    with pytest.raises(implementer.ContractError, match="not a git repository"):
+        implementer.run(repo=repo, ticket_id="T001", doer=doers.NoneBackend())
+
+
+def test_leftover_worktree_directory_raises_contract_error(tmp_path):
+    """A path that exists but is not a registered git worktree is a
+    leftover, never something `git worktree add` runs on top of."""
+    repo = _git_repo(tmp_path / "repo")
+    leftover = repo.parent / f"{repo.name}.worktrees" / "T001"
+    leftover.mkdir(parents=True)
+    (leftover / "junk.txt").write_text("not a worktree\n", encoding="utf-8")
+
+    with pytest.raises(implementer.ContractError, match="not a registered git worktree"):
+        implementer._worktree(repo, "T001")
+
+
+def test_uncommitted_ticket_and_never_committed_loop_yml_reach_the_worktree(tmp_path):
+    """The enhancer's ticket edit is often uncommitted, and a target repo's
+    own .loop.yml may never be tracked at all. Both still have to reach the
+    worktree, or a live doer reading its own cwd never sees them."""
+    repo = _git_repo(tmp_path / "repo")
+    uncommitted_ticket = TICKET.replace(
+        "greet() returns hello", "greet() returns hi, uncommitted"
+    )
+    (repo / "tickets" / "T001.md").write_text(uncommitted_ticket, encoding="utf-8")
+
+    # .loop.yml was committed by _git_repo. Simulate a target repo where it
+    # was never tracked at all, without touching the file on disk.
+    subprocess.run(
+        ["git", "rm", "--cached", ".loop.yml"], cwd=repo, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "stop tracking .loop.yml"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    worktree = implementer._worktree(repo, "T001")
+
+    copied_ticket = (worktree / "tickets" / "T001.md").read_text(encoding="utf-8")
+    assert "uncommitted" in copied_ticket
+    assert (worktree / ".loop.yml").read_text(encoding="utf-8") == LOOP_YML
+
+
+def test_cleanup_flag_removes_the_worktree_and_prints_the_path_without_it(
+    tmp_path, monkeypatch, capsys
+):
+    """Open decision 2: the worktree is never removed automatically. Without
+    --cleanup the path and the removal command print; --cleanup actually
+    runs `git worktree remove`."""
+    repo = _git_repo(tmp_path / "repo")
+    resolved_repo = repo.resolve()
+    worktree_path = resolved_repo.parent / f"{resolved_repo.name}.worktrees" / "T001"
+    health = "tests/test_health.py::test_health"
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+
+    implementer.main(["--repo", str(repo), "--ticket", "T001", "--doer", "none", "--budget", "1"])
+    out = capsys.readouterr().out
+    assert worktree_path.exists()
+    assert f"worktree: {worktree_path}" in out
+    assert f"git -C {resolved_repo} worktree remove {worktree_path}" in out
+
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+    implementer.main(
+        [
+            "--repo", str(repo), "--ticket", "T001", "--doer", "none",
+            "--budget", "1", "--cleanup",
+        ]
+    )
+    out2 = capsys.readouterr().out
+    assert f"worktree removed: {worktree_path}" in out2
+    assert not worktree_path.exists()

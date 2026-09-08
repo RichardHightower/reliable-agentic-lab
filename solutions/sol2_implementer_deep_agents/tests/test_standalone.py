@@ -49,3 +49,23 @@ def test_table_only_without_repo():
     assert proc.returncode == 0
     assert "judge" in proc.stdout
     assert "no" in proc.stdout.lower() or "writes" in proc.stdout.lower() or "judge" in proc.stdout
+
+
+def test_cleanup_flag_reaches_implementer_run(monkeypatch, target_repo):
+    """A4 (#431). The worktree mechanics are implementer.py's; this only
+    proves harness.py's own --cleanup flag is not dropped on the way to it."""
+    import harness
+    import implementer
+
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"rubric": "", "gate": "pass", "reason": "ok"}
+
+    monkeypatch.setattr(implementer, "run", fake_run)
+
+    exit_code = harness.main(["--repo", str(target_repo), "--doer", "none", "--cleanup"])
+
+    assert captured.get("cleanup") is True
+    assert exit_code == 0

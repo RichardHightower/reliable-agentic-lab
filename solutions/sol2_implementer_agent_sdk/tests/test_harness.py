@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import harness
+import implementer
 import load_agents
 import roleplan
 
@@ -145,3 +146,20 @@ def test_the_e2e_path_does_not_import_the_sibling_folder():
     text = (FOLDER / "e2e_t001.py").read_text(encoding="utf-8")
     assert "sol2_implementer_deep_agents" not in text
     assert "sys.path" not in text or "_flat_modules" not in text
+
+
+def test_cleanup_flag_reaches_implementer_run(repo, monkeypatch):
+    """A4 (#431). The worktree mechanics are implementer.py's; this only
+    proves harness.py's own --cleanup flag is not dropped on the way to it."""
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"rubric": "", "gate": "pass", "reason": "ok"}
+
+    monkeypatch.setattr(implementer, "run", fake_run)
+
+    exit_code = harness.main(["--repo", str(repo), "--doer", "none", "--cleanup"])
+
+    assert captured.get("cleanup") is True
+    assert exit_code == 0
