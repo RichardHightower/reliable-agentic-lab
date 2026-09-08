@@ -447,6 +447,34 @@ def _write_briefing(work_dir: Path, payload: dict) -> None:
     (dest / "scout-briefing.md").write_text("\n".join(lines), encoding="utf-8")
 
 
+def _normalize_title(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+# #475. A scout title counts as retrieved only on a normalized exact match,
+# or a token-set overlap of at least 0.8 against an admitted source's own
+# title. One shared word, even a distinctive one, is not enough: judge
+# revision on #520, follow-up 1, found a never-retrieved flagship work
+# reading as retrieved on one word shared with an unrelated source, such as
+# "trial" or "study".
+TITLE_OVERLAP_MIN = 0.8
+
+
+def _scout_title_retrieved(title: str, sources) -> bool:
+    normalized_wanted = _normalize_title(title)
+    wanted = set(re.findall(r"[a-z0-9]{4,}", normalized_wanted))
+    if not normalized_wanted or not wanted:
+        return False
+    for source in sources:
+        normalized_found = _normalize_title(getattr(source, "title", "") or "")
+        if normalized_wanted == normalized_found:
+            return True
+        found = set(re.findall(r"[a-z0-9]{4,}", normalized_found))
+        if found and len(wanted & found) / min(len(wanted), len(found)) >= TITLE_OVERLAP_MIN:
+            return True
+    return False
+
+
 def _briefing_markdown(work_dir: Path) -> str:
     """The map, if the scout actually ran. A skipped briefing is not a map."""
     path = Path(work_dir) / "corpus" / "scout-briefing.json"
@@ -504,6 +532,12 @@ class Paper:
     # behavior: the doctrine question is bound, the repository answers it,
     # and the assembled body is graded on naming it.
     loop_doctrine: bool = False
+    # #475. Every important question is expected to carry its own
+    # `evidence_requirements` block. Off by default, the same as
+    # `loop_doctrine`, so the many tests that build a `Paper` directly and
+    # exercise `stage_plan`/`stage_search` with an older-shaped plan are
+    # unaffected; `loop.py`'s real run turns it on.
+    require_evidence_requirements: bool = False
 
     state: pstate.PaperState = field(init=False)
     ledger: evidence.Ledger = field(init=False)
@@ -526,6 +560,15 @@ class Paper:
     # The most expensive call seen per role. The budget check reads it as the
     # headroom the next call of that kind is likely to need.
     _worst: dict = field(default_factory=dict, init=False)
+    # #475. Loaded from `state.scout_retried` in `__post_init__`, so a
+    # resumed `scout` stage does not spend a second retry turn.
+    scout_retried: bool = field(default=False, init=False)
+    # #475, judge revision on #520. Loaded from `state.evidence_shortfall_unmet`
+    # in `__post_init__`: question id -> the measured shortfall text, for a
+    # question whose one turn is spent and the block is still short. Being
+    # in this dict is what tells `_research_shortfalls` not to ask again and
+    # `search_gate` to accept the gap rather than fail the run on it.
+    evidence_shortfall_unmet: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         self.work_dir = Path(self.work_dir)
@@ -543,6 +586,8 @@ class Paper:
         self.budget.on_charge = self._reserve_search
         self.follow_used = self.state.follow_used
         self.counter_used = self.state.counter_used
+        self.scout_retried = self.state.scout_retried
+        self.evidence_shortfall_unmet = dict(self.state.evidence_shortfall_unmet)
         self._load_allowlist()
 
     def _load_allowlist(self) -> None:
@@ -918,6 +963,37 @@ class Paper:
         except Exception as exc:
             self.say(f"  scout failed: {exc}; outlining from the topic")
 
+        # #475. A scout that named headings -- a literature exists -- but no
+        # flagship titles is retried once, the missing field named in the
+        # prompt. `self.scout_retried`, persisted to `state.scout_retried`,
+        # means a resumed scout stage does not spend a second retry turn.
+        if proposal.get("headings") and not proposal.get("titles") and not self.scout_retried:
+            self.scout_retried = True
+            self.state.scout_retried = True
+            self.state.save()
+            try:
+                retry = self._ask(
+                    "researcher",
+                    "Map the field for a white paper. This is a briefing, not "
+                    "research. Do not return claims, quotes, or citation "
+                    "numbers.\n\nTopic: " + self.topic + "\n\n"
+                    "The first pass named headings but no titles. Name titles: "
+                    "list a few flagship works for this field, by name.\n\n"
+                    "Return JSON with headings, domains (canonical hosts with "
+                    f"org_type from {', '.join(source_policy.ORG_TYPES)}; at "
+                    f"most {source_policy.MAX_PERPLEXITY_DOMAINS}), titles (a "
+                    "few flagship works, names only), and field."
+                    + extra,
+                )
+                usd += retry.usd
+                retried = self._json_reply("researcher", retry)
+                if isinstance(retried, dict) and retried.get("titles"):
+                    proposal = retried
+            except BudgetSpent:
+                raise
+            except Exception as exc:
+                self.say(f"  scout retry failed: {exc}")
+
         proposed = []
         for item in proposal.get("domains") or []:
             if isinstance(item, str):
@@ -1001,7 +1077,11 @@ class Paper:
                 else reply.json()
             )
         self.plan = stages.normalize_plan(self.plan)
-        stages.plan_gate(self.plan, loop_doctrine=self.loop_doctrine)
+        stages.plan_gate(
+            self.plan,
+            loop_doctrine=self.loop_doctrine,
+            require_evidence_requirements=self.require_evidence_requirements,
+        )
         path.write_text(json.dumps(self.plan, indent=2), encoding="utf-8")
         usd += self._approve_outline()
         self.state.record("plan", path)
@@ -1586,16 +1666,19 @@ class Paper:
             # Persist per question. A stop between questions must not discard
             # the answers this run already paid for.
             self.ledger.write()
-        # Both return what they spent, added into this stage's own total.
-        # `_ask` already adds every call to `self.state.total_cost_usd`
-        # regardless; without this, `stage_search`'s `StageResult.usd` (what
-        # `mark_complete` records as this stage's `cost_usd`) undercounted
-        # by exactly what these two passes spent, and the invariant
+        # Every one of these returns what it spent, added into this stage's
+        # own total. `_ask` already adds every call to
+        # `self.state.total_cost_usd` regardless; without this,
+        # `stage_search`'s `StageResult.usd` (what `mark_complete` records
+        # as this stage's `cost_usd`) undercounted by exactly what these
+        # passes spent, and the invariant
         # `state.total_cost_usd == sum(stage.cost_usd for every stage)`
-        # silently broke the moment either pass spent a real turn.
+        # silently broke the moment any of them spent a real turn.
         usd += self._follow_primaries()
         usd += self._counter_evidence()
-        stages.search_gate(self.ledger, self.plan)
+        usd += self._research_shortfalls()
+        self._record_scout_title_status()
+        stages.search_gate(self.ledger, self.plan, unmet=self.evidence_shortfall_unmet)
         self.ledger.write()
         provider = self.backend.active_name
         transport = self.backend.active_transport
@@ -1724,6 +1807,114 @@ class Paper:
             self.state.counter_used = self.counter_used
             self.state.save()
         return spent
+
+    def _research_shortfalls(self) -> float:
+        """One extra research turn per important question whose bound
+        evidence still falls short of its own `evidence_requirements` block,
+        before `search_gate` grades it. #475
+
+        `self.evidence_shortfall_unmet`, persisted to
+        `state.evidence_shortfall_unmet`, holds a question id once its one
+        shot is spent and the block is still short: `stage_search` retries
+        on a `search_gate` failure by re-entering this method from the top,
+        and it is a specific still-short question, not a shared budget,
+        that must not be asked twice. A question the one extra turn fully
+        resolves is never added: `evidence_shortfall` on the next check
+        already reads "" for it, the same as one that was never short.
+
+        Judge revision on #520, blocking finding 1: a shortfall that
+        survives the one turn used to end the run, because `search_gate`
+        re-entered this method found nothing left to do and failed with an
+        unchanged signature. Being marked unmet here is what lets
+        `search_gate` accept the gap as named, not terminal, the same shape
+        `_counter_evidence`'s `capped` state already gives `counterweighed`.
+
+        Returns what it spent, so `stage_search` can fold it into its own
+        `StageResult.usd`. #475
+        """
+        spent = 0.0
+        for question in self.plan.get("questions", []):
+            if not question.get("important"):
+                continue
+            qid = question.get("id") or ""
+            if qid in self.evidence_shortfall_unmet:
+                continue
+            # This one question is about checked-in Python, answered by
+            # `stage_search`'s own repository lookup, never a model. Asking
+            # a researcher turn about it here would be the same mistake
+            # `stage_search`'s own comment already refuses. #475
+            if (
+                self.loop_doctrine
+                and self.runner.name == "deep_agents"
+                and research.repository_doctrine_report(question["question"]) is not None
+            ):
+                continue
+            reason = stages.evidence_shortfall(self.ledger, question)
+            if not reason:
+                continue
+            self.say(f"    evidence_requirements shortfall on {qid}: {reason}")
+            self.budget.begin_request(max_calls=1, max_provider_calls=3)
+            try:
+                reply = self._ask(
+                    "researcher",
+                    f"Question: {question['question']}\n"
+                    f"What answers it: {question['check']}\n"
+                    f"Evidence requirements shortfall: {reason}. Search again "
+                    "naming what is missing.\n\n"
+                    "Search once, then return JSON: "
+                    '{"answer": "...", "sources": [{"title": "...", "url": "...", '
+                    '"vendor": "...", "quote": "..."}], '
+                    '"claims": [{"text": "...", "confidence": 0.8, "source_urls": ["..."]}]}',
+                )
+            finally:
+                self.budget.end_request()
+            spent += reply.usd
+            parsed = self._json_reply("researcher", reply)
+            self._locate_cabinet_sources(question, parsed)
+            stages.record_findings(
+                self.ledger, question, parsed, seed=self.allowed_domains, backend=self.backend
+            )
+            self.ledger.write()
+            still_short = stages.evidence_shortfall(self.ledger, question)
+            if still_short:
+                self.evidence_shortfall_unmet[qid] = still_short
+                self.state.evidence_shortfall_unmet = dict(self.evidence_shortfall_unmet)
+                self.state.save()
+        return spent
+
+    def _record_scout_title_status(self) -> None:
+        """Each scout-briefing flagship title, retrieved or a named skip. #475
+
+        The scout's `titles` are a map, not evidence; this is what makes the
+        map bind to something a reader can open, or names why it does not.
+        Recomputed on every call, not accumulated: a `stage_search` retry
+        only adds sources, never removes one, so a later recompute can only
+        turn a skip into a retrieval, never the reverse -- no persisted
+        counter is needed here, unlike the scout retry and the shortfall
+        pass, neither of which is free to repeat.
+        """
+        path = self.work_dir / "corpus" / "scout-briefing.json"
+        if not path.exists():
+            return
+        try:
+            briefing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        titles = briefing.get("titles") or []
+        if not titles:
+            return
+        status = []
+        for title in titles:
+            retrieved = _scout_title_retrieved(title, self.ledger.sources.values())
+            status.append(
+                {
+                    "title": title,
+                    "retrieved": retrieved,
+                    "reason": "" if retrieved else "no admitted source matched this title",
+                }
+            )
+        briefing["title_status"] = status
+        path.write_text(json.dumps(briefing, indent=2) + "\n", encoding="utf-8")
 
     # -- 3. verify ---------------------------------------------------------
 
@@ -2006,6 +2197,27 @@ class Paper:
             )
             briefs = "\n".join(stages.claim_brief(self.ledger, cid, index) for cid in claim_ids)
             word_range = _section_word_range(heading, len(claim_ids))
+            # #475, judge revision on #520: a question graded and still
+            # short after its one shot travels as a named gap, not a run
+            # failure. The section that answers it is told to hedge its
+            # generalizations the same way a single-source claim is
+            # hedged, so the paper does not overstate what a thin ledger
+            # supports.
+            subjects = {self.ledger.claim(cid).subject for cid in claim_ids if self.ledger.claim(cid)}
+            shortfalls = [
+                self.evidence_shortfall_unmet[qid]
+                for question in self.plan.get("questions", [])
+                if question.get("subject") in subjects
+                and (qid := question.get("id") or "") in self.evidence_shortfall_unmet
+            ]
+            hedge = (
+                "Evidence requirements were not fully met for this section: "
+                f"{'; '.join(shortfalls)}. Hedge every generalization here the way "
+                "a single-source claim is hedged: say what the evidence shows is "
+                "limited, not settled.\n"
+                if shortfalls
+                else ""
+            )
             if heading.strip().lower() == "abstract":
                 # Every other section is already stamped by the time this
                 # runs. The writer may state only what that body states, and
@@ -2022,14 +2234,14 @@ class Paper:
                     "\"proves\", \"definitively\", \"conclusively\", or \"establishes "
                     "that\" for a claim the body hedges.\n"
                     f"Purpose: {section.get('purpose', '')}\n"
-                    f"Audience: {self.plan['audience']}\n{extra}\n\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n"
                     f"The paper body, already written:\n{written_body}\n\n"
                 )
             else:
                 lead = (
                     f"Write the {heading!r} section of {self.plan['title']!r}.\n"
                     f"Purpose: {section.get('purpose', '')}\n"
-                    f"Audience: {self.plan['audience']}\n{extra}\n\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n"
                 )
             reply = self._ask(
                 "writer",

@@ -660,9 +660,13 @@ def test_the_exit_doctrine_finding_accepts_only_this_repository(work):
 
 
 def test_the_offline_outline_includes_the_exit_doctrine_question(work):
+    import outline as outlines  # noqa: PLC0415
+
     offline = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
     drafted = offline.plan("topic", "")
-    questions = [q for s in drafted["sections"] for q in s["key_questions"]]
+    questions = [
+        outlines.question_text(q) for s in drafted["sections"] for q in s["key_questions"]
+    ]
     assert t.EXIT_DOCTRINE_QUESTION in questions
 
     backend = Backend(
@@ -695,7 +699,8 @@ def test_the_offline_outline_reads_as_prose():
         assert topic not in objective, objective
         assert not objective.lower().startswith("describe how how")
         assert not objective.lower().startswith("state what how")
-        for question in section["key_questions"]:
+        for raw_question in section["key_questions"]:
+            question = outlines.question_text(raw_question)
             assert "how how" not in question.lower(), question
             assert not question.lower().startswith(topic), question
             assert question[0].isupper() or question[0].isdigit(), question

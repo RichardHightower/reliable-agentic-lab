@@ -102,6 +102,11 @@ def question_list(section: dict) -> list[dict]:
                 "id": f"{section['id']}-q{index}",
                 "text": text,
                 "kind": outlines.question_kind(raw),
+                # #475. `{}` for a bare-string question, an older outline, or
+                # one this test built directly: the run pass below treats an
+                # empty block as nothing required, the same as `checks
+                # .evidence_requirements_met` does.
+                "evidence_requirements": outlines.question_evidence_requirements(raw),
             }
         )
     return out
@@ -269,6 +274,25 @@ def attributed(finding: dict, source_text: str) -> bool:
     return bool(numbers) and numbers <= _numbers(source_text)
 
 
+def _flatten_for_grading(findings: list[dict]) -> list[dict]:
+    """Raw findings, reduced to the `{tier, year, text, url}` shape
+    `checks.evidence_requirements_met` grades. `url` is what that function
+    dedupes `min_count` on: two findings citing one URL are one source, not
+    two. #475"""
+    flattened = []
+    for finding in findings:
+        source = finding.get("source") or {}
+        flattened.append(
+            {
+                "tier": source.get("evidence_tier") or "",
+                "year": source.get("year") or "",
+                "text": f"{finding.get('claim') or ''} {finding.get('quote') or ''}",
+                "url": source.get("url_or_path") or "",
+            }
+        )
+    return flattened
+
+
 def attribute_findings(run, findings: list[dict], sid: str) -> list[dict]:
     """Drop a finding whose own cited source does not back it. #471
 
@@ -417,6 +441,11 @@ def follow_primary_sources(run, findings: list[dict], sid: str) -> None:
             result = {"found": False}
         _apply_follow_result(run, finding, result)
         run.follow_used += 1
+        run.state.follow_used = run.follow_used
+        try:
+            run.state.save(run.work_dir)
+        except OSError:
+            pass  # telemetry never fails a run
 
 
 # #474. A generalizing claim ruled a lever out from one datapoint (#474's own
@@ -579,6 +608,11 @@ def counter_evidence_pass(run, findings: list[dict], section: dict) -> None:
                 hit = True
         finding["counter"] = "hit" if hit else "miss"
         run.counter_used += 1
+        run.state.counter_used = run.counter_used
+        try:
+            run.state.save(run.work_dir)
+        except OSError:
+            pass  # telemetry never fails a run
 
 
 # A claim describes the world. These phrases describe the search instead, and
@@ -686,6 +720,14 @@ def _claims_for_writer(
             text = f"{text} (no contrary evidence found in this search)."
         elif counter == "capped":
             text = f"{text} ({CAPPED_NOTE}; hedge like a single source)."
+        shortfall = finding.get("evidence_shortfall") or ""
+        if shortfall:
+            # #475, judge revision on #520, blocking finding 1: the one
+            # shortfall turn is spent and the block is still short. The
+            # writer is told outright, the same way `secondary` and
+            # `capped` already are, rather than left to infer a gap it was
+            # never taught.
+            text = f"{text} (evidence requirement not fully met: {shortfall}. Hedge accordingly.)"
         usable.append(
             {
                 "id": finding["id"],
@@ -700,6 +742,9 @@ def _claims_for_writer(
                 # sent to the writer: `WRITER_CLAIM_FIELDS` in `turns.py`
                 # still names only `id, number, text, status`. #473
                 "tier": source.get("evidence_tier") or "",
+                # Read by `checks.section_check`'s `evidence_requirements_met`
+                # row, same reason `tier` above is. #475
+                "year": source.get("year") or "",
                 # Read by `checks.section_check`'s `counterweighed` row, same
                 # reason. #474
                 "generalizing": bool(finding.get("generalizing")),
@@ -1084,28 +1129,78 @@ def run_section(run, section: dict) -> dict:
     findings, unlocated = locate_cabinet_findings(run, findings)
     run.write_json(f"knowledge/{sid}/{UNRESOLVED_FILE}", {"unresolved": unlocated})
 
-    # 3c gap pass
+    # 3b-ter metadata, early. `evidence_requirements_met` below needs
+    # `evidence_tier`, which only exists after this runs; the full pass at
+    # 3c-bis below (idempotent, cache-backed) covers whatever the gap loop
+    # adds. #475
+    enrich_source_metadata(findings, run)
+
+    # 3c gap pass. A question with no finding at all is researched once, the
+    # existing behavior; a question with findings that still fall short of
+    # its own `evidence_requirements` block is researched once more too,
+    # naming the shortfall. Either way it is one extra turn per question,
+    # consumed here, not retried: `do_sections` runs this section's loop
+    # once, forward only, never re-entering it mid-run. #475
     gaps = [
         item
         for item in (loaded.get("coverage_gaps") or [])
         if not _answered(findings, item.get("question") or "")
     ]
     answered = {f.get("answers_question") for f in findings if f.get("claim")}
+    unmet_shortfalls = getattr(getattr(run, "state", None), "evidence_shortfall_unmet", None) or {}
     for question in questions:
-        if question["text"] in answered or _answered(findings, question["text"]):
+        bound = [f for f in findings if f.get("answers_question") == question["text"]]
+        unanswered = question["text"] not in answered and not _answered(findings, question["text"])
+        requirements = question.get("evidence_requirements") or {}
+        # #475, judge revision on #520, blocking finding 1 and 2. A question
+        # already graded and accepted as unmet is not asked again, and does
+        # not fail the section a second time: the shortfall already
+        # travelled as a named coverage gap once, the one turn it gets.
+        already_unmet = question["text"] in unmet_shortfalls
+        met, reason = (
+            (True, "")
+            if not requirements or already_unmet
+            else checks.evidence_requirements_met(requirements, _flatten_for_grading(bound))
+        )
+        if not unanswered and met:
             continue
+        note = "" if unanswered else f"evidence_requirements shortfall: {reason}. Search again naming what is missing."
         try:
             if hasattr(run.turns, "gap_research"):
-                raw = run.turns.gap_research(section, question, queries, note="")
+                raw = run.turns.gap_research(section, question, queries, note=note)
             else:
-                raw = run.turns.research(question["text"], "gap: restated, previous queries listed")
+                raw = run.turns.research(
+                    question["text"], note or "gap: restated, previous queries listed"
+                )
         except (TurnFailed, Escalate):
             raw = {"claims": [], "findings": []}
         extra = findings_from_research(raw, sid, question["text"], start=len(findings) + 1)
         if extra:
+            enrich_source_metadata(extra, run)
             findings.extend(extra)
-        else:
+        bound = [f for f in findings if f.get("answers_question") == question["text"]]
+        met, reason = (
+            (True, "")
+            if not requirements
+            else checks.evidence_requirements_met(requirements, _flatten_for_grading(bound))
+        )
+        if unanswered and not extra:
             gaps.append({"question": question["text"], "queries": list(queries)})
+        elif not met:
+            gaps.append({"question": question["text"], "queries": list(queries), "reason": reason})
+            if requirements and hasattr(run, "state"):
+                # The one shot is spent and it is still short. Persist so a
+                # resume or `--reuse-research` does not spend a second turn
+                # on the same question, and stamp every bound finding so
+                # the writer's brief carries the hedge the way a
+                # single-source claim is hedged.
+                run.state.evidence_shortfall_unmet[question["text"]] = reason
+                try:
+                    run.state.save(run.work_dir)
+                except OSError:
+                    pass
+                for finding in bound:
+                    finding["evidence_shortfall"] = reason
         queries.append(question["text"])
 
     # 3c-bis metadata. One pass, after every research path for this section
@@ -1361,6 +1456,9 @@ def run_section(run, section: dict) -> dict:
             evidence=_evidence_blob(run, sid, findings),
             word_target=int(section.get("word_target") or 0),
             figures_given=figures,
+            evidence_requirements_unmet=getattr(
+                getattr(run, "state", None), "evidence_shortfall_unmet", None
+            ),
         )
         (knowledge / "section-check.json").write_text(
             json.dumps(last_score.to_dict(), indent=2) + "\n", encoding="utf-8"

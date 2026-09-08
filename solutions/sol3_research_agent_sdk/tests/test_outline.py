@@ -203,6 +203,87 @@ def test_sections_must_be_objects():
     assert any("SECTIONS MUST BE OBJECTS" in item for item in errors)
 
 
+# -- #475, evidence requirements per question --------------------------------
+
+
+def _reqs(**over):
+    reqs = {
+        "study_types": ["primary_trial"],
+        "min_count": 2,
+        "recency_years": 10,
+        "populations": [],
+    }
+    reqs.update(over)
+    return reqs
+
+
+def _question(text: str, **over) -> dict:
+    return {"text": text, "kind": "fact", "evidence_requirements": _reqs(**over)}
+
+
+def test_a_question_without_evidence_requirements_is_rejected():
+    """`validate` names the question, off by default so the many outline
+    fixtures that predate this ticket keep validating with no changes."""
+    drafted = sample_outline(
+        sections=[sample_section(key_questions=["what is the problem", "why it fails"])]
+    )
+    assert outlines.validate(drafted, require_evidence_requirements=True) != []
+    errors = outlines.validate(drafted, require_evidence_requirements=True)
+    assert any(
+        "what is the problem" in item and "evidence_requirements" in item for item in errors
+    ), errors
+    # Off by default: the same outline validates clean without the flag.
+    assert outlines.validate(drafted) == []
+
+
+def test_an_old_plan_without_requirements_fails_validation_not_parsing():
+    """A plan authored before #475, every `key_questions` entry a bare
+    string, still parses. `validate` reports the missing field on every
+    question, it never raises."""
+    drafted = sample_outline(
+        sections=[sample_section(key_questions=["what is the problem", "why it fails"])]
+    )
+    errors = outlines.validate(drafted, require_evidence_requirements=True)
+    assert len(errors) == 2
+    assert all("evidence_requirements" in item for item in errors)
+
+
+def test_a_question_with_evidence_requirements_passes():
+    drafted = sample_outline(
+        sections=[
+            sample_section(
+                key_questions=[_question("what is the problem"), _question("why it fails")]
+            )
+        ]
+    )
+    assert outlines.validate(drafted, require_evidence_requirements=True) == []
+
+
+def test_evidence_requirements_names_each_malformed_field():
+    bad_type = _question("q1", study_types=["not-a-real-tier"])
+    bad_count = _question("q2", min_count=0)
+    bad_recency = _question("q3", recency_years=-1)
+    bad_populations = _question("q4", populations="not a list")
+    drafted = sample_outline(
+        sections=[
+            sample_section(key_questions=[bad_type, bad_count, bad_recency, bad_populations]),
+        ]
+    )
+    errors = outlines.validate(drafted, require_evidence_requirements=True)
+    assert any("unknown type" in item for item in errors), errors
+    assert any("min_count" in item for item in errors), errors
+    assert any("recency_years" in item for item in errors), errors
+    assert any("populations" in item for item in errors), errors
+
+
+def test_the_recorded_outline_carries_evidence_requirements_import():
+    """`outline.question_evidence_requirements` round-trips a dict question
+    and returns `{}` for a bare string, never raising on either shape."""
+    assert outlines.question_evidence_requirements("a bare string") == {}
+    assert outlines.question_evidence_requirements(_question("q")) == _reqs()
+    assert outlines.question_evidence_requirements({"text": "q"}) == {}
+
+
 def make_run(work, turns, **kwargs):
     kwargs.setdefault("brain", None)
     kwargs.setdefault("log", lambda *a: None)
@@ -496,7 +577,9 @@ def test_the_offline_recorded_outline_still_carries_the_doctrine_question():
     offline = t.OfflineTurns(backend=research.FixtureBackend(fixture))
     drafted = offline.outline("a topic", "")
     all_questions = " ".join(
-        question for section in drafted["sections"] for question in section.get("key_questions", [])
+        outlines.question_text(question)
+        for section in drafted["sections"]
+        for question in section.get("key_questions", [])
     )
     assert t.EXIT_DOCTRINE_QUESTION in all_questions
 
@@ -512,6 +595,21 @@ def test_the_recorded_outline_now_ends_in_next_step():
     drafted = offline.outline("a topic", "")
     assert drafted["sections"][-1]["heading"] == "Next step"
     assert outlines.validate(drafted, require_next_step=True) == []
+
+
+def test_the_recorded_outline_carries_evidence_requirements():
+    """#475's fixture repair: `loop.py`'s real run enforces `require_next_step`
+    and `require_evidence_requirements` together, so the same recorded
+    outline `task demo` uses must clear both at once."""
+    import research  # noqa: PLC0415
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
+    offline = t.OfflineTurns(backend=research.FixtureBackend(fixture))
+    drafted = offline.outline("a topic", "")
+    assert (
+        outlines.validate(drafted, require_next_step=True, require_evidence_requirements=True)
+        == []
+    )
 
 
 def test_the_word_targets_still_sum_within_ten_percent():

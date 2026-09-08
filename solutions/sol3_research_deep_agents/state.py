@@ -98,6 +98,19 @@ class PaperState:
     # `search_gate` retry re-enters `stage_search` and `_counter_evidence`
     # from the top.
     counter_used: int = 0
+    # #475. Whether the scout's empty-titles retry has already fired this
+    # run. Persisted so a resumed `scout` stage does not spend a second
+    # retry turn on top of the first.
+    scout_retried: bool = False
+    # #475, judge revision on #520. Important question id -> the measured
+    # shortfall text, for a question whose one evidence_requirements turn is
+    # spent and the block is still not met. Being in this dict means both
+    # "do not ask again" (`_research_shortfalls`) and "accept this as a
+    # named gap, not a gate failure" (`search_gate`): a question graded and
+    # still short must not end the run, only a question never graded at all
+    # does. A dict, not a list of ids, because the gate and the writer brief
+    # both need the shortfall sentence itself, not only that one exists.
+    evidence_shortfall_unmet: dict[str, str] = field(default_factory=dict)
     total_retries: int = 0
     backend: str = ""
     # Live position, written every call rather than every stage. A stage that
@@ -210,6 +223,8 @@ class PaperState:
             "search_calls": self.search_calls,
             "follow_used": self.follow_used,
             "counter_used": self.counter_used,
+            "scout_retried": self.scout_retried,
+            "evidence_shortfall_unmet": self.evidence_shortfall_unmet,
             "total_retries": self.total_retries,
             "backend": self.backend,
             "current_role": self.current_role,
@@ -253,6 +268,8 @@ class PaperState:
             search_calls=int(data.get("search_calls", 0)),
             follow_used=int(data.get("follow_used", 0)),
             counter_used=int(data.get("counter_used", 0)),
+            scout_retried=bool(data.get("scout_retried", False)),
+            evidence_shortfall_unmet=dict(data.get("evidence_shortfall_unmet") or {}),
             total_retries=int(data.get("total_retries", 0)),
             backend=data.get("backend", ""),
             current_role=data.get("current_role", ""),

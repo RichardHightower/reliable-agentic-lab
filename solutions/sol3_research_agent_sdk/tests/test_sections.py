@@ -1451,6 +1451,492 @@ def test_the_counter_pass_stops_at_the_run_cap(work, turns, monkeypatch):
     assert "hedge" in body.lower()
 
 
+# -- item 11, PR #518 re-verification follow-up ------------------------------
+
+
+def test_a_fresh_run_reloads_follow_and_counter_used_from_state(work):
+    """A fresh `Run` built on a work dir that already spent some of the
+    per-run follow and counter budget must see that spend, not start a new
+    process with a fresh `max_follow`/`max_counter`. #473 #474, follow-up
+    to the #518 re-verification: this closes the SDK's own gap -- these
+    counters had nowhere to persist to before now."""
+    state = paper.State.load_or_new(work, "a topic")
+    run = paper.Run(topic="a topic", work_dir=work, turns=object(), state=state, brain=None, log=lambda *a: None)
+    run.follow_used = 3
+    run.state.follow_used = 3
+    run.counter_used = 2
+    run.state.counter_used = 2
+    run.state.save(work)
+
+    reloaded_state = paper.State.load_or_new(work, "a topic")
+    resumed = paper.Run(
+        topic="a topic", work_dir=work, turns=object(), state=reloaded_state, brain=None, log=lambda *a: None
+    )
+    assert resumed.follow_used == 3
+    assert resumed.counter_used == 2
+
+
+def test_a_negative_max_counter_clamps_to_zero_not_a_tail_slice(work, turns):
+    """`remaining = max(0, run.max_counter - run.counter_used)` already
+    clamps a negative `max_counter` to zero before it ever reaches a slice
+    bound; a bare `candidates[:run.max_counter]` would instead have sliced
+    off all but the last `|max_counter|` candidates, Python's own footgun
+    for a negative index. Locked in against a regression, item 11c of the
+    #518 re-verification follow-up."""
+    claims = [
+        {
+            "text": f"The result never changed by more than {i} percent.",
+            "source_url": f"https://example.invalid/c{i}",
+            "quote": "",
+        }
+        for i in range(3)
+    ]
+    counter_log: list[str] = []
+
+    class WithCounter(turns):
+        backend = _FakeBackend()
+
+        def counter_search(self, claim):
+            counter_log.append(claim)
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithCounter(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        max_counter=-1,
+    )
+    findings = [{"id": f"s1-f{i}", "claim": c["text"]} for i, c in enumerate(claims)]
+    sections.counter_evidence_pass(run, findings, {"id": "s1", "claims_to_support": []})
+    assert counter_log == []
+
+
+# -- #475: evidence requirements per question -------------------------------
+
+
+def test_question_list_carries_evidence_requirements():
+    """A bare-string question carries `{}`; a dict question's block survives
+    into `question_list`'s flattened shape, which the gap pass reads."""
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+    section = _section(
+        key_questions=[
+            {"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs},
+            "a bare-string question",
+        ]
+    )
+    questions = sections.question_list(section)
+    assert questions[0]["evidence_requirements"] == reqs
+    assert questions[1]["evidence_requirements"] == {}
+
+
+def test_a_met_requirement_passes_the_gate():
+    """A section whose bound findings satisfy the block passes."""
+    reqs = {"study_types": ["primary_trial"], "min_count": 1, "recency_years": 10, "populations": []}
+    section = _section(
+        key_questions=[{"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs}]
+    )
+    findings = [{"id": "s1-f1", "number": 1, "question_id": "what is the effect", "tier": "primary_trial", "year": "2024"}]
+    passed = checks.section_check(
+        "The effect was measured [1].", section=section, findings=findings
+    )
+    assert "evidence_requirements_met" not in passed.signature()
+
+
+def test_a_shortfall_names_the_missing_study_type():
+    """A shortfall names the missing type and how many were found."""
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+    section = _section(
+        key_questions=[{"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs}]
+    )
+    findings = [
+        {"id": "s1-f1", "number": 1, "question_id": "what is the effect", "tier": "preprint_or_compilation", "year": "2024"}
+    ]
+    failed = checks.section_check(
+        "The effect was measured [1].", section=section, findings=findings
+    )
+    assert "evidence_requirements_met" in failed.signature()
+    row = next(c for c in failed.checks if c.name == "evidence_requirements_met")
+    assert "primary_trial" in row.detail
+    assert "needs 2" in row.detail and "has 0" in row.detail
+
+
+def test_evidence_requirements_met_grades_recency_and_population():
+    """`checks.evidence_requirements_met` directly: a stale source does not
+    count toward the window, and a missing population is named."""
+    old = [{"tier": "primary_trial", "year": "1990", "text": "a fact"}]
+    fresh = [{"tier": "primary_trial", "year": "2024", "text": "a fact about older adults"}]
+    reqs = {"study_types": ["primary_trial"], "min_count": 1, "recency_years": 5, "populations": []}
+    met, reason = checks.evidence_requirements_met(reqs, old)
+    assert not met and "needs 1" in reason
+
+    met, reason = checks.evidence_requirements_met(reqs, fresh)
+    assert met and reason == ""
+
+    reqs_pop = {**reqs, "populations": ["women"]}
+    met, reason = checks.evidence_requirements_met(reqs_pop, fresh)
+    assert not met and "women" in reason
+
+    reqs_pop_hit = {**reqs, "populations": ["older adults"]}
+    met, reason = checks.evidence_requirements_met(reqs_pop_hit, fresh)
+    assert met
+
+
+def test_evidence_requirements_met_passes_trivially_with_no_block():
+    assert checks.evidence_requirements_met({}, []) == (True, "")
+    assert checks.evidence_requirements_met({"study_types": []}, []) == (True, "")
+
+
+def test_evidence_requirements_met_counts_distinct_urls_not_findings():
+    """Two claims lifted from one reply cite one URL and must count as one
+    source, not two. Judge revision on #520, blocking finding 3."""
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 0, "populations": []}
+    one_source_two_claims = [
+        {"tier": "primary_trial", "url": "https://a.invalid/x", "text": "claim a"},
+        {"tier": "primary_trial", "url": "https://a.invalid/x", "text": "claim b"},
+    ]
+    met, reason = checks.evidence_requirements_met(reqs, one_source_two_claims)
+    assert not met and "has 1" in reason
+
+    two_sources = [
+        {"tier": "primary_trial", "url": "https://a.invalid/x", "text": "claim a"},
+        {"tier": "primary_trial", "url": "https://a.invalid/y", "text": "claim b"},
+    ]
+    met, reason = checks.evidence_requirements_met(reqs, two_sources)
+    assert met and reason == ""
+
+
+def test_a_shortfall_gets_one_extra_gap_research_turn(work, turns, monkeypatch):
+    """A question answered by one preprint gets one more research turn
+    naming the shortfall; two primary trials clear it, and no coverage gap
+    is recorded."""
+    records = {
+        "https://example.invalid/preprint": {"category": "cs.AI"},
+        "https://example.invalid/rct1": {
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "the trial found a 22 percent effect",
+        },
+        "https://example.invalid/rct2": {
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "the trial found a 19 percent effect",
+        },
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "2024", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+    research_log: list[tuple] = []
+
+    class WithGap(turns):
+        backend = _FakeBackend()
+
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            return {
+                "title": f"On {topic}",
+                "audience": "engineers",
+                "thesis": "An abstract.",
+                "word_target_total": 400,
+                "sections": [
+                    {
+                        "id": "s1",
+                        "heading": "The problem",
+                        "objective": "State it.",
+                        "abstract": "This section states the problem.",
+                        "key_questions": [
+                            {"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs},
+                            "why does it fail",
+                        ],
+                        "claims_to_support": ["The problem is structural."],
+                        "required_evidence": ["a primary specification"],
+                        "word_target": 400,
+                        "figures": [],
+                        "depends_on": [],
+                    }
+                ],
+            }
+
+        def plan(self, topic, prior_art, budget=None, note="", brief=""):
+            return self.outline(topic, prior_art, budget, note, brief)
+
+        def follow_primary(self, claim, source_title, source_tier):
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+        def counter_search(self, claim):
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+        def research(self, question, note=""):
+            research_log.append((question, note))
+            if question != "what is the effect":
+                return {"answer": "", "sources": [], "claims": []}
+            calls = sum(1 for item in research_log if item[0] == question)
+            if calls == 1:
+                return {
+                    "answer": "",
+                    "sources": [{"url": "https://example.invalid/preprint", "title": "A Preprint"}],
+                    "claims": [
+                        {
+                            "text": "The effect was 20 percent.",
+                            "source_url": "https://example.invalid/preprint",
+                            "quote": "",
+                        }
+                    ],
+                }
+            return {
+                "answer": "",
+                "sources": [
+                    {"url": "https://example.invalid/rct1", "title": "Trial One"},
+                    {"url": "https://example.invalid/rct2", "title": "Trial Two"},
+                ],
+                "claims": [
+                    {
+                        "text": "Trial one found a 22 percent effect.",
+                        "source_url": "https://example.invalid/rct1",
+                        "quote": "",
+                    },
+                    {
+                        "text": "Trial two found a 19 percent effect.",
+                        "source_url": "https://example.invalid/rct2",
+                        "quote": "",
+                    },
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithGap(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    calls_for_q = [item for item in research_log if item[0] == "what is the effect"]
+    assert len(calls_for_q) == 2, "one initial call, one shortfall-driven gap call, consumed once"
+    assert "evidence_requirements shortfall" in calls_for_q[1][1]
+    assert "primary_trial" in calls_for_q[1][1]
+
+    payload = json.loads((Path(work) / "knowledge/s1/findings.json").read_text())
+    for_question = [
+        f for f in payload["findings"] if f.get("answers_question") == "what is the effect"
+    ]
+    assert sum(1 for f in for_question if f["source"]["evidence_tier"] == "primary_trial") == 2
+    assert not any(g.get("question") == "what is the effect" for g in payload["coverage_gaps"])
+
+
+def test_a_persistent_shortfall_is_a_named_gap(work, turns, monkeypatch):
+    """A shortfall the one extra turn does not resolve is a named coverage
+    gap, not a silent pass, and no third turn is spent on it."""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("", category="cs.AI"))
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+    research_log: list[tuple] = []
+
+    class NeverResolves(turns):
+        backend = _FakeBackend()
+
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            return {
+                "title": f"On {topic}",
+                "audience": "engineers",
+                "thesis": "An abstract.",
+                "word_target_total": 400,
+                "sections": [
+                    {
+                        "id": "s1",
+                        "heading": "The problem",
+                        "objective": "State it.",
+                        "abstract": "This section states the problem.",
+                        "key_questions": [
+                            {"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs},
+                            "why does it fail",
+                        ],
+                        "claims_to_support": ["The problem is structural."],
+                        "required_evidence": ["a primary specification"],
+                        "word_target": 400,
+                        "figures": [],
+                        "depends_on": [],
+                    }
+                ],
+            }
+
+        def plan(self, topic, prior_art, budget=None, note="", brief=""):
+            return self.outline(topic, prior_art, budget, note, brief)
+
+        def follow_primary(self, claim, source_title, source_tier):
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+        def counter_search(self, claim):
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+        def research(self, question, note=""):
+            research_log.append((question, note))
+            if question != "what is the effect":
+                return {"answer": "", "sources": [], "claims": []}
+            calls = sum(1 for item in research_log if item[0] == question)
+            return {
+                "answer": "",
+                "sources": [{"url": f"https://example.invalid/p{calls}", "title": "A Preprint"}],
+                "claims": [
+                    {
+                        "text": "The effect was 20 percent.",
+                        "source_url": f"https://example.invalid/p{calls}",
+                        "quote": "",
+                    }
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=NeverResolves(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    calls_for_q = [item for item in research_log if item[0] == "what is the effect"]
+    assert len(calls_for_q) == 2, "one initial call, one shortfall call, no third"
+
+    payload = json.loads((Path(work) / "knowledge/s1/findings.json").read_text())
+    gap = next(g for g in payload["coverage_gaps"] if g.get("question") == "what is the effect")
+    assert "needs 2" in gap.get("reason", "")
+
+
+def test_a_persistent_shortfall_does_not_end_the_run_when_enforced(work, turns, monkeypatch):
+    """Judge revision on #520, blocking finding 1: with
+    `enforce_research_policy=True`, the flag every real run sets, the row
+    the judge's own probe found stuck twice in a row must not stall the
+    section. A shortfall the one turn does not resolve is accepted as a
+    named gap and the section's Python check passes on `evidence_requirements_met`."""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("", category="cs.AI"))
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+
+    class NeverResolves(turns):
+        backend = _FakeBackend()
+
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            return {
+                "title": f"On {topic}",
+                "audience": "engineers",
+                "thesis": "An abstract.",
+                "word_target_total": 400,
+                "sections": [
+                    {
+                        "id": "s1",
+                        "heading": "The problem",
+                        "objective": "State it.",
+                        "abstract": "This section states the problem.",
+                        "key_questions": [
+                            {"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs},
+                            "why does it fail",
+                        ],
+                        "claims_to_support": ["The problem is structural."],
+                        "required_evidence": ["a primary specification"],
+                        "word_target": 400,
+                        "figures": [],
+                        "depends_on": [],
+                    }
+                ],
+            }
+
+        def plan(self, topic, prior_art, budget=None, note="", brief=""):
+            return self.outline(topic, prior_art, budget, note, brief)
+
+        def follow_primary(self, claim, source_title, source_tier):
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+        def counter_search(self, claim):
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+        def research(self, question, note=""):
+            if question != "what is the effect":
+                return {"answer": "", "sources": [], "claims": []}
+            return {
+                "answer": "",
+                "sources": [{"url": "https://example.invalid/p", "title": "A Preprint"}],
+                "claims": [
+                    {"text": "The effect was 20 percent.", "source_url": "https://example.invalid/p", "quote": ""}
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=NeverResolves(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)  # must not raise Escalate/RunFailed
+
+    assert "what is the effect" in run.state.evidence_shortfall_unmet
+    score = json.loads((Path(work) / "knowledge/s1/section-check.json").read_text())
+    assert "evidence_requirements_met" not in score["signature"]
+
+
+def test_an_unretrieved_scout_title_is_a_named_gap(work, turns, monkeypatch):
+    """A scout title with no bound source is a named skip, with a reason. A
+    title that shares a distinctive word with an admitted source's fetched
+    title counts as retrieved."""
+    monkeypatch.setattr(
+        sections.metadata, "cached_fetch", _fake_fetch("", **{"title": "The Longland Trial"})
+    )
+
+    class WithBriefing(turns):
+        backend = _FakeBackend()
+
+        def scout(self, topic, note=""):
+            return {
+                "headings": ["Background"],
+                "domains": [],
+                "titles": ["The Longland Trial", "A Paper Nobody Retrieved"],
+            }
+
+        def research(self, question, note=""):
+            return {
+                "answer": "",
+                "sources": [{"url": "https://example.invalid/retrieved", "title": "unused"}],
+                "claims": [
+                    {"text": "A fact.", "source_url": "https://example.invalid/retrieved", "quote": ""}
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithBriefing(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    run.write_json("corpus/brain-pack.json", {"corpus_thin": True, "hits": []})
+    paper.scout(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    scout_titles = json.loads((Path(work) / "sources.json").read_text())["scout_titles"]
+    by_title = {item["title"]: item for item in scout_titles}
+    assert by_title["The Longland Trial"]["retrieved"] is True
+    assert by_title["The Longland Trial"]["reason"] == ""
+    assert by_title["A Paper Nobody Retrieved"]["retrieved"] is False
+    assert by_title["A Paper Nobody Retrieved"]["reason"]
+
+
 def test_attribute_findings_is_a_noop_with_no_backend():
     """A `run.turns` with no `backend` attribute at all (every pre-#471 test
     double) is untouched, so old behaviour is unchanged byte for byte."""

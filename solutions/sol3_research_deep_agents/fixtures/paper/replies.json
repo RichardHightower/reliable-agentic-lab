@@ -10,14 +10,30 @@
             "subject": "exit-conditions",
             "question": "What three exits does this repo's paper loop check, and in what order?",
             "check": "the paper loop implementation in this repo names done, then cost, then max turns, with a URL",
-            "important": true
+            "important": true,
+            "evidence_requirements": {
+              "study_types": [
+                "other"
+              ],
+              "min_count": 1,
+              "recency_years": 10,
+              "populations": []
+            }
           },
           {
             "id": "q2",
             "subject": "runaway-cost",
             "question": "What happens when a graph has no explicit exit condition?",
             "check": "a documented runtime limit or failure mode, with a URL",
-            "important": true
+            "important": true,
+            "evidence_requirements": {
+              "study_types": [
+                "other"
+              ],
+              "min_count": 1,
+              "recency_years": 10,
+              "populations": []
+            }
           },
           {
             "id": "q3",

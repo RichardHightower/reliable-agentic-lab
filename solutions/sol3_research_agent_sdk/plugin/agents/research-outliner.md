@@ -45,8 +45,15 @@ Every section is an object with all of these fields:
 - `heading`: sentence case
 - `objective`: one sentence naming what a reader knows after reading it
 - `abstract`: two or three sentences
-- `key_questions`: at least two. What the research phase must answer. Each is
-  answerable from a primary source.
+- `key_questions`: at least two objects, each `{text, kind, evidence_requirements}`.
+  `text` is what the research phase must answer, answerable from a primary
+  source. `kind` is one of fact, mechanism, comparison, data. `evidence_requirements`
+  is required on every question: `study_types` (one or more of primary_trial,
+  meta_analysis_or_systematic_review, position_stand_or_guideline,
+  narrative_review, preprint_or_compilation, other), `min_count` (how many
+  sources of those types the question needs), `recency_years` (how old a
+  source may be and still count), and `populations` (who the evidence has to
+  cover, an empty array when nothing narrower than the general case applies).
 - `claims_to_support`: what the section will assert
 - `required_evidence`: the kind of source that would support those claims
   (a spec, a benchmark, a version table, an incident report)
@@ -95,9 +102,10 @@ answer.
 4. Section `word_target` values sum to `word_target_total` within ten percent.
 5. Every `kind: chart` figure has a non-empty `data_needed`.
 6. Every section has at least two `key_questions`.
-7. A Limitations section exists.
-8. Every claim to support has a matching required evidence entry.
-9. Every figure is earned by the section abstract.
+7. Every `key_questions` entry carries `evidence_requirements` with `study_types`, `min_count`, `recency_years`, and `populations`.
+8. A Limitations section exists.
+9. Every claim to support has a matching required evidence entry.
+10. Every figure is earned by the section abstract.
 
 ## Output contract
 
@@ -116,7 +124,28 @@ No prose before it, no fence around it.
       "heading": "The problem",
       "objective": "...",
       "abstract": "two or three sentences",
-      "key_questions": ["...", "..."],
+      "key_questions": [
+        {
+          "text": "...",
+          "kind": "fact",
+          "evidence_requirements": {
+            "study_types": ["primary_trial"],
+            "min_count": 2,
+            "recency_years": 10,
+            "populations": []
+          }
+        },
+        {
+          "text": "...",
+          "kind": "fact",
+          "evidence_requirements": {
+            "study_types": ["primary_trial"],
+            "min_count": 2,
+            "recency_years": 10,
+            "populations": []
+          }
+        }
+      ],
       "claims_to_support": ["..."],
       "required_evidence": ["..."],
       "word_target": 600,
