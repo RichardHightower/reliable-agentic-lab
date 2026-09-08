@@ -982,6 +982,22 @@ def test_an_unclosed_fence_masks_to_the_end_of_the_body():
     assert paper_check.question_headings(body, outline) == []
 
 
+def test_a_heading_right_after_a_closing_fence_is_still_seen():
+    """#529 judge regression: the closer's trailing `(?:\\n|\\Z)` used to
+    consume the newline after `` ``` ``, so a heading on the very next
+    line, with no blank line between, lost its own leading newline to the
+    masked span and vanished from every row that scans headings.
+    """
+    body = (
+        "## Abstract\n\nsummary [1].\n\n"
+        "```python\nx = 1\n```\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert paper_check.missing_sections(body, ("abstract", "references")) == []
+    assert "references" in paper_check.top_level_sections(body)
+    assert paper_check.last_prose_heading(body) == "Abstract"
+
+
 def test_the_recorded_fixture_paper_passes_question_heading(run_dir, stub_renderer):
     """`task paper` assembles a paper with no heading that pastes a
     question, under `assemble_gate`'s own production call."""

@@ -109,7 +109,17 @@ SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
 # group 3 is the body. The closer is `\1` on its own line, or end of body
 # when no closer exists, so an unclosed fence masks to the end rather than
 # leaving its content, headings included, exposed as prose.
-FENCE = re.compile(r"^[ \t]*([`~]{3,})([^\n]*)\n(.*?)(?:\n[ \t]*\1[ \t]*(?:\n|\Z)|\Z)", re.M | re.S)
+#
+# The trailing `(?=\n|\Z)` is a lookahead, not a consumed match. A judge on
+# the same PR found the first version consumed that newline, so a heading
+# on the line right after a closing fence, with no blank line between, had
+# its own leading newline swallowed into the masked span and replaced with
+# a space along with it. `SECTION_HEADING`'s `^` anchor needs an actual
+# newline before it, not a space, so that heading vanished from every row
+# that scans it, and `missing_sections` reported a present `References` as
+# missing. The lookahead ends the match before that newline, leaving it in
+# place.
+FENCE = re.compile(r"^[ \t]*([`~]{3,})([^\n]*)\n(.*?)(?:\n[ \t]*\1[ \t]*(?=\n|\Z)|\Z)", re.M | re.S)
 IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 EXIT_ORDER = re.compile(r"\bdone\b[\s\S]{0,240}?\bcost\b[\s\S]{0,240}?\bmax(?:imum)?\s+turns?\b", re.I)
 WHICHEVER_FIRST = re.compile(r"\bwhichever\s+(?:comes|fires)\s+first\b", re.I)

@@ -435,6 +435,24 @@ def test_an_unclosed_fence_masks_to_the_end_of_the_body():
     assert question_headings(body, outline) == []
 
 
+def test_a_heading_right_after_a_closing_fence_is_still_seen():
+    """#529 judge regression: the closer's trailing `(?:\\n|\\Z)` used to
+    consume the newline after `` ``` ``, so a heading on the very next
+    line, with no blank line between, lost its own leading newline to the
+    masked span and vanished from every row that scans headings.
+    """
+    from checks import last_prose_heading, missing_sections, section_bodies  # noqa: PLC0415
+
+    body = (
+        "## Abstract\n\nsummary [1].\n\n"
+        "```python\nx = 1\n```\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert missing_sections(body, ["Abstract", "References"]) == []
+    assert "references" in section_bodies(body)
+    assert last_prose_heading(body) == "Abstract"
+
+
 def test_a_question_worded_around_domain_verbs_keeps_its_content_terms():
     """#529 judge finding 4. `STE_FUNCTION_WORDS` stops `run`, `calls`,
     `uses`, and `holds` for the noun-stack row; a coverage row that
