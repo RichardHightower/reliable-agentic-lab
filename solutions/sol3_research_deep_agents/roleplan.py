@@ -154,6 +154,14 @@ FALLBACK_SCOPE = {
 }
 NO_WRITE_SCOPE = ((), ("**",))
 
+# #479. The one model `roles.build_paper_agents` actually wires onto every
+# role in the paper cast today, `roles.DEFAULT_MODEL` stripped of its
+# `anthropic:` provider prefix (the display form the SDK's own table already
+# uses). The paper's own byline reads this, not a name a caller made up, so
+# the two must move together: a role that starts using a different model
+# earns its own line here, not a hand-edited front-matter block.
+DEFAULT_MODEL = "claude-sonnet-5"
+
 
 @dataclass(frozen=True)
 class RolePlan:
@@ -164,6 +172,7 @@ class RolePlan:
     tools: tuple[str, ...]
     allow: tuple[str, ...] = ()
     deny: tuple[str, ...] = ()
+    model: str = DEFAULT_MODEL
 
     @property
     def can_write(self) -> bool:

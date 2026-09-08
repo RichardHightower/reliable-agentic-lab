@@ -2820,6 +2820,10 @@ class Paper:
         # already-persisted run state, so a retry costs nothing to redo.
         self.written["Methods"] = "\n\n".join(self._methods_lines())
         skipped_figures = self._skipped_figures()
+        # #479. `pstate.now()` is today, not the run's own `started_at`: the
+        # byline states when this paper was prepared, and a multi-day run
+        # may assemble on a later date than the one Methods states it began.
+        front_matter = stages.front_matter_block(self.ledger, prepared_at=pstate.now()[:10])
         body = stages.assemble(
             self.plan,
             self.outline,
@@ -2828,6 +2832,7 @@ class Paper:
             self.ledger,
             charts=self._loaded_charts(),
             skipped_figures=skipped_figures,
+            front_matter=front_matter,
         )
         # The em dash sweep is mechanical and runs before the gate that checks
         # for em dashes. Arguing with a model about punctuation costs a turn.
