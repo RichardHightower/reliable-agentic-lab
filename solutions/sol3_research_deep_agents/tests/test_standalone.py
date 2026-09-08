@@ -73,3 +73,11 @@ def test_every_model_facing_role_has_a_skill():
             continue
         assert (ROOT / "skills" / name / "SKILL.md").exists(), name
         assert role.purpose
+
+
+def test_the_writer_card_forbids_second_person():
+    """P2's catch-up with the SDK: the no-second-person rule and the
+    never-write-about-the-run line each appear once, not twice."""
+    body = (ROOT / "skills" / "writer" / "SKILL.md").read_text(encoding="utf-8")
+    assert body.lower().count("second person") == 1
+    assert body.lower().count("narration of the run") == 1

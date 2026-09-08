@@ -25,11 +25,15 @@ Do not write:
 
 - a hook, a cold open, or a question to the reader
 - "In this article we will"
+- second person: never "you", "your", or "if you implement it". Name the
+  actor instead: an implementer, the host, a client.
 - "Let's dive in", "under the hood", "think of it as", "it's basically"
 - an analogy or a metaphor in place of a mechanism
 - a rhetorical question
 - marketing verbs: leverage, unlock, empower, revolutionize, seamless, robust
 - a conclusion that restates the introduction
+- narration of the run: the research pass, the verification pass, a budget,
+  a tool, or an allowlist
 
 ## Length is part of the contract
 

@@ -272,6 +272,45 @@ def noun_stacks(body: str, limit: int = NOUN_STACK_LIMIT) -> list[str]:
     return hits
 
 
+# P2, third person and no first person tour. SECOND_PERSON already grades one
+# section at `section_check`; these rows raise the same regex, plus the two
+# first-person phrases, to the whole paper.
+WE_WILL = re.compile(r"\bwe\s+will\b", re.I)
+IN_THIS_ARTICLE = re.compile(r"\bin\s+this\s+article\b", re.I)
+
+
+def person_violations(body: str) -> list[str]:
+    """Sentences carrying second person, or a first-person tour.
+
+    Unconditional: third person, active voice, passes by construction.
+    """
+    masked = _mask_for_ste(body)
+    return [
+        sentence[:160]
+        for sentence in _prose_sentences(masked)
+        if SECOND_PERSON.search(sentence) or WE_WILL.search(sentence) or IN_THIS_ARTICLE.search(sentence)
+    ]
+
+
+# P2, the marketing lexicon. `\w*` covers the inflections a writer reaches
+# for: leverages, unlocked, empowering, revolutionizes, seamlessly,
+# robustness.
+MARKETING_VERB = re.compile(
+    r"\b(leverag\w*|unlock\w*|empower\w*|revolutioniz\w*|seamless\w*|robust\w*)\b",
+    re.I,
+)
+
+
+def marketing_violations(body: str) -> list[str]:
+    """Sentences carrying a marketing verb: leverage, unlock, empower,
+    revolutionize, seamless, robust.
+
+    Unconditional: a clean sentence passes by construction.
+    """
+    masked = _mask_for_ste(body)
+    return [sentence[:160] for sentence in _prose_sentences(masked) if MARKETING_VERB.search(sentence)]
+
+
 @dataclass
 class Check:
     name: str
@@ -837,6 +876,28 @@ def check(
         )
     )
 
+    person_hits = person_violations(body)
+    checks.append(
+        Check(
+            "person",
+            not person_hits,
+            "third person, no first person tour"
+            if not person_hits
+            else f"second person or first person tour in: {person_hits[0]!r}",
+        )
+    )
+
+    marketing_hits = marketing_violations(body)
+    checks.append(
+        Check(
+            "marketing",
+            not marketing_hits,
+            "no marketing verb in body prose"
+            if not marketing_hits
+            else f"marketing verb in: {marketing_hits[0]!r}",
+        )
+    )
+
     if min_section_words:
         thin = sections_without_prose(body, min_section_words)
         checks.append(
@@ -1371,6 +1432,24 @@ def demo() -> int:
     )
     assert noun_stacks("The default live E2E run costs about a dollar.") == [], (
         "E2E is one digit-bearing token, not two bare letters"
+    )
+
+    assert person_violations("The orchestrator charges the budget before the writer runs.") == []
+    hit = person_violations("You should charge the budget before the writer runs.")
+    assert hit and "You should" in hit[0]
+    assert person_violations("We will now look at the budget in detail.")
+    assert person_violations("In this article, the orchestrator sequences every role.")
+    assert person_violations("`You should not skip a step.`") == [], "a code span is masked"
+    assert person_violations("## References\n\nSee you at example.com.") == [], (
+        "the references section is masked"
+    )
+
+    assert marketing_violations("The orchestrator sequences roles in a fixed order.") == []
+    assert marketing_violations("The design will leverage existing infrastructure.")
+    assert marketing_violations("The mechanism unlocks new throughput for the pipeline.")
+    assert marketing_violations("`a seamless robust retry loop`") == [], "a code span is masked"
+    assert marketing_violations("## References\n\n1. https://example.com/unlock-guide\n") == [], (
+        "the references section is masked"
     )
 
     print("checks: ok")

@@ -373,3 +373,74 @@ def test_the_recorded_fixture_paper_passes_the_ste_belt(tmp_path):
     body = (work / "paper.md").read_text(encoding="utf-8")
     assert checks.ste_language_violations(body) == []
     assert checks.noun_stacks(body) == []
+
+
+# -- P2, person and marketing verbs -------------------------------------------
+
+
+def test_second_person_fails_the_whole_paper():
+    """`you should` fails `person` at paper level, and the detail names the
+    sentence."""
+    body = "You should charge the budget before the writer runs [1]."
+    score = checks.check(body, ["https://a"])
+    assert "person" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "person")
+    assert "You should" in row.detail
+
+
+def test_we_will_and_in_this_article_fail():
+    """Both first-person phrases fail the same row."""
+    will_body = "We will now look at the retry budget in detail [1]."
+    assert "person" in checks.check(will_body, ["https://a"]).signature()
+
+    article_body = "In this article, the orchestrator sequences every role [1]."
+    assert "person" in checks.check(article_body, ["https://a"]).signature()
+
+
+def test_a_marketing_verb_fails():
+    """`leverage` fails, `robust` fails, and an inflected form fails."""
+    leverage = checks.check("The design will leverage existing infrastructure [1].", ["https://a"])
+    assert "marketing" in leverage.signature(), leverage.report()
+
+    robust = checks.check("The retry loop stays robust under load [1].", ["https://a"])
+    assert "marketing" in robust.signature(), robust.report()
+
+    unlocks = checks.check("The change unlocks new throughput for the pipeline [1].", ["https://a"])
+    assert "marketing" in unlocks.signature(), unlocks.report()
+
+
+def test_a_marketing_word_inside_code_or_a_url_passes():
+    """A code span and a reference-list URL are not body prose."""
+    body = (
+        "A real point [1].\n\n"
+        "The adapter uses `a seamless robust retry loop` internally.\n\n"
+        "## References\n\n1. https://example.com/unlock-guide\n"
+    )
+    score = checks.check(body, ["https://example.com/unlock-guide"])
+    assert "marketing" not in score.signature(), score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_person_and_marketing_rows(tmp_path):
+    """The paper `task demo` writes carries no second person, no first person
+    tour, and none of the six marketing verbs. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    assert checks.person_violations(body) == []
+    assert checks.marketing_violations(body) == []
