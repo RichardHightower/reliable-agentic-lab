@@ -45,6 +45,51 @@ HEARTBEAT_SECONDS = 15
 # tree the agent cannot write to anyway.
 SKIP_DIRS = {".harness", ".cache", ".git", "__pycache__", "knowledge"}
 
+# Backoff before a retried `collect()`, in seconds. A module-level `_sleep`
+# (rather than `time.sleep` inline) is what lets a test replace the wait with
+# a no-op instead of actually pausing three times.
+RETRY_WAITS_S: tuple[float, ...] = (5.0, 15.0, 45.0)
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _transient_provider_errors() -> tuple[type[BaseException], ...]:
+    """Exception classes that might be a dropped CLI connection or a live
+    provider failure the CLI surfaced. `_is_transient` narrows this to the
+    cases actually worth a retry; `anthropic` is not one of this port's
+    dependencies (`query()` shells out to the Claude Code CLI, it never talks
+    to the Anthropic API directly), so there is nothing of that package's to
+    catch here.
+    """
+    try:
+        from claude_agent_sdk import CLIConnectionError, ResultError  # noqa: PLC0415
+    except ImportError:
+        return ()
+    return (CLIConnectionError, ResultError)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """A dropped CLI connection, or a live provider error the CLI reported.
+
+    `CLINotFoundError` (the CLI is not installed) is a permanent setup
+    problem, not a dropped connection; retrying it just spends 65 seconds
+    reaching the same failure. `ResultError` carries every terminal reason the
+    CLI can end a run with, and only `api_error` (a provider failure mid-run,
+    e.g. overloaded or rate limited) is transient; `error_max_turns` and its
+    siblings are ordinary, legitimate stops.
+    """
+    try:
+        from claude_agent_sdk import CLINotFoundError, ResultError  # noqa: PLC0415
+    except ImportError:
+        return True
+    if isinstance(exc, CLINotFoundError):
+        return False
+    if isinstance(exc, ResultError):
+        return exc.terminal_reason == "api_error"
+    return True
+
 
 @dataclass
 class TurnResult:
@@ -63,6 +108,9 @@ class TurnResult:
     events: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    # How many times a dropped connection or a rate limit sent this turn back
+    # to `collect()` before it answered. 0 when nothing was retried.
+    retries: int = 0
 
 
 class Backend:
@@ -239,33 +287,54 @@ class AgentSdkBackend(Backend):
                 return result_text, usd, reported, structured, ok, reason, tokens_in, tokens_out
 
             started = time.monotonic()
-            try:
-                (
-                    output,
-                    usd,
-                    reported,
-                    structured,
-                    ok,
-                    reason,
-                    tokens_in,
-                    tokens_out,
-                ) = asyncio.run(asyncio.wait_for(collect(), timeout=QUERY_TIMEOUT_SECONDS))
-            except asyncio.TimeoutError:
-                elapsed = time.monotonic() - started
-                return TurnResult(
-                    ok=False,
-                    output=(
-                        f"agent sdk query timed out after {QUERY_TIMEOUT_SECONDS} seconds "
-                        f"(role={role}, elapsed={elapsed:.0f}s, events={len(raw_events)}, "
-                        f"prompt={len(prompt)} chars). Raise SOL3_QUERY_TIMEOUT_SECONDS "
-                        f"or shrink the prompt."
-                    ),
-                    stop_reason="query timeout",
-                    raw_output="\n".join(raw_events),
-                    elapsed_s=elapsed,
-                    prompt_chars=len(prompt),
-                    events=len(raw_events),
-                )
+            transient_errors = _transient_provider_errors()
+            retries = 0
+            while True:
+                try:
+                    (
+                        output,
+                        usd,
+                        reported,
+                        structured,
+                        ok,
+                        reason,
+                        tokens_in,
+                        tokens_out,
+                    ) = asyncio.run(asyncio.wait_for(collect(), timeout=QUERY_TIMEOUT_SECONDS))
+                    break
+                except asyncio.TimeoutError:
+                    elapsed = time.monotonic() - started
+                    return TurnResult(
+                        ok=False,
+                        output=(
+                            f"agent sdk query timed out after {QUERY_TIMEOUT_SECONDS} seconds "
+                            f"(role={role}, elapsed={elapsed:.0f}s, events={len(raw_events)}, "
+                            f"prompt={len(prompt)} chars). Raise SOL3_QUERY_TIMEOUT_SECONDS "
+                            f"or shrink the prompt."
+                        ),
+                        stop_reason="query timeout",
+                        raw_output="\n".join(raw_events),
+                        elapsed_s=elapsed,
+                        prompt_chars=len(prompt),
+                        events=len(raw_events),
+                    )
+                except transient_errors as exc:
+                    if not _is_transient(exc) or retries >= len(RETRY_WAITS_S):
+                        raise
+                    wait = RETRY_WAITS_S[retries]
+                    retries += 1
+                    print(
+                        f"[sol3] role={role} transient error, retry {retries}/{len(RETRY_WAITS_S)} "
+                        f"after {wait:.0f}s: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    _sleep(wait)
+                    # A failed attempt's partial stream must not bleed into the
+                    # one that succeeds: raw diagnostics, event count, and the
+                    # heartbeat's progress all start clean for the retry.
+                    raw_events.clear()
+                    progress.update({"started": time.monotonic(), "events": 0, "last": "-", "usd": None})
             elapsed = time.monotonic() - started
             wrote = [path for path in _changed(before, _snapshot(root)) if scope.permits(path)]
             return TurnResult(
@@ -282,6 +351,7 @@ class AgentSdkBackend(Backend):
                 events=len(raw_events),
                 input_tokens=tokens_in,
                 output_tokens=tokens_out,
+                retries=retries,
             )
         except Exception as exc:  # graceful failure. Never claim a write it did not make.
             return TurnResult(ok=False, output=f"agent sdk backend failed: {exc}")

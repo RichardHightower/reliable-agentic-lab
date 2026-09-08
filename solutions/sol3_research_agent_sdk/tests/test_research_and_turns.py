@@ -600,6 +600,29 @@ def test_the_turn_detail_names_the_role_and_the_elapsed_time(work):
     assert seen["events"] == 7
 
 
+def test_the_turn_detail_carries_the_retry_count(work):
+    """#409: `Run.spend` needs `retries` in `detail` to log it on the turn row."""
+    seen = {}
+    backend = Backend([result(retries=2, structured={"verdict": "supports"})])
+    t.SdkTurns(
+        backend=backend,
+        work_dir=work,
+        on_cost=lambda usd, **detail: seen.update(detail),
+    ).verify("c")
+    assert seen["retries"] == 2
+
+
+def test_a_turn_with_no_retries_reports_zero(work):
+    seen = {}
+    backend = Backend([result(structured={"verdict": "supports"})])
+    t.SdkTurns(
+        backend=backend,
+        work_dir=work,
+        on_cost=lambda usd, **detail: seen.update(detail),
+    ).verify("c")
+    assert seen["retries"] == 0
+
+
 # -- the offline twin -------------------------------------------------------
 
 

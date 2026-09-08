@@ -79,12 +79,46 @@ class FakeResultMessage:
     subtype: str = "success"
 
 
+# -- transient errors (#409) -------------------------------------------------
+#
+# Minimal stand-ins for `claude_agent_sdk._errors`. Only the shape `adapter.py`
+# actually reads: `CLINotFoundError` is a `CLIConnectionError`, and
+# `ResultError` carries `terminal_reason`.
+
+
+class FakeClaudeSDKError(Exception):
+    pass
+
+
+class FakeCLIConnectionError(FakeClaudeSDKError):
+    pass
+
+
+class FakeCLINotFoundError(FakeCLIConnectionError):
+    pass
+
+
+class FakeProcessError(FakeClaudeSDKError):
+    pass
+
+
+class FakeResultError(FakeProcessError):
+    def __init__(self, message: str = "api error", terminal_reason: str | None = "api_error"):
+        super().__init__(message)
+        self.terminal_reason = terminal_reason
+
+
 def make_sdk_module(messages=None):
     module = types.ModuleType("claude_agent_sdk")
     module.AgentDefinition = FakeAgentDefinition
     module.HookMatcher = FakeHookMatcher
     module.ClaudeAgentOptions = FakeClaudeAgentOptions
     module.ResultMessage = FakeResultMessage
+    module.ClaudeSDKError = FakeClaudeSDKError
+    module.CLIConnectionError = FakeCLIConnectionError
+    module.CLINotFoundError = FakeCLINotFoundError
+    module.ProcessError = FakeProcessError
+    module.ResultError = FakeResultError
 
     async def query(*, prompt: str, options):
         module.last_prompt = prompt
