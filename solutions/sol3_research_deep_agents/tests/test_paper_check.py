@@ -1413,9 +1413,15 @@ def test_word_count_excludes_the_front_matter_block():
 def test_mask_front_matter_leaves_a_body_with_no_h1_unmasked():
     """PR #542 judge F4. `_mask_front_matter` requires the body's own first
     heading to be a genuine H1; a body that opens with `## ` (no title at
-    all) is returned unchanged, never with its own first section blanked."""
+    all) is returned unchanged, never with its own first section blanked,
+    even when that first section carries four or more paragraphs (the
+    shape that would otherwise clear the cap and get masked)."""
     body = (
-        "## Abstract\n\nThis paragraph asserts 42 percent and cites nothing.\n\n"
+        "## Overview\n\n"
+        "This paragraph asserts 42 percent and cites nothing.\n\n"
+        "A second uncited paragraph.\n\n"
+        "A third uncited paragraph.\n\n"
+        "A fourth uncited paragraph.\n\n"
         "## Findings\n\nAlso uncited prose here.\n"
     )
     assert paper_check._mask_front_matter(body) == body
