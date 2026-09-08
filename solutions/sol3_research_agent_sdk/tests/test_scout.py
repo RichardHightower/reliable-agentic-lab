@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import paper
+import turns as turns_mod
 
 
 def make_run(work, turns, **kwargs):
@@ -85,6 +86,33 @@ class ScoutTurns:
         return {"domains": [proposal("nature.com", "peer_reviewed_publisher")]}
 
 
+class _FakeResult:
+    ok = True
+    stop_reason = None
+    structured = {"headings": [], "domains": []}
+    output = "{}"
+
+
+class _FakeBackend:
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    def run(self, root, prompt, allow, output_format, role):
+        self.prompts.append(prompt)
+        return _FakeResult()
+
+
+def test_the_scout_schema_and_prompt_ask_for_the_field(tmp_path):
+    """The schema and the prompt both carry `field`. #469"""
+    assert "field" in turns_mod.SCOUT_SCHEMA["properties"]
+    backend = _FakeBackend()
+    turns = turns_mod.SdkTurns(backend=backend, work_dir=tmp_path)
+    turns.scout("a topic")
+    prompt = backend.prompts[0]
+    assert "field" in prompt.lower()
+    assert "prefer arxiv.org" not in prompt.lower()
+
+
 def test_linear_runs_scout_after_the_pack_and_before_the_outline():
     names = [name for _n, name, _out, _fn in paper.LINEAR]
     assert names.index("corpus_pack") < names.index("scout")
@@ -117,7 +145,9 @@ def test_a_thin_pack_writes_the_briefing(work):
     assert payload["skipped"] is False
     assert "Epidemiology" in payload["headings"]
     assert "cdc.gov" in payload["admitted"]
-    assert "arxiv.org" in payload["admitted"]
+    # The model proposed a host, so Python does not also force arxiv.org onto
+    # a topic it never named. #469
+    assert payload["seeded_by_field"] is False
     text = (work / "corpus" / "scout-briefing.md").read_text()
     assert "This is a map, not evidence" in text
     assert "Epidemiology" in text
@@ -133,6 +163,30 @@ def test_a_dead_scout_does_not_stop_the_run(work):
     payload = json.loads((work / "corpus" / "scout-briefing.json").read_text())
     assert payload["admitted"] == ["arxiv.org"]
     assert (work / "corpus" / "scout-briefing.md").exists()
+
+
+def test_an_empty_scout_proposal_seeds_by_field(work):
+    """A biomedical topic seeds PubMed and PMC, not arxiv alone. #469"""
+    turns = ScoutTurns(
+        {"headings": ["Epidemiology"], "domains": [], "titles": [], "field": "biomedical"}
+    )
+    run = make_run(work, turns)
+    run.write_json("corpus/brain-pack.json", {"corpus_thin": True, "hits": []})
+    paper.scout(run)
+    payload = json.loads((work / "corpus" / "scout-briefing.json").read_text())
+    assert payload["seeded_by_field"] is True
+    assert "pubmed.ncbi.nlm.nih.gov" in payload["admitted"]
+    assert "pmc.ncbi.nlm.nih.gov" in payload["admitted"]
+    assert payload["admitted"] != ["arxiv.org"]
+
+
+def test_an_empty_scout_proposal_on_a_software_topic_still_seeds_arxiv(work):
+    turns = ScoutTurns({"headings": ["APIs"], "domains": [], "titles": [], "field": "software"})
+    run = make_run(work, turns)
+    run.write_json("corpus/brain-pack.json", {"corpus_thin": True, "hits": []})
+    paper.scout(run)
+    payload = json.loads((work / "corpus" / "scout-briefing.json").read_text())
+    assert payload["admitted"] == ["arxiv.org"]
 
 
 def test_the_scout_cannot_admit_an_aggregator(work):

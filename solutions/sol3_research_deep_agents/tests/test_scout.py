@@ -76,7 +76,9 @@ def test_a_thin_pack_writes_the_briefing(run_dir):
     payload = json.loads((dest / "scout-briefing.json").read_text())
     assert "Epidemiology" in payload["headings"]
     assert "cdc.gov" in payload["admitted"]
-    assert "arxiv.org" in payload["admitted"]
+    # The model proposed a host, so Python does not also force arxiv.org onto
+    # a topic it never named. #469
+    assert payload["seeded_by_field"] is False
     text = (dest / "scout-briefing.md").read_text()
     assert "This is a map, not evidence" in text
 
@@ -93,6 +95,57 @@ def test_a_dead_scout_does_not_stop_the_run(run_dir):
     assert meta.artifacts["skipped"] is False
     payload = json.loads((dest / "scout-briefing.json").read_text())
     assert payload["admitted"] == ["arxiv.org"]
+
+
+def test_an_empty_scout_proposal_seeds_by_field(run_dir):
+    """A biomedical topic seeds PubMed and PMC, not arxiv alone. #469"""
+    runner = ScoutRunner(
+        FIXTURES / "replies.json",
+        payload={"headings": ["Epidemiology"], "domains": [], "titles": [], "field": "biomedical"},
+    )
+    run = build_run(run_dir, runner=runner)
+    dest = Path(run_dir) / "corpus"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "brain-pack.json").write_text(
+        json.dumps({"corpus_thin": True, "hits": []}), encoding="utf-8"
+    )
+    run.stage_scout("")
+    payload = json.loads((dest / "scout-briefing.json").read_text())
+    assert payload["seeded_by_field"] is True
+    assert "pubmed.ncbi.nlm.nih.gov" in payload["admitted"]
+    assert "pmc.ncbi.nlm.nih.gov" in payload["admitted"]
+    assert payload["admitted"] != ["arxiv.org"]
+
+
+def test_an_empty_scout_proposal_on_a_software_topic_still_seeds_arxiv(run_dir):
+    runner = ScoutRunner(
+        FIXTURES / "replies.json",
+        payload={"headings": ["APIs"], "domains": [], "titles": [], "field": "software"},
+    )
+    run = build_run(run_dir, runner=runner)
+    dest = Path(run_dir) / "corpus"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "brain-pack.json").write_text(
+        json.dumps({"corpus_thin": True, "hits": []}), encoding="utf-8"
+    )
+    run.stage_scout("")
+    payload = json.loads((dest / "scout-briefing.json").read_text())
+    assert payload["admitted"] == ["arxiv.org"]
+
+
+def test_the_scout_prompt_asks_for_the_field_not_arxiv(run_dir):
+    """The prompt stops nudging toward arxiv.org and asks for the field. #469"""
+    runner = ScoutRunner(FIXTURES / "replies.json")
+    run = build_run(run_dir, runner=runner)
+    dest = Path(run_dir) / "corpus"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "brain-pack.json").write_text(
+        json.dumps({"corpus_thin": True, "hits": []}), encoding="utf-8"
+    )
+    run.stage_scout("")
+    prompt = runner.asked[0][1]
+    assert "Prefer arxiv.org" not in prompt
+    assert "field" in prompt.lower()
 
 
 def test_the_scout_cannot_admit_an_aggregator(run_dir):

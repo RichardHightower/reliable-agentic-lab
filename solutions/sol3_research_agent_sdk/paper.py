@@ -423,6 +423,11 @@ def _write_briefing(run: Run, payload: dict) -> None:
             lines += ["## Flagship titles", ""]
             lines += [f"- {item}" for item in titles]
             lines.append("")
+        if payload.get("seeded_by_field"):
+            lines += [
+                f"No host was proposed; seeded by field: {payload.get('field') or 'software'}.",
+                "",
+            ]
         lines += [
             "This is a map, not evidence. The outline judge must not treat it as research.",
             "",
@@ -464,11 +469,19 @@ def scout(run: Run) -> dict:
             proposed.append({"host": item, "org_type": "preprint"})
         elif isinstance(item, dict):
             proposed.append(item)
-    if not any(str(item.get("host") or "").lower() == "arxiv.org" for item in proposed):
-        proposed.append({"host": "arxiv.org", "org_type": "preprint"})
+    field = str(proposal.get("field") or "").strip().lower()
+    seeded_by_field = False
+    if not proposed:
+        # The model named no host at all. Seed by field rather than forcing
+        # arxiv.org onto every topic: a biomedical topic gets PubMed and PMC,
+        # not an empty preprint search. #469
+        proposed = list(source_policy.seed_for_field(field))
+        seeded_by_field = bool(proposed)
     decided = source_policy.admit(proposed)
     payload = {
         "skipped": False,
+        "field": field,
+        "seeded_by_field": seeded_by_field,
         "headings": [str(h) for h in (proposal.get("headings") or []) if str(h).strip()][:8],
         "titles": [str(t) for t in (proposal.get("titles") or []) if str(t).strip()][:8],
         "proposed": decided["proposed"],

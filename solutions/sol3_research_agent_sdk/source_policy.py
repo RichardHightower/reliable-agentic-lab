@@ -92,6 +92,47 @@ ALLOWED_TLDS = frozenset({".gov", ".edu", ".int"})
 # Below this many admitted hosts the run keeps the seed instead. A librarian
 # that returns almost nothing is worse than no librarian.
 MIN_ADMITTED = 3
+
+# The scout's own fallback when the model proposes no host at all. Distinct
+# from SEED_ALLOWLIST above, which is this workshop's own vendor-doc default
+# and never changes with the paper's topic. Before this, the scout forced
+# `arxiv.org` onto every field, including one that does not publish there: a
+# biomedical topic got an empty preprint search and the plan then treated
+# arxiv.org as the paper's only source boundary. `arxiv.org` may still be
+# proposed and admitted for any field; it is only the automatic seed for
+# software and physics. #469
+FIELD_SEEDS: dict[str, tuple[dict[str, str], ...]] = {
+    "software": ({"host": "arxiv.org", "org_type": "preprint"},),
+    "physics": ({"host": "arxiv.org", "org_type": "preprint"},),
+    "biomedical": (
+        {"host": "pubmed.ncbi.nlm.nih.gov", "org_type": "government"},
+        {"host": "pmc.ncbi.nlm.nih.gov", "org_type": "government"},
+        {"host": "doi.org", "org_type": "standards_body"},
+        {"host": "cochranelibrary.com", "org_type": "professional_society"},
+        {"host": "jissn.biomedcentral.com", "org_type": "peer_reviewed_publisher"},
+    ),
+}
+# ponytail: economics, law, and general have no named seed yet. An empty
+# scout proposal on one of those fields falls through with no forced host;
+# `run_allowlist`'s own MIN_ADMITTED fallback still keeps a run from
+# searching nothing. Add a seed here once a real run names what those fields
+# actually need.
+DEFAULT_FIELD = "software"
+
+
+def seed_for_field(field: str) -> tuple[dict, ...]:
+    """The scout's own fallback proposal when the model names no host.
+
+    A missing or blank field keeps the old default, software, so a scout
+    that cannot yet name its field is no worse off than before this port
+    seeded by field. A field the model does name, biomedical among them,
+    gets its own seed instead of software's, and an unrecognized named
+    field gets no forced seed at all.
+    """
+    key = str(field or "").strip().lower() or DEFAULT_FIELD
+    return FIELD_SEEDS.get(key, ())
+
+
 _GITHUB_ORGS = frozenset(
     entry.rsplit("/", 1)[1].lower() for entry in SEED_ALLOWLIST if entry.startswith("github.com/")
 )

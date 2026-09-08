@@ -70,6 +70,13 @@ SCOUT_SCHEMA = {
                 "required": ["host", "org_type"],
             },
         },
+        # The topic's own research field, not a source recommendation. Python
+        # seeds the fallback allowlist from this when the model names no
+        # host; a paper's field is not always arxiv.org's field. #469
+        "field": {
+            "type": "string",
+            "enum": ["software", "physics", "biomedical", "economics", "law", "general"],
+        },
     },
     "required": ["headings", "domains"],
 }
@@ -485,10 +492,13 @@ class SdkTurns(Turns):
             "Return JSON with headings (5-8 standard section titles for this "
             "kind of paper), domains (canonical hosts with org_type from "
             f"{', '.join(source_policy.ORG_TYPES)}; at most "
-            f"{source_policy.MAX_PERPLEXITY_DOMAINS}), and titles (a few "
-            "flagship works, names only). Prefer arxiv.org, .gov, .edu, .int, "
-            "peer-reviewed publishers, and official documentation. Not blogs, "
-            "not encyclopedias, not cable news.",
+            f"{source_policy.MAX_PERPLEXITY_DOMAINS}), titles (a few "
+            "flagship works, names only), and field (software, physics, "
+            "biomedical, economics, law, or general, naming this topic's own "
+            "research field). Name the hosts that field actually publishes "
+            "in. Prefer .gov, .edu, .int, peer-reviewed publishers, and "
+            "official documentation. Not blogs, not encyclopedias, not cable "
+            "news.",
             SCOUT_SCHEMA,
         )
 

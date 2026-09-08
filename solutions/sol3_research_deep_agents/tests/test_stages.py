@@ -161,6 +161,21 @@ def test_a_plan_cannot_make_more_than_six_questions_block_the_paper():
     assert "at most 6" in str(exc.value)
 
 
+def test_a_plan_check_that_names_a_host_is_rejected():
+    """The source boundary is Python's allowlist, decided later, never the
+    plan. #469"""
+    bad = plan()
+    bad["questions"][0]["check"] = "a claim cited to arxiv.org"
+    with pytest.raises(GateFailed) as exc:
+        stages.plan_gate(bad)
+    assert "arxiv.org" in str(exc.value)
+
+
+def test_check_names_host_ignores_an_abbreviation():
+    assert stages.check_names_host("a stated mechanism, e.g. a retry budget") == ""
+    assert stages.check_names_host("a URL") == ""
+
+
 def headings(plan):
     return [stages.plan_heading(item) for item in plan["sections"]]
 
@@ -223,6 +238,31 @@ def test_record_findings_drops_a_claim_with_no_source():
         {"answer": "a", "sources": [], "claims": [{"text": "unsourced"}]},
     )
     assert led.claims == {}
+
+
+def test_a_retrieval_claim_records_a_gap_not_a_claim():
+    """A search miss narrated as a claim is refused; the gap is kept. #469"""
+    led = evidence.Ledger("/nonexistent")
+    finding = stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {
+                    "text": (
+                        "No arxiv.org source was found that reports a specific "
+                        "quantitative rate."
+                    ),
+                    "source_urls": ["https://docs.claude.com/x"],
+                }
+            ],
+        },
+    )
+    assert led.claims == {}
+    assert finding.claim_ids == []
+    assert finding.gaps and "arxiv.org" in finding.gaps[0]
 
 
 def test_record_findings_ignores_a_fabricated_url():

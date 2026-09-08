@@ -167,13 +167,38 @@ def _finding_from_claim(claim: dict, section_id: str, question: str, index: int)
     }
 
 
+# A claim describes the world. These phrases describe the search instead, and
+# a claim built out of one is a narrated retrieval miss, not a finding. The
+# creatine paper this ticket names put two such sentences in the body, each
+# `important: true`: "No arxiv.org source was found that reports a specific
+# quantitative rate/magnitude of lean mass loss...". #469
+RETRIEVAL_PHRASES = (
+    "source was found",
+    "could not be located",
+    "via the search boundary",
+    "search protocol",
+)
+
+
+def is_retrieval_claim(text: str) -> bool:
+    """Whether a claim's text is about the search rather than the topic."""
+    lowered = str(text or "").lower()
+    return any(phrase in lowered for phrase in RETRIEVAL_PHRASES)
+
+
 def findings_from_research(result: dict, section_id: str, question: str, start: int = 1) -> list[dict]:
     out = []
     for offset, claim in enumerate(result.get("claims") or [], start=start):
+        text = claim.get("text") or claim.get("claim") or ""
+        if is_retrieval_claim(text):
+            # Refused, not carried forward as a single-source claim about
+            # nothing. The gap pass below sees this question still has no
+            # finding and researches it again instead. #469
+            continue
         out.append(_finding_from_claim(claim, section_id, question, offset))
     if not out and (result.get("answer") or result.get("findings")):
         for offset, item in enumerate(result.get("findings") or [], start=start):
-            if isinstance(item, dict) and item.get("claim"):
+            if isinstance(item, dict) and item.get("claim") and not is_retrieval_claim(item.get("claim")):
                 item = dict(item)
                 item.setdefault("section_id", section_id)
                 item.setdefault("answers_question", question)
