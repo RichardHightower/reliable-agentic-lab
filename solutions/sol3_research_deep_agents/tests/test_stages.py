@@ -276,6 +276,82 @@ def test_record_findings_ignores_a_fabricated_url():
     assert led.claims == {}
 
 
+# -- 2b. metadata comes from the record, not the model. #470 ---------------
+
+
+class _FakeBackend:
+    name = "perplexity"
+
+
+def test_record_findings_fetches_metadata_when_a_backend_is_given(monkeypatch):
+    def fake_fetch(url, backend, *, model_title=""):
+        assert backend is not None
+        return {
+            "title": "The Record's Actual Title",
+            "authors": ["Jane Doe"],
+            "year": "2023",
+            "venue": "A Journal",
+            "note": "",
+        }
+
+    monkeypatch.setattr(stages.metadata, "fetch_record", fake_fetch)
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "The Model's Guess", "url": "https://docs.claude.com/x"}],
+            "claims": [{"text": "a fact", "source_urls": ["https://docs.claude.com/x"]}],
+        },
+        backend=_FakeBackend(),
+    )
+    source = led.source_for_url("https://docs.claude.com/x")
+    assert source.title == "The Record's Actual Title"
+    assert source.authors == ["Jane Doe"]
+    assert source.year == "2023"
+    assert source.venue == "A Journal"
+
+
+def test_record_findings_with_no_backend_keeps_the_model_title():
+    """The default. Every existing test above calls `record_findings` this
+    way, and none of them may start making a network call."""
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "The Model's Guess", "url": "https://docs.claude.com/x"}],
+            "claims": [{"text": "a fact", "source_urls": ["https://docs.claude.com/x"]}],
+        },
+    )
+    assert led.source_for_url("https://docs.claude.com/x").title == "The Model's Guess"
+
+
+def test_record_findings_fetches_a_url_only_once_per_run(monkeypatch):
+    calls = []
+
+    def fake_fetch(url, backend, *, model_title=""):
+        calls.append(url)
+        return {"title": "Fetched", "authors": [], "year": "", "venue": "", "note": ""}
+
+    monkeypatch.setattr(stages.metadata, "fetch_record", fake_fetch)
+    led = evidence.Ledger("/nonexistent")
+    for _ in range(2):
+        stages.record_findings(
+            led,
+            {"subject": "s1", "question": "q"},
+            {
+                "answer": "a",
+                "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+                "claims": [{"text": "a fact", "source_urls": ["https://docs.claude.com/x"]}],
+            },
+            backend=_FakeBackend(),
+        )
+    assert calls == ["https://docs.claude.com/x"], calls
+
+
 def test_search_gate_fails_with_no_claims():
     with pytest.raises(GateFailed):
         stages.search_gate(evidence.Ledger("/nonexistent"), plan())
@@ -665,6 +741,30 @@ def test_assemble_generates_the_references_from_the_ledger():
     assert "## References" in body
     assert "https://a.example" in body
     assert body.count("https://") == 2
+
+
+def test_the_reference_block_carries_authors_and_years():
+    """#470: "Authors (year). Title. Venue. URL.", falling back field by field."""
+    full = evidence.SourceDocument(
+        title="A Study",
+        url="https://a.example",
+        subject="s",
+        authors=["Jane Doe", "John Smith"],
+        year="2020",
+        venue="Journal of Things",
+    )
+    bare = evidence.SourceDocument(title="", url="https://b.example", subject="s")
+    block = stages.references_block(["https://a.example", "https://b.example"], [full, bare])
+    assert "1. Jane Doe, John Smith (2020). A Study. Journal of Things. https://a.example" in block
+    assert "2. https://b.example" in block
+
+
+def test_render_reference_falls_back_field_by_field():
+    title_only = evidence.SourceDocument(title="Just a Title", url="https://a.example", subject="s")
+    assert stages.render_reference(title_only) == "Just a Title. https://a.example"
+
+    nothing = evidence.SourceDocument(title="", url="https://a.example", subject="s")
+    assert stages.render_reference(nothing) == "https://a.example"
 
 
 def test_assemble_places_a_figure_under_its_section():

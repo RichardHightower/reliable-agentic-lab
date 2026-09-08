@@ -175,6 +175,72 @@ def test_findings_from_research_names_every_finding_itself():
     assert [f["id"] for f in out] == ["s1-f1", "s1-f2"]
 
 
+def test_enrich_source_metadata_with_no_run_keeps_the_model_title():
+    """The default. Every caller that predates #470 must see no change."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "source": {"kind": "web", "url_or_path": "https://a.example", "title": "The Model's Guess"},
+        }
+    ]
+    sections.enrich_source_metadata(findings, None)
+    assert findings[0]["source"]["title"] == "The Model's Guess"
+    assert "authors" not in findings[0]["source"]
+
+
+def test_enrich_source_metadata_replaces_the_title_from_the_record(tmp_path, monkeypatch):
+    """#470: the record replaces the model's title on the source, once a run
+    (and therefore a backend and a work directory) is on hand.
+
+    Every research path this ticket names -- the per-question `research()`
+    loop, the base `Turns.research_section` default, and the live
+    `SdkTurns.research_section` -- converges on the same `_finding_from_claim`
+    / `_SOURCE_SCHEMA` shape before `run_section` calls this. One test against
+    that shape covers all three.
+    """
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        assert backend is not None
+        return {
+            "title": "The Record's Actual Title",
+            "authors": ["Jane Doe"],
+            "year": "2021",
+            "venue": "A Journal",
+            "note": "",
+        }
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    class FakeBackend:
+        name = "perplexity"
+
+    class FakeTurns:
+        backend = FakeBackend()
+
+    class FakeRun:
+        work_dir = tmp_path
+        turns = FakeTurns()
+
+    findings = [
+        {
+            "id": "s1-f1",
+            "source": {"kind": "web", "url_or_path": "https://a.example", "title": "The Model's Guess"},
+        },
+        # A corpus finding is never fetched: no page to fetch from.
+        {
+            "id": "s1-f2",
+            "source": {"kind": "corpus", "url_or_path": "brain:knowledge:claim.x", "title": "x"},
+        },
+    ]
+    sections.enrich_source_metadata(findings, FakeRun())
+    web_source = findings[0]["source"]
+    assert web_source["title"] == "The Record's Actual Title"
+    assert web_source["authors"] == ["Jane Doe"]
+    assert web_source["year"] == "2021"
+    assert web_source["venue"] == "A Journal"
+    assert findings[1]["source"]["title"] == "x"
+
+
 def test_section_check_figures_grades_what_the_writer_was_handed():
     """`diagram` runs after `sections`, so the first pass hands the writer none.
 
@@ -408,6 +474,51 @@ def test_the_ledger_appends_one_entry_per_section(work, turns, no_renderer):
     assert ledger["entries"]
     assert ledger["entries"][0]["section_id"] == "s1"
     assert (Path(work) / "knowledge" / "s1" / "findings.json").is_file()
+
+
+def test_run_section_enriches_metadata_through_the_real_pipeline(work, turns, no_renderer, monkeypatch):
+    """#470, the call site, not the helper (same shape of gap as #355 finding 6).
+
+    `test_enrich_source_metadata_replaces_the_title_from_the_record` proved the
+    function. This proves `run_section` actually calls it, by running the real
+    section loop with a `turns` that carries a `backend`, and reading the
+    `findings.json` `run_section` wrote.
+    """
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        assert backend is not None
+        return {
+            "title": "The Record's Actual Title",
+            "authors": ["Jane Doe"],
+            "year": "2021",
+            "venue": "A Journal",
+            "note": "",
+        }
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    class FakeBackend:
+        name = "perplexity"
+
+    class WithBackend(turns):
+        backend = FakeBackend()
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithBackend(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    payload = json.loads((Path(work) / "knowledge" / "s1" / "findings.json").read_text())
+    source = payload["findings"][0]["source"]
+    assert source["title"] == "The Record's Actual Title"
+    assert source["authors"] == ["Jane Doe"]
 
 
 def test_resume_keeps_findings_when_the_draft_is_gone(work, turns, no_renderer):

@@ -1168,12 +1168,28 @@ def do_sections(run: Run) -> dict:
                         or "",
                         "vendor": (finding.get("source") or {}).get("vendor") or "",
                         "epistemic": finding.get("epistemic") or "",
+                        # From the record, not the model, when `_finding_from_claim`
+                        # fetched it. #470
+                        "title": (finding.get("source") or {}).get("title") or "",
+                        "authors": (finding.get("source") or {}).get("authors") or [],
+                        "year": (finding.get("source") or {}).get("year") or "",
+                        "venue": (finding.get("source") or {}).get("venue") or "",
+                        "note": (finding.get("source") or {}).get("note") or "",
                     }
                 )
             if url and url not in seen:
                 seen.add(url)
                 src = finding.get("source") or {}
-                sources.append({"url": url, "title": src.get("title") or ""})
+                sources.append(
+                    {
+                        "url": url,
+                        "title": src.get("title") or "",
+                        "authors": src.get("authors") or [],
+                        "year": src.get("year") or "",
+                        "venue": src.get("venue") or "",
+                        "note": src.get("note") or "",
+                    }
+                )
         for gap in payload.get("coverage_gaps") or []:
             failed.append({"id": sid, "text": gap.get("question") or "", "reason": "coverage_gap"})
 
@@ -1301,6 +1317,14 @@ def _numbered(
                 "origin": claim.get("origin") or "",
                 "source_kind": claim.get("source_kind") or "",
                 "epistemic": claim.get("epistemic") or "",
+                # From the record `metadata.fetch_record` found, not the
+                # model's word. Carried here so `citations.render_reference`
+                # has what it needs once `assemble` is switched to call it. #470
+                "title": claim.get("title") or "",
+                "authors": claim.get("authors") or [],
+                "year": claim.get("year") or "",
+                "venue": claim.get("venue") or "",
+                "note": claim.get("note") or "",
             }
         claim["number"] = _cite_number(url, registry, sources)
     refs = []
@@ -1314,6 +1338,11 @@ def _numbered(
                 "source_kind": meta.get("source_kind") or "",
                 "epistemic": meta.get("epistemic") or "",
                 "model_brief": checks.is_model_brief(meta),
+                "title": meta.get("title") or "",
+                "authors": meta.get("authors") or [],
+                "year": meta.get("year") or "",
+                "venue": meta.get("venue") or "",
+                "note": meta.get("note") or "",
             }
         )
     return usable, refs

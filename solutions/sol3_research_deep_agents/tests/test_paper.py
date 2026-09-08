@@ -967,6 +967,17 @@ def test_findings_are_written_per_question(offline, run_dir):
     assert list((run_dir / "evidence").glob("finding.*.md"))
 
 
+def test_stage_search_passes_its_own_backend_to_record_findings(offline):
+    """#470: `stage_search` must hand `record_findings` `self.backend`, not
+    leave it at the default `None`. The fixture backend has no recorded
+    reply for any of these fixture URLs, so a note lands on every source
+    only if the fetch was actually attempted."""
+    offline.stage_plan()
+    offline.stage_search()
+    assert offline.ledger.sources, "the fixture research produced no sources"
+    assert all(source.note for source in offline.ledger.sources.values())
+
+
 def test_an_empty_checkpointed_finding_is_researched_again(offline):
     import evidence  # noqa: PLC0415
 

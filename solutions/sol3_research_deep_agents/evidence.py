@@ -204,6 +204,16 @@ class SourceDocument:
     # it, and a resumed run that reloads in a different order renumbers the
     # whole bibliography. The ledger assigns it.
     seq: int = 0
+    # What `metadata.fetch_record` found on the actual page, never the model's
+    # word. `title` above is already replaced with the fetched title when one
+    # came back; these three are additional fields the model never supplied.
+    authors: list[str] = field(default_factory=list)
+    year: str = ""
+    venue: str = ""
+    # `title_mismatch: ...` or a fetch-failure message. The writer never reads
+    # a SourceDocument, only `stages.claim_brief`'s numbers, so this is safe
+    # to carry all the way to the report without leaking into the paper. #470
+    note: str = ""
 
     def __post_init__(self) -> None:
         self.id = self.id or f"source.{slug(self.subject, 40)}.{new_id()}"
@@ -225,6 +235,10 @@ class SourceDocument:
                 "located_from": self.located_from or None,
                 "captured_at": self.captured_at,
                 "seq": self.seq,
+                "authors": self.authors,
+                "year": self.year or None,
+                "venue": self.venue or None,
+                "note": self.note or None,
             }
         )
         return f"{head}\n\n{self.body or self.url}\n"
@@ -372,6 +386,15 @@ class Ledger:
             self._by_url[source.url] = source
         return source
 
+    def source_for_url(self, url: str) -> SourceDocument | None:
+        """The source already admitted for this URL, or `None`.
+
+        `record_findings` checks this before fetching metadata, so a source
+        cited by a second question in the same run does not pay for the fetch
+        twice. `add_source` already dedupes on write; this is the read side.
+        """
+        return self._by_url.get(url)
+
     def add_claim(self, claim: Claim) -> Claim:
         self.claims[claim.id] = claim
         return claim
@@ -460,6 +483,13 @@ class Ledger:
                         captured_at=fields.get("captured_at", ""),
                         located_from=fields.get("located_from", ""),
                         seq=int(fields.get("seq", 0)),
+                        authors=list(fields.get("authors") or []),
+                        # `_load_scalar` reads a purely numeric front-matter value
+                        # back as an int, the same as `seq` above. `year` is a
+                        # string field, so put it back.
+                        year=str(fields.get("year") or ""),
+                        venue=fields.get("venue", "") or "",
+                        note=fields.get("note", "") or "",
                     )
                 )
             elif kind == "Claim":
@@ -554,6 +584,36 @@ def demo() -> None:  # noqa: PLR0915  (one assertion per rule, deliberately flat
     assert ledger.add_source(one) is one
     assert ledger.add_source(again) is one, "one URL is one source"
     assert len(ledger.sources) == 1
+    assert ledger.source_for_url(one.url) is one
+    assert ledger.source_for_url("https://never-added.example") is None
+
+    # Metadata fields round-trip through the ledger, note included. #470
+    meta = SourceDocument(
+        title="Fetched Title",
+        url="https://meta.example/paper",
+        subject="dt",
+        authors=["Jane Doe", "John Smith"],
+        year="2021",
+        venue="Journal of Things",
+        note="title_mismatch: model said 'X'; the record says 'Fetched Title'",
+    )
+    fields, _ = parse_front_matter(meta.to_markdown())
+    assert fields["authors"] == ["Jane Doe", "John Smith"], fields
+    # A purely numeric front-matter value reads back as an int, same as `seq`.
+    assert str(fields["year"]) == "2021", fields
+    assert fields["venue"] == "Journal of Things", fields
+    assert fields["note"].startswith("title_mismatch:"), fields
+    import tempfile  # noqa: PLC0415
+
+    with tempfile.TemporaryDirectory() as tmp:
+        meta_ledger = Ledger(tmp)
+        meta_ledger.add_source(meta)
+        meta_ledger.write()
+        reloaded = Ledger(tmp).load().source_for_url(meta.url)
+        assert reloaded.authors == meta.authors, reloaded
+        assert reloaded.year == meta.year, reloaded
+        assert reloaded.venue == meta.venue, reloaded
+        assert reloaded.note == meta.note, reloaded
 
     # A source nobody cited stays out of the bibliography.
     ledger.add_source(two)
