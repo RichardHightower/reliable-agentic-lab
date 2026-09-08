@@ -1057,20 +1057,20 @@ def test_a_number_shared_by_a_corroborated_claim_is_not_forced_to_hedge():
             text="A checker catches errors the maker cannot",
             subject="exits",
             source_ids=[src.id, src2.id],
+            # #471: `corroborate()` counts attributed bindings, not raw
+            # source ids. Both must pass attribution before the claim
+            # counts as corroborated.
+            attributed_source_ids=[src.id, src2.id],
         )
     )
     evidence.corroborate(corroborated_claim)
+    assert corroborated_claim.truth_state == evidence.CORROBORATED
     body = (
         "# Title\n\n"
         "## Abstract\n\nThe loop halts before a person notices. [1]\n\n"
         "## Introduction\n\nThe loop halts before a person notices. [1]\n\n"
         "## References\n\n1. https://a\n2. https://b\n"
     )
-    print("DEBUG single_claim", single_claim.truth_state, single_claim.source_ids)
-    print("DEBUG corroborated_claim", corroborated_claim.truth_state, corroborated_claim.source_ids)
-    print("DEBUG src.id", src.id, "src2.id", src2.id, "equal?", src.id == src2.id)
-    print("DEBUG reference_rows", paper_check.reference_rows(body))
-    print("DEBUG single_source_numbers", paper_check._single_source_numbers(body, ledger))
     score = gate(body, urls=["https://a", "https://b"], ledger=ledger)
     assert "abstract_matches_body" not in score.signature(), score.report()
 
