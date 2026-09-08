@@ -106,12 +106,13 @@ Push from inside the worktree. The CRM's own push gate, tracked at
 `.claude/hooks/gate.py`, follows the worktree onto its branch and reads
 `.harness/receipt.json` there.
 
-Pass `--cleanup` to remove the worktree and its branch once you are done
-with it. Pass `--resume` to re-enter a killed run from that worktree's own
-`.harness/state.json`, instead of starting over. `--planner` accepts
-`derived`, `sdk`, or `deep`, and defaults to `derived`, which calls no
-model. `--doer none` and `--doer reference` force `derived` regardless of
-the flag.
+Pass `--cleanup` to remove the worktree once you are done with it.
+`--cleanup` leaves the branch behind. Delete it by hand with
+`git branch -D implementer/<ticket>`. Pass `--resume` to re-enter a killed
+run from that worktree's own `.harness/state.json`, instead of starting
+over. `--planner` accepts `derived`, `sdk`, or `deep`, and defaults to
+`derived`, which calls no model. `--doer none` and `--doer reference`
+force `derived` regardless of the flag.
 
 `main` exits `0` on pass, `2` on escalate, `1` on a contract error or a
 corrupt `state.json`.

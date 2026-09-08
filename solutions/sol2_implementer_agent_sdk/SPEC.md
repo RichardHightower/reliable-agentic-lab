@@ -122,9 +122,11 @@ to `derived`, which is `plan_for` and calls no model. `--doer none` and
 Every run happens inside an isolated git worktree at
 `<repo>.worktrees/<ticket>`, on branch `implementer/<ticket>`. The target
 repo you pass with `--repo` is never written to. `--cleanup` removes the
-worktree and its branch after the run; without it, the worktree stays so
-you can inspect it, or push from it. `--resume` re-enters a killed run from
-that worktree's own `.harness/state.json`, instead of starting over.
+worktree after the run. Without it, the worktree stays so you can inspect
+it, or push from it. `--cleanup` leaves the branch behind; delete it by
+hand with `git branch -D implementer/<ticket>`. `--resume` re-enters a
+killed run from that worktree's own `.harness/state.json`, instead of
+starting over.
 
 `state.json` sits beside the receipt. It carries the run count, the last
 gate, the last reason, the last run time, the loop name, the phase, the

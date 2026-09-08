@@ -131,7 +131,8 @@ prints nothing after either command. Read the receipt and the trace from
 the worktree, not the clone.
 
 `--resume` re-enters a killed run from that worktree's own `state.json`.
-`--cleanup` removes the worktree and its branch. `--planner` picks
+`--cleanup` removes the worktree, but leaves the branch behind. Delete the
+branch by hand with `git branch -D implementer/T001`. `--planner` picks
 `derived`, `sdk`, or `deep`, and `--doer none` and `--doer reference` force
 `derived` either way. `main` exits `0` on pass, `2` on escalate, and `1` on
 a contract error or a corrupt `state.json`.
