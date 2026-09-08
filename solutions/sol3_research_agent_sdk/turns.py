@@ -339,6 +339,10 @@ class Turns:
         """Flow and transitions only. Add no facts."""
         return body
 
+    def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
+        """P9's whole-paper pass. Default: hand the body back unchanged."""
+        return body
+
 
 @dataclass
 class SdkTurns(Turns):
@@ -793,6 +797,23 @@ class SdkTurns(Turns):
             f"result to {target} and also return it as your final message.\n\n"
             f"Current body:\n{whole(body)}",
             allow=[target],
+        )
+        return result.output or ""
+
+    def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
+        """P9. One turn sees the whole body, because the defect is a repeat
+        across sections and no single-section turn can see it.
+        """
+        result = self._ask(
+            "research-writer",
+            "This is the whole-paper pass. Cut every repeat named below: keep "
+            "the first statement of each caveat or numeric finding, and refer "
+            "back to it afterward by a short phrase, like \"the same trial, "
+            "above\", instead of restating it. Add no facts. Keep every "
+            "heading and every figure line exactly as it is. Return the "
+            "whole edited body.\n\n"
+            f"Repeats:\n{json.dumps(repeats, indent=2)[:6000]}\n\n"
+            f"The paper body, already assembled:\n{whole(body)}",
         )
         return result.output or ""
 
@@ -1306,6 +1327,23 @@ class OfflineTurns(Turns):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(body, encoding="utf-8")
         return body
+
+    def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
+        """No model, so no paraphrase either: cut one occurrence of each
+        named repeat's own text, leaving the canonical statement standing.
+
+        A repeat and its canonical sentence can differ by a citation marker
+        alone ("...behind [1]." versus "...behind [2].") and still shingle
+        as identical, because the marker carries no word `WORD` tokenizes.
+        Matching each `matches` entry by its own text, not by a set folded
+        down to unique strings, is what removes that variant too.
+        """
+        for item in repeats:
+            for match in item.get("matches") or []:
+                sentence = match.get("sentence") or ""
+                if sentence:
+                    body = body.replace(sentence, "", 1)
+        return re.sub(r"\n{3,}", "\n\n", body)
 
     def review(self, paper: str, report: str, ledger=None) -> dict:
         """Agree with the deterministic report and add nothing.

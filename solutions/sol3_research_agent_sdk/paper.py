@@ -1846,6 +1846,34 @@ def review(run: Run) -> dict:
     return verdict
 
 
+def edit_whole_paper(run: Run, repeats: list[dict], figures: list | None = None) -> dict:
+    """The P9 whole-paper pass: one writer turn sees the assembled body and
+    every `caveat_once` repeat, and cuts each one. Add no facts.
+
+    Unlike `edit_paper`, this reads and writes `paper.md` directly, not the
+    section files, because the repeat is a cross-section defect assembly
+    already stitched together. `new_claims` still has the last word: a
+    specific the evidence never retrieved reverts the whole edit. `figures`
+    is P10's parameter, unused until that unit lands. #477.
+    """
+    path = run.file("paper.md")
+    before = path.read_text(encoding="utf-8")
+    if hasattr(run.turns, "edit_whole_paper"):
+        after = run.turns.edit_whole_paper(before, repeats, figures or [])
+    else:
+        after = before
+    after = (after or before).strip()
+    if not after:
+        return {"trimmed": False, "reverted": []}
+    novel = checks.new_claims(before, after)
+    evidence = corpus_for(run)
+    invented = [token for token in novel if token.lower() not in evidence.lower()]
+    if invented:
+        return {"trimmed": False, "reverted": invented}
+    path.write_text(after + "\n", encoding="utf-8")
+    return {"trimmed": True, "reverted": []}
+
+
 def edit_paper(run: Run) -> dict:
     """One flow-only pass after the first green check. Add no facts.
 
@@ -2026,6 +2054,25 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
             run.state.mark(name, "running")
             run.state.save(work)
             meta = phase(run)
+            if name == "check" and "caveat_once" in (meta.get("signature") or []) and not run.file(
+                "trim.done.json"
+            ).exists():
+                # P9. Python caught a repeat, so a per-section retry cannot
+                # fix it: no writer turn sees more than one section. One
+                # whole-paper pass runs here, then `check` runs again, so the
+                # reviewer next in `CYCLE` never sees a body that still fails
+                # this row. Bounded to once per run. #477.
+                repeats = checks.repeat_shingles(
+                    checks.top_level_sections(run.file("paper.md").read_text(encoding="utf-8"))
+                )
+                trim_before = run.state.total_usd
+                trim_meta = edit_whole_paper(run, repeats)
+                run.write_json("trim.done.json", trim_meta)
+                run.state.mark("trim", "complete", usd=round(run.state.total_usd - trim_before, 4), **trim_meta)
+                run.state.save(work)
+                run.log(f"  6b trim     {trim_meta}")
+                before = run.state.total_usd
+                meta = check(run)
             run.state.mark(name, "complete", usd=round(run.state.total_usd - before, 4))
             run.state.save(work)
             run.log(f"  {number} {name:<10} {meta if name != 'check' else meta['signature']}")

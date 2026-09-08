@@ -505,6 +505,10 @@ class Paper:
     # The most expensive call seen per role. The budget check reads it as the
     # headroom the next call of that kind is likely to need.
     _worst: dict = field(default_factory=dict, init=False)
+    # P9. The whole-paper trim pass runs at most once per run: a pass that
+    # could not clear `caveat_once` fails the gate normally on the next
+    # attempt, and the ordinary writer retry loop takes over. #477.
+    _trimmed: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         self.work_dir = Path(self.work_dir)
@@ -2070,16 +2074,33 @@ class Paper:
         import brief  # noqa: PLC0415
 
         body = brief.strip_em_dashes(body)
-        score = stages.assemble_gate(
-            body,
-            self.ledger,
-            charts=self._loaded_charts(),
-            allowed_domains=self.allowed_domains,
-            loop_doctrine=self.loop_doctrine,
+        usd = 0.0
+        gate_kwargs = {
+            "charts": self._loaded_charts(),
+            "allowed_domains": self.allowed_domains,
+            "loop_doctrine": self.loop_doctrine,
             # `self.plan`'s sections carry `key_questions`, so `question_heading`
             # can grade a heading against them, not only against "ends in ?". #463.
-            outline=self.plan,
-        )
+            "outline": self.plan,
+        }
+        try:
+            score = stages.assemble_gate(body, self.ledger, **gate_kwargs)
+        except GateFailed as failure:
+            # P9. `caveat_once` is Python-only and the defect is a repeat
+            # across sections, so no per-section writer turn can see it. One
+            # whole-paper pass runs here, then the gate runs again. Bounded
+            # to once per run by `self._trimmed`: a pass that could not
+            # clear it re-raises below and the ordinary writer retry loop
+            # takes over. #477.
+            if "caveat_once" not in failure.signature or self._trimmed:
+                raise
+            self._trimmed = True
+            self.paper_path.write_text(body, encoding="utf-8")
+            repeats = paper_check.repeat_shingles(paper_check.top_level_sections(body))
+            trimmed = self.stage_trim(repeats)
+            usd += trimmed.usd
+            body = self.paper_path.read_text(encoding="utf-8")
+            score = stages.assemble_gate(body, self.ledger, **gate_kwargs)
         self.paper_path.write_text(body, encoding="utf-8")
         # A warning is not a failure. Filing both under one key made a short
         # paper look like it had failed a gate, and `publish` reads this file to
@@ -2098,8 +2119,72 @@ class Paper:
         self.state.record("paper", self.paper_path)
         return StageResult(
             "assemble",
+            usd=usd,
             artifacts={"words": len(body.split())},
             summary=f"{len(body.split())} words, every hard gate green",
+        )
+
+    def stage_trim(self, repeats: list[dict], figures: list | None = None) -> StageResult:
+        """The P9 whole-paper pass: one writer turn sees the assembled body
+        and every `caveat_once` repeat, and cuts each one. Add no facts.
+
+        Reads and writes `self.paper_path` directly, not a section file,
+        because the repeat is a cross-section defect `stage_assemble`
+        already stitched together. `new_claims` still has the last word: a
+        specific the evidence never retrieved reverts the whole edit, the
+        same defence the SDK port's `edit_whole_paper` gives its own body.
+        `figures` is P10's parameter, unused until that unit lands. #477.
+        """
+        before = self.paper_path.read_text(encoding="utf-8")
+        if self.runner.name == "fixture":
+            # A canned reply is keyed by a phrase in the prompt; a
+            # whole-paper prompt has no fixed heading to key on. No model,
+            # so no paraphrase either: cut one occurrence of each named
+            # repeat's own text, leaving the canonical statement standing.
+            # A repeat and its canonical sentence can differ by a citation
+            # marker alone ("...behind [1]." versus "...behind [2].") and
+            # still shingle as identical, because the marker carries no word
+            # `WORD` tokenizes, so match each entry by its own text rather
+            # than folding to a set of unique strings first.
+            after = before
+            for item in repeats:
+                for match in item.get("matches") or []:
+                    sentence = match.get("sentence") or ""
+                    if sentence:
+                        after = after.replace(sentence, "", 1)
+            after = re.sub(r"\n{3,}", "\n\n", after)
+            usd = 0.0
+        else:
+            reply = self._ask(
+                "writer",
+                "This is the whole-paper pass. Cut every repeat named below: keep "
+                "the first statement of each caveat or numeric finding, and refer "
+                "back to it afterward by a short phrase, like \"the same trial, "
+                "above\", instead of restating it. Add no facts. Keep every "
+                "heading and every figure line exactly as it is. Return the "
+                "whole edited body.\n\n"
+                f"Repeats:\n{json.dumps(repeats, indent=2)}\n\n"
+                f"The paper body, already assembled:\n{before}",
+            )
+            after = (reply.text or "").strip()
+            usd = reply.usd
+        evidence_blob = "\n".join(
+            [claim.text for claim in self.ledger.claims.values()]
+            + [f"{src.title} {src.url} {src.text}" for src in self.ledger.bibliography()]
+        )
+        novel = paper_check.new_claims(before, after) if after else []
+        invented = [token for token in novel if token.lower() not in evidence_blob.lower()]
+        if not after or invented:
+            self.state.mark_complete("trim", cost_usd=usd, trimmed=False, reverted=invented)
+            return StageResult(
+                "trim", usd=usd, artifacts={"trimmed": False, "reverted": invented},
+                summary="reverted: an invented specific" if invented else "reverted: empty reply",
+            )
+        self.paper_path.write_text(after, encoding="utf-8")
+        self.state.mark_complete("trim", cost_usd=usd, trimmed=True, reverted=[])
+        return StageResult(
+            "trim", usd=usd, artifacts={"trimmed": True, "reverted": []},
+            summary=f"{len(repeats)} repeats cut",
         )
 
     def _uncited_section_headings(self) -> list[str]:

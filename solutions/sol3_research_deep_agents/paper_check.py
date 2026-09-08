@@ -160,6 +160,25 @@ NOUN_STACK_LIMIT = 3
 # to the STE belt.
 CODE_SPAN = re.compile(r"`[^`]*`|```.*?```", re.S)
 
+# Identifiers a later edit must not invent, copied from the SDK's `checks.py`,
+# not imported. A bare URL is deliberately excluded: too common in retrieved
+# text to be signal, and a dead link is a different problem.
+ARXIV = re.compile(r"\barXiv[:\s]*(\d{4}\.\d{4,5})", re.I)
+DOI = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)")
+AUTHOR_YEAR = re.compile(r"\[([A-Z][^\[\]\n]{2,60}?,\s*(?:19|20)\d{2})\]")
+PERCENT = re.compile(r"\b\d+(?:\.\d+)?%")
+VERSION = re.compile(r"\bv?\d+\.\d+(?:\.\d+)?\b")
+YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+BIG_INT = re.compile(r"\b([1-9]\d{2,})\b")
+QUOTED = re.compile(r'"([^"]{3,})"')
+
+# P9, #477. A numeric finding stated in full twice, with the same value and
+# unit, is a repeat even when the wording around it differs enough to dodge
+# the shingle threshold below: "2.4 percent" once, then "2.4%" a paragraph
+# later, is one finding either way.
+NUMERIC_FULL = re.compile(r"\b\d+(?:\.\d+)?\s*(?:%|percent)\b", re.I)
+CAVEAT_EXEMPT_SECTIONS = {"glossary", "references"}
+
 
 def _mask_references(text: str) -> str:
     """Blank the references section. A host name in a URL is not body prose."""
@@ -1019,6 +1038,143 @@ def abstract_matches_body(body: str, ledger: evidence.Ledger | None = None) -> l
     return issues
 
 
+def top_level_sections(body: str) -> dict[str, str]:
+    """Each `##` heading's own text, running to the next `##`-or-higher
+    heading. Keyed by the heading, lowercased. A `###` key-question
+    sub-heading is left inside its parent's span, not split out as a second
+    section: `caveat_once` needs that distinction, or a sentence under a
+    sub-heading is graded as repeating itself, once in its own entry and
+    once more inside its `##` parent's span. Copied from the SDK port's
+    `checks.py`, not imported.
+    """
+    matches = [m for m in SECTION_HEADING.finditer(body) if len(m.group(1)) == 2]
+    out: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        out[match.group(2).strip().lower()] = body[match.end() : end]
+    return out
+
+
+def _section_sentences_with_lines(text: str) -> list[tuple[int, str]]:
+    """(line, sentence) pairs inside one section's own text, the line counted
+    from that section's own first line. Skips a heading, an image, a list, a
+    table, a quote, and a fence, the same exemptions `_prose_sentences`
+    grants, because none of those is a sentence a writer composed. Copied
+    from the SDK port, not imported.
+    """
+    out: list[tuple[int, str]] = []
+    block_lines: list[str] = []
+    block_start = 0
+
+    def flush() -> None:
+        if not block_lines:
+            return
+        block = "\n".join(block_lines).strip()
+        if block.startswith(("#", "!", "|", ">", "```", "-", "*")) or LIST_ITEM.match(block):
+            return
+        for piece in SENTENCE_END.split(block):
+            piece = piece.strip()
+            if piece:
+                out.append((block_start, piece))
+
+    for index, line in enumerate(text.split("\n"), start=1):
+        if line.strip() == "":
+            flush()
+            block_lines = []
+            continue
+        if not block_lines:
+            block_start = index
+        block_lines.append(line)
+    flush()
+    return out
+
+
+def _word_shingles(sentence: str, n: int = 4) -> set[tuple[str, ...]]:
+    """Word 4-grams, lowercased. A sentence shorter than `n` words still
+    shingles as one tuple, so two short sentences can still match.
+    """
+    words = [w.lower() for w in WORD.findall(sentence)]
+    if len(words) < n:
+        return {tuple(words)} if words else set()
+    return {tuple(words[i : i + n]) for i in range(len(words) - n + 1)}
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _numeric_full_tokens(sentence: str) -> frozenset[str]:
+    """Every number-and-unit pair stated in full, normalized so '2.4%' and
+    '2.4 percent' compare equal.
+    """
+    return frozenset(
+        re.sub(r"\s+", " ", match.group(0).lower()).replace("percent", "%")
+        for match in NUMERIC_FULL.finditer(sentence)
+    )
+
+
+def repeat_shingles(sections: dict[str, str]) -> list[dict]:
+    """A caveat sentence, or a numeric finding stated in full, that a later
+    section restates. Glossary and References are exempt. The abstract may
+    restate one body finding, so it is exempt on the abstract side; two body
+    sections that both restate the same finding are still a repeat. Copied
+    from the SDK port, not imported. #477.
+    """
+    entries: list[dict] = []
+    for name, text in sections.items():
+        if name in CAVEAT_EXEMPT_SECTIONS:
+            continue
+        for line, sentence in _section_sentences_with_lines(text):
+            entries.append(
+                {
+                    "section": name,
+                    "line": line,
+                    "sentence": sentence,
+                    "shingles": _word_shingles(sentence),
+                    "numbers": _numeric_full_tokens(sentence),
+                }
+            )
+    results: list[dict] = []
+    for index, entry in enumerate(entries):
+        if entry["section"] == "abstract":
+            continue
+        matches = []
+        for other in entries[index + 1 :]:
+            if other["section"] == entry["section"] or other["section"] == "abstract":
+                continue
+            same_numbers = bool(entry["numbers"]) and entry["numbers"] == other["numbers"]
+            if same_numbers or _jaccard(entry["shingles"], other["shingles"]) > 0.6:
+                matches.append(
+                    {"section": other["section"], "line": other["line"], "sentence": other["sentence"]}
+                )
+        if matches:
+            results.append(
+                {
+                    "section": entry["section"],
+                    "line": entry["line"],
+                    "sentence": entry["sentence"],
+                    "matches": matches,
+                }
+            )
+    return results
+
+
+def caveat_once_violations(body: str) -> list[str]:
+    """Every repeat `repeat_shingles` names, as one detail string per repeat.
+
+    Unconditional: a body with nothing to repeat passes by construction.
+    """
+    hits = []
+    for item in repeat_shingles(top_level_sections(body)):
+        where = [f"{item['section']}:{item['line']}"] + [
+            f"{m['section']}:{m['line']}" for m in item["matches"]
+        ]
+        hits.append(f"{item['sentence'][:120]!r} in {', '.join(where)}")
+    return hits
+
+
 def check(
     body: str,
     sources: list[str],
@@ -1176,6 +1332,19 @@ def check(
             "the abstract and introduction match the body they summarize"
             if not abstract_mismatches
             else f"mismatch: {abstract_mismatches[:3]}",
+        )
+    )
+
+    # Unconditional, and inert with nothing to repeat: a snippet another
+    # row's test built has no second section to compare against. #477.
+    caveat_hits = caveat_once_violations(body)
+    checks.append(
+        Check(
+            "caveat_once",
+            not caveat_hits,
+            "no caveat or numeric finding repeats across sections"
+            if not caveat_hits
+            else f"repeated: {caveat_hits[:2]}",
         )
     )
 
@@ -1363,6 +1532,26 @@ def _ledger_blob(ledger) -> str:
             parts.append(getattr(source, "title", "") or "")
             parts.append(getattr(source, "url", "") or "")
     return "\n".join(parts)
+
+
+def _specifics(text: str) -> set[str]:
+    """Identifiers a later edit must not invent. Copied from the SDK port's
+    `checks.py`, not imported, because Deep Agents had no whole-paper edit
+    pass before P9.
+    """
+    masked = _mask_code(text)
+    found: set[str] = set()
+    for rx in (ARXIV, DOI, AUTHOR_YEAR, PERCENT, VERSION, YEAR, BIG_INT, QUOTED):
+        for match in rx.finditer(masked):
+            token = match.group(1) if match.lastindex else match.group(0)
+            if token:
+                found.add(token.strip())
+    return found
+
+
+def new_claims(before: str, after: str) -> list[str]:
+    """Specifics that appear in the edit and not in the original."""
+    return sorted(_specifics(after) - _specifics(before))
 
 
 def demo() -> None:
