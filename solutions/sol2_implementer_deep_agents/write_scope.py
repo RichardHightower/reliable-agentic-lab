@@ -129,6 +129,12 @@ class Orchestrator(Role):
     budget_usd: float = 2.0
     spent_usd: float = 0.0
     iteration: int = 0
+    # #539, follow-up 7. `spent_usd` alone cannot tell "every turn answered
+    # and cost nothing" from "we never heard a real number", the same silent
+    # zero the ticket exists to kill, one level up. This count is the
+    # difference: a trace with a nonzero count here has a `spent_usd` that
+    # is a floor, not a total.
+    unknown_spend_turns: int = 0
 
     def start_iteration(self) -> int:
         self.iteration += 1
@@ -142,7 +148,15 @@ class Orchestrator(Role):
     def usd_left(self) -> float:
         return max(0.0, self.budget_usd - self.spent_usd)
 
-    def spend(self, usd: float) -> None:
+    def spend(self, usd: float | None) -> None:
+        # #539. `None` means the backend never answered (a timed-out query,
+        # a raised exception), not that the turn was free. The budget still
+        # has to keep moving, so an unknown turn spends 0.0 against it; the
+        # trace reports the `None` itself, never a silent 0.0, so a reader
+        # can tell "cost nothing" from "we do not know".
+        if usd is None:
+            self.unknown_spend_turns += 1
+            return
         self.spent_usd += usd
 
     @property

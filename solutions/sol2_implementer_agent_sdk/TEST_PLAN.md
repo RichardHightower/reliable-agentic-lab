@@ -168,7 +168,7 @@ Pass:
 - `result.output` is not a Grep dump
 - `result.raw_output` may contain tool events
 - `result.usd` is greater than 0
-- the call returns in under 180 seconds
+- the call returns in under the query ceiling (900 seconds by default; `SOL2_QUERY_TIMEOUT_SECONDS` raises or lowers it)
 
 ### 3b. Out-of-scope write
 

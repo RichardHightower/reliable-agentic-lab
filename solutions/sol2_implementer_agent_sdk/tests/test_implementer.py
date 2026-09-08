@@ -262,6 +262,116 @@ def test_red_gate_escalates_with_the_old_wording_at_budget_one(tmp_path, monkeyp
     assert backend.calls == 1
 
 
+class FailingBackend(doers.Backend):
+    """#539. A backend that never answers: a timed-out query, a raised
+    exception. Writes nothing and says so, `ok=False`, the way a live
+    backend's own failure path now reports itself."""
+
+    name = "failing"
+
+    def __init__(self, message: str):
+        self.message = message
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+        return doers.DoerResult(ok=False, usd=None, output=self.message)
+
+
+def test_a_backend_failure_names_itself_instead_of_the_generic_red_gate_wording(
+    tmp_path, monkeypatch
+):
+    """#539, judge of PR #540. A backend that never answers writes an empty
+    signature every attempt, so at the shipped `iterations: 3` the loop
+    reaches attempt 2 before it stops (`gates.decide` sees the same empty
+    signature twice and returns `repeat_failure`). No `budget=` override
+    here on purpose: that is the live path, and it must still name the
+    backend instead of "two test turns wrote nothing", which is what a
+    reorder bug made this test pass on when it forced `budget=1`."""
+    repo = _git_repo(tmp_path / "repo")
+    baseline = _run(passed=("tests/test_health.py::test_health",))
+    still_green = _run(passed=("tests/test_health.py::test_health",))
+    _patch_runs(monkeypatch, [baseline, still_green])
+
+    backend = FailingBackend("agent sdk query timed out after 900 seconds (elapsed=900s)")
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert "the test implementer backend did not answer" in trace["reason"]
+    assert "timed out after 900 seconds" in trace["reason"]
+    assert "not converging" not in trace["reason"]
+    assert trace["test_phase"]["ok"] is False
+    assert trace["test_phase"]["usd"] is None
+    assert trace["test_phase"]["output"] == backend.message
+    # #539(e). The trace names the cap the code actually applied (the
+    # fixture's own `.loop.yml` above), not a number invented after the run.
+    assert trace["budget_usd"] == 2.00
+    assert trace["spent_usd"] == 0.0
+    # #539, follow-up 7. Both attempts answered `usd=None`, so `spent_usd`
+    # is a floor, not a total; this count is what says so.
+    assert trace["unknown_spend_turns"] == 2
+
+
+def test_unknown_spend_turns_counts_answers_with_no_cost_reported():
+    """#539, follow-up 7. `spent_usd` alone cannot tell "every turn answered
+    free" from "we never heard a real number" one level up from
+    `DoerResult.usd`."""
+    boss = implementer.roles.Orchestrator(name="orchestrator", repo=Path("."))
+    boss.spend(1.0)
+    boss.spend(None)
+    boss.spend(0.5)
+
+    assert boss.spent_usd == 1.5
+    assert boss.unknown_spend_turns == 1
+
+
+class FailsAtCodePhaseBackend(doers.Backend):
+    """Writes a red test, then never answers the code phase."""
+
+    name = "fails-at-code"
+
+    def __init__(self, message: str):
+        self.message = message
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+        if any(pattern.startswith("tests/") for pattern in allow):
+            target = repo / "tests" / "test_greet.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("def test_ac1():\n    assert False\n", encoding="utf-8")
+            return doers.DoerResult(wrote=["tests/test_greet.py"], output="wrote a red test")
+        return doers.DoerResult(ok=False, usd=None, output=self.message)
+
+
+def test_a_code_phase_backend_failure_names_itself_and_is_recorded_per_iteration(
+    tmp_path, monkeypatch
+):
+    """#539, follow-up 2. The test phase names a backend that never answered;
+    the code phase carried none of that (no `ok`, `output`, or `usd` per
+    iteration, and the terminal reason was always the rubric's generic
+    wording)."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health,), failed=(new_test,)),
+        ],
+    )
+    backend = FailsAtCodePhaseBackend(
+        "agent sdk query timed out after 900 seconds (elapsed=901s, events=9, usd=unknown)"
+    )
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert "the code implementer backend did not answer" in trace["reason"]
+    assert "timed out after 900 seconds" in trace["reason"]
+    iteration = trace["iterations"][0]
+    assert iteration["ok"] is False
+    assert iteration["usd"] is None
+    assert iteration["output"] == backend.message
+
+
 def test_a_silent_test_turn_then_a_failing_test_passes_the_red_gate(tmp_path, monkeypatch):
     """A3 (#436). Turn 1 is silent. Turn 2 writes a failing test. Budget 2 is
     enough to reach it, and the red gate is satisfied rather than escalated."""
@@ -1053,6 +1163,11 @@ def test_cleanup_flag_removes_the_worktree_and_prints_the_path_without_it(
     assert worktree_path.exists()
     assert f"worktree: {worktree_path}" in out
     assert f"git -C {resolved_repo} worktree remove {worktree_path}" in out
+    # #539. A failed run's own raw turn records are the evidence a trace
+    # cites; they must still be sitting in the worktree, not just the
+    # worktree's path.
+    assert (worktree_path / ".harness" / "last-implementer.json").exists()
+    assert (worktree_path / ".harness" / "state.json").exists()
 
     _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
     implementer.main(
