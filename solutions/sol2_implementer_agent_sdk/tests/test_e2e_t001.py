@@ -258,3 +258,34 @@ def test_the_e2e_summary_lands_in_the_worktree(tmp_path, monkeypatch):
     # The regression this test pins: the summary must not land next to the
     # clone the run never touched.
     assert not (repo / ".harness" / "last-sdk-e2e.md").exists()
+
+
+def test_the_query_failed_message_names_the_absolute_worktree_path(tmp_path, monkeypatch, capsys):
+    """#506 follow-up, judge of PR #527, item 4. The "see .harness/last-sdk-
+    e2e.md" message printed on a failed query used to be a bare relative
+    path, which reads as living next to wherever this command was invoked
+    from, not the worktree `_write_extras` actually wrote the summary to."""
+    repo = _git_repo(tmp_path / "repo")
+    baseline = _run(passed=("tests/test_health.py::test_health",))
+    still_green = _run(passed=("tests/test_health.py::test_health",))
+    _patch_runs(monkeypatch, [baseline, still_green])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(e2e_t001, "_load_operator_env", lambda: None)
+
+    class FailingBackend:
+        def run(self, *, repo: Path, prompt: str, allow: list[str]):
+            return SimpleNamespace(wrote=[], output="boom", usd=0.0, ok=False, stop_reason="crashed")
+
+    monkeypatch.setattr(
+        e2e_t001,
+        "_build_backend",
+        lambda repo, budget: (e2e_t001.AgentSdkE2EBackend(FailingBackend()), []),
+    )
+
+    exit_code = e2e_t001.main(["--repo", str(repo), "--ticket", "T001", "--budget", "1"])
+
+    assert exit_code == 2
+    worktree = repo.parent / f"{repo.name}.worktrees" / "T001"
+    err = capsys.readouterr().err
+    assert str(worktree / ".harness" / "last-sdk-e2e.md") in err
+    assert "see .harness/last-sdk-e2e.md\n" not in err  # the old bare relative path
