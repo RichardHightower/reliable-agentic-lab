@@ -7,6 +7,9 @@ still there holding the built-in filesystem tools.
 
 from __future__ import annotations
 
+import inspect
+
+import conftest
 import gates
 import implementer
 import pytest
@@ -131,6 +134,124 @@ def test_build_agent_fences_the_harness(contract, fake_langchain, fake_deepagent
 
     orchestrator = fake_deepagents["permissions"]
     assert [rule.mode for rule in orchestrator] == ["deny"]
+
+
+# -- Layer 3, checked again against the real deepagents package -------------
+#
+# `fake_deepagents` above proves `build_agent` calls the SDK the way this
+# folder believes it does. That proof is only as good as the fake's field
+# names. The two tests below close that gap: the first proves the fake
+# declares real fields, the second re-runs the layer-3 fence against the
+# real classes instead of the fake's stand-ins. Both skip, not fail, when
+# `deepagents` is not installed -- `task test-setup` installs pytest only,
+# and `.github/workflows/tests.yml:41` runs that CI leg, so CI never reaches
+# either test's body. The fake-path tests above are what CI enforces, and a
+# skip here is never mistaken for them having passed: this file also carries
+# `test_build_agent_fences_the_harness`, which runs and asserts for real in
+# every environment, `deepagents` installed or not.
+
+
+def _declared_fields(cls, fallback: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """Field names `cls.__init__` declares, read off the fake itself.
+
+    `FilesystemPermission`'s fake takes `**kwargs` and declares no names of
+    its own, so `fallback` supplies the field set every call site in
+    `roles.py` and in `conftest.fake_deepagents` actually uses.
+    """
+    names = tuple(
+        name
+        for name, param in inspect.signature(cls.__init__).parameters.items()
+        if name != "self" and param.kind is not inspect.Parameter.VAR_KEYWORD
+    )
+    return names or fallback
+
+
+def test_the_fake_declares_the_fields_the_real_types_accept():
+    """The fake is only a fence if its field names are the SDK's field
+    names. Take each field list straight off `conftest`'s fake classes and
+    construct the matching real `deepagents` type with exactly that field
+    set, so a renamed real field breaks this test instead of leaving a fake
+    that quietly no longer matches the SDK.
+    """
+    real = pytest.importorskip("deepagents")
+    real_backends = pytest.importorskip("deepagents.backends")
+
+    assert _declared_fields(conftest.GeneralPurposeSubagentProfile) == ("enabled",)
+    disabled = real.GeneralPurposeSubagentProfile(enabled=False)
+
+    assert _declared_fields(conftest.HarnessProfile) == (
+        "excluded_tools",
+        "general_purpose_subagent",
+    )
+    real.HarnessProfile(excluded_tools=frozenset({"write_file", "execute"}), general_purpose_subagent=disabled)
+
+    assert _declared_fields(conftest.FilesystemPermission, ("operations", "paths", "mode")) == (
+        "operations",
+        "paths",
+        "mode",
+    )
+    real.FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")
+
+    assert _declared_fields(conftest.FilesystemBackend) == ("root_dir", "virtual_mode")
+    backend = real_backends.FilesystemBackend(root_dir="/tmp", virtual_mode=True)
+
+    assert _declared_fields(conftest.CompositeBackend) == ("default", "routes")
+    real_backends.CompositeBackend(default=backend, routes={})
+
+
+def _patch_create_deep_agent(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Record what `build_agent` hands the real `create_deep_agent` and
+    `register_harness_profile`, without calling either -- `create_deep_agent`
+    wants a model and a key, and `register_harness_profile` writes a
+    process-wide registry. Every object landing in the returned dict --
+    `FilesystemPermission`, `GeneralPurposeSubagentProfile`, `HarnessProfile`,
+    `FilesystemBackend`, `CompositeBackend` -- is still the real deepagents
+    class; only these two entry points are stand-ins.
+    """
+    import deepagents  # noqa: PLC0415  (the real package; only reached when installed)
+
+    seen: dict = {}
+
+    def create_deep_agent(**kwargs):
+        seen.update(kwargs)
+        return "agent"
+
+    def register_harness_profile(model, profile):
+        seen["harness_model"] = model
+        seen["harness_profile"] = profile
+
+    monkeypatch.setattr(deepagents, "create_deep_agent", create_deep_agent)
+    monkeypatch.setattr(deepagents, "register_harness_profile", register_harness_profile)
+    return seen
+
+
+def test_the_real_types_keep_the_fence(contract, fake_langchain, monkeypatch):
+    """`test_build_agent_fences_the_harness`, re-run against the installed
+    `deepagents` classes instead of `conftest`'s stand-ins: general-purpose
+    off, `write_file` and `execute` excluded on the parent, the judge holds
+    only `read_file`, and a role's deny rule still precedes its allow rule.
+    """
+    pytest.importorskip("deepagents")
+    seen = _patch_create_deep_agent(monkeypatch)
+
+    roles.build_agent(contract)
+
+    profile = seen["harness_profile"]
+    assert profile.general_purpose_subagent.enabled is False
+    assert "write_file" in profile.excluded_tools
+    assert "execute" in profile.excluded_tools
+
+    assert seen["backend"].default.virtual_mode is True
+
+    orchestrator = seen["permissions"]
+    assert [rule.mode for rule in orchestrator] == ["deny"]
+
+    judge = next(spec for spec in seen["subagents"] if spec["name"] == "judge")
+    assert [t.__name__ for t in judge["tools"]] == ["read_file"]
+
+    code_implementer = next(spec for spec in seen["subagents"] if spec["name"] == "code-implementer")
+    assert code_implementer["permissions"][0].mode == "deny"
+    assert code_implementer["permissions"][1].mode == "allow"
 
 
 def test_build_agent_passes_every_subagent_permission(contract, fake_langchain, fake_deepagents):
