@@ -245,6 +245,30 @@ def _mask_urls(text: str) -> str:
     return INLINE_URL.sub(lambda m: " " * len(m.group(0)), text)
 
 
+def _mask_fences(text: str) -> str:
+    """Blank a fenced code block, keeping every character offset.
+
+    A judge on PR #508 found a `##` line inside a quoted markdown snippet
+    counted as a heading in `question_heading`, and every sibling row that
+    scans headings has the same exposure: `next_step` (`last_prose_heading`),
+    the outline coverage scan, the `sections`/`complete` row, and the
+    section-boundary helpers they all share. Narrower than `_mask_code` on
+    purpose: an inline single-backtick span never spans a line, so it cannot
+    fake a heading, and blanking it here would also blank a heading's own
+    inline code, e.g. `## Using `--brain``. #509
+    """
+    return FENCE.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def _headings(text: str) -> list[re.Match]:
+    """`SECTION_HEADING` matches read from the fence-masked body.
+
+    One call, and every row below reads through it, so a heading inside a
+    fenced snippet is never counted as paper structure. #509
+    """
+    return list(SECTION_HEADING.finditer(_mask_fences(text)))
+
+
 def _mask_for_ste(text: str) -> str:
     """Code, an inline URL, and references, gone. Everything else is body prose."""
     return _mask_urls(_mask_references(_mask_code(text)))
@@ -717,7 +741,7 @@ def section_bodies(body: str) -> dict[str, str]:
     `outline_coverage` saw none of the questions, both under a section that
     was complete on the page.
     """
-    matches = list(SECTION_HEADING.finditer(body))
+    matches = _headings(body)
     out: dict[str, str] = {}
     for index, match in enumerate(matches):
         level = len(match.group(1))
@@ -736,7 +760,7 @@ def _mask_section(text: str, name: str) -> str:
     Grading whether a glossary term is used elsewhere in the body must not
     credit the glossary's own entry as that use.
     """
-    matches = list(SECTION_HEADING.finditer(text))
+    matches = _headings(text)
     for index, match in enumerate(matches):
         if match.group(2).strip().lower() != name:
             continue
@@ -872,7 +896,7 @@ def last_prose_heading(body: str) -> str | None:
     """
     headings = [
         match.group(2).strip()
-        for match in SECTION_HEADING.finditer(body)
+        for match in _headings(body)
         if len(match.group(1)) == 2 and match.group(2).strip().lower() not in NON_PROSE_TRAILING
     ]
     return headings[-1] if headings else None
@@ -883,14 +907,35 @@ def last_prose_heading(body: str) -> str | None:
 # requiring the verbatim question taught the writer to paste it as a
 # heading. Scoring whether the question is answered removes that incentive.
 # Copied, not imported, per the house rule against a shared loop package.
-COVERAGE_STOP = {
-    "a", "an", "the", "is", "are", "of", "in", "on", "to", "and", "or", "for",
-    "what", "how", "why", "does", "do", "this", "that", "with", "from",
-}
+#
+# #510. A judge on PR #508 scored the #385 gist question "Which trace
+# counts were reported by the MAST taxonomy paper?" as answered by a body
+# that shares only "paper" with it, because the twenty-word list here
+# missed ordinary function words: `was`, `were`, `which`, `when`, `has`,
+# `not`, `also`, `more`, `should`. `STE_FUNCTION_WORDS`, above, already is
+# the usual-English-function-word list this row needed; every word this
+# set used to name is already in it, so growing the stop list is reusing
+# that set rather than hand-picking more exceptions one probe at a time.
+COVERAGE_STOP = STE_FUNCTION_WORDS
 
 
 def _coverage_terms(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in COVERAGE_STOP and len(w) > 2}
+
+
+def _coverage_needed(terms: set[str]) -> int:
+    """A third of the question's content terms, floored at two, and never
+    more than the question actually has to give. #510
+
+    A fifteen-term question used to need two incidental matches, the same
+    floor a two-term question needed. Scaling the requirement with the
+    question closes that gap while a short question still only has to name
+    what it actually asks: `min(2, len(terms))` was already the answer for
+    `len(terms) <= 2`, and stays that answer here.
+    """
+    if not terms:
+        return 0
+    return min(len(terms), max(2, -(-len(terms) // 3)))
 
 
 def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
@@ -917,7 +962,7 @@ def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
             # the raw 460-character string and could never find it.
             named = question_text(question)
             terms = _coverage_terms(named) if named else set()
-            if terms and len(terms & body_terms) < min(2, len(terms)):
+            if terms and len(terms & body_terms) < _coverage_needed(terms):
                 gaps.append(f"section {heading!r} never answers {named!r}")
     return gaps
 
@@ -943,7 +988,7 @@ def question_headings(body: str, outline: dict | None) -> list[str]:
             if text:
                 wanted.add(text)
     bad = []
-    for match in SECTION_HEADING.finditer(body):
+    for match in _headings(body):
         if len(match.group(1)) not in (2, 3):
             continue
         heading = match.group(2).strip()
@@ -1148,7 +1193,7 @@ def top_level_sections(body: str) -> dict[str, str]:
     once in its own entry and once more inside its `##` parent's span, which
     graded the sentence as repeating itself.
     """
-    matches = [m for m in SECTION_HEADING.finditer(body) if len(m.group(1)) == 2]
+    matches = [m for m in _headings(body) if len(m.group(1)) == 2]
     out: dict[str, str] = {}
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
@@ -1165,7 +1210,7 @@ def top_level_section_spans(body: str) -> dict[str, tuple[int, int]]:
     `str.replace` to find a short sentence that a different section might
     also happen to contain. #477.
     """
-    matches = [m for m in SECTION_HEADING.finditer(body) if len(m.group(1)) == 2]
+    matches = [m for m in _headings(body) if len(m.group(1)) == 2]
     out: dict[str, tuple[int, int]] = {}
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
@@ -1299,7 +1344,7 @@ def missing_sections(body: str, headings: list[str]) -> list[str]:
     Matched on the heading text, because that is what the writer was told to
     emit and what a reader looks for in a table of contents.
     """
-    present = {match.group(1).strip().lower() for match in HEADING.finditer(body)}
+    present = {match.group(1).strip().lower() for match in HEADING.finditer(_mask_fences(body))}
     return [heading for heading in headings if heading.strip().lower() not in present]
 
 
@@ -1421,7 +1466,7 @@ def sections_without_prose(body: str, min_words: int) -> list[str]:
     if min_words <= 0:
         return []
     thin = []
-    for match in SECTION_HEADING.finditer(body):
+    for match in _headings(body):
         heading = match.group(2).strip()
         if heading.lower() in PROSE_EXEMPT:
             continue
@@ -2026,7 +2071,7 @@ def section_check(
     missing_q = []
     for question in questions:
         terms = _coverage_terms(question)
-        if terms and len(terms & body_terms) < min(2, len(terms)):
+        if terms and len(terms & body_terms) < _coverage_needed(terms):
             missing_q.append(question)
     checks.append(
         Check(

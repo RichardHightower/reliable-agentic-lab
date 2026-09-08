@@ -322,6 +322,30 @@ def _mask_urls(text: str) -> str:
     return INLINE_URL.sub(lambda m: " " * len(m.group(0)), text)
 
 
+def _mask_fences(text: str) -> str:
+    """Blank a fenced code block, keeping every character offset.
+
+    A judge on PR #508 found a `##` line inside a quoted markdown snippet
+    counted as a heading in `question_headings`, and every sibling row that
+    scans headings has the same exposure: `next_step` (`last_prose_heading`),
+    the `sections` row, and the section-boundary helpers they all share.
+    Narrower than `_mask_code` on purpose: an inline single-backtick span
+    never spans a line, so it cannot fake a heading, and blanking it here
+    would also blank a heading's own inline code. Copied from the SDK port,
+    not imported. #509
+    """
+    return FENCE.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def _headings(text: str) -> list[re.Match]:
+    """`SECTION_HEADING` matches read from the fence-masked body.
+
+    One call, and every row below reads through it, so a heading inside a
+    fenced snippet is never counted as paper structure. #509
+    """
+    return list(SECTION_HEADING.finditer(_mask_fences(text)))
+
+
 def _mask_for_ste(text: str) -> str:
     """Code, an inline URL, and references, gone. Everything else is body prose."""
     return _mask_urls(_mask_references(_mask_code(text)))
@@ -564,7 +588,7 @@ def _mask_section(text: str, name: str) -> str:
     Grading whether a glossary term is used elsewhere in the body must not
     credit the glossary's own entry as that use.
     """
-    matches = list(SECTION_HEADING.finditer(text))
+    matches = _headings(text)
     for index, match in enumerate(matches):
         if match.group(2).strip().lower() != name:
             continue
@@ -585,7 +609,7 @@ def glossary_terms(body: str) -> dict[str, str]:
     Empty when the paper carries no Glossary heading: no captured term means
     no section, not a missing one.
     """
-    matches = list(SECTION_HEADING.finditer(body))
+    matches = _headings(body)
     for index, match in enumerate(matches):
         if match.group(2).strip().lower() != "glossary":
             continue
@@ -713,7 +737,7 @@ def last_prose_heading(body: str) -> str | None:
     """
     headings = [
         match.group(2).strip()
-        for match in SECTION_HEADING.finditer(body)
+        for match in _headings(body)
         if len(match.group(1)) == 2 and match.group(2).strip().lower() not in NON_PROSE_TRAILING
     ]
     return headings[-1] if headings else None
@@ -721,7 +745,7 @@ def last_prose_heading(body: str) -> str | None:
 
 def _section_text(body: str, name: str) -> str:
     """One named heading's own body, the same boundary rule `glossary_terms` uses."""
-    matches = list(SECTION_HEADING.finditer(body))
+    matches = _headings(body)
     for index, match in enumerate(matches):
         if match.group(2).strip().lower() != name:
             continue
@@ -755,7 +779,7 @@ def question_headings(body: str, outline: dict | None = None) -> list[str]:
             if text:
                 wanted.add(text)
     bad = []
-    for match in SECTION_HEADING.finditer(body):
+    for match in _headings(body):
         if len(match.group(1)) not in (2, 3):
             continue
         heading = match.group(2).strip()
@@ -807,7 +831,7 @@ class PaperScore:
 
 
 def sections(body: str) -> list[str]:
-    return [heading.strip().lower() for heading in HEADING.findall(body)]
+    return [heading.strip().lower() for heading in HEADING.findall(_mask_fences(body))]
 
 
 def figures(body: str) -> list[tuple[str, str]]:
@@ -863,7 +887,7 @@ def sections_without_prose(body: str, min_words: int = MIN_SECTION_WORDS) -> lis
     so this is the check that says the paper has a body.
     """
     thin = []
-    matches = list(SECTION_HEADING.finditer(body))
+    matches = _headings(body)
     for index, match in enumerate(matches):
         heading = match.group(2).strip()
         if heading.lower() in PROSE_EXEMPT:
@@ -1160,7 +1184,7 @@ def top_level_sections(body: str) -> dict[str, str]:
     once more inside its `##` parent's span. Copied from the SDK port's
     `checks.py`, not imported.
     """
-    matches = [m for m in SECTION_HEADING.finditer(body) if len(m.group(1)) == 2]
+    matches = [m for m in _headings(body) if len(m.group(1)) == 2]
     out: dict[str, str] = {}
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
@@ -1177,7 +1201,7 @@ def top_level_section_spans(body: str) -> dict[str, tuple[int, int]]:
     `str.replace` to find a short sentence that a different section might
     also happen to contain. Copied from the SDK port, not imported. #477.
     """
-    matches = [m for m in SECTION_HEADING.finditer(body) if len(m.group(1)) == 2]
+    matches = [m for m in _headings(body) if len(m.group(1)) == 2]
     out: dict[str, tuple[int, int]] = {}
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
