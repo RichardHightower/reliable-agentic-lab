@@ -248,8 +248,24 @@
             "source_urls": [
               "https://arxiv.org/abs/2305.11738"
             ]
+          },
+          {
+            "text": "A checker alone does not catch an error the maker's own tool output already hid.",
+            "confidence": 0.6,
+            "source_urls": [
+              "https://docs.claude.com/en/docs/agents-and-tools/agent-loops"
+            ]
           }
         ]
+      }
+    },
+    "A checker alone does not catch an error the maker's own tool output already hid.": {
+      "data": {
+        "found": false,
+        "counter_claim": "",
+        "url": "",
+        "title": "",
+        "quote": ""
       }
     }
   },

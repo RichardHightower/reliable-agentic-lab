@@ -82,6 +82,11 @@ MAX_WORDS = 2000
 # per section, and eight sections at six each would roughly double a run.
 # Mirrors `MAX_CLAIMS`'s role for the verifier turn.
 MAX_FOLLOW = 6
+# #474. How many generalizing claims get a counter-evidence turn, per run,
+# not per section, for the same reason `MAX_FOLLOW` is per run: Open decision
+# 4 asked for a cap per section, and eight sections at six each would
+# roughly double a run.
+MAX_COUNTER = 6
 # Every other budget in this port is a flag. The Deep Agents twin defaults
 # this to 14. Three rounds was enough for a four-row judge on a fixture, and
 # not enough once the live judge was scoring eleven rows a paper rubric owns.
@@ -235,6 +240,10 @@ class Run:
     # resumed run in a new process starts the count over.
     max_follow: int = MAX_FOLLOW
     follow_used: int = field(default=0, init=False)
+    # #474. Bounds the counter-evidence pass across the whole run, the same
+    # way `max_follow`/`follow_used` bound the follow pass above.
+    max_counter: int = MAX_COUNTER
+    counter_used: int = field(default=0, init=False)
     word_target_total: int = MAX_WORDS
     theme: str = diagrams.DEFAULT_THEME
     brain: Path | None = BRAIN
@@ -1241,6 +1250,12 @@ def do_sections(run: Run) -> dict:
                         "study": finding.get("study") or {},
                         # From `source_policy.tier_for()`, not the model. #473
                         "evidence_tier": (finding.get("source") or {}).get("evidence_tier") or "",
+                        # `_apply_follow_result` keeps the review a rebound
+                        # claim came from under `finding["via"]`, so the
+                        # report can still say the number arrived through
+                        # it (#473 item 5). This is the only reader: written
+                        # once, otherwise dead. #474 item 10
+                        "via_title": (finding.get("via") or {}).get("title") or "",
                     }
                 )
             if url and url not in seen:

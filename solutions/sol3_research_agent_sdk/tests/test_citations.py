@@ -278,6 +278,51 @@ def test_do_sections_carries_the_tier_from_findings_into_claims(work, monkeypatc
     assert claims[0]["evidence_tier"] == "position_stand_or_guideline"
 
 
+def test_do_sections_carries_the_via_title_from_a_rebound_finding(work, monkeypatch):
+    """#474 item 10: `_apply_follow_result` keeps the review a rebound claim
+    came from under `finding["via"]`. `do_sections` is the field's only
+    production reader; before this it was written and never read."""
+    approved = {"title": "T", "sections": [{"id": "s1", "heading": "One"}]}
+    monkeypatch.setattr(paper, "approved_outline", lambda run: approved)
+    monkeypatch.setattr(sections, "run_section", lambda run, section: {"section": section["id"]})
+
+    knowledge = Path(work) / "knowledge" / "s1"
+    knowledge.mkdir(parents=True)
+    (knowledge / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "s1-f1",
+                        "claim": "A fact.",
+                        "quote": "",
+                        "answers_question": "q",
+                        "source": {
+                            "kind": "web",
+                            "url_or_path": "https://a.invalid/primary",
+                            "title": "The Primary Trial",
+                            "note": "",
+                        },
+                        "via": {"title": "A Review", "url_or_path": "https://a.invalid/review"},
+                    }
+                ],
+                "coverage_gaps": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = paper.Run(
+        topic="t",
+        work_dir=work,
+        turns=object(),
+        state=paper.State.load_or_new(work, "t"),
+    )
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text(encoding="utf-8"))["claims"]
+    assert claims[0]["via_title"] == "A Review"
+
+
 def test_a_bare_number_never_binds_to_a_finding_id_that_ends_in_it(work):
     """`[1]` is a reference number. It is not a suffix of `s1-1`.
 

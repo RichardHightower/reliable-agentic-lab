@@ -93,6 +93,11 @@ class PaperState:
     # `stage_search` and `_follow_primaries` from the top, does not get a
     # fresh slice of `max_follow` on every attempt.
     follow_used: int = 0
+    # #474. How many generalizing claims a counter-evidence turn has already
+    # spent this run. Persisted for the same reason `follow_used` is: a
+    # `search_gate` retry re-enters `stage_search` and `_counter_evidence`
+    # from the top.
+    counter_used: int = 0
     total_retries: int = 0
     backend: str = ""
     # Live position, written every call rather than every stage. A stage that
@@ -204,6 +209,7 @@ class PaperState:
             "search_cost_usd": round(self.search_cost_usd, 4),
             "search_calls": self.search_calls,
             "follow_used": self.follow_used,
+            "counter_used": self.counter_used,
             "total_retries": self.total_retries,
             "backend": self.backend,
             "current_role": self.current_role,
@@ -246,6 +252,7 @@ class PaperState:
             search_cost_usd=float(data.get("search_cost_usd", 0.0)),
             search_calls=int(data.get("search_calls", 0)),
             follow_used=int(data.get("follow_used", 0)),
+            counter_used=int(data.get("counter_used", 0)),
             total_retries=int(data.get("total_retries", 0)),
             backend=data.get("backend", ""),
             current_role=data.get("current_role", ""),
