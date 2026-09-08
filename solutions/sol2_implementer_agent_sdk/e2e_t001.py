@@ -64,9 +64,12 @@ class Call:
     phase: str
     agent: str
     wrote: list[str]
-    usd: float
+    usd: float | None
     ok: bool
     stop_reason: str | None
+    # #539. The proof, not just the verdict. Dropped here on the old code
+    # path, so a failed live run left nothing for `_write_extras` to write.
+    raw_output: str = ""
 
 
 class AgentSdkE2EBackend(doers.Backend):
@@ -84,20 +87,18 @@ class AgentSdkE2EBackend(doers.Backend):
     def query_failed(self) -> bool:
         return any(not call.ok and call.stop_reason not in CONTROLLED_STOPS for call in self.calls)
 
-    def run(self, *, repo: Path, prompt: str, allow: list[str]):
-        phase, agent = _phase(allow)
-        if self.spent_usd >= self.max_total_usd:
-            result = doers.DoerResult(
-                ok=False,
-                output=f"Agent SDK E2E budget exhausted at ${self.spent_usd:.2f}",
-            )
-            self.calls.append(Call(phase, agent, [], 0.0, False, "cost budget spent"))
-            return result
+    def _bookkeep(self, *, phase: str, agent: str, result: Any) -> float | None:
+        """Record the call and return the usd this turn reported.
 
-        instruction = f"Delegate only to {agent}. {prompt}" if agent else prompt
-        result = self.backend.run(repo=repo, prompt=instruction, allow=allow)
-        usd = float(getattr(result, "usd", 0.0) or 0.0)
-        self.spent_usd += max(usd, 0.0)
+        #539. `None` means the backend never answered; coercing it to 0.0
+        with `or` is the exact silent-zero bug this ticket exists to kill.
+        The budget still moves (an unknown turn spends 0.0 against it), but
+        the number this method returns, and the trace that reads it, keeps
+        the `None`.
+        """
+        raw_usd = getattr(result, "usd", None)
+        usd = None if raw_usd is None else float(raw_usd)
+        self.spent_usd += usd if usd is not None else 0.0
         self.calls.append(
             Call(
                 phase=phase,
@@ -106,8 +107,25 @@ class AgentSdkE2EBackend(doers.Backend):
                 usd=usd,
                 ok=bool(getattr(result, "ok", False)),
                 stop_reason=getattr(result, "stop_reason", None),
+                raw_output=str(getattr(result, "raw_output", "") or ""),
             )
         )
+        return usd
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]):
+        phase, agent = _phase(allow)
+        if self.spent_usd >= self.max_total_usd:
+            result = doers.DoerResult(
+                ok=False,
+                usd=None,
+                output=f"Agent SDK E2E budget exhausted at ${self.spent_usd:.2f}",
+            )
+            self.calls.append(Call(phase, agent, [], None, False, "cost budget spent"))
+            return result
+
+        instruction = f"Delegate only to {agent}. {prompt}" if agent else prompt
+        result = self.backend.run(repo=repo, prompt=instruction, allow=allow)
+        usd = self._bookkeep(phase=phase, agent=agent, result=result)
         return doers.DoerResult(
             wrote=list(getattr(result, "wrote", ()) or ()),
             output=str(getattr(result, "output", "")),
@@ -115,22 +133,12 @@ class AgentSdkE2EBackend(doers.Backend):
             ok=bool(getattr(result, "ok", False)),
             structured=getattr(result, "structured", None),
             stop_reason=getattr(result, "stop_reason", None),
+            raw_output=str(getattr(result, "raw_output", "") or ""),
         )
 
     def judge(self, *, repo: Path, prompt: str):
         result = self.backend.judge(repo=repo, prompt=prompt)
-        usd = float(getattr(result, "usd", 0.0) or 0.0)
-        self.spent_usd += max(usd, 0.0)
-        self.calls.append(
-            Call(
-                phase="judge",
-                agent="implementer-judge",
-                wrote=[],
-                usd=usd,
-                ok=bool(getattr(result, "ok", False)),
-                stop_reason=getattr(result, "stop_reason", None),
-            )
-        )
+        self._bookkeep(phase="judge", agent="implementer-judge", result=result)
         return result
 
 
@@ -218,18 +226,29 @@ def _write_extras(repo: Path, trace: dict, backend: AgentSdkE2EBackend, audit: l
         f"gate: {trace.get('gate', 'missing')}",
         f"reason: {trace.get('reason', 'missing')}",
         f"spent_usd: {backend.spent_usd:.4f}",
+        # #539(e). The cap this run actually applied, not a number a status
+        # note has to guess or invent after the fact.
+        f"cap_usd: {backend.max_total_usd:.2f}",
         f"query_failed: {backend.query_failed}",
         "",
         "## Phases",
     ]
-    for call in backend.calls:
+    for index, call in enumerate(backend.calls):
+        usd_text = "unknown" if call.usd is None else format(call.usd, ".4f")
         lines.extend(
             (
                 f"- {call.phase} via {call.agent or 'unknown'}: ok={call.ok} "
-                f"usd={call.usd:.4f} stop={call.stop_reason or 'none'}",
+                f"usd={usd_text} stop={call.stop_reason or 'none'}",
                 f"  wrote: {', '.join(call.wrote) or 'nothing'}",
             )
         )
+        # #539. The proof, kept even on a failed call. Written per call
+        # rather than inlined: a raw event log can run to hundreds of lines,
+        # and the earlier bug was losing this entirely, not formatting it.
+        if call.raw_output:
+            raw_name = f"last-sdk-e2e-raw-{index}-{call.phase}.txt"
+            (out / raw_name).write_text(call.raw_output, encoding="utf-8")
+            lines.append(f"  raw: .harness/{raw_name}")
     lines.extend(("", "## Hook audit"))
     for event in audit:
         lines.append(

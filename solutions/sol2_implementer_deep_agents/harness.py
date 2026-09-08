@@ -15,6 +15,10 @@ import roles as deep
 from contract import Contract, ContractError
 
 LOOP = "implementer"
+# #539. Left at 16 rather than raised: a `GraphRecursionError` now names
+# itself and this number in the escalate reason (`adapter._describe_exc`),
+# so a run that genuinely needs more turns says so instead of reading as an
+# honest empty reply. Raise this if a live T001 code phase keeps naming it.
 LIVE_RECURSION_LIMIT = 16
 
 

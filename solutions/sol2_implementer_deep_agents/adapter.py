@@ -195,6 +195,13 @@ def last_usd(result) -> float:
     return total
 
 
+def _describe_exc(exc: Exception) -> str:
+    """#539. The exception's own class name first, so a `GraphRecursionError`
+    reads as one, instead of surviving only in a message a reader would have
+    to already know to look for."""
+    return f"{type(exc).__name__}: {exc}"
+
+
 class DeepAgentsBackend(Backend):
     """Runs one role's prompt through the Deep Agents graph this folder builds."""
 
@@ -250,7 +257,16 @@ class DeepAgentsBackend(Backend):
             return DoerResult(wrote=wrote, output=last_ai_text(result), usd=last_usd(result))
         # Same contract every offline Backend keeps: never raise, report it.
         except Exception as exc:
-            return DoerResult(ok=False, output=f"deep_agents backend failed: {exc}")
+            # #539. `agent.invoke()` is one synchronous call: a raise means it
+            # never answered, so `usd` is `None`, not the 0.0 that reads as
+            # "this turn was free". `type(exc).__name__` names the exception
+            # (a `GraphRecursionError` names itself and this port's
+            # `recursion_limit` in its own message), so a caller no longer
+            # has to guess whether this was a raised backend or an honest
+            # empty reply, the two the judge of PR #537 found indistinguishable.
+            return DoerResult(
+                ok=False, usd=None, output=f"deep_agents backend failed: {_describe_exc(exc)}"
+            )
 
     def judge(self, *, repo: Path, prompt: str) -> DoerResult:
         """Run the judge-only graph. No write tools, JSON in, JSON out."""
@@ -265,7 +281,9 @@ class DeepAgentsBackend(Backend):
                 result = agent.invoke(payload)
             return DoerResult(output=last_ai_text(result), usd=last_usd(result))
         except Exception as exc:
-            return DoerResult(ok=False, output=f"deep_agents judge failed: {exc}")
+            return DoerResult(
+                ok=False, usd=None, output=f"deep_agents judge failed: {_describe_exc(exc)}"
+            )
 
     def plan(self, *, repo: Path, prompt: str) -> DoerResult:
         """Route to the planner graph and run it with the planner's own scope.

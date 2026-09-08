@@ -273,7 +273,7 @@ def _ask_judge(
     score: rubric.Score,
     changed: list[str],
     plan: steps.Plan,
-) -> tuple[bool, dict, float]:
+) -> tuple[bool, dict, float | None]:
     """Invoke the judge once. Offline backends return valid JSON; live ones run.
 
     `changed` is the code phase's own files, so the judge can name what it is
@@ -303,7 +303,11 @@ def _ask_judge(
     if structured is not None and not isinstance(structured, dict):
         structured = None
     done, payload = parse_judge_verdict(getattr(result, "output", "") or "", structured)
-    return done, payload, float(getattr(result, "usd", 0.0) or 0.0)
+    # #539. `None` here means the judge backend never answered; coercing it
+    # to 0.0 with `or` is the exact silent-zero bug this ticket exists to
+    # kill, so it is preserved instead.
+    judge_usd = getattr(result, "usd", None)
+    return done, payload, None if judge_usd is None else float(judge_usd)
 
 
 def _test_prompt(ticket: tickets.Ticket, plan: steps.Plan) -> str:
@@ -669,6 +673,7 @@ def run(  # noqa: PLR0915
             test_phase_files=set(), test_phase_attempts=0,
             last_written=last_state_bytes,
             source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+            boss=boss,
         )
     plan.save(target)
     # This run's own last write of steps.jsonl. `_is_loop_bookkeeping` reads
@@ -767,6 +772,10 @@ def run(  # noqa: PLR0915
                 "violations": list(scope_violations),
                 "ok": test_result.ok,
                 "usd": test_result.usd,
+                # #539. The backend's own words, kept even when nothing was
+                # written. Without this, a query timeout or a raised
+                # exception reads identically to an honest empty attempt.
+                "output": test_result.output,
             }
             # A6 (#433). Checkpointed before the next line can escalate, or
             # this process can be killed outright, so a resume always finds
@@ -807,6 +816,7 @@ def run(  # noqa: PLR0915
                     test_phase_files=after_test_phase, test_phase_attempts=attempt,
                     last_written=last_state_bytes,
                     source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+                    boss=boss,
                 )
 
             if not contract.rubric.get("require_red", True) or red_ids:
@@ -840,7 +850,12 @@ def run(  # noqa: PLR0915
                 # bug in the trace rather than what actually happened -- two
                 # turns that wrote nothing at all. Only a plain
                 # iteration-budget exhaustion falls through to the red-gate
-                # wording.
+                # wording. #539: a backend that never answered (a timed-out
+                # query, a raised exception) is not the same event as one
+                # that answered with a passing test, and gets the backend's
+                # own words instead of the generic red-gate line, so the
+                # trace does not read as an honest miss when it was a
+                # failure to run at all.
                 if decision.repeat_failure:
                     trace["reason"] = (
                         decision.reason
@@ -849,6 +864,10 @@ def run(  # noqa: PLR0915
                     )
                 elif boss.usd_left <= 0:
                     trace["reason"] = decision.reason
+                elif not test_result.ok:
+                    trace["reason"] = (
+                        f"the test implementer backend did not answer: {test_result.output}"
+                    )
                 else:
                     trace["reason"] = (
                         "red gate: no new test was observed failing. A test that passes before "
@@ -862,6 +881,7 @@ def run(  # noqa: PLR0915
                     test_phase_files=after_test_phase, test_phase_attempts=attempt,
                     last_written=last_state_bytes,
                     source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+                    boss=boss,
                 )
             previous_test_signature = signature
 
@@ -887,6 +907,7 @@ def run(  # noqa: PLR0915
                 test_phase_files=after_test_phase, test_phase_attempts=attempt,
                 last_written=last_state_bytes,
                 source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+                boss=boss,
             )
 
     # Steps 5 to 8. Code until green, then judge.
@@ -1010,6 +1031,7 @@ def run(  # noqa: PLR0915
         test_phase_files=after_test_phase, test_phase_attempts=test_phase_attempts,
         last_written=last_state_bytes,
         source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+        boss=boss,
     )
 
 
@@ -1139,8 +1161,15 @@ def _finish(
     source_repo: Path | None = None,
     cleanup: bool = False,
     previous_runs: int = 0,
+    boss: roles.Orchestrator | None = None,
 ) -> dict:
     trace.setdefault("gate", gates.ESCALATE)
+    # #539. Every exit, pass or escalate, names what it spent against what
+    # it was allowed to spend. A trace that only shows 0.0 on a failure path
+    # cannot be told apart from a turn that genuinely cost nothing.
+    if boss is not None:
+        trace["spent_usd"] = boss.spent_usd
+        trace["budget_usd"] = boss.budget_usd
     if write_trace:
         out = contract.repo / ".harness"
         out.mkdir(parents=True, exist_ok=True)

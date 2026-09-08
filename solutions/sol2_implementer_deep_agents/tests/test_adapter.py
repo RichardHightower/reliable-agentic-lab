@@ -248,6 +248,55 @@ def test_the_backend_reports_what_the_run_cost(tmp_path):
     assert result.output == "wrote it"
 
 
+# -- #539: a raised backend never claims a silent 0.0 -----------------------
+
+
+class RaisingAgent:
+    """A Deep Agents graph whose `invoke()` never answers."""
+
+    def __init__(self, exc: Exception):
+        self.exc = exc
+
+    def invoke(self, payload, config=None):
+        raise self.exc
+
+
+def test_a_backend_that_raises_reports_usd_as_none_not_zero(tmp_path):
+    """A raise means `agent.invoke()` never answered. `usd=0.0` there reads
+    as "this turn was free", which the judge of PR #537 could not tell apart
+    from an honest empty reply."""
+    result = adapter.DeepAgentsBackend(RaisingAgent(RuntimeError("boom"))).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert not result.ok
+    assert result.usd is None
+    assert "RuntimeError: boom" in result.output
+
+
+def test_a_backend_failure_names_the_exception_class(tmp_path):
+    """A `GraphRecursionError` must read as one, and name the limit it hit,
+    not the driver's generic 'returned no files' wording."""
+
+    class GraphRecursionError(RuntimeError):
+        pass
+
+    exc = GraphRecursionError("Recursion limit of 16 reached without hitting a stop condition.")
+    result = adapter.DeepAgentsBackend(RaisingAgent(exc)).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert "GraphRecursionError" in result.output
+    assert "Recursion limit of 16" in result.output
+
+
+def test_a_judge_that_raises_reports_usd_as_none(tmp_path):
+    result = adapter.DeepAgentsBackend(
+        FakeAgent(), judge_agent=RaisingAgent(RuntimeError("judge boom"))
+    ).judge(repo=tmp_path, prompt="grade this")
+    assert not result.ok
+    assert result.usd is None
+    assert "RuntimeError: judge boom" in result.output
+
+
 def test_a_spent_budget_now_escalates(tmp_path):
     """End to end through the objects the loop really uses."""
     boss = loop_roles.Orchestrator(name="orchestrator", repo=Path(tmp_path), budget_usd=2.0)

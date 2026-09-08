@@ -263,6 +263,46 @@ def test_red_gate_escalates_with_the_old_wording_at_budget_one(tmp_path, monkeyp
     assert backend.calls == 1
 
 
+class FailingBackend(doers.Backend):
+    """#539. A backend that never answers: a timed-out query, a raised
+    exception. Writes nothing and says so, `ok=False`, the way a live
+    backend's own failure path now reports itself."""
+
+    name = "failing"
+
+    def __init__(self, message: str):
+        self.message = message
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+        return doers.DoerResult(ok=False, usd=None, output=self.message)
+
+
+def test_a_backend_failure_names_itself_instead_of_the_generic_red_gate_wording(
+    tmp_path, monkeypatch
+):
+    """#539. A backend that never answered must not read as an honest turn
+    that just wrote a passing test. The judge of PR #537 found the two
+    indistinguishable in both ports' traces."""
+    repo = _git_repo(tmp_path / "repo")
+    baseline = _run(passed=("tests/test_health.py::test_health",))
+    still_green = _run(passed=("tests/test_health.py::test_health",))
+    _patch_runs(monkeypatch, [baseline, still_green])
+
+    backend = FailingBackend("deep_agents backend failed: GraphRecursionError: Recursion limit of 16 reached")
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert "the test implementer backend did not answer" in trace["reason"]
+    assert "GraphRecursionError" in trace["reason"]
+    assert trace["test_phase"]["ok"] is False
+    assert trace["test_phase"]["usd"] is None
+    assert trace["test_phase"]["output"] == backend.message
+    # #539(e). The trace names the cap the code actually applied (the
+    # fixture's own `.loop.yml` above), not a number invented after the run.
+    assert trace["budget_usd"] == 2.00
+    assert trace["spent_usd"] == 0.0
+
+
 def test_a_silent_test_turn_then_a_failing_test_passes_the_red_gate(tmp_path, monkeypatch):
     """A3 (#436). Turn 1 is silent. Turn 2 writes a failing test. Budget 2 is
     enough to reach it, and the red gate is satisfied rather than escalated."""
@@ -1086,6 +1126,11 @@ def test_cleanup_flag_removes_the_worktree_and_prints_the_path_without_it(
     assert worktree_path.exists()
     assert f"worktree: {worktree_path}" in out
     assert f"git -C {resolved_repo} worktree remove {worktree_path}" in out
+    # #539. A failed run's own raw turn records are the evidence a trace
+    # cites; they must still be sitting in the worktree, not just the
+    # worktree's path.
+    assert (worktree_path / ".harness" / "last-implementer.json").exists()
+    assert (worktree_path / ".harness" / "state.json").exists()
 
     _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
     implementer.main(
