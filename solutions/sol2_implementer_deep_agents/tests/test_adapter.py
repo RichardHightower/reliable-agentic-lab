@@ -13,6 +13,9 @@ import adapter
 import doers
 import gates
 import loop_roles
+import pytest
+import roles
+import steps
 
 
 class Block:
@@ -483,3 +486,114 @@ def test_an_out_of_scope_untracked_file_is_not_claimed(tmp_path):
     assert result.ok
     assert "app/model.py" not in result.wrote
     assert (repo / "app" / "model.py").exists()
+
+
+# -- A9 (#437 #422): the planner scope and the planner graph -----------------
+
+
+def test_the_planner_scope_routes_to_the_plan_agent():
+    """`steps.jsonl` is the planner's whole write scope. `_agent_for` must
+    route on it before the tests/ and app/ branches, and refuse a scope no
+    branch names, the same as before this unit."""
+    test_agent = FakeAgent("test phase")
+    plan_agent = FakeAgent("the plan")
+    backend = adapter.DeepAgentsBackend(
+        phase_agents={"test": test_agent, "code": FakeAgent("code phase"), "plan": plan_agent}
+    )
+
+    assert backend._agent_for([steps.STEPS_FILE]) is plan_agent
+    assert backend._agent_for(["tests/**"]) is test_agent
+    with pytest.raises(ValueError, match="no Deep Agents graph"):
+        backend._agent_for(["reports/**"])
+
+
+def test_an_unconfigured_planner_fails_closed(tmp_path):
+    """`run()` wraps `_agent_for` in the same try/except every other scope
+    failure already goes through, so this comes back as a failed `DoerResult`,
+    not a raised exception -- the existing DA convention, unchanged by A9."""
+    backend = adapter.DeepAgentsBackend(
+        phase_agents={"test": FakeAgent(), "code": FakeAgent()}
+    )
+    result = backend.plan(repo=tmp_path, prompt="plan it")
+    assert not result.ok
+    assert "no Deep Agents planner graph" in result.output
+
+
+def test_plan_runs_the_plan_agent_with_its_own_scope(tmp_path):
+    """`plan()` is `run()` scoped to `steps.jsonl`, the same shape as
+    `judge()` scoping to the judge graph."""
+    plan_agent = FakeAgent("wrote the plan")
+    backend = adapter.DeepAgentsBackend(
+        phase_agents={"test": FakeAgent(), "code": FakeAgent(), "plan": plan_agent}
+    )
+
+    result = backend.plan(repo=tmp_path, prompt="write steps.jsonl")
+
+    assert result.ok
+    assert result.output == "wrote the plan"
+    assert plan_agent.calls[0][0]["messages"][0]["content"] == "write steps.jsonl"
+
+
+def test_planner_deep_with_doer_deep_invokes_the_planner_graph(contract, monkeypatch, tmp_path):
+    """A9 (#437 #422), test 2 of 5. `--planner deep --doer deep` must reach
+    the planner subagent, not the test, code, or judge one.
+
+    `fake_deepagents`'s own `create_deep_agent` spy is overwritten on every
+    call, so the graph `harness.backend` builds last (judge) is the only one
+    it would show. Spying on `roles.build_agent` itself, the way
+    `harness.backend` calls it, proves which named subagent each phase
+    reaches instead.
+    """
+    import harness  # noqa: PLC0415  (only this test needs it)
+
+    class RecordingAgent:
+        def __init__(self, label: str):
+            self.label = label
+
+        def invoke(self, payload, config=None):
+            return {"messages": [{"role": "assistant", "content": self.label}]}
+
+    calls: list[str] = []
+
+    def fake_build_agent(contract_arg, loop=None, model="x", subagent_names=None):
+        label = sorted(subagent_names)[0]
+        calls.append(label)
+        return RecordingAgent(f"built:{label}")
+
+    monkeypatch.setattr(harness.deep, "build_agent", fake_build_agent)
+
+    backend = harness.backend(contract)
+    result = backend.plan(repo=tmp_path, prompt="write the plan")
+
+    assert "planner" in calls
+    assert result.ok
+    assert result.output == "built:planner"
+
+
+def test_the_real_build_agent_accepts_planner_and_rejects_unknown_names(contract, monkeypatch):
+    """A9 (#437 #422). The test above monkeypatches `roles.build_agent`
+    itself, so it never proves the real one recognizes "planner" as a
+    subagent name. `deepagents` is installed in this environment, so run it
+    for real here, skipped only where it is not.
+
+    `create_deep_agent` and `register_harness_profile` are patched, not
+    `deepagents` itself: everything else `build_agent` builds -- the
+    subagent list, the permissions, the harness profile -- is still the
+    real package's own types, the same split `test_the_real_types_keep_the_fence`
+    in `tests/test_roles.py` uses.
+    """
+    deepagents = pytest.importorskip("deepagents")
+
+    def create_deep_agent(**kwargs):
+        return "agent"
+
+    def register_harness_profile(model, profile):
+        pass
+
+    monkeypatch.setattr(deepagents, "create_deep_agent", create_deep_agent)
+    monkeypatch.setattr(deepagents, "register_harness_profile", register_harness_profile)
+
+    assert roles.build_agent(contract, subagent_names=frozenset({"planner"})) == "agent"
+
+    with pytest.raises(ValueError, match="unknown Deep Agents subagent"):
+        roles.build_agent(contract, subagent_names=frozenset({"not-a-real-role"}))

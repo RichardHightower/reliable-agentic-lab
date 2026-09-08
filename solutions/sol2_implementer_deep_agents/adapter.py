@@ -15,6 +15,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import steps
 from doers import Backend, DoerResult
 from write_scope import WriteScope
 
@@ -218,6 +219,14 @@ class DeepAgentsBackend(Backend):
         """Choose the graph whose cast matches the driver's current phase."""
         if self.phase_agents is None:
             return self.agent
+        # A9 (#437 #422). The planner's write scope is `steps.jsonl`, the same
+        # scope `contract.py` declares for the role. Route on it before the
+        # test/code branches, so an unconfigured planner fails closed rather
+        # than a bare KeyError on `self.phase_agents["plan"]`.
+        if any(pattern == steps.STEPS_FILE for pattern in allow):
+            if "plan" not in self.phase_agents:
+                raise ValueError("no Deep Agents planner graph is configured")
+            return self.phase_agents["plan"]
         if any(pattern.startswith("tests/") for pattern in allow):
             phase = "test"
         elif any(pattern.startswith(("app/", "src/")) for pattern in allow):
@@ -257,3 +266,13 @@ class DeepAgentsBackend(Backend):
             return DoerResult(output=last_ai_text(result), usd=last_usd(result))
         except Exception as exc:
             return DoerResult(ok=False, output=f"deep_agents judge failed: {exc}")
+
+    def plan(self, *, repo: Path, prompt: str) -> DoerResult:
+        """Route to the planner graph and run it with the planner's own scope.
+
+        `_agent_for` returns the LangGraph agent itself, not a `Backend`, so
+        there is no `self._for(...).run(...)` to delegate to the way the SDK
+        adapter does. `run()` already resolves the graph from `allow`, so
+        calling it with the planner's own scope is the whole method.
+        """
+        return self.run(repo=repo, prompt=prompt, allow=[steps.STEPS_FILE])

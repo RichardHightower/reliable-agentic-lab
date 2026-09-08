@@ -27,6 +27,7 @@ import dataclasses
 import subprocess
 from pathlib import Path
 
+import steps
 from doers import Backend, DoerResult
 from write_scope import WriteScope
 
@@ -194,12 +195,22 @@ class AgentSdkPhaseBackend(Backend):
         test: AgentSdkBackend,
         code: AgentSdkBackend,
         judge: AgentSdkBackend | None = None,
+        planner: AgentSdkBackend | None = None,
     ):
         self.test = test
         self.code = code
         self.judge_backend = judge
+        self.planner = planner
 
     def _for(self, allow: list[str]) -> AgentSdkBackend:
+        # A9 (#437 #422). The planner's write scope is `steps.jsonl`, the same
+        # scope `contract.py` declares for the role. Route on it before the
+        # test/code branches, so an unconfigured planner fails closed rather
+        # than falling through to "no backend for this scope".
+        if any(pattern == steps.STEPS_FILE for pattern in allow):
+            if self.planner is None:
+                raise ValueError("no Agent SDK planner backend is configured")
+            return self.planner
         if any(pattern.startswith("tests/") for pattern in allow):
             return self.test
         if any(pattern.startswith(("app/", "src/")) for pattern in allow):
@@ -213,4 +224,10 @@ class AgentSdkPhaseBackend(Backend):
         if self.judge_backend is None:
             return super().judge(repo=repo, prompt=prompt)
         return self.judge_backend.judge(repo=repo, prompt=prompt)
+
+    def plan(self, *, repo: Path, prompt: str) -> DoerResult:
+        """Route to the planner graph and run it with the planner's own scope."""
+        return self._for([steps.STEPS_FILE]).run(
+            repo=repo, prompt=prompt, allow=[steps.STEPS_FILE]
+        )
 

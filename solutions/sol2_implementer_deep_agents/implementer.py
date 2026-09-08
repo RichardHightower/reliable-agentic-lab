@@ -144,6 +144,33 @@ def plan_for(target_ticket: tickets.Ticket) -> steps.Plan:
     return steps.Plan(steps=made)
 
 
+# A9 (#437 #422). Backends that force `derived` regardless of the --planner
+# flag: a live planner with no live doer produces a plan nothing can execute.
+CLASSROOM_DOERS = frozenset({"none", "reference"})
+
+
+def _plan_from_backend(backend, *, repo: Path, ticket: tickets.Ticket) -> steps.Plan:
+    """A generated plan, validated by the same schema the derived one meets.
+
+    The planner writes `steps.jsonl` inside its own scope; Python reads it
+    back through `steps.Plan.load`, which already rejects a line that is not
+    valid JSON or is missing `id`, `ticket`, `role`, `action`, or
+    `validation`. Nothing here invents a field.
+    """
+    maker = getattr(backend, "plan", None)
+    if maker is None:
+        raise steps.PlanRejected("this backend has no planner graph")
+    # The DoerResult itself is discarded: neither `.ok` nor `.wrote` is
+    # checked, only the file `Plan.load` reads back next. That is only safe
+    # because this path never runs on a resume -- `_worktree` resets the
+    # worktree to HEAD before every non-resume run, so a planner that wrote
+    # nothing (or failed) cannot be masked by a stale `steps.jsonl` left
+    # over from an earlier attempt. `Plan.load` then sees only this call's
+    # own output, or the file's absence.
+    maker(repo=repo, prompt=ticket.for_prompt())
+    return steps.Plan.load(repo)
+
+
 def _extract_json(text: str) -> dict | None:
     """The first JSON object in `text`, or None. Never raises."""
     blob = (text or "").strip()
@@ -446,6 +473,7 @@ def run(  # noqa: PLR0915
     repo: str | Path,
     ticket_id: str = "T001",
     doer: str | doers.Backend = "reference",
+    planner: str = "derived",
     budget: int | None = None,
     write_trace: bool = True,
     cleanup: bool = False,
@@ -481,6 +509,14 @@ def run(  # noqa: PLR0915
     from `.harness/` by their role's own tool restrictions, so only an
     offline scripted backend -- exactly what this file's own tests use --
     can reach `state.json` directly; a real doer with a live key cannot.
+
+    `planner` (A9, #437 #422) chooses step 2. `derived` is `plan_for`: no
+    model, and the default. Any other value reads the plan back from the
+    doer's own `plan()` graph through `_plan_from_backend`, still validated
+    by the same schema. `doer` `none` or `reference` forces `derived`
+    regardless of this flag, because a live planner with no live doer
+    produces a plan nothing can execute. A resumed run never re-plans: it
+    loads the worktree's own `steps.jsonl`, whichever planner wrote it.
     """
     contract = Contract(repo)
     contract.validate()
@@ -523,11 +559,43 @@ def run(  # noqa: PLR0915
     if budget:
         boss.budget_iterations = budget
 
-    plan = plan_for(the_ticket)
-    plan.validate(criteria=the_ticket.criterion_ids)
+    backend = doers.build(doer)
+
+    # A9 (#437 #422). derived is plan_for; sdk/deep read the plan back from
+    # the doer's own planner graph through `_plan_from_backend`. `none` and
+    # `reference` force derived: a live planner with no live doer produces a
+    # plan nothing can execute. A resumed run never re-plans -- it loads the
+    # worktree's own steps.jsonl, or a regenerated plan would renumber the
+    # steps the stored `red_ids` were proven against.
+    effective_planner = "derived" if backend.name in CLASSROOM_DOERS else planner
+    try:
+        if resume:
+            plan = steps.Plan.load(target)
+        elif effective_planner == "derived":
+            plan = plan_for(the_ticket)
+        else:
+            plan = _plan_from_backend(backend, repo=target, ticket=the_ticket)
+        plan.validate(criteria=the_ticket.criterion_ids)
+    except steps.PlanRejected as exc:
+        # Fail closed, never a crash and never a skipped red gate. A5's
+        # ContractError wrapper in main() does not catch a PlanRejected
+        # (it is a ValueError, not a ContractError), so it is caught here.
+        trace = {
+            "ticket": the_ticket.id,
+            "repo": str(target),
+            "doer": backend.name,
+            "gate": gates.ESCALATE,
+            "reason": f"the planner produced an unusable plan: {exc}",
+        }
+        return _finish(
+            contract, trace, write_trace,
+            phase="test", red_ids=set(), preexisting=set(),
+            test_phase_files=set(), test_phase_attempts=0,
+            last_written=last_state_bytes,
+            source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+        )
     plan.save(target)
 
-    backend = doers.build(doer)
     trace: dict = {
         "ticket": the_ticket.id,
         "repo": str(target),
@@ -1021,6 +1089,14 @@ def main(argv: list[str] | None = None) -> int:
         default="reference",
         help="none | reference | reference:<ref> | judge-no",
     )
+    parser.add_argument(
+        "--planner",
+        default="derived",
+        help=(
+            "derived | sdk | deep. derived is plan_for and calls no model. "
+            "--doer none or reference forces derived regardless of this flag."
+        ),
+    )
     parser.add_argument("--budget", type=int, default=None)
     parser.add_argument(
         "--cleanup",
@@ -1039,6 +1115,7 @@ def main(argv: list[str] | None = None) -> int:
             repo=args.repo,
             ticket_id=args.ticket,
             doer=args.doer,
+            planner=args.planner,
             budget=args.budget,
             cleanup=args.cleanup,
             resume=args.resume,

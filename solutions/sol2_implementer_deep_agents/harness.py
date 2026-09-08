@@ -40,6 +40,12 @@ def backend(contract):
             "code": deep.build_agent(
                 contract, loop=LOOP, subagent_names=frozenset({"code-implementer"})
             ),
+            # A9 (#437 #422). --planner deep reads this graph through
+            # `plan()`. Built unconditionally, the way the other two are: it
+            # is inert unless `_plan_from_backend` calls it.
+            "plan": deep.build_agent(
+                contract, loop=LOOP, subagent_names=frozenset({"planner"})
+            ),
         },
         judge_agent=deep.build_agent(
             contract, loop=LOOP, subagent_names=frozenset({"judge"})
@@ -73,6 +79,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--ticket", default="T001")
     parser.add_argument("--doer", default="reference", help="reference | deep | none")
+    parser.add_argument(
+        "--planner",
+        default="derived",
+        help=(
+            "derived | sdk | deep. derived is plan_for and calls no model. "
+            "--doer none or reference forces derived regardless of this flag."
+        ),
+    )
     parser.add_argument("--budget", type=int, default=None)
     parser.add_argument("--table-only", action="store_true")
     parser.add_argument(
@@ -110,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
             repo=args.repo,
             ticket_id=args.ticket,
             doer=doer,
+            planner=args.planner,
             budget=args.budget,
             cleanup=args.cleanup,
             resume=args.resume,

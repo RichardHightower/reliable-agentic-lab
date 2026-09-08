@@ -219,3 +219,21 @@ def test_resume_flag_reaches_implementer_run(repo, monkeypatch):
 
     assert captured.get("resume") is True
     assert exit_code == 0
+
+
+def test_planner_flag_reaches_implementer_run(repo, monkeypatch):
+    """A9 (#437 #422). harness.py's own --planner flag is not dropped on the
+    way to implementer.run; the planner graph and the classroom guard are
+    implementer.py's and adapter.py's, proven elsewhere."""
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"rubric": "", "gate": "pass", "reason": "ok"}
+
+    monkeypatch.setattr(implementer, "run", fake_run)
+
+    exit_code = harness.main(["--repo", str(repo), "--doer", "none", "--planner", "sdk"])
+
+    assert captured.get("planner") == "sdk"
+    assert exit_code == 0
