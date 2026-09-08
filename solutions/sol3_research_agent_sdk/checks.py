@@ -1072,8 +1072,17 @@ NUMERIC_FULL = re.compile(r"\b\d+(?:\.\d+)?\s*(?:%|percent)\b", re.I)
 # sections pointing at the same source: the writer card for the pass is
 # told to open with exactly one of these four phrases, so a sentence this
 # short starting this way is recognized as a pointer, not a restatement.
+#
+# #521. The exemption keys on the cue, not the length: a cap of 12 words
+# failed the pass's own output once the source section's heading ran past
+# four words, because the fixed frame around the heading is already 8
+# words. A live model-written outline names sections in five or six words
+# routinely; the offline fixtures never hit this because their headings
+# are one or two words. 24 words covers a heading well past what a real
+# outline produces while still being far too short to smuggle in a fresh
+# restatement of a finding.
 BACK_REFERENCE_CUES = ("as stated in", "as noted in", "as shown in", "see ")
-BACK_REFERENCE_MAX_WORDS = 12
+BACK_REFERENCE_MAX_WORDS = 24
 
 
 def _is_back_reference(sentence: str) -> bool:
@@ -1081,6 +1090,52 @@ def _is_back_reference(sentence: str) -> bool:
     if not words or len(words) > BACK_REFERENCE_MAX_WORDS:
         return False
     return sentence.strip().lower().startswith(BACK_REFERENCE_CUES)
+
+
+def collapse_repeated_back_references(body: str) -> str:
+    """Two or more identical back references stacked in one paragraph
+    collapse to one.
+
+    The whole-paper pass can point more than one repeat in the same
+    paragraph at the same source; each is edited on its own, so the
+    result is the same short pointer sentence typed out once per repeat
+    it cleared, instead of the single pointer a reader needs. Runs on the
+    deterministic trim's own output and again on whatever a model-written
+    pass returns, since a model can stack the same pointer on its own.
+    #521.
+    """
+    out_lines: list[str] = []
+    block_lines: list[str] = []
+
+    def flush() -> None:
+        if not block_lines:
+            return
+        block = "\n".join(block_lines)
+        stripped = block.strip()
+        if (
+            not stripped
+            or stripped.startswith(("#", "!", "|", ">", "```", "-", "*"))
+            or LIST_ITEM.match(stripped)
+        ):
+            out_lines.append(block)
+            return
+        pieces = SENTENCE_END.split(block)
+        kept: list[str] = []
+        for piece in pieces:
+            if kept and _is_back_reference(piece) and piece.strip() == kept[-1].strip():
+                continue
+            kept.append(piece)
+        out_lines.append(block if len(kept) == len(pieces) else " ".join(kept))
+
+    for line in body.split("\n"):
+        if line.strip() == "":
+            flush()
+            out_lines.append(line)
+            block_lines = []
+            continue
+        block_lines.append(line)
+    flush()
+    return "\n".join(out_lines)
 
 
 def top_level_sections(body: str) -> dict[str, str]:

@@ -908,11 +908,21 @@ def develop_claim(text: str, marker: str, status: str = "verified") -> list[str]
         "A host that wants this behavior has to put it in the loop and keep it "
         "out of the model's judgment." + cite
     )
+    # #521. Ten of these paragraphs carried no reference to `claim` at all,
+    # so two different claims produced byte-identical mechanism prose.
+    # `caveat_once` correctly reads identical prose as a restatement no
+    # matter which finding backs it, so a thin fixture's second and third
+    # claim lost almost this whole paragraph to a back reference for a
+    # repeat that was never about the finding, only about the template.
+    # Naming the finding once, in the same third-person declarative voice
+    # the rest of this function already uses, ties the paragraph back to
+    # the one claim it develops, the same fix `mechanism` already carried
+    # for this reason.
     order = (
-        "The order of the check is part of the mechanism. The host runs the "
-        "test after the work of the turn, not before it, and not as a request "
-        "the model can rewrite. A check that runs in the wrong place is a "
-        "check the model can talk past." + cite
+        f"{claim} sets the order the check runs in. "
+        "The host runs the test after the work of the turn, not before it, and "
+        "not as a request the model can rewrite. A check that runs in the wrong "
+        "place is a check the model can talk past." + cite
     )
     missing = (
         "If that component is missing, the bound disappears with it. The rest "
@@ -921,41 +931,44 @@ def develop_claim(text: str, marker: str, status: str = "verified") -> list[str]
         "operator notices." + cite
     )
     alternative = (
-        "The cheaper alternative is to leave this to a prompt. That alternative "
-        "needs no extra role and no path check. Its cost is that a model can "
-        "talk past it. The bound in the claim is a program bound, not a request." + cite
+        f"{claim} is the finding a cheaper alternative would lose. "
+        "That alternative needs no extra role and no path check. Its cost is "
+        "that a model can talk past it. The bound in the claim is a program "
+        "bound, not a request." + cite
     )
     tradeoff = (
+        f"{claim} is what the tradeoff buys. "
         "Choosing the program bound costs a role, a path, and a test. Choosing "
-        "the prompt costs none of those. The prompt looks cheaper until a run "
-        "has to be explained. Then the missing check is the whole incident." + cite
+        "the prompt costs none of those, until a run has to be explained; then "
+        "the missing check is the whole incident." + cite
     )
     limit = (
-        f"The limit of the evidence is the source behind {marker or 'this claim'}. "
-        "This paragraph does not upgrade that source into a standard or a "
-        "production measurement. If the claim carries one page, it remains a "
-        "single-source observation." + cite
+        f"The limit of the evidence behind {claim} is the source behind "
+        f"{marker or 'this claim'}. This paragraph does not upgrade that "
+        "source into a standard or a production measurement. If the claim "
+        "carries one page, it remains a single-source observation." + cite
     )
     caveat = (
-        "A single source can be right and still be thin. Vendor documentation "
-        "states what a product does on one day. It does not state what every "
-        "host should copy. The paper names the source and stops there." + cite
+        f"{claim} still rests on one source, which can be right and thin at "
+        "the same time. Vendor documentation states what a product does on "
+        "one day. It does not state what every host should copy. The paper "
+        "names the source and stops there." + cite
     )
     scope = (
-        "Scope stays inside the claim. A fact the source does not support does "
+        f"Scope stays inside {claim}. A fact the source does not support does "
         "not enter this section. That is what makes the citation count mean "
         "something." + cite
     )
     resume = (
-        "A loop that records this finding can resume from it. A loop that only "
+        f"A loop that records {claim} can resume from it. A loop that only "
         "holds it in a model message loses it on the next turn. Persistence is "
         "part of the mechanism, not an afterthought." + cite
     )
     ownership = (
-        "The host owns the check. The model does not. A stop condition trusted "
-        "to the model's own judgment is a stop condition the model can talk "
-        "itself past. This paper treats that as a design error, not a style "
-        "choice." + cite
+        f"The host owns the check behind {claim}. The model does not. A stop "
+        "condition trusted to the model's own judgment is a stop condition the "
+        "model can talk itself past. This paper treats that as a design error, "
+        "not a style choice." + cite
     )
     falsify = (
         f"A reader can falsify the claim by opening the cited source. If the "
@@ -964,18 +977,18 @@ def develop_claim(text: str, marker: str, status: str = "verified") -> list[str]
         "reader to trust the prose." + cite
     )
     host = (
-        "An implementer who copies only the conclusion and skips the check "
-        "has not copied the design. The useful part is the program test, not "
-        "the sentence that describes it." + cite
+        f"An implementer who copies only the conclusion behind {claim} and "
+        "skips the check has not copied the design. The useful part is the "
+        "program test, not the sentence that describes it." + cite
     )
     interrupt = (
-        "An interrupt must leave the finding on disk. Killing the process "
-        "mid-turn is an expected event, not an edge case. A run that can "
-        "only explain itself while it is still in memory is a run that cannot "
-        "be handed to a colleague." + cite
+        f"An interrupt must leave {claim} on disk. Killing the process "
+        "mid-turn is an expected event, not an edge case. A run that can only "
+        "explain itself while it is still in memory is a run that cannot be "
+        "handed to a colleague." + cite
     )
     brief = (
-        "A cited brief can stop after the finding. This paper does not. The "
+        f"A cited brief can stop after {claim}. This paper does not. The "
         "Saturday lab already produces that brief. The extra paragraphs exist "
         "to name the mechanism, the alternative, and the limit of the evidence "
         "so a colleague can implement the check rather than quote the slogan." + cite
@@ -1393,6 +1406,10 @@ class OfflineTurns(Turns):
                 reference = f"As stated in {source}, this point also holds here."
                 segment = segment.replace(sentence, reference, 1)
                 body = body[:start] + segment + body[end:]
+        # #521. Pointing two repeats in the same paragraph at the same
+        # source leaves the identical pointer sentence stacked once per
+        # repeat; a reader needs it once.
+        body = checks.collapse_repeated_back_references(body)
         return re.sub(r"\n{3,}", "\n\n", body)
 
     def review(self, paper: str, report: str, ledger=None) -> dict:
