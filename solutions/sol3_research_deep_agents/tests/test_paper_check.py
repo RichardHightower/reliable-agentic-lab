@@ -417,3 +417,81 @@ def test_the_recorded_fixture_paper_passes_the_ste_belt(run_dir, stub_renderer):
     body = run.paper_path.read_text(encoding="utf-8")
     assert paper_check.ste_language_violations(body) == []
     assert paper_check.noun_stacks(body) == []
+
+
+# -- P2, person and marketing verbs -------------------------------------------
+
+
+def test_second_person_fails_the_whole_paper():
+    """`you should` fails `person` at paper level, and the detail names the
+    sentence."""
+    body = GOOD.replace(
+        "A loop without an exit spends until someone notices. [1]",
+        "You should notice that a loop without an exit spends until it stops. [1]",
+    )
+    score = gate(body, URLS)
+    assert "person" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "person")
+    assert "You should" in row.detail
+
+
+def test_we_will_and_in_this_article_fail():
+    """Both first-person phrases fail the same row."""
+    will_body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "We will now look at the retry budget in detail. [2]",
+    )
+    assert "person" in gate(will_body, URLS).signature()
+
+    article_body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "In this article, the orchestrator sequences every role. [2]",
+    )
+    assert "person" in gate(article_body, URLS).signature()
+
+
+def test_a_marketing_verb_fails():
+    """`leverage` fails, `robust` fails, and an inflected form fails."""
+    leverage = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "The design will leverage existing infrastructure. [2]",
+    )
+    assert "marketing" in gate(leverage, URLS).signature()
+
+    robust = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "The retry loop stays robust under load. [2]",
+    )
+    assert "marketing" in gate(robust, URLS).signature()
+
+    unlocks = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "The change unlocks new throughput for the pipeline. [2]",
+    )
+    assert "marketing" in gate(unlocks, URLS).signature()
+
+
+def test_a_marketing_word_inside_code_or_a_url_passes():
+    """A fenced code block and a reference-list URL are not body prose."""
+    body = GOOD.replace(
+        "## Limitations",
+        "```\na seamless robust retry loop\n```\n\n## Limitations",
+    ).replace(
+        "1. https://docs.langchain.com/one",
+        "1. https://example.com/unlock-guide",
+    )
+    score = gate(body, [URLS[1], "https://example.com/unlock-guide"])
+    assert "marketing" not in score.signature(), score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_person_and_marketing_rows(run_dir, stub_renderer):
+    """The paper `task paper` writes carries no second person, no first person
+    tour, and none of the six marketing verbs.
+    """
+    from conftest import build_run  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    assert run.run() == 0, "the recorded fixture must still assemble and pass its gate"
+    body = run.paper_path.read_text(encoding="utf-8")
+    assert paper_check.person_violations(body) == []
+    assert paper_check.marketing_violations(body) == []
