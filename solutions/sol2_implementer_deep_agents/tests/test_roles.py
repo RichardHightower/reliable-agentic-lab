@@ -15,10 +15,24 @@ import implementer
 import pytest
 import roleplan
 import roles
+from contract import Contract
 
 
 def _by_name(subagents):
     return {agent["name"]: agent for agent in subagents}
+
+
+def test_the_fixture_taskfile_validates(target_repo):
+    """#496. `conftest.py`'s `target_repo` fixture used to write its
+    Taskfile.yml in flow style (`setup: {cmds: [echo setup]}`), which the
+    hand-rolled YAML subset parser (`contract.py`'s `missing_tasks`) never
+    reads: its regex only matches a task name on its own line, block style.
+    `Contract(target_repo).validate()` raised "missing required tasks:
+    setup, test, e2e, lint, format-check" on the fixture meant to prove a
+    valid target repo. Block style, matching the Agent SDK port's fixture,
+    fixes it; this test is what keeps it fixed."""
+    assert Contract(target_repo).missing_tasks() == []
+    Contract(target_repo).validate()
 
 
 def test_cast_names(contract, fake_langchain):

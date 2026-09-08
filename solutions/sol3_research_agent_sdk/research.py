@@ -125,6 +125,16 @@ class FixtureBackend(Backend):
         return self.path.exists()
 
     def search(self, question: str, *, charge=None) -> Finding:
+        # #528. #520 made a key question `{text, kind, evidence_requirements}`.
+        # The live path (`sections.py`'s `question_list`) always extracts the
+        # text with `outline.question_text` first, so `search` never sees the
+        # object -- catch it here with a name, not a `TypeError` from `dict`
+        # trying to hash itself as a lookup key below.
+        if not isinstance(question, str):
+            raise TypeError(
+                f"FixtureBackend.search expects question text (str), got "
+                f"{type(question).__name__}. Extract it with outline.question_text() first."
+            )
         data = json.loads(self.path.read_text(encoding="utf-8"))
         # A key starting with an underscore is a note to the reader, not a
         # recorded answer. Skipping non-dict values keeps a comment in the
