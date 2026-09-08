@@ -237,52 +237,80 @@ def run(  # noqa: PLR0915
     preexisting = {path for path in rubric.changed_files(target) if path != steps.STEPS_FILE}
 
     # Step 3. Tests first. The test implementer owns tests/ and nothing else.
+    # A red-gate miss retries inside this loop's own attempt counter rather
+    # than escalating on the first empty attempt. This never calls
+    # `boss.start_iteration()`: that counter belongs to the code loop below,
+    # and sharing it would spend the code budget on test turns.
     tester = cast["test_implementer"]
-    test_result = backend.run(
-        repo=target, prompt=_test_prompt(the_ticket, plan), allow=list(tester.scope.allow)
-    )
-    boss.spend(test_result.usd)
-    after_tests = contract.run("test")
-    red_ids = _new_test_ids(known_ids, after_tests.junit.failed_ids)
-
-    # Attribute writes by phase, not by what a backend claims. Files that appear
-    # during the test phase belong to the test implementer; files that appear
-    # later belong to the code implementer. A backend that lies about `wrote`
-    # cannot move a file out of its phase.
-    after_test_phase = {
-        path
-        for path in rubric.changed_files(target)
-        if path != steps.STEPS_FILE and path not in preexisting
-    }
-    scope_violations = tester.violations(sorted(after_test_phase))
-    trace["test_phase"] = {
-        "wrote": list(test_result.wrote),
-        "files": sorted(after_test_phase),
-        "violations": list(scope_violations),
-        "ok": test_result.ok,
-        "usd": test_result.usd,
-    }
-
-    # Step 4. The red gate.
-    if scope_violations:
-        trace["test_phase_scope_violations"] = sorted(scope_violations)
-        trace["scope_violations"] = sorted(scope_violations)
-        trace["gate"] = gates.ESCALATE
-        trace["reason"] = (
-            "test phase wrote outside its scope: " + ", ".join(sorted(scope_violations))
+    attempt = 0
+    previous_test_signature: tuple[str, ...] | None = None
+    while True:
+        attempt += 1
+        test_result = backend.run(
+            repo=target, prompt=_test_prompt(the_ticket, plan), allow=list(tester.scope.allow)
         )
-        trace["red_ids"] = sorted(red_ids)
-        return _finish(contract, trace, write_trace)
+        boss.spend(test_result.usd)
+        after_tests = contract.run("test")
+        red_ids = _new_test_ids(known_ids, after_tests.junit.failed_ids)
 
-    if contract.rubric.get("require_red", True) and not red_ids:
-        trace["gate"] = gates.ESCALATE
-        trace["reason"] = (
-            "red gate: no new test was observed failing. A test that passes before "
-            "any code exists proves nothing."
+        # Attribute writes by phase, not by what a backend claims. Files that
+        # appear during the test phase belong to the test implementer; files
+        # that appear later belong to the code implementer. A backend that
+        # lies about `wrote` cannot move a file out of its phase.
+        after_test_phase = {
+            path
+            for path in rubric.changed_files(target)
+            if path != steps.STEPS_FILE and path not in preexisting
+        }
+        scope_violations = tester.violations(sorted(after_test_phase))
+        trace["test_phase"] = {
+            "wrote": list(test_result.wrote),
+            "files": sorted(after_test_phase),
+            "violations": list(scope_violations),
+            "ok": test_result.ok,
+            "usd": test_result.usd,
+        }
+
+        # Step 4. The red gate. A scope violation escalates on the turn it
+        # happens; the test phase never gets a second try to stay in scope.
+        if scope_violations:
+            trace["test_phase_scope_violations"] = sorted(scope_violations)
+            trace["scope_violations"] = sorted(scope_violations)
+            trace["gate"] = gates.ESCALATE
+            trace["reason"] = (
+                "test phase wrote outside its scope: " + ", ".join(sorted(scope_violations))
+            )
+            trace["red_ids"] = sorted(red_ids)
+            return _finish(contract, trace, write_trace)
+
+        if not contract.rubric.get("require_red", True) or red_ids:
+            break
+
+        # Still no red. Retry while the attempt budget allows it, and reuse
+        # the code loop's own stop rule (gates.decide) rather than writing a
+        # second one: two attempts that touch the same files are not
+        # converging, and stop as a stable failure before the budget runs out.
+        signature = tuple(sorted(after_test_phase))
+        decision = gates.decide(
+            passed=False,
+            iteration=attempt,
+            budget=boss.budget_iterations,
+            signature=signature,
+            previous_signature=previous_test_signature,
+            usd_left=boss.usd_left,
         )
-        trace["red_ids"] = []
-        trace["scope_violations"] = list(scope_violations)
-        return _finish(contract, trace, write_trace)
+        if decision.stop:
+            trace["gate"] = gates.ESCALATE
+            trace["reason"] = (
+                decision.reason
+                if decision.repeat_failure
+                else "red gate: no new test was observed failing. A test that passes before "
+                "any code exists proves nothing."
+            )
+            trace["red_ids"] = []
+            trace["scope_violations"] = list(scope_violations)
+            return _finish(contract, trace, write_trace)
+        previous_test_signature = signature
 
     trace["red_ids"] = sorted(red_ids)
 
