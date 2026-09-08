@@ -91,6 +91,17 @@ def test_a_long_question_needs_a_third_of_its_terms():
     )
     assert _coverage_row(three_terms).passed
 
+    # The stop-list growth on its own, isolated from the third-scaling: a
+    # question padded with words the old twenty-word list missed (`which`,
+    # `were`, `not`, `when`, `was`) has more raw tokens than content terms,
+    # and the extra tokens must not count against the body.
+    padded_question = "Which claims were not corroborated when the budget was capped?"
+    padded_section = {"heading": "One", "key_questions": [padded_question]}
+    padded = sections.section_check(
+        "The retry budget stayed capped for the whole run [1].", section=padded_section
+    )
+    assert _coverage_row(padded).passed
+
 
 def test_a_short_question_still_passes_on_two_terms():
     """#510. The floor of two survives the scaling: a two-term question

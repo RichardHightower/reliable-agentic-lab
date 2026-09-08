@@ -274,17 +274,20 @@ def test_a_heading_inside_a_fence_is_not_a_heading():
     fenced = (
         "## Real heading\n\n"
         "Real prose describes a heading question with a rubric here today [1].\n\n"
+        "## Another heading\n\n"
+        "More real prose closes the section out today [1].\n\n"
         "```markdown\n"
         "## Is this a heading?\n"
         "more fence text\n"
-        "```\n\n"
-        "## Another heading\n\n"
-        "More real prose closes the section out today [1].\n"
+        "```\n"
     )
     outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
 
     assert question_headings(fenced, outline) == []
     assert set(section_bodies(fenced)) == {"real heading", "another heading"}
+    # The fence sits after "Another heading", so a heading scan that reads
+    # it unmasked would report the fenced line as the paper's last section,
+    # not "Another heading".
     assert last_prose_heading(fenced) == "Another heading"
     assert outline_coverage_gaps(fenced, outline) == []
     assert sections_without_prose(fenced, 5) == []
