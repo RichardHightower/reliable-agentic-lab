@@ -168,14 +168,22 @@ def options_for(
     max_usd: float | None = None,
     max_turns: int = DEFAULT_MAX_TURNS,
     role_names: frozenset[str] | None = None,
+    cwd: Path | str | None = None,
 ):
     """Build `ClaudeAgentOptions` with one subagent per role in this loop's cast.
 
     Imported lazily. This folder's tests run without the SDK installed.
+
+    #543. `cwd` is where the live session actually works: `contract.repo`
+    when unset, matching every caller before this ticket, or the caller's
+    own worktree path when `implementer.run` executes somewhere other than
+    `contract.repo` itself (the `--repo` clone). `contract` still supplies
+    the role config either way -- `.loop.yml` lives in the clone, and a
+    worktree that does not exist yet at build time has none to read.
     """
     from claude_agent_sdk import ClaudeAgentOptions, HookMatcher  # noqa: PLC0415
 
-    repo = Path(contract.repo)
+    repo = Path(cwd) if cwd is not None else Path(contract.repo)
     roles = plan(contract, loop)
     if role_names is not None:
         unknown = role_names - set(roles)

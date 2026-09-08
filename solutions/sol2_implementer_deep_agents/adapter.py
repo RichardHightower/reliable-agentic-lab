@@ -216,6 +216,57 @@ def _describe_exc(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def _usage_callback():
+    """#543. A callback that sums `usage_metadata` off every completed LLM
+    call, so a `GraphRecursionError` (raised only after some number of model
+    turns already ran) still reports what those turns cost, instead of
+    losing them along with the exception. `agent.invoke()` returns no state
+    on a raise, so `last_usd`, which reads the returned state, never gets
+    the chance.
+
+    Imported lazily and never let to raise: this module has to stay
+    importable, and this handler safe to attach, with no `deepagents` or
+    `langchain_core` installed, the same as every offline test already runs.
+    """
+    try:
+        from langchain_core.callbacks import BaseCallbackHandler  # noqa: PLC0415
+    except ImportError:
+        return None
+
+    class UsageCallback(BaseCallbackHandler):
+        def __init__(self):
+            self.total_usd = 0.0
+            self.saw_usage = False
+
+        def on_llm_end(self, response, **kwargs):
+            try:
+                for generation_list in getattr(response, "generations", None) or []:
+                    for generation in generation_list:
+                        message = getattr(generation, "message", None)
+                        usage = getattr(message, "usage_metadata", None) if message else None
+                        if isinstance(usage, dict):
+                            self.total_usd += _usage_usd(usage)
+                            self.saw_usage = True
+            except Exception:
+                # A telemetry side channel must never crash the run it is
+                # only supposed to be watching.
+                pass
+
+    return UsageCallback()
+
+
+def _invoke_config(recursion_limit: int | None, usage) -> dict:
+    """`{}` when neither is set, exactly matching `agent.invoke(payload)`
+    with no `config=` at all -- the shape every existing test with no
+    recursion limit and no `langchain_core` installed already pins."""
+    config: dict = {}
+    if recursion_limit:
+        config["recursion_limit"] = recursion_limit
+    if usage is not None:
+        config["callbacks"] = [usage]
+    return config
+
+
 class DeepAgentsBackend(Backend):
     """Runs one role's prompt through the Deep Agents graph this folder builds."""
 
@@ -257,14 +308,17 @@ class DeepAgentsBackend(Backend):
         return self.phase_agents[phase]
 
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
+        # #543. Attached whether or not a raise ever happens: `on_llm_end`
+        # fires per completed model turn, well before a `GraphRecursionError`
+        # (which only fires after some number of turns already ran) reaches
+        # this method at all.
+        usage = _usage_callback()
         try:
             before = _changed_files(repo)
             payload = {"messages": [{"role": "user", "content": prompt}]}
             agent = self._agent_for(allow)
-            if self.recursion_limit:
-                result = agent.invoke(payload, config={"recursion_limit": self.recursion_limit})
-            else:
-                result = agent.invoke(payload)
+            config = _invoke_config(self.recursion_limit, usage)
+            result = agent.invoke(payload, config=config) if config else agent.invoke(payload)
             after = _changed_files(repo)
             scope = WriteScope(allow=allow)
             wrote = sorted(path for path in (after - before) if scope.permits(path))
@@ -277,14 +331,18 @@ class DeepAgentsBackend(Backend):
         # Same contract every offline Backend keeps: never raise, report it.
         except Exception as exc:
             # #539. `agent.invoke()` is one synchronous call: a raise means it
-            # never answered, so `usd` is `None`, not the 0.0 that reads as
-            # "this turn was free". `type(exc).__name__` names the exception
-            # (a `GraphRecursionError` names itself and this port's
-            # `recursion_limit` in its own message), so a caller no longer
-            # has to guess whether this was a raised backend or an honest
-            # empty reply, the two the judge of PR #537 found indistinguishable.
+            # never answered a final state, so `usd` is `None`, not the 0.0
+            # that reads as "this turn was free" -- unless `usage` actually
+            # saw a completed model turn before the raise (#543), in which
+            # case that spend is real and reporting `None` would discard it.
+            # `type(exc).__name__` names the exception (a `GraphRecursionError`
+            # names itself and this port's `recursion_limit` in its own
+            # message), so a caller no longer has to guess whether this was a
+            # raised backend or an honest empty reply, the two the judge of
+            # PR #537 found indistinguishable.
+            spend = usage.total_usd if usage is not None and usage.saw_usage else None
             return DoerResult(
-                ok=False, usd=None, output=f"deep_agents backend failed: {_describe_exc(exc)}"
+                ok=False, usd=spend, output=f"deep_agents backend failed: {_describe_exc(exc)}"
             )
 
     def judge(self, *, repo: Path, prompt: str) -> DoerResult:
@@ -292,18 +350,18 @@ class DeepAgentsBackend(Backend):
         agent = self.judge_agent
         if agent is None:
             return super().judge(repo=repo, prompt=prompt)
+        usage = _usage_callback()
         try:
             payload = {"messages": [{"role": "user", "content": prompt}]}
-            if self.recursion_limit:
-                result = agent.invoke(payload, config={"recursion_limit": self.recursion_limit})
-            else:
-                result = agent.invoke(payload)
+            config = _invoke_config(self.recursion_limit, usage)
+            result = agent.invoke(payload, config=config) if config else agent.invoke(payload)
             return DoerResult(
                 output=last_ai_text(result), usd=last_usd(result), raw_output=_raw_messages(result)
             )
         except Exception as exc:
+            spend = usage.total_usd if usage is not None and usage.saw_usage else None
             return DoerResult(
-                ok=False, usd=None, output=f"deep_agents judge failed: {_describe_exc(exc)}"
+                ok=False, usd=spend, output=f"deep_agents judge failed: {_describe_exc(exc)}"
             )
 
     def plan(self, *, repo: Path, prompt: str) -> DoerResult:

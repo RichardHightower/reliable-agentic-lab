@@ -347,6 +347,23 @@ def _code_prompt(
     return extra + "\n\n" + body
 
 
+def _worktree_path(repo: Path, ticket_id: str) -> Path:
+    """The deterministic path `_worktree` creates or reuses, computed with no
+    I/O and no side effect.
+
+    #543. A live doer's `ClaudeAgentOptions(cwd=...)` (SDK) or
+    `FilesystemBackend(root_dir=...)` (Deep Agents) has to be built against
+    this same path before `run()` ever creates it, or the model works in the
+    `--repo` clone while every step below reads the worktree, and a live
+    doer's writes land where the red gate never looks. Calling `_worktree`
+    itself for that would be wrong: reusing an already-created worktree
+    resets it to `HEAD` and `git clean -fd`s it, which would erase the very
+    write this function exists to let a caller point the doer at first.
+    """
+    repo = Path(repo).resolve()
+    return repo.parent / f"{repo.name}.worktrees" / ticket_id
+
+
 def _worktree(repo: Path, ticket_id: str, *, resume: bool = False) -> Path:
     """An isolated git worktree for one ticket. Every run mutates this tree,
     never the caller's repo.
@@ -373,7 +390,7 @@ def _worktree(repo: Path, ticket_id: str, *, resume: bool = False) -> Path:
     git repo (`git worktree list` then exits 0 and names the outer repo).
     """
     repo = Path(repo).resolve()
-    path = repo.parent / f"{repo.name}.worktrees" / ticket_id
+    path = _worktree_path(repo, ticket_id)
 
     if path.is_symlink():
         raise ContractError(f"{path} is a symlink; refusing to use it as a worktree path")

@@ -34,8 +34,13 @@ def build(contract):
     return deep.subagents_for(contract, loop=LOOP)
 
 
-def backend(contract):
+def backend(contract, ticket_id: str):
     from adapter import DeepAgentsBackend  # noqa: PLC0415
+
+    # #543. `implementer.run` executes in this worktree, computed the same
+    # way `implementer._worktree` itself does, but with no side effect: the
+    # worktree need not exist yet, only by the time a live query actually runs.
+    cwd = implementer._worktree_path(contract.repo, ticket_id)
 
     # One graph per implementation phase. A test-phase graph has no code
     # implementer to delegate to, so the role split is structural rather than
@@ -43,20 +48,20 @@ def backend(contract):
     return DeepAgentsBackend(
         phase_agents={
             "test": deep.build_agent(
-                contract, loop=LOOP, subagent_names=frozenset({"test-implementer"})
+                contract, loop=LOOP, subagent_names=frozenset({"test-implementer"}), cwd=cwd
             ),
             "code": deep.build_agent(
-                contract, loop=LOOP, subagent_names=frozenset({"code-implementer"})
+                contract, loop=LOOP, subagent_names=frozenset({"code-implementer"}), cwd=cwd
             ),
             # A9 (#437 #422). --planner deep reads this graph through
             # `plan()`. Built unconditionally, the way the other two are: it
             # is inert unless `_plan_from_backend` calls it.
             "plan": deep.build_agent(
-                contract, loop=LOOP, subagent_names=frozenset({"planner"})
+                contract, loop=LOOP, subagent_names=frozenset({"planner"}), cwd=cwd
             ),
         },
         judge_agent=deep.build_agent(
-            contract, loop=LOOP, subagent_names=frozenset({"judge"})
+            contract, loop=LOOP, subagent_names=frozenset({"judge"}), cwd=cwd
         ),
         # The runtime's recursion guard is the model-turn ceiling for this
         # live probe. It leaves time for the deterministic test/rubric pass and
@@ -126,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
 
     doer = args.doer
     if doer == "deep":
-        doer = backend(contract)
+        doer = backend(contract, args.ticket)
     try:
         trace = implementer.run(
             repo=args.repo,

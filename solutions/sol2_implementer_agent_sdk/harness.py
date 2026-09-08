@@ -36,36 +36,49 @@ def cast(contract) -> dict[str, roleplan.RolePlan]:
     return roleplan.plan(contract, LOOP)
 
 
-def build(contract, *, max_turns: int = DEFAULT_MAX_TURNS, role_names=None):
+def build(contract, *, cwd, max_turns: int = DEFAULT_MAX_TURNS, role_names=None):
     """This runtime's configuration for the cast.
 
     Needs `claude-agent-sdk` installed. `cast()` and the role table do not.
+
+    #543. `cwd` is `implementer.run`'s own worktree for this ticket, not
+    `contract.repo`: every caller here builds a live session, and a live
+    session has to work where the loop actually reads its writes back from.
     """
-    kwargs = {"max_turns": max_turns}
+    kwargs = {"max_turns": max_turns, "cwd": cwd}
     if role_names is not None:
         kwargs["role_names"] = role_names
     return sdk.options_for(contract, loop=LOOP, **kwargs)
 
 
-def backend(contract, *, max_turns: int = DEFAULT_MAX_TURNS):
+def backend(contract, ticket_id: str, *, max_turns: int = DEFAULT_MAX_TURNS):
     """A `doers.Backend` that runs each phase through its own Agent SDK graph."""
     from adapter import AgentSdkBackend, AgentSdkPhaseBackend  # noqa: PLC0415
 
+    # #543. `implementer.run` executes in this worktree, computed the same
+    # way `implementer._worktree` itself does, but with no side effect: the
+    # worktree need not exist yet, only by the time a live query actually runs.
+    cwd = implementer._worktree_path(contract.repo, ticket_id)
+
     return AgentSdkPhaseBackend(
         test=AgentSdkBackend(
-            build(contract, max_turns=max_turns, role_names=frozenset({"test_implementer"}))
+            build(
+                contract, cwd=cwd, max_turns=max_turns, role_names=frozenset({"test_implementer"})
+            )
         ),
         code=AgentSdkBackend(
-            build(contract, max_turns=max_turns, role_names=frozenset({"code_implementer"}))
+            build(
+                contract, cwd=cwd, max_turns=max_turns, role_names=frozenset({"code_implementer"})
+            )
         ),
         judge=AgentSdkBackend(
-            build(contract, max_turns=max_turns, role_names=frozenset({"judge"}))
+            build(contract, cwd=cwd, max_turns=max_turns, role_names=frozenset({"judge"}))
         ),
         # A9 (#437 #422). --planner sdk reads this graph through `plan()`.
         # Built unconditionally, the way the other three are: it is inert
         # unless `_plan_from_backend` calls it.
         planner=AgentSdkBackend(
-            build(contract, max_turns=max_turns, role_names=frozenset({"planner"}))
+            build(contract, cwd=cwd, max_turns=max_turns, role_names=frozenset({"planner"}))
         ),
     )
 
@@ -116,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
 
     doer = args.doer
     if doer == "sdk":
-        doer = backend(contract)
+        doer = backend(contract, args.ticket)
     try:
         trace = implementer.run(
             repo=args.repo,
