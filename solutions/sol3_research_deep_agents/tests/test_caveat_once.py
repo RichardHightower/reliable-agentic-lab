@@ -79,13 +79,18 @@ def test_a_fourteen_word_back_reference_is_not_a_repeat():
     very row the pass was written to clear, on a live model-written
     outline whose headings run longer than the offline fixtures' one or
     two words. The cue still carries the exemption; the cap is 24 now.
+
+    #531. The exemption now also requires the sentence to name one of the
+    paper's own `##` headings, so this section is renamed to the long
+    heading the reference points at, rather than pointing at an invented
+    name no `##` in the body actually carries.
     """
     heading = "Independent Verification Under Bounded Budgets"
     reference = f"As stated in {heading}, this specific point still applies here."
     assert len(paper_check.WORD.findall(reference)) == 14
     body = (
         "# On a topic\n\n"
-        f"## Discussion\n\n{CAVEAT} [1]\n\n"
+        f"## {heading}\n\n{CAVEAT} [1]\n\n"
         "## Limitations\n\n"
         f"{reference} [1]\n\n"
         "## Conclusion\n\n"
@@ -93,6 +98,59 @@ def test_a_fourteen_word_back_reference_is_not_a_repeat():
     )
     score = paper_check.check(body, ["https://a"])
     assert "caveat_once" not in score.signature(), score.report()
+
+
+def test_a_back_reference_naming_no_real_heading_still_repeats():
+    """#531. The cue phrase and the word cap are not enough on their own: a
+    manufactured "See ..." sentence that names no `##` heading the paper
+    actually carries is still a restatement wearing a pointer's opening
+    words, not a pointer.
+    """
+    fake = "See the earlier analysis of this exact same point in full detail."
+    body = (
+        "# On a topic\n\n"
+        "## Discussion\n\nAn unrelated finding here. [1]\n\n"
+        f"## Limitations\n\n{fake} [1]\n\n"
+        f"## Conclusion\n\n{fake} [1]\n"
+    )
+    score = paper_check.check(body, ["https://a"])
+    assert "caveat_once" in score.signature(), score.report()
+
+
+def test_non_adjacent_stacked_pointers_collapse():
+    """#531. Two pointers stacked in one paragraph with an unrelated
+    sentence between them still collapse: the comparison checks every
+    already-kept piece, not only the one immediately before it.
+    """
+    pointer = "As stated in Discussion, this point also holds here."
+    body = (
+        "# On a topic\n\n"
+        "## Discussion\n\nA point. [1]\n\n"
+        f"## Conclusion\n\n{pointer} An unrelated sentence sits between them. {pointer} [1]\n"
+    )
+    collapsed = paper_check.collapse_repeated_back_references(body)
+    conclusion = paper_check.top_level_sections(collapsed)["conclusion"]
+    assert conclusion.count(pointer) == 1
+    assert "An unrelated sentence sits between them." in conclusion
+
+
+def test_collapse_never_flattens_a_same_block_figure_line():
+    """#531. A `![figure]` line with no blank line separating it from the
+    prose above stays on its own line; the sentence join around a
+    collapsed pointer must not sweep it into the flow.
+    """
+    pointer = "As stated in Discussion, this point also holds here."
+    body = (
+        "# On a topic\n\n"
+        "## Discussion\n\nA point. [1]\n\n"
+        f"## Conclusion\n\n{pointer} {pointer}\n"
+        "![fig](figures/fig_imagen.png)\n"
+    )
+    collapsed = paper_check.collapse_repeated_back_references(body)
+    conclusion = paper_check.top_level_sections(collapsed)["conclusion"]
+    lines = [line for line in conclusion.splitlines() if line.strip()]
+    assert lines[-1] == "![fig](figures/fig_imagen.png)"
+    assert conclusion.count(pointer) == 1
 
 
 def test_top_level_section_spans_ignores_subheadings():

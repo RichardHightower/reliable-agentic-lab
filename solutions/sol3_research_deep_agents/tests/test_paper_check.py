@@ -12,6 +12,8 @@ GOOD = (
     "## Abstract\n\nA loop without an exit spends until someone notices. [1]\n\n"
     "## Introduction\n\nThree exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
     "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
+    "Figure 1. A flowchart of the three exits.\n\n"
+    "Figure 1 shows the order. [1]\n\n"
     "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
     "## Next step\n\n"
     "- Evaluate the three exits on a live ticket before adopting them.\n"
@@ -266,7 +268,11 @@ def test_every_other_hard_gate_passes_on_the_hollow_paper():
 
 def test_a_stub_section_is_blocked():
     thin = GOOD.replace(
-        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]", "Yes. [1]"
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
+        "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
+        "Figure 1. A flowchart of the three exits.\n\n"
+        "Figure 1 shows the order. [1]",
+        "Yes. [1]",
     )
     assert "has_body" in gate(thin, URLS).signature()
 
@@ -275,7 +281,9 @@ def test_a_section_of_only_a_figure_is_blocked():
     """A figure still owes the reader an explanation."""
     figure_only = GOOD.replace(
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
-        "![A flowchart of the three exits](figures/exits_imagen.png)",
+        "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
+        "Figure 1. A flowchart of the three exits.\n\n"
+        "Figure 1 shows the order. [1]",
         "![A flowchart of the three exits](figures/exits_imagen.png)",
     )
     assert "has_body" in gate(figure_only, URLS).signature()

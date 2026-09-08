@@ -18,6 +18,9 @@ Rows `check()` appends, past the three it reuses from `brief`:
     limitations    the paper states its limitations (soft)
     figure_alt     every figure carries real alt text
     figure_assets  every diagram is a judged publication asset, not a sketch
+    captioned      every image is followed by a Figure N. caption
+    figure_referenced every placed figure is named Figure N in its own section's prose
+    skip_noted     every skipped figure is named, with its reason, on the page
     no_diagram_source diagram source text never leaked into the body
     ste_language   no contraction, no e.g./i.e./etc. in body prose
     noun_stack     no noun cluster longer than three (soft)
@@ -257,24 +260,63 @@ BACK_REFERENCE_CUES = ("as stated in", "as noted in", "as shown in", "see ")
 BACK_REFERENCE_MAX_WORDS = 24
 
 
-def _is_back_reference(sentence: str) -> bool:
+def _is_back_reference(sentence: str, headings: frozenset[str] | None = None) -> bool:
+    """A short pointer sentence that names one of the paper's own `##`
+    headings, exempt from `caveat_once` because it points at a finding
+    instead of restating it.
+
+    The cue phrase alone used to be enough: a judge on #531's line found a
+    manufactured "See ..." sentence under 24 words that named no section
+    at all could dodge the row by cue and length alone, then repeat across
+    sections just like any other sentence. Naming a real heading is the
+    difference between a pointer and a restatement wearing a pointer's
+    opening words. Copied from the SDK's `checks.py`, not imported.
+    """
     words = WORD.findall(sentence)
     if not words or len(words) > BACK_REFERENCE_MAX_WORDS:
         return False
-    return sentence.strip().lower().startswith(BACK_REFERENCE_CUES)
+    if not sentence.strip().lower().startswith(BACK_REFERENCE_CUES):
+        return False
+    if not headings:
+        return False
+    lowered = sentence.lower()
+    # Word-bounded: a substring match let a short or common heading claim
+    # the exemption from inside an unrelated longer word. #464 F6.
+    return any(heading and re.search(rf"\b{re.escape(heading)}\b", lowered) for heading in headings)
 
 
-def collapse_repeated_back_references(body: str) -> str:
-    """Two or more identical back references stacked in one paragraph
-    collapse to one.
+def _collapse_prose_piece(text: str, headings: frozenset[str] | None) -> str:
+    """One prose chunk (no embedded image line) with a duplicate back
+    reference collapsed to its first occurrence.
 
-    The whole-paper pass can point more than one repeat in the same
-    paragraph at the same source; each is edited on its own, so the
-    result is the same short pointer sentence typed out once per repeat
-    it cleared, instead of the single pointer a reader needs. Runs on the
-    deterministic trim's own output and again on whatever a model-written
-    pass returns, since a model can stack the same pointer on its own.
-    #521. Copied from the SDK's `checks.py`, not imported.
+    Compares every piece already kept, not only the immediately preceding
+    one (#531): two repeats in the same paragraph can be split by an
+    unrelated sentence in between, and the second pointer is still a
+    duplicate of the first even though it is not adjacent to it.
+    """
+    pieces = SENTENCE_END.split(text)
+    kept: list[str] = []
+    for piece in pieces:
+        if _is_back_reference(piece, headings) and any(
+            piece.strip() == prior.strip() for prior in kept
+        ):
+            continue
+        kept.append(piece)
+    return text if len(kept) == len(pieces) else " ".join(kept)
+
+
+def _map_prose_blocks(body: str, transform) -> str:
+    """Apply `transform(text) -> text` to every prose block, a same-block
+    `![figure]` line split onto its own segment first.
+
+    Shared by `collapse_repeated_back_references` and
+    `drop_dangling_figure_mentions` (#464 F2): whatever the transform does
+    to a block's sentences, an image line with no blank line separating it
+    from the prose above it must never be swept into that flow and lose
+    its own line. A heading, a list, a table, a quote, a fence, and a
+    `Figure N.` caption are passed through untouched, the same exemptions
+    the sentence-scanning helpers grant elsewhere. Copied from the SDK's
+    `checks.py`, not imported.
     """
     out_lines: list[str] = []
     block_lines: list[str] = []
@@ -288,16 +330,23 @@ def collapse_repeated_back_references(body: str) -> str:
             not stripped
             or stripped.startswith(("#", "!", "|", ">", "```", "-", "*"))
             or LIST_ITEM.match(stripped)
+            or FIGURE_CAPTION.match(stripped)
         ):
             out_lines.append(block)
             return
-        pieces = SENTENCE_END.split(block)
-        kept: list[str] = []
-        for piece in pieces:
-            if kept and _is_back_reference(piece) and piece.strip() == kept[-1].strip():
-                continue
-            kept.append(piece)
-        out_lines.append(block if len(kept) == len(pieces) else " ".join(kept))
+        segments: list[str] = []
+        prose_buf: list[str] = []
+        for line in block_lines:
+            if line.lstrip().startswith("!["):
+                if prose_buf:
+                    segments.append(transform("\n".join(prose_buf)))
+                    prose_buf = []
+                segments.append(line)
+            else:
+                prose_buf.append(line)
+        if prose_buf:
+            segments.append(transform("\n".join(prose_buf)))
+        out_lines.append("\n".join(segments))
 
     for line in body.split("\n"):
         if line.strip() == "":
@@ -308,6 +357,29 @@ def collapse_repeated_back_references(body: str) -> str:
         block_lines.append(line)
     flush()
     return "\n".join(out_lines)
+
+
+def collapse_repeated_back_references(body: str, headings: frozenset[str] | None = None) -> str:
+    """Two or more identical back references stacked in one paragraph
+    collapse to one.
+
+    The whole-paper pass can point more than one repeat in the same
+    paragraph at the same source; each is edited on its own, so the
+    result is the same short pointer sentence typed out once per repeat
+    it cleared, instead of the single pointer a reader needs. Runs on the
+    deterministic trim's own output and again on whatever a model-written
+    pass returns, since a model can stack the same pointer on its own.
+    #521. Copied from the SDK's `checks.py`, not imported.
+
+    `headings` defaults to `top_level_sections(body)`'s own `##` scan,
+    right for the SDK's call on a whole assembled body. `stage_trim` calls
+    this once per section on `self.written[heading]` alone, which carries
+    no `##` line of its own to scan, so it passes the paper's real heading
+    set in instead.
+    """
+    if headings is None:
+        headings = frozenset(top_level_sections(body))
+    return _map_prose_blocks(body, lambda text: _collapse_prose_piece(text, headings))
 
 
 def _mask_references(text: str) -> str:
@@ -370,14 +442,17 @@ def _mask_for_ste(text: str) -> str:
 
 def _prose_sentences(text: str) -> list[str]:
     """Sentence-shaped chunks of body prose. Skips headings, images, lists,
-    tables, quotes, and fences, none of which are a sentence a writer composed.
+    tables, quotes, fences, and a `Figure N.` caption, none of which are a
+    sentence a writer composed. A caption is system-generated from a
+    diagram's own node labels, not prose a writer is held to the STE belt
+    for. #464.
     """
     sentences: list[str] = []
     for block in re.split(r"\n\s*\n", text):
         block = block.strip()
         if not block or block.startswith(("#", "!", "|", ">", "```", "-", "*")):
             continue
-        if LIST_ITEM.match(block):
+        if LIST_ITEM.match(block) or FIGURE_CAPTION.match(block):
             continue
         for piece in SENTENCE_END.split(block):
             piece = piece.strip()
@@ -855,8 +930,25 @@ def figures(body: str) -> list[tuple[str, str]]:
     return IMAGE.findall(body)
 
 
+SKIP_NOTE = re.compile(r"^>.*was not shown:.*\.$", re.M)
+
+
+def _strip_figure_notes(body: str) -> str:
+    """Blank a `Figure N.` caption line and a skip-note blockquote line.
+
+    Neither is prose a writer composed, and counting either toward
+    `has_body` or `length` credits a section for system-generated text.
+    `FIGURE_CAPTION` has no `re.M` flag (every other caller matches it
+    against one already-split line), so this multiline body needs its own
+    flag on the substitution. Copied from the SDK port's `checks.py`, not
+    imported. #464, F4.
+    """
+    body = re.sub(FIGURE_CAPTION.pattern, "", body, flags=re.M)
+    return SKIP_NOTE.sub("", body)
+
+
 def word_count(body: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", body)))
+    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", _strip_figure_notes(body))))
 
 
 def missing_sections(body: str, required=REQUIRED_SECTIONS) -> list[str]:
@@ -880,6 +972,148 @@ def non_publication_figures(body: str) -> list[str]:
             continue
         bad.append(target)
     return bad
+
+
+FIGURE_CAPTION = re.compile(r"^Figure (\d+)\.[ \t]*(.*)$")
+IMAGE_LINE = re.compile(r"^!\[[^\]]*\]\([^)]+\)\s*$")
+FIGURE_MENTION = re.compile(r"\bFigure\s+(\d+)\b")
+
+
+def placed_figures(body: str) -> list[dict]:
+    """Every numbered figure the assembled body carries: its number, its
+    owning `##` section, and the caption text on its own `Figure N.` line.
+
+    Reads the caption line `assemble` writes at placement, the single
+    source of truth for `captioned`, `figure_referenced`, and the
+    whole-paper pass's own figure list: whatever number is on the page is
+    the number a mention has to name, nothing recomputed separately.
+    Copied from the SDK port's `checks.py`, not imported. #413, #464.
+    """
+    spans = top_level_section_spans(body)
+    out: list[dict] = []
+    pos = 0
+    for line in body.split("\n"):
+        match = FIGURE_CAPTION.match(line.strip())
+        if match:
+            owner = next((name for name, (s, e) in spans.items() if s <= pos < e), "")
+            out.append(
+                {
+                    "number": int(match.group(1)),
+                    "section": owner,
+                    "caption": match.group(2).strip(),
+                }
+            )
+        pos += len(line) + 1
+    return out
+
+
+def captioned_violations(body: str) -> list[str]:
+    """Every placed image is followed by a `Figure N.` caption line, and
+    every caption on the page numbers a distinct figure, contiguous from
+    one.
+
+    Not a fake caption on an image that resolved to nothing: `figure_alt`
+    and `figure_assets` already own the file itself. This row owns only
+    whether a resolved image carries the caption a reader needs, and
+    whether the numbers on the page still add up. #413, #464.
+    """
+    lines = body.split("\n")
+    missing = []
+    for idx, line in enumerate(lines):
+        if not IMAGE_LINE.match(line.strip()):
+            continue
+        j = idx + 1
+        while j < len(lines) and lines[j].strip() == "":
+            j += 1
+        nxt = lines[j].strip() if j < len(lines) else ""
+        if not FIGURE_CAPTION.match(nxt):
+            missing.append(line.strip()[:80])
+    # #464 B2. A figure whose image line was already persisted from an
+    # earlier pass, and one freshly placed this call, must still number
+    # 1..N with no gap and no duplicate.
+    numbers = [figure["number"] for figure in placed_figures(body)]
+    if numbers and sorted(numbers) != list(range(1, len(numbers) + 1)):
+        missing.append(f"figure numbers are not contiguous from one: {numbers}")
+    return missing
+
+
+def mentions_figure(text: str, number: int) -> bool:
+    """Whether `text` names `Figure {number}` as a whole number, not as a
+    prefix of a longer one.
+
+    A plain substring let "Figure 1" read as satisfied by a "Figure 12"
+    mention. Shared by `figure_referenced_violations` and `stage_trim`'s
+    own "already mentioned" check, so neither can decide a figure is
+    referenced when the other would still flag it missing. Copied from
+    the SDK port's `checks.py`, not imported. #464 F1.
+    """
+    return re.search(rf"\bFigure {number}\b", text) is not None
+
+
+def figure_referenced_violations(body: str) -> list[str]:
+    """Every placed figure is named `Figure N` in its owning section's own
+    prose, outside the caption line itself.
+
+    Reads `placed_figures`, so a figure with no number at all -- skipped,
+    dropped, or never rendered -- never reaches this row and never demands
+    a mention. #464.
+    """
+    spans = top_level_section_spans(body)
+    missing = []
+    for figure in placed_figures(body):
+        section = figure["section"]
+        span = spans.get(section)
+        scope = body[span[0] : span[1]] if span else body
+        prose = re.sub(rf"^Figure {figure['number']}\..*$", "", scope, flags=re.M)
+        if not mentions_figure(prose, figure["number"]):
+            missing.append(f"Figure {figure['number']} never named in {section or 'its section'!r} prose")
+    return missing
+
+
+def skip_noted_violations(body: str, skipped: list[dict] | None) -> list[str]:
+    """Every recorded skip is named, with its reason, under the section it
+    names -- or somewhere on the page, for a skip with no section at all.
+
+    Not a fake image, not a caption on an empty axis: a skip is a note,
+    and a note with nothing to show for it is the defect #386 named.
+    Grading only the name let a note that dropped its reason, or landed
+    under the wrong section, still pass. #464, F3.
+    """
+    sections = top_level_sections(body)
+    missing = []
+    for item in skipped or []:
+        name = str((item or {}).get("name") or "").strip()
+        if not name:
+            continue
+        reason = str((item or {}).get("reason") or "").strip()
+        section = str((item or {}).get("section") or "").strip().lower()
+        scope = sections.get(section, body) if section else body
+        if name not in scope or (reason and reason not in scope):
+            missing.append(name)
+    return missing
+
+
+def drop_dangling_figure_mentions(body: str, valid_numbers) -> str:
+    """A sentence naming a figure number that is no longer placed reads as
+    a promise the page does not keep: a figure a later attempt dropped
+    after an earlier pass already pointed a section at it, or one a live
+    image backend failed to render (#514, #531). Strips the whole
+    sentence, never only the number, so a reader is never left with a
+    dangling "shows" pointed at nothing. Copied from the SDK port's
+    `checks.py`, not imported. #464.
+    """
+    valid = set(valid_numbers)
+
+    def _drop(text: str) -> str:
+        pieces = SENTENCE_END.split(text)
+        kept = [
+            piece
+            for piece in pieces
+            if not any(int(n) not in valid for n in FIGURE_MENTION.findall(piece))
+        ]
+        return text if len(kept) == len(pieces) else " ".join(kept)
+
+    return _map_prose_blocks(body, _drop)
 
 
 def visible_source_syntax(body: str) -> list[str]:
@@ -913,8 +1147,10 @@ def sections_without_prose(body: str, min_words: int = MIN_SECTION_WORDS) -> lis
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
         chunk = body[match.end() : end]
         # Images and fenced code are not prose. A section that is one figure and
-        # nothing else still owes the reader an explanation.
-        chunk = IMAGE.sub("", FENCE.sub("", chunk))
+        # nothing else still owes the reader an explanation. Nor is a
+        # `Figure N.` caption or a skip-note blockquote, both system-
+        # generated. #464, F4.
+        chunk = IMAGE.sub("", FENCE.sub("", _strip_figure_notes(chunk)))
         words = re.findall(r"\b[\w'-]+\b", chunk)
         if len(words) < min_words:
             thin.append(f"{heading} ({len(words)} words)")
@@ -1230,9 +1466,13 @@ def top_level_section_spans(body: str) -> dict[str, tuple[int, int]]:
 def _section_sentences_with_lines(text: str) -> list[tuple[int, str]]:
     """(line, sentence) pairs inside one section's own text, the line counted
     from that section's own first line. Skips a heading, an image, a list, a
-    table, a quote, and a fence, the same exemptions `_prose_sentences`
-    grants, because none of those is a sentence a writer composed. Copied
-    from the SDK port, not imported.
+    table, a quote, a fence, and a `Figure N.` caption, the same exemptions
+    `_prose_sentences` grants, because none of those is a sentence a writer
+    composed. Copied from the SDK port, not imported. The caption exemption
+    matters here specifically: two auto-described diagrams of the same
+    paper share enough boilerplate wording ("A flowchart diagram of
+    <topic>, showing ...") to read as a repeat of each other, which is not
+    a finding restated, it is two figures about the same paper. #464.
     """
     out: list[tuple[int, str]] = []
     block_lines: list[str] = []
@@ -1242,7 +1482,11 @@ def _section_sentences_with_lines(text: str) -> list[tuple[int, str]]:
         if not block_lines:
             return
         block = "\n".join(block_lines).strip()
-        if block.startswith(("#", "!", "|", ">", "```", "-", "*")) or LIST_ITEM.match(block):
+        if (
+            block.startswith(("#", "!", "|", ">", "```", "-", "*"))
+            or LIST_ITEM.match(block)
+            or FIGURE_CAPTION.match(block)
+        ):
             return
         for piece in SENTENCE_END.split(block):
             piece = piece.strip()
@@ -1294,12 +1538,13 @@ def repeat_shingles(sections: dict[str, str]) -> list[dict]:
     sections that both restate the same finding are still a repeat. Copied
     from the SDK port, not imported. #477.
     """
+    headings = frozenset(sections)
     entries: list[dict] = []
     for name, text in sections.items():
         if name in CAVEAT_EXEMPT_SECTIONS:
             continue
         for line, sentence in _section_sentences_with_lines(text):
-            if _is_back_reference(sentence):
+            if _is_back_reference(sentence, headings):
                 continue
             entries.append(
                 {
@@ -1363,6 +1608,7 @@ def check(
     loop_doctrine: bool = True,
     enforce_structure: bool = False,
     outline: dict | None = None,
+    skipped_figures=None,
 ) -> PaperScore:
     """Score a white paper. Every check here is arithmetic."""
     words_needed = MIN_WORDS if min_words is None else min_words
@@ -1411,6 +1657,47 @@ def check(
             "every figure is a judged *_imagen.png publication asset"
             if not wrong_assets
             else f"non-publication figures: {wrong_assets}",
+        )
+    )
+
+    # Unconditional, and inert with no image at all: a snippet another
+    # row's test built has nothing to caption. #413, #464.
+    cap_missing = captioned_violations(body)
+    checks.append(
+        Check(
+            "captioned",
+            not cap_missing,
+            "every image is followed by its Figure N. caption"
+            if not cap_missing
+            else f"no caption: {cap_missing[:3]}",
+        )
+    )
+
+    # Unconditional, and inert with no numbered figure at all: `placed_figures`
+    # reads only what `Figure N.` captions the body actually carries, so a
+    # figure the diagrammer dropped or the chart stage skipped is never
+    # placed and never demands a mention here. #464.
+    ref_missing = figure_referenced_violations(body)
+    checks.append(
+        Check(
+            "figure_referenced",
+            not ref_missing,
+            "every placed figure is named Figure N in its own section's prose"
+            if not ref_missing
+            else f"unreferenced: {ref_missing[:3]}",
+        )
+    )
+
+    # Unconditional, and inert with nothing skipped: a snippet another
+    # row's test built has no skip to note. #386, #464.
+    skip_missing = skip_noted_violations(body, skipped_figures)
+    checks.append(
+        Check(
+            "skip_noted",
+            not skip_missing,
+            "every skipped figure is named with its reason"
+            if not skip_missing
+            else f"no note: {skip_missing[:3]}",
         )
     )
 
@@ -1736,6 +2023,8 @@ def demo() -> None:
         "## Introduction\n\n"
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
         "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
+        "Figure 1. A flowchart of the three exits.\n\n"
+        "Figure 1 shows the order. [1]\n\n"
         "## Limitations\n\n"
         "This paper measures two runtimes only. [2]\n\n"
         "## References\n\n"
@@ -1774,7 +2063,11 @@ def demo() -> None:
 
     # One sentence under a heading is not a section either.
     thin = good.replace(
-        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]", "Yes. [1]"
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
+        "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
+        "Figure 1. A flowchart of the three exits.\n\n"
+        "Figure 1 shows the order. [1]",
+        "Yes. [1]",
     )
     assert "has_body" in gate(thin, urls).signature()
 

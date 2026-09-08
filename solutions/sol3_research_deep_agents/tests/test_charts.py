@@ -114,6 +114,13 @@ def test_charts_stage_skips_with_no_data(tmp_path: Path):
     assert result.artifacts["rendered"] == 0
     assert any("no data" in str(item) for item in notes)
     assert not any("not rendered in this phase" in str(item) for item in notes)
+    # #386, #464. Named, not a bare string: a reader (and `assemble`) needs
+    # the owning section and the reason, not only the fact one figure
+    # never rendered.
+    import json  # noqa: PLC0415
+
+    recorded = json.loads((run.work_dir / "charts.json").read_text())["skipped"]
+    assert recorded == [{"name": "latency", "section": "s1", "reason": "no data"}], recorded
 
 
 def test_charts_stage_renders_when_data_arrives(tmp_path: Path):

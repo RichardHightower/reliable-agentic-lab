@@ -2229,16 +2229,24 @@ class Paper:
                 # the label loop already earned, so a later commissioning
                 # gets its full label budget back once the backend
                 # recovers.
+                figure_spec = next(
+                    (f for f in survivors if evidence.slug(f["name"]) == name), None
+                )
+                # #464. The owning section, captured before the reference is
+                # dropped below: `_drop_figure_reference` empties this out
+                # of `outline.json`, and `assemble` still needs to know
+                # where to name the skip.
+                owning_section = None
+                if figure_spec:
+                    owning_section = self._section_for_figure(figure_spec["name"])
                 records[name] = {
                     "name": name,
                     "attempts": prior_attempts,
                     "dropped": False,
+                    "section": (owning_section or {}).get("id") or "",
                     "reason": f"{stages.BACKEND_FAILURE_MARK}{reason}",
                 }
                 self.say(f"    note: {name} skipped, {stages.BACKEND_FAILURE_MARK}{reason}")
-                figure_spec = next(
-                    (f for f in survivors if evidence.slug(f["name"]) == name), None
-                )
                 if figure_spec:
                     self._drop_figure_reference(figure_spec["name"])
             survivors = [f for f in survivors if evidence.slug(f["name"]) not in backend_failed]
@@ -2348,7 +2356,11 @@ class Paper:
             rows = charts_mod.collect(self.work_dir, figure, ledger)
             if not rows:
                 self.say(f"    skipping chart {name!r}: no data")
-                skipped.append(name)
+                # #386, #464. A skip is the product, not a phase-skip log
+                # line nobody reads: `section` and `reason` travel with the
+                # name so `assemble` can name both under the section a
+                # reader expects this chart to sit in.
+                skipped.append({"name": name, "section": figure.get("section") or "", "reason": "no data"})
                 continue
             spec = {}
             try:
@@ -2659,8 +2671,15 @@ class Paper:
         if normalized != self.written:
             self.written = normalized
             self._save_sections()
+        skipped_figures = self._skipped_figures()
         body = stages.assemble(
-            self.plan, self.outline, self.written, self.figures, self.ledger, charts=self._loaded_charts()
+            self.plan,
+            self.outline,
+            self.written,
+            self.figures,
+            self.ledger,
+            charts=self._loaded_charts(),
+            skipped_figures=skipped_figures,
         )
         # The em dash sweep is mechanical and runs before the gate that checks
         # for em dashes. Arguing with a model about punctuation costs a turn.
@@ -2676,6 +2695,7 @@ class Paper:
             # `self.plan`'s sections carry `key_questions`, so `question_heading`
             # can grade a heading against them, not only against "ends in ?". #463.
             outline=self.plan,
+            skipped_figures=skipped_figures,
         )
         self.paper_path.write_text(body, encoding="utf-8")
         # A warning is not a failure. Filing both under one key made a short
@@ -2702,11 +2722,15 @@ class Paper:
     # -- 7b. trim ------------------------------------------------------------
 
     def stage_trim(self, extra: str = "") -> StageResult:
-        """The P9 whole-paper pass. Runs once, between write and review, so
-        `stage_review` (the reviewer the creatine run's `no_filler`
-        complaint named) never grades a draft that restates the same
-        finding across sections. Operates on `self.written` directly:
-        assembly has not run yet, so there is no `paper.md` to read.
+        """The P9 whole-paper pass, now also #464's in-text figure pass.
+        Runs once, between diagram and review: `stage_review` (the
+        reviewer the creatine run's `no_filler` complaint named) never
+        grades a draft that restates the same finding across sections, or
+        one that still leaves a placed figure unmentioned. Operates on
+        `self.written` directly: assembly proper has not run yet, so there
+        is no `paper.md` to read, but a throwaway preview assemble (below)
+        gives `Figure N` numbers to work from, since `diagram` now runs
+        before this stage (#464's reorder of #476's own STAGE_ORDER move).
 
         Add no facts; `new_claims` reverts the whole edit if it invents a
         specific the evidence never retrieved, the same defence the SDK
@@ -2718,8 +2742,41 @@ class Paper:
         by_lower = {heading.lower(): heading for heading in self.written}
         sections = {lowered: self.written[heading] for lowered, heading in by_lower.items()}
         repeats = paper_check.repeat_shingles(sections)
-        if not repeats:
-            return StageResult("trim", summary="no repeat")
+
+        # #464. Every figure this attempt will publish, numbered, from a
+        # throwaway preview assemble: `self.written` carries no image or
+        # caption line of its own, so this is the only way to learn a
+        # figure's number before the real `stage_assemble` runs.
+        preview = stages.assemble(
+            self.plan, self.outline, self.written, self.figures, self.ledger,
+            charts=self._loaded_charts(),
+        )
+        figures_for_trim = paper_check.placed_figures(preview)
+        # #464 F5. Every figure already exists from the second attempt on,
+        # so gating on "any figure at all" spent a writer turn on every
+        # single attempt even when every figure was already named. Gate on
+        # the figures that still need a sentence.
+        unmentioned = [
+            figure
+            for figure in figures_for_trim
+            if figure.get("section")
+            and by_lower.get(figure["section"])
+            and not paper_check.mentions_figure(self.written[by_lower[figure["section"]]], figure["number"])
+        ]
+        # #531. A "Figure N" mention with no figure behind it can survive in
+        # `self.written` alone even with nothing else to do this attempt: a
+        # figure an earlier pass pointed a section at, that this attempt's
+        # own commissioning then dropped. Still worth the pass, to clean it.
+        # #464 F5: a valid mention is not dangling, or this never idles.
+        valid_numbers = {f["number"] for f in figures_for_trim if f.get("number")}
+        dangling = any(
+            int(n) not in valid_numbers
+            for text in self.written.values()
+            for n in paper_check.FIGURE_MENTION.findall(text)
+        )
+
+        if not repeats and not unmentioned and not dangling:
+            return StageResult("trim", summary="no repeat, no figure")
 
         before = dict(self.written)
         if self.runner.name == "fixture":
@@ -2743,23 +2800,53 @@ class Paper:
                         continue
                     reference = f"As stated in {source}, this point also holds here."
                     self.written[target_heading] = text.replace(sentence, reference, 1)
+            # #464. One plain sentence naming the figure, appended to the
+            # end of its owning section's own prose, for any figure that
+            # section does not already mention. Joined onto the last
+            # paragraph, not a new one: a standalone sentence would read
+            # as an uncited claim, and the paragraph it joins already
+            # carries the citation this figure is illustrating.
+            for figure in figures_for_trim:
+                heading = by_lower.get(figure.get("section") or "")
+                number = figure.get("number")
+                if not heading or not number:
+                    continue
+                text = self.written[heading]
+                # Word-bounded, so "Figure 1" is not satisfied by a
+                # "Figure 12" mention already in the prose. #464 F1.
+                if paper_check.mentions_figure(text, number):
+                    continue
+                sentence = _figure_mention_sentence(number, figure.get("caption") or "")
+                self.written[heading] = f"{text.rstrip()} {sentence}"
         else:
             draft = "\n\n".join(f"## {head}\n\n{body}" for head, body in self.written.items())
+            figure_note = (
+                (
+                    "\n\nEach entry below also names a figure the paper already "
+                    "carries a caption for: its number, its owning section, and "
+                    "its caption. If that section's own prose does not yet name "
+                    "the figure, add one short sentence there that does, for "
+                    "example \"Figure 2 shows the retry sequence.\" Do not "
+                    "renumber a figure or move its image or caption line.\n\n"
+                    f"Figures:\n{json.dumps(figures_for_trim, indent=2)}"
+                )
+                if figures_for_trim
+                else ""
+            )
             reply = self._ask(
                 "writer",
                 "This is the whole-paper pass. Each entry below names a "
                 "sentence and the other sections that restate it. Keep the "
                 "first statement, in full, with its numbers and units, "
                 "exactly where it already is. Replace every later "
-                "restatement with one sentence of twelve words or fewer "
-                "that opens with one of these four phrases and names the "
-                "section where the finding first appears: \"As stated in\", "
-                "\"As noted in\", \"As shown in\", or \"See\". Do not "
-                "simply delete a repeat; a reader needs the pointer, and a "
-                "paragraph must never end up as only a citation marker "
-                "with no sentence. Add no facts. Keep every heading and "
-                "every figure line exactly as it is. Return the whole "
-                "edited body.\n\n"
+                "restatement with one sentence of 24 words or fewer that "
+                "opens with one of these four phrases and names one of the "
+                "paper's own `##` headings: \"As stated in\", \"As noted "
+                "in\", \"As shown in\", or \"See\". Do not simply delete a "
+                "repeat; a reader needs the pointer, and a paragraph must "
+                "never end up as only a citation marker with no sentence. "
+                "Add no facts. Keep every heading and every figure line "
+                f"exactly as it is. Return the whole edited body.{figure_note}\n\n"
                 f"Repeats:\n{json.dumps(repeats, indent=2)}\n\n"
                 f"The paper body:\n{draft}",
             )
@@ -2774,10 +2861,17 @@ class Paper:
         # #521. Pointing two repeats in the same section at the same
         # source leaves the identical pointer sentence stacked once per
         # repeat, whichever branch above wrote it; a reader needs it once.
+        # #531: `self.written[heading]` carries no `##` line of its own, so
+        # the paper's real heading set travels in explicitly. A dangling
+        # `Figure N` -- a mention an earlier attempt added for a figure
+        # this attempt's own commissioning then dropped -- is stripped the
+        # same pass. #514, #531.
+        real_headings = frozenset(h.lower() for h in self.written)
         for heading in self.written:
-            self.written[heading] = paper_check.collapse_repeated_back_references(
-                self.written[heading]
+            text = paper_check.collapse_repeated_back_references(
+                self.written[heading], real_headings
             )
+            self.written[heading] = paper_check.drop_dangling_figure_mentions(text, valid_numbers)
 
         before_blob = "\n\n".join(before.values())
         after_blob = "\n\n".join(self.written.values())
@@ -2794,10 +2888,34 @@ class Paper:
                 summary="reverted: an invented specific",
             )
         self._save_sections()
+        self._restamp_diagram_guard()
         return StageResult(
             "trim", usd=usd, artifacts={"trimmed": True, "reverted": []},
-            summary=f"{len(repeats)} repeats cut",
+            summary=f"{len(repeats)} repeats cut, {len(figures_for_trim)} figures checked",
         )
+
+    def _restamp_diagram_guard(self) -> None:
+        """Re-hash `diagrams.json`'s own `sections_sha` to the section text
+        `stage_trim` just finished editing. #464.
+
+        `diagram` now runs before `trim` (the opposite of #476's own
+        order), so the guard it wrote reflects the pre-trim draft. Without
+        this, a caveat cut or an added figure mention makes a future
+        resume's freshly hashed `self.written` no longer match what the
+        guard recorded, and a real render budget gets spent redrawing
+        figures no section change actually touched.
+        """
+        path = self.work_dir / "diagrams.json"
+        if not path.exists():
+            return
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if "sections_sha" not in payload:
+            return
+        payload["sections_sha"] = _sections_sha(self.written)
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     def _uncited_section_headings(self) -> list[str]:
         """Return exactly the writer bodies that the citation gate rejects."""
@@ -2870,6 +2988,76 @@ class Paper:
         self.charts = [item for item in payload.get("charts") or [] if item.get("path")]
         return self.charts
 
+    def _skipped_charts(self) -> list[dict]:
+        """Every skipped chart, `{"name", "section", "reason"}`, section-
+        owned.
+
+        An older `charts.json` recorded a bare name list (`["a-chart"]`,
+        pre #464). That still loads: a bare name becomes `reason: "no
+        data"` (the only reason this port's chart stage ever logs) with an
+        empty `section`, so `assemble` still has a name and a reason to
+        write, only no section to own it.
+        """
+        path = self.work_dir / "charts.json"
+        if not path.exists():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        out = []
+        for item in payload.get("skipped") or []:
+            if isinstance(item, dict):
+                out.append(
+                    {
+                        "name": str(item.get("name") or ""),
+                        "section": str(item.get("section") or ""),
+                        "reason": str(item.get("reason") or "no data"),
+                    }
+                )
+            else:
+                out.append({"name": str(item), "section": "", "reason": "no data"})
+        return out
+
+    def _skipped_diagrams(self) -> list[dict]:
+        """Every diagram a live image backend failed to render, `{"name",
+        "section", "reason"}`. #386, #464, #531.
+
+        Only the #531 backend-failure case, named by `stage_diagram`'s own
+        `reason` field (`BACKEND_FAILURE_MARK` prefixed). The renderer
+        being absent altogether is not a skip worth narrating on every
+        offline and CI page, and a claims-mismatch drop is E7's own
+        territory: it already strips the figure's reference from the
+        outline before assembly, so there is no dangling mention to
+        explain here.
+        """
+        path = self.work_dir / "diagrams.json"
+        if not path.exists():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        out = []
+        for item in payload.get("figures") or []:
+            reason = str(item.get("reason") or "")
+            if not reason.startswith(stages.BACKEND_FAILURE_MARK):
+                continue
+            out.append(
+                {
+                    "name": str(item.get("name") or ""),
+                    "section": str(item.get("section") or ""),
+                    "reason": reason,
+                }
+            )
+        return out
+
+    def _skipped_figures(self) -> list[dict]:
+        """Every named skip on the page: a chart Python refused, and a
+        diagram a live image backend failed to render. #386, #464, #531.
+        """
+        return self._skipped_charts() + self._skipped_diagrams()
+
 
 FENCE = re.compile(r"\A```[\w]*\n(.*?)\n?```\Z", re.S)
 
@@ -2878,6 +3066,21 @@ def _strip_fence(text: str) -> str:
     """Diagram source, without the fence a model adds however often you ask."""
     match = FENCE.match(text.strip())
     return (match.group(1) if match else text).strip() + "\n"
+
+
+def _figure_mention_sentence(number: int, caption: str) -> str:
+    """A plain sentence naming a figure, distinct enough from another
+    figure's own mention to never itself become a `caveat_once` repeat.
+
+    #464. `WORD` (the shingle tokenizer `repeat_shingles` uses) drops a
+    bare digit, so "Figure 1 illustrates this point." and "Figure 2
+    illustrates this point." shingle identically once the number is gone
+    and Jaccard-match each other as a restatement. A few words of the
+    figure's own caption is content two different figures do not share.
+    Copied from the SDK port's `turns.py`, not imported.
+    """
+    gist = " ".join((caption or "").split()[:6]).rstrip(",.:;")
+    return f"Figure {number} shows {gist}." if gist else f"Figure {number} illustrates this point."
 
 
 def _sections_sha(written: dict[str, str]) -> str:
