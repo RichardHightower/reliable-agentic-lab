@@ -126,6 +126,36 @@ def bibliography(work_dir) -> list[dict]:
     ]
 
 
+def render_reference(ref: dict) -> str:
+    """One reference line: "Authors (year). Title. Venue. URL."
+
+    Every field is optional and falls back field by field, down to the bare
+    URL when nothing else came back. `ref` is the dict `paper._numbered`
+    builds, carrying whatever `metadata.fetch_record` found. #470
+
+    `paper.assemble` does not call this yet; it still writes
+    `f"{ref['number']}. {ref['url']}"` at the seam P3 will convert. This
+    function is complete now so E2 never has to touch `assemble` to land it.
+    """
+    url = str(ref.get("url") or "").strip()
+    authors = [str(a).strip() for a in (ref.get("authors") or []) if str(a).strip()]
+    year = str(ref.get("year") or "").strip()
+    title = str(ref.get("title") or "").strip()
+    venue = str(ref.get("venue") or "").strip()
+
+    lead = ", ".join(authors)
+    if year:
+        lead = f"{lead} ({year})" if lead else f"({year})"
+
+    parts = [part for part in (lead, title, venue) if part]
+    if not parts:
+        return url
+    text = ". ".join(parts)
+    if not text.endswith("."):
+        text += "."
+    return f"{text} {url}" if url else text
+
+
 def demo() -> None:
     import tempfile  # noqa: PLC0415
 
@@ -140,6 +170,22 @@ def demo() -> None:
     # A resume reads the same map off disk.
     assert load(work) == second
     assert [row["number"] for row in bibliography(work)] == [1, 2, 3]
+
+    # render_reference falls back field by field to the bare URL.
+    assert render_reference({"url": "https://a.invalid"}) == "https://a.invalid"
+    assert render_reference({"url": "https://a.invalid", "title": "A Study"}) == (
+        "A Study. https://a.invalid"
+    )
+    full = render_reference(
+        {
+            "url": "https://a.invalid",
+            "title": "A Study",
+            "authors": ["Jane Doe", "John Smith"],
+            "year": "2020",
+            "venue": "Journal of Things",
+        }
+    )
+    assert full == "Jane Doe, John Smith (2020). A Study. Journal of Things. https://a.invalid", full
     print("citations: ok")
 
 

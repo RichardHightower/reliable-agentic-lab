@@ -22,6 +22,7 @@ import citations
 import corpus
 import gates
 import locate
+import metadata
 import outline as outlines
 import rkc
 from turns import Escalate, TurnFailed
@@ -165,6 +166,56 @@ def _finding_from_claim(claim: dict, section_id: str, question: str, index: int)
         "origin": "corpus" if kind == "corpus" else "web",
         "epistemic": claim.get("epistemic") or "",
     }
+
+
+def enrich_source_metadata(findings: list[dict], run) -> None:
+    """Replace each web finding's title with the record's, in place. #470
+
+    One call, over every finding a section produced, whichever research path
+    built it: the per-question `research()` loop through
+    `findings_from_research`, the base `Turns.research_section` default (which
+    calls that same function), or the live `SdkTurns.research_section`, which
+    hands back the identical `_SOURCE_SCHEMA` shape straight from the model.
+    A single choke point here, after every path has converged on one finding
+    shape, beats fetching inside each path separately and disagreeing about
+    which title is "the model's" once a run enriches the same finding twice.
+
+    `run` is `None` in every test and call site that predates this ticket,
+    which is a no-op: the model's title stands exactly as before. The same
+    holds for a `run.turns` that declares no `backend` at all, which is every
+    hand-built test double in this suite that is not modelling the research
+    backend. Treating "no backend concept" as "live, go fetch" would send a
+    real DNS query for every `https://example.invalid/...` those tests
+    construct.
+
+    Only a `turns` that actually holds a `backend` attribute, fixture or
+    live, is enriched. The fetch is cached per work directory
+    (`metadata.cached_fetch`), so a source two sections cite, or a resumed
+    run reloading a stamped section, pays for it once.
+    """
+    if run is None or not hasattr(getattr(run, "turns", None), "backend"):
+        return
+    backend = run.turns.backend
+    for finding in findings:
+        source = finding.get("source") or {}
+        url = str(source.get("url_or_path") or "")
+        # Not `kind == "web"`: `locate_cabinet_findings` relabels a matched
+        # cabinet source `kind = "corpus"` even once it carries a real public
+        # URL, and that source is just as fetchable as one the researcher
+        # found directly. The scheme is the actual gate: a corpus key or a
+        # `brain:` reference is never `http(s)://`, and `metadata.fetch_record`
+        # refuses anything else anyway, this check only saves the call.
+        if not url.lower().startswith(("http://", "https://")):
+            continue
+        fetched = metadata.cached_fetch(
+            run.work_dir, url, backend, model_title=source.get("title") or ""
+        )
+        source["title"] = fetched.get("title") or source.get("title") or ""
+        source["authors"] = fetched.get("authors") or []
+        source["year"] = fetched.get("year") or ""
+        source["venue"] = fetched.get("venue") or ""
+        source["note"] = fetched.get("note") or ""
+        finding["source"] = source
 
 
 # A claim describes the world. These phrases describe the search instead, and
@@ -645,6 +696,11 @@ def run_section(run, section: dict) -> dict:
         else:
             gaps.append({"question": question["text"], "queries": list(queries)})
         queries.append(question["text"])
+
+    # 3c-bis metadata. One pass, after every research path for this section
+    # has converged on the same finding shape, replaces each web source's
+    # title with the record's. #470
+    enrich_source_metadata(findings, run)
 
     payload = {
         "section_id": sid,

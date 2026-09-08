@@ -179,3 +179,28 @@ def test_a_hand_edited_non_http_source_url_stops_a_resume(tmp_path):
     (good_root / f"{good.id}.md").write_text(good.to_markdown(), encoding="utf-8")
     loaded = evidence.Ledger(good_root).load()
     assert loaded.sources[good.id].url == "https://a.example"
+
+
+def test_metadata_round_trips_through_the_ledger(tmp_path):
+    """#470: authors, year, venue, and a title_mismatch note all survive a
+    `to_markdown` write and a `load` back, the same way `located_from` does."""
+    fetched = evidence.SourceDocument(
+        title="The Interplay Between Physical Activity, Protein Consumption, "
+        "and Sleep Quality in Muscle Protein Synthesis",
+        url="https://pubmed.ncbi.nlm.nih.gov/12345678/",
+        subject="creatine",
+        authors=["Nakamura K", "Ortiz L"],
+        year="2022",
+        venue="Journal of Applied Physiology",
+        note="title_mismatch: model said 'X'; the record says 'Y'",
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_source(fetched)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load().source_for_url(fetched.url)
+    assert reloaded.title == fetched.title
+    assert reloaded.authors == fetched.authors
+    assert str(reloaded.year) == fetched.year
+    assert reloaded.venue == fetched.venue
+    assert reloaded.note == fetched.note

@@ -25,6 +25,7 @@ from pathlib import Path
 import diagrams
 import brief
 import evidence
+import metadata
 import paper_check
 import source_policy
 
@@ -306,12 +307,20 @@ def record_findings(
     reply: dict,
     *,
     seed: tuple[str, ...] | None = None,
+    backend=None,
 ) -> evidence.Finding:
     """Turn one researcher reply into source, claim, and finding records.
 
     A claim with no source id is dropped here rather than carried forward. It
     cannot be corroborated, it cannot be cited, and keeping it only lets it
     reach the writer as something that looks like evidence.
+
+    `backend` is the run's research backend, the same object `Paper.backend`
+    holds. Passing it fetches the source's real title, authors, year, and
+    venue through `metadata.fetch_record` before the source is admitted,
+    which is what replaces the model's word with the record's. Leaving it
+    `None`, as every test that does not care about metadata does, skips the
+    fetch entirely and keeps the model's title exactly as before. #470
     """
     subject = question.get("subject", "topic")
     supplied_urls = [str(item.get("url", "")) for item in reply.get("sources", [])]
@@ -339,14 +348,32 @@ def record_findings(
                 continue
         elif not source_policy.url_allowed(url, allowlist):
             continue
+        # `add_source` already dedupes by url, so a source this run already
+        # admitted is also a fetch this run already paid for. One fetch per
+        # unique URL per run falls out of the ledger's own dedup, no separate
+        # cache required.
+        existing = ledger.source_for_url(url)
+        if existing is not None:
+            source_ids.append(existing.id)
+            continue
+        model_title = item.get("title") or url
+        fetched = (
+            metadata.fetch_record(url, backend, model_title=model_title)
+            if backend is not None
+            else {}
+        )
         source = ledger.add_source(
             evidence.SourceDocument(
-                title=item.get("title") or url,
+                title=fetched.get("title") or model_title,
                 url=url,
                 subject=subject,
                 vendor=item.get("vendor", ""),
                 body=item.get("quote", ""),
                 located_from=located_from,
+                authors=fetched.get("authors") or [],
+                year=fetched.get("year") or "",
+                venue=fetched.get("venue") or "",
+                note=fetched.get("note") or "",
             )
         )
         source_ids.append(source.id)
@@ -859,11 +886,34 @@ def figure_block(figure, figures_dir: str = "figures") -> str:
     return f"![{figure.alt}]({figures_dir}/{target.name})"
 
 
+def render_reference(source: evidence.SourceDocument) -> str:
+    """One reference line: "Authors (year). Title. Venue. URL."
+
+    Every field is optional and falls back field by field, down to the bare
+    URL when `metadata.fetch_record` found nothing at all. #470
+    """
+    title = source.title.strip() or ""
+    authors = [str(a).strip() for a in (source.authors or []) if str(a).strip()]
+    year = str(source.year or "").strip()
+    venue = str(source.venue or "").strip()
+
+    lead = ", ".join(authors)
+    if year:
+        lead = f"{lead} ({year})" if lead else f"({year})"
+
+    parts = [part for part in (lead, title, venue) if part]
+    if not parts:
+        return source.url
+    text = ". ".join(parts)
+    if not text.endswith("."):
+        text += "."
+    return f"{text} {source.url}"
+
+
 def references_block(urls: list[str], sources: list) -> str:
     rows = ["## References", ""]
     for number, source in enumerate(sources, start=1):
-        title = source.title.strip() or source.url
-        rows.append(f"{number}. {title}. {source.url}")
+        rows.append(f"{number}. {render_reference(source)}")
     if not sources:
         rows += [f"{n}. {url}" for n, url in enumerate(urls, start=1)]
     return "\n".join(rows) + "\n"

@@ -1500,7 +1500,11 @@ class Paper:
             )
             if repository_report is not None:
                 stages.record_findings(
-                    self.ledger, question, repository_report, seed=self.allowed_domains
+                    self.ledger,
+                    question,
+                    repository_report,
+                    seed=self.allowed_domains,
+                    backend=self.backend,
                 )
                 self.ledger.write()
                 continue
@@ -1532,6 +1536,7 @@ class Paper:
                 question,
                 parsed,
                 seed=self.allowed_domains,
+                backend=self.backend,
             )
             # Persist per question. A stop between questions must not discard
             # the answers this run already paid for.
