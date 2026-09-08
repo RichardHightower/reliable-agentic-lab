@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import checks
@@ -219,7 +220,76 @@ def enrich_source_metadata(findings: list[dict], run) -> None:
         source["year"] = fetched.get("year") or ""
         source["venue"] = fetched.get("venue") or ""
         source["note"] = fetched.get("note") or ""
+        # The abstract or page text the fetch carried. #471's `attributed()`
+        # reads this, never the researcher's own quote.
+        source["text"] = fetched.get("text") or ""
         finding["source"] = source
+
+
+# #471: the claim's own quote, or all of its numbers, must appear in the text
+# `enrich_source_metadata` just fetched for the source it names. Lives here,
+# not in `paper.py`: `run_section` is the path a real run executes, and
+# `paper.verify` is dead code no `LINEAR` or `CYCLE` stage calls.
+_NUMBER = re.compile(r"\d[\d,.]*\d|\d")
+
+
+def _numbers(text: str) -> set[str]:
+    return {token.replace(",", "") for token in _NUMBER.findall(text or "")}
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").lower()).strip()
+
+
+def attributed(finding: dict, source_text: str) -> bool:
+    """Does the text fetched for a finding's own cited source back it?
+
+    The finding's own `quote` (the researcher's excerpt) must appear in
+    `source_text`, or every one of the claim's numbers must -- one shared
+    number out of several is not enough: a source that only says "a 12 week
+    study" does not back "creatine adds 1.2 kg over 12 weeks" merely because
+    12 appears in both. Neither a quote nor a number is not a failure: a
+    purely qualitative claim carries nothing this cheap, model-free check
+    can contradict, and dropping it here would invent a mismatch that was
+    never checked. #471
+    """
+    quote = str(finding.get("quote") or "").strip()
+    numbers = _numbers(finding.get("claim") or "")
+    if not quote and not numbers:
+        return True
+    normalized_source = _normalize(source_text)
+    if quote and _normalize(quote) in normalized_source:
+        return True
+    return bool(numbers) and numbers <= _numbers(source_text)
+
+
+def attribute_findings(run, findings: list[dict], sid: str) -> list[dict]:
+    """Drop a finding whose own cited source does not back it. #471
+
+    Python only, no model call, so it runs over every finding here,
+    unconditionally, before `run.max_claims` caps the model verify turn
+    below. Gated the same way `enrich_source_metadata` is: a `run.turns`
+    with no `backend` attribute at all (every pre-#471 test double) is
+    untouched, so old behaviour is unchanged byte for byte.
+    """
+    if not hasattr(getattr(run, "turns", None), "backend"):
+        return findings
+    kept: list[dict] = []
+    dropped: list[str] = []
+    for finding in findings:
+        source = finding.get("source") or {}
+        source_text = str(source.get("text") or "")
+        if source_text and not attributed(finding, source_text):
+            dropped.append(finding.get("claim") or finding.get("id") or "")
+            continue
+        if not source_text:
+            note = "unattributed: attribution not checked"
+            source["note"] = f"{source['note']}; {note}" if source.get("note") else note
+            finding["source"] = source
+        kept.append(finding)
+    if dropped:
+        run.log(f"    {sid} attribution: dropped {len(dropped)} claim(s) the cited source does not say: {dropped}")
+    return kept
 
 
 # A claim describes the world. These phrases describe the search instead, and
@@ -706,6 +776,11 @@ def run_section(run, section: dict) -> dict:
     # title with the record's. #470
     enrich_source_metadata(findings, run)
 
+    # 3c-ter attribution. A finding whose own cited source does not say what
+    # its claim says is dropped here, before it is written to disk, so
+    # `do_sections`'s aggregation downstream never sees it. #471
+    findings = attribute_findings(run, findings, sid)
+
     payload = {
         "section_id": sid,
         "findings": findings,
@@ -772,11 +847,18 @@ def run_section(run, section: dict) -> dict:
         else:
             state = "unverified"
         queries_used = verdict.get("queries_used") or []
+        # Silence is not a result. A `not_found`-shaped verdict still names
+        # what the verifier tried, so the record shows a search happened
+        # rather than nothing at all. #471
+        note = verdict.get("excerpt") or ""
+        if not note and state == "unverified":
+            queries = list(queries_used) or [(finding.get("claim") or "")[:80]]
+            note = f"not_found: searched {queries}"
         verdicts[finding["id"]] = {
             "finding_id": finding["id"],
             "state": state,
             "queries_used": queries_used,
-            "note": verdict.get("excerpt") or "",
+            "note": note,
         }
     (knowledge / "verdicts.json").write_text(
         json.dumps({"verdicts": list(verdicts.values())}, indent=2) + "\n",

@@ -38,14 +38,24 @@ def test_corroboration_needs_two_distinct_sources():
 
 def test_attributed_requires_the_quote_or_the_numbers_to_appear():
     """#471: the two signals `attributed()` checks, and the default when a
-    claim carries neither."""
-    quoted = evidence.Claim(text='The page states "creatine improves lean mass" directly.', subject="s")
-    assert evidence.attributed(quoted, 'A review notes "creatine improves lean mass" in trained adults.')
-    assert not evidence.attributed(quoted, "This page never mentions lean mass at all.")
+    claim carries neither. `quote` is the researcher's own excerpt for this
+    binding (`SourceDocument.body`), not a substring of `claim.text`."""
+    quoted = evidence.Claim(text="The page states that creatine improves lean mass.", subject="s")
+    assert evidence.attributed(
+        quoted, "A review notes creatine improves lean mass in trained adults.", quote="creatine improves lean mass"
+    )
+    assert not evidence.attributed(
+        quoted, "This page never mentions lean mass at all.", quote="creatine improves lean mass"
+    )
 
     numeric = evidence.Claim(text="The study enrolled 42 participants.", subject="s")
     assert evidence.attributed(numeric, "Of the 42 participants who enrolled, most finished.")
     assert not evidence.attributed(numeric, "The study enrolled a different number of people.")
+
+    # Every one of the claim's numbers must appear, not just one. #471
+    dosage = evidence.Claim(text="Creatine adds 1.2 kg of lean mass over 12 weeks.", subject="s")
+    assert not evidence.attributed(dosage, "This was a 12 week study of resistance-trained adults.")
+    assert evidence.attributed(dosage, "Over 12 weeks, creatine added 1.2 kg of lean mass on average.")
 
     plain = evidence.Claim(text="Creatine is widely studied.", subject="s")
     assert evidence.attributed(plain, "This text is about something unrelated."), (

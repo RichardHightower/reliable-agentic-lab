@@ -13,11 +13,14 @@ One attempt, a 10 second timeout, no retry. A failed or timed-out fetch keeps
 the model's title and writes a note; it never raises and never blocks the run.
 
 The same fetch also keeps whatever abstract or summary the record carried:
-the esummary abstract when PubMed or PMC report one, the arXiv summary, the
-Crossref abstract when present, else the page's meta description or its
-first text block. Capped at `TEXT_CAP` characters. #471's `attributed()`
-reads this text, never the model's own quote, to check a claim against the
-source it names.
+for PubMed or PMC, a second call to efetch (`rettype=abstract`), since
+esummary itself almost never carries one; for arXiv, its own summary field;
+for a DOI, the Crossref abstract when present; else the page's meta
+description or its first text block. Capped at `TEXT_CAP` characters. #471's
+`attributed()` reads this text, never the model's own quote, to check a
+claim against the source it names. A failed efetch keeps esummary's title,
+authors, and year and notes the miss; it never drops what esummary already
+gave.
 
 The offline switch: when `backend` is the fixture backend (`backend.name ==
 "fixture"`), this reads a recorded reply under `fixtures/metadata/` and never
@@ -78,6 +81,27 @@ def _get(url: str) -> bytes:
         return response.read()
 
 
+def _efetch_abstract(db: str, uid: str) -> str:
+    """The plain-text abstract, from efetch, not the rare esummary field.
+
+    `rettype=abstract&retmode=text` returns a formatted citation line, a
+    blank line, the abstract itself, then a trailing `PMID:` (or similar)
+    footer line, each block separated by a blank line. The citation and the
+    footer are not the abstract; everything between them is.
+    """
+    url = (
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+        f"?db={db}&id={uid}&rettype=abstract&retmode=text"
+    )
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", _get(url).decode("utf-8", errors="replace")) if p.strip()]
+    if len(paragraphs) < 2:
+        return " ".join(paragraphs[0].split()) if paragraphs else ""
+    body = paragraphs[1:]
+    if body[-1].lower().startswith(("pmid", "doi", "pmcid", "©")):
+        body = body[:-1]
+    return " ".join(" ".join(p.split()) for p in body)
+
+
 def _from_pubmed(pubmed_id: str) -> dict:
     url = (
         "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
@@ -86,15 +110,22 @@ def _from_pubmed(pubmed_id: str) -> dict:
     payload = json.loads(_get(url))
     result = (payload.get("result") or {}).get(pubmed_id) or {}
     authors = [a.get("name", "") for a in result.get("authors") or [] if a.get("name")]
-    return {
+    record = {
         "title": result.get("title") or "",
         "authors": authors,
         "year": str(result.get("pubdate") or "")[:4],
         "venue": result.get("fulljournalname") or result.get("source") or "",
-        # esummary does not normally carry an abstract; a small number of
-        # NCBI mirrors do, so take it when it is there rather than assume.
+        # esummary does not normally carry an abstract; efetch below usually
+        # does. This is the fallback when efetch itself fails.
         "text": result.get("abstract") or "",
     }
+    try:
+        abstract = _efetch_abstract("pubmed", pubmed_id)
+        if abstract:
+            record["text"] = abstract
+    except Exception as exc:  # noqa: BLE001  the abstract is a bonus; esummary's fields still stand
+        record["note"] = f"efetch abstract failed: {exc}"
+    return record
 
 
 def _from_pmc(pmc_id: str) -> dict:
@@ -105,13 +136,20 @@ def _from_pmc(pmc_id: str) -> dict:
     payload = json.loads(_get(url))
     result = (payload.get("result") or {}).get(pmc_id) or {}
     authors = [a.get("name", "") for a in result.get("authors") or [] if a.get("name")]
-    return {
+    record = {
         "title": result.get("title") or "",
         "authors": authors,
         "year": str(result.get("pubdate") or "")[:4],
         "venue": result.get("fulljournalname") or result.get("source") or "",
         "text": result.get("abstract") or "",
     }
+    try:
+        abstract = _efetch_abstract("pmc", pmc_id)
+        if abstract:
+            record["text"] = abstract
+    except Exception as exc:  # noqa: BLE001  the abstract is a bonus; esummary's fields still stand
+        record["note"] = f"efetch abstract failed: {exc}"
+    return record
 
 
 def _from_arxiv(arxiv_id: str) -> dict:
@@ -255,6 +293,10 @@ def fetch_record(url: str, backend, *, model_title: str = "") -> dict:
     record["year"] = str((fetched or {}).get("year") or "")
     record["venue"] = str((fetched or {}).get("venue") or "")
     record["text"] = str((fetched or {}).get("text") or "").strip()[:TEXT_CAP]
+    if (fetched or {}).get("note"):
+        # A partial failure below the title, e.g. efetch failing after
+        # esummary succeeded. The record's own fields still stand.
+        record["note"] = str(fetched["note"])
     if fetched_title:
         record["title"] = fetched_title
         if model_title and title_mismatch(model_title, fetched_title):

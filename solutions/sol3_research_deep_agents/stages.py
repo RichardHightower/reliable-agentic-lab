@@ -323,12 +323,13 @@ def record_findings(
     fetch entirely and keeps the model's title exactly as before. #470
 
     A claim is also checked here against the text that fetch retrieved:
-    `evidence.attributed()` requires the claim's quote or its numbers to
-    appear in it. A binding whose source text says something else is
-    dropped; a claim left with no binding is dropped and recorded as a gap.
-    A source with no fetched text (no `backend`, or the fetch found nothing)
-    keeps every binding and the claim is noted `unattributed`, because there
-    is nothing here to contradict, only nothing checked. #471
+    `evidence.attributed()` requires the source's own quote (`body`, that
+    source's entry in the researcher's reply) or every one of the claim's
+    numbers to appear in it. A binding whose source text says something else
+    is dropped; a claim left with no binding is dropped and recorded as a
+    gap. A source with no fetched text (no `backend`, or the fetch found
+    nothing) keeps every binding and the claim is noted `unattributed`,
+    because there is nothing here to contradict, only nothing checked. #471
     """
     subject = question.get("subject", "topic")
     supplied_urls = [str(item.get("url", "")) for item in reply.get("sources", [])]
@@ -426,11 +427,14 @@ def record_findings(
         attributed_ids: list[str] = []
         unattributed_kept = False
         for sid in ids:
-            source_text = ledger.sources[sid].text
-            if not source_text:
+            source = ledger.sources[sid]
+            if not source.text:
                 kept_ids.append(sid)
                 unattributed_kept = True
-            elif evidence.attributed(claim, source_text):
+            # `source.body` is the researcher's own quote for this specific
+            # binding, not a `"..."` substring pulled out of the claim's own
+            # text: #471, finding 3.
+            elif evidence.attributed(claim, source.text, quote=source.body):
                 kept_ids.append(sid)
                 attributed_ids.append(sid)
             # else: the source text does not back this claim. The binding is

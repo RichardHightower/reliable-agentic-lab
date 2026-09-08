@@ -217,11 +217,12 @@ class SourceDocument:
     # to carry all the way to the report without leaking into the paper. #470
     note: str = ""
     # The abstract or page text `metadata.fetch_record` retrieved, independent
-    # of anything the model said. `attributed()` reads this, never `body`,
-    # because `body` is the researcher's own quote and checking a model's
-    # claim against the model's own quote proves nothing. Empty means the
-    # fetch failed or returned no text; a claim bound to this source then
-    # keeps its binding unattributed rather than dropped. #471
+    # of anything the model said. `attributed()` searches this text, never
+    # `body`, for its needle: `body` is the researcher's own quote for this
+    # binding, the needle itself, and searching a source's own text for
+    # its own text proves nothing. Empty means the fetch failed or returned
+    # no text; a claim bound to this source then keeps its binding
+    # unattributed rather than dropped. #471
     text: str = ""
 
     def __post_init__(self) -> None:
@@ -358,7 +359,6 @@ class Finding:
         return f"{head}\n\n{self.summary or self.question}\n"
 
 
-_QUOTED = re.compile(r'"([^"]{6,})"')
 _NUMBER = re.compile(r"\d[\d,.]*\d|\d")
 
 
@@ -370,26 +370,31 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").lower()).strip()
 
 
-def attributed(claim: Claim, source_text: str) -> bool:
+def attributed(claim: Claim, source_text: str, *, quote: str = "") -> bool:
     """Does the text #470 fetched for a source actually back this claim?
 
-    A literal quoted phrase inside the claim's own text (the researcher
-    sometimes reproduces the source's wording) must appear in `source_text`,
-    or one of the claim's numbers must. Neither present is not a failure: a
-    purely qualitative claim carries nothing this cheap, model-free check can
+    `quote` is the researcher's own excerpt for this specific binding
+    (`SourceDocument.body`, set from that source's own entry in the
+    researcher's reply), not a `"..."` substring pulled out of `claim.text`:
+    a DA claim rarely carries an embedded quote, and the real one the
+    researcher gave sat unused. That quote must appear in `source_text`, or
+    every one of the claim's numbers must -- one shared number out of
+    several is not enough: a source that only says "a 12 week study" does
+    not back "creatine adds 1.2 kg over 12 weeks" merely because 12 appears
+    in both. Neither a quote nor a number is not a failure: a purely
+    qualitative claim carries nothing this cheap, model-free check can
     contradict, and dropping it here would be inventing evidence of a
     mismatch that was never checked. That claim's binding is only as good as
     whatever verified it elsewhere. #471
     """
-    quote_match = _QUOTED.search(claim.text or "")
-    quote = quote_match.group(1) if quote_match else ""
+    quote = (quote or "").strip()
     numbers = _numbers(claim.text)
     if not quote and not numbers:
         return True
     normalized_source = _normalize(source_text)
     if quote and _normalize(quote) in normalized_source:
         return True
-    return bool(numbers and numbers & _numbers(source_text))
+    return bool(numbers) and numbers <= _numbers(source_text)
 
 
 def corroborate(claim: Claim, *, contradicted: bool = False) -> Claim:
@@ -631,14 +636,26 @@ def demo() -> None:  # noqa: PLR0915  (one assertion per rule, deliberately flat
     corroborate(claim)
     assert claim.truth_state == CORROBORATED
 
-    # attributed(): a quote the source text does not carry loses the check; a
-    # number it does carry passes it; nothing to check passes by default. #471
-    quoted = Claim(text='The paper reports "a 42 percent reduction in error rate".', subject="dt")
-    assert not attributed(quoted, "The paper found no significant change in error rate.")
-    assert attributed(quoted, 'Results show "a 42 percent reduction in error rate" overall.')
+    # attributed(): the researcher's own quote for this binding
+    # (`SourceDocument.body`), never a `"..."` substring pulled out of
+    # `claim.text`, is the needle. Missing from the source text loses the
+    # check; found passes it; nothing to check passes by default. #471
+    quoted = Claim(text="The paper reports a marked reduction in error rate.", subject="dt")
+    assert not attributed(
+        quoted, "The paper found no significant change.", quote="a marked reduction in error rate"
+    )
+    assert attributed(
+        quoted, 'Results show "a marked reduction in error rate" overall.', quote="a marked reduction in error rate"
+    )
+    # Every one of the claim's numbers must appear, not just one: a source
+    # that only says "a 12 week study" does not back "creatine adds 1.2 kg
+    # over 12 weeks" merely because 12 appears in both. #471
     numeric = Claim(text="The cohort included 214 participants.", subject="dt")
     assert attributed(numeric, "Of the 214 participants enrolled, most completed the study.")
     assert not attributed(numeric, "The cohort included far fewer participants than planned.")
+    dosage = Claim(text="Creatine adds 1.2 kg of lean mass over 12 weeks.", subject="dt")
+    assert not attributed(dosage, "This was a 12 week study of resistance-trained adults.")
+    assert attributed(dosage, "Over 12 weeks, creatine added 1.2 kg of lean mass on average.")
     plain = Claim(text="Creatine is widely studied.", subject="dt")
     assert attributed(plain, "This page is about something else entirely.")
     assert claim.cross_checked is False

@@ -489,6 +489,98 @@ def test_an_unfetched_source_keeps_the_binding_and_notes_it_unattributed():
     assert claim.note == "unattributed: attribution not checked"
 
 
+def test_the_sources_own_quote_attributes_the_claim(monkeypatch):
+    """#471, finding 3: the needle is the researcher's own quote for this
+    specific binding (that source's `quote` field in the reply, carried onto
+    `SourceDocument.body`), not a `"..."` substring embedded in the claim's
+    own text, which a DA claim rarely carries."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        _fetch_with_text("This position stand reviews creatine monohydrate and lean body mass."),
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [
+                {
+                    "title": "t",
+                    "url": "https://docs.claude.com/x",
+                    "quote": "creatine monohydrate and lean body mass",
+                }
+            ],
+            "claims": [
+                {"text": "Creatine monohydrate preserves lean body mass.", "source_urls": ["https://docs.claude.com/x"]}
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.source_ids, "the binding was dropped despite the source's own quote matching"
+    assert claim.attributed_source_ids == claim.source_ids
+
+
+class _MetaFixtureBackend:
+    name = "fixture"
+
+
+def test_a_pubmed_source_with_an_abstract_attributes_a_number(monkeypatch):
+    """#471, finding 2: the recorded PubMed fixture carries an efetch-shaped
+    abstract, not the rare esummary field. No monkeypatch of `fetch_record`
+    itself: the real fixture reader runs."""
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://pubmed.ncbi.nlm.nih.gov/12345678/"}],
+            "claims": [
+                {
+                    "text": "The trial enrolled 42 adults.",
+                    "source_urls": ["https://pubmed.ncbi.nlm.nih.gov/12345678/"],
+                }
+            ],
+        },
+        seed=("pubmed.ncbi.nlm.nih.gov",),
+        backend=_MetaFixtureBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.source_ids, "the binding was dropped despite the abstract carrying the number"
+    assert claim.attributed_source_ids == claim.source_ids
+
+
+def test_a_pubmed_source_with_no_abstract_keeps_the_binding_unattributed(tmp_path, monkeypatch):
+    """esummary alone, with efetch giving nothing (a fixture recorded before
+    #471, or a live efetch failure): the binding survives and says so."""
+    no_abstract = tmp_path / "no_abstract.json"
+    no_abstract.write_text('{"title": "A Paper", "authors": [], "year": "2020", "venue": "J Test"}')
+    monkeypatch.setattr(stages.metadata, "_fixture_path", lambda url: no_abstract)
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://pubmed.ncbi.nlm.nih.gov/11111111/"}],
+            "claims": [
+                {
+                    "text": "The trial enrolled 42 adults.",
+                    "source_urls": ["https://pubmed.ncbi.nlm.nih.gov/11111111/"],
+                }
+            ],
+        },
+        seed=("pubmed.ncbi.nlm.nih.gov",),
+        backend=_MetaFixtureBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.source_ids, "the binding was dropped with nothing to check it against"
+    assert claim.note == "unattributed: attribution not checked"
+
+
 def test_record_findings_carries_the_study_object_onto_the_claim():
     """Unused until #478's study table; `record_findings` only has to keep
     what the researcher reported."""

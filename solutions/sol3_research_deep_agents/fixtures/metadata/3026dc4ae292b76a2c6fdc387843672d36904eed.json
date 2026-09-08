@@ -1,5 +1,5 @@
 {
-  "_comment": "esummary reply for https://pubmed.ncbi.nlm.nih.gov/12345678/, recorded for tests/test_metadata.py",
+  "_comment": "esummary + efetch abstract reply for https://pubmed.ncbi.nlm.nih.gov/12345678/, recorded for tests/test_metadata.py. `text` is the shape efetch's rettype=abstract returns, not the rare esummary field: #471.",
   "title": "The Interplay Between Physical Activity, Protein Consumption, and Sleep Quality in Muscle Protein Synthesis",
   "authors": [
     "Nakamura K",
@@ -7,5 +7,5 @@
   ],
   "year": "2022",
   "venue": "Journal of Applied Physiology",
-  "text": "This randomized trial enrolled 42 adults and found a 15 percent improvement in muscle protein synthesis when resistance training, adequate protein consumption, and at least 7 hours of nightly sleep were combined."
+  "text": "BACKGROUND: Muscle protein synthesis declines with age and inactivity. METHODS: This randomized trial enrolled 42 adults and combined resistance training, adequate protein consumption, and at least 7 hours of nightly sleep. RESULTS: The combined intervention produced a 15 percent improvement in muscle protein synthesis relative to control. CONCLUSIONS: Sleep quality is an independent contributor to synthesis rates."
 }

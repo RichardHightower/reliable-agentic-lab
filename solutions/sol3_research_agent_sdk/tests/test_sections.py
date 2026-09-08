@@ -587,6 +587,308 @@ def test_run_section_enriches_metadata_through_the_real_pipeline(work, turns, no
     assert source["authors"] == ["Jane Doe"]
 
 
+# -- attribution: the verifier checks the cited source says the claim, on
+# the live path a real run actually executes. #471
+#
+# A previous version of these tests drove `paper.verify` directly. That
+# function is dead code: no `LINEAR` or `CYCLE` stage calls it, and the
+# fixture stage log never names it. The checks below drive `paper.do_sections`
+# (which calls `sections.run_section` for real), same as
+# `test_run_section_enriches_metadata_through_the_real_pipeline` above.
+
+
+class _FakeBackend:
+    name = "perplexity"
+
+
+def _fake_fetch(text: str = "", **extra):
+    def fetch(work_dir, url, backend, *, model_title=""):
+        record = {"title": model_title or "Doc", "authors": [], "year": "", "venue": "", "note": "", "text": text}
+        record.update(extra)
+        return record
+
+    return fetch
+
+
+def _one_claim_run(work, turns, claims, monkeypatch, *, fetch_text="", verdict="supports"):
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch(fetch_text))
+
+    class WithBackend(turns):
+        backend = _FakeBackend()
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithBackend(claims=claims, verdict=verdict),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    return run
+
+
+def test_a_quote_absent_from_the_source_loses_the_binding(work, turns, monkeypatch):
+    """`attributed()` drops the binding on the live path. The claim's own
+    cited source does not say what the claim says, so it never reaches the
+    model verifier, and `do_sections` never writes it to `claims.json`."""
+    claims = [
+        {
+            "text": "This source reports guanidinoacetic acid clearance, not creatine.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "guanidinoacetic acid clearance",
+        }
+    ]
+    run = _one_claim_run(
+        work,
+        turns,
+        claims,
+        monkeypatch,
+        fetch_text="This is a position stand on creatine monohydrate and lean body mass.",
+    )
+    try:
+        paper.do_sections(run)
+    except paper.RunFailed:
+        pass
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved == []
+
+
+def test_a_claim_with_no_attributed_binding_is_dropped_and_logged(work, turns, monkeypatch):
+    """The drop is recorded, not silent."""
+    notes: list[str] = []
+    claims = [
+        {
+            "text": "The response rate was 87 percent.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "",
+        }
+    ]
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("Nothing here mentions that number."))
+
+    class WithBackend(turns):
+        backend = _FakeBackend()
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithBackend(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=notes.append,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    try:
+        paper.do_sections(run)
+    except paper.RunFailed:
+        pass
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved == []
+    assert any("dropped" in note for note in notes), "the drop was never logged"
+
+
+def test_a_numeric_unimportant_claim_still_reaches_attribution(work, turns, monkeypatch):
+    """`run.max_claims` bounds the model verifier turn only. A miscited
+    numeric claim is dropped by `attributed()` even at `max_claims=0`, where
+    it would never have reached the model verify step at all."""
+    claims = [
+        {
+            "text": "The cohort included 9001 participants.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "",
+        }
+    ]
+    run = _one_claim_run(
+        work, turns, claims, monkeypatch, fetch_text="The cohort included far fewer participants than planned."
+    )
+    run.max_claims = 0
+    try:
+        paper.do_sections(run)
+    except paper.RunFailed:
+        pass
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved == [], "attribution ran despite the claim never reaching the verify cap"
+
+
+def test_an_unattributable_source_keeps_the_binding_and_notes_it(work, turns, monkeypatch):
+    """A source with a backend but no fetched text (the fetch found nothing)
+    keeps its claim: nothing here contradicts it, only nothing was checked."""
+    claims = [
+        {
+            "text": "The cohort included 9001 participants.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "",
+        }
+    ]
+    run = _one_claim_run(work, turns, claims, monkeypatch, fetch_text="")
+    paper.do_sections(run)
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved, "the claim was dropped with nothing to check it against"
+    assert "unattributed: attribution not checked" in saved[0]["note"]
+
+
+def test_two_urls_in_one_reply_stay_single_source(work, turns, monkeypatch):
+    """Passing attribution is not corroboration or verification. A claim
+    whose own citation is attributed stays `unverified`, not `verified`,
+    until a real, separate verifier turn actually agrees."""
+    claims = [
+        {
+            "text": "Creatine monohydrate preserves lean body mass during caloric restriction.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "preserves lean body mass",
+        }
+    ]
+    run = _one_claim_run(
+        work,
+        turns,
+        claims,
+        monkeypatch,
+        fetch_text="This position stand says creatine monohydrate preserves lean body mass in trained adults.",
+        verdict="unclear",
+    )
+    paper.do_sections(run)
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved, "the attributed claim was dropped, not merely left unverified"
+    assert saved[0]["status"] == "unverified", "attribution alone is not corroboration"
+
+
+def test_not_found_writes_the_queries_into_the_note(work, turns, monkeypatch):
+    """Silence is not a result."""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("a thing is true, and more"))
+
+    class Silent(turns):
+        backend = _FakeBackend()
+
+        def verify(self, claim):
+            return {
+                "verdict": "unclear",
+                "source_url": "",
+                "excerpt": "",
+                "queries_used": ["creatine alternate wording", "creatine site:example.org"],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=Silent(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert "creatine alternate wording" in claims[0]["note"]
+    assert "creatine site:example.org" in claims[0]["note"]
+
+
+def test_not_found_with_no_reported_queries_still_names_the_claim(work, turns, monkeypatch):
+    """A verifier that reports no queries at all still leaves a real note."""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("a thing is true, and more"))
+
+    class Silent(turns):
+        backend = _FakeBackend()
+
+        def verify(self, claim):
+            return {"verdict": "unclear", "source_url": "", "excerpt": ""}
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=Silent(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert "A thing is true" in claims[0]["note"]
+
+
+def test_all_the_claims_numbers_must_appear_not_just_one():
+    """One shared number is not enough. A source that only says "a 12 week
+    study" does not back "creatine adds 1.2 kg over 12 weeks" just because
+    12 appears in both."""
+    finding = {"claim": "Creatine adds 1.2 kg of lean mass over 12 weeks.", "quote": ""}
+    assert not sections.attributed(finding, "This was a 12 week study of resistance-trained adults.")
+    assert sections.attributed(finding, "Over 12 weeks, creatine added 1.2 kg of lean mass on average.")
+
+
+def test_attribute_findings_is_a_noop_with_no_backend():
+    """A `run.turns` with no `backend` attribute at all (every pre-#471 test
+    double) is untouched, so old behaviour is unchanged byte for byte."""
+
+    class NoBackend:
+        pass
+
+    class Run:
+        turns = NoBackend()
+
+    findings = [{"claim": "x", "quote": "", "source": {"url_or_path": "https://example.invalid/doc"}}]
+    assert sections.attribute_findings(Run(), findings, "s1") == findings
+
+
+# -- metadata finding 2: PubMed's abstract comes from efetch, not the rare
+# esummary field, and attribution reads whatever that fetch actually found.
+
+
+class _MetaFixtureBackend:
+    name = "fixture"
+
+
+def test_a_pubmed_source_with_an_abstract_attributes_a_quote_from_it(work):
+    """The recorded PubMed fixture carries an efetch-shaped abstract. A claim
+    whose quote is in it is attributed, on the real `enrich_source_metadata`
+    plus `attribute_findings` pipeline, no monkeypatch."""
+
+    class Run:
+        class turns:
+            backend = _MetaFixtureBackend()
+
+        work_dir = str(work)
+
+    finding = {
+        "claim": "The intervention produced a 15 percent improvement in muscle protein synthesis.",
+        "quote": "15 percent improvement in muscle protein synthesis",
+        "source": {"url_or_path": "https://pubmed.ncbi.nlm.nih.gov/12345678/", "title": "Model's Guess"},
+    }
+    sections.enrich_source_metadata([finding], Run())
+    assert "42 adults" in finding["source"]["text"]
+    kept = sections.attribute_findings(Run(), [finding], "s1")
+    assert kept == [finding]
+    assert "unattributed" not in finding["source"].get("note", "")
+
+
+def test_a_pubmed_source_with_no_abstract_keeps_the_binding_unattributed(tmp_path, monkeypatch):
+    """esummary alone, with efetch giving nothing (a fixture recorded before
+    #471, or a live efetch failure): the binding survives and says so."""
+    no_abstract = tmp_path / "no_abstract.json"
+    no_abstract.write_text(json.dumps({"title": "A Paper", "authors": [], "year": "2020", "venue": "J Test"}))
+    monkeypatch.setattr(sections.metadata, "_fixture_path", lambda url: no_abstract)
+
+    class Run:
+        class turns:
+            backend = _MetaFixtureBackend()
+
+        work_dir = str(tmp_path)
+
+    finding = {
+        "claim": "The trial enrolled 42 adults.",
+        "quote": "",
+        "source": {"url_or_path": "https://pubmed.ncbi.nlm.nih.gov/11111111/", "title": "Model's Guess"},
+    }
+    sections.enrich_source_metadata([finding], Run())
+    assert finding["source"]["text"] == ""
+    kept = sections.attribute_findings(Run(), [finding], "s1")
+    assert kept == [finding], "the binding was dropped with nothing to check it against"
+    assert "unattributed: attribution not checked" in finding["source"]["note"]
+
+
 def test_resume_keeps_findings_when_the_draft_is_gone(work, turns, no_renderer):
     """A section whose draft is wrong still has research that was paid for."""
     run = paper.Run(
