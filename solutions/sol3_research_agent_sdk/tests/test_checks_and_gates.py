@@ -542,11 +542,13 @@ def test_an_irregular_plural_matches_its_singular():
 
 
 def test_structural_rows_are_off_by_default():
-    """`enforce_structure` defaults false, so a body carrying both glossary
-    defects passes when the caller does not opt in, and an existing narrow
-    snippet's signature is unchanged."""
+    """`enforce_structure` defaults false, so a body carrying glossary
+    defects, a bare-Conclusion close, and a selling CTA passes when the
+    caller does not opt in, and an existing narrow snippet's signature is
+    unchanged."""
     body = (
         "A point [1].\n\n"
+        "## Conclusion\n\n- Unlock the platform for every team today. [1]\n\n"
         "## Glossary\n\n"
         "**widget.** A term the body never uses.\n\n"
         "## References\n\n1. https://a\n"
@@ -554,6 +556,8 @@ def test_structural_rows_are_off_by_default():
     off = checks.check(body, ["https://a"])
     assert "glossary_complete" not in off.signature()
     assert "glossary_exact" not in off.signature()
+    assert "next_step" not in off.signature()
+    assert "cta_language" not in off.signature()
 
     corpus = "we retrieved arXiv:2401.00001 and it says things"
     unrelated = "A real point [1].\n\nAnother point, see arXiv:2999.99999 [1]."
@@ -599,4 +603,136 @@ def test_the_recorded_fixture_paper_passes_the_glossary_rows(tmp_path):
     names = {row["name"] for row in report["checks"]}
     assert "glossary_complete" in names
     assert "glossary_exact" in names
+    assert report["passed"], report
+
+
+# -- P4, the next-step section --------------------------------------------
+
+
+def test_a_conclusion_heading_with_no_next_step_verb_fails():
+    """`next_step` fires when the last prose heading is a bare Conclusion."""
+    body = (
+        "A point [1].\n\n"
+        "## Conclusion\n\nThis paper reviewed the same point again. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "next_step" in score.signature(), score.report()
+
+
+def test_unlock_in_the_next_step_section_fails():
+    """`cta_language` is scoped to the next-step section. `unlock` in a body
+    section is the unconditional `marketing` row's business, not this one."""
+    body = (
+        "A point [1].\n\n"
+        "## Next step\n\n"
+        "- Unlock the platform for every team.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "cta_language" in score.signature(), score.report()
+
+    elsewhere = (
+        "This paper does not unlock every runtime [1].\n\n"
+        "## Next step\n\n"
+        "- Evaluate the design on a live ticket.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    scored = checks.check(elsewhere, ["https://a"], enforce_structure=True)
+    assert "marketing" in scored.signature(), scored.report()
+    assert "cta_language" not in scored.signature(), scored.report()
+
+
+def test_evaluate_x_on_a_live_ticket_passes():
+    """The house style's own allowed CTA shape passes both new rows."""
+    body = (
+        "A point [1].\n\n"
+        "## Next step\n\n"
+        "- Evaluate X on a live ticket.\n"
+        "- Run the fixture with --doer none.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "next_step" not in score.signature(), score.report()
+    assert "cta_language" not in score.signature(), score.report()
+
+
+def test_a_figures_appendix_after_next_step_still_passes():
+    """A rendered figure no section claimed lands in an orphan `## Figures`
+    appendix between the last body section and Glossary. That appendix is
+    assembled, not written, so it must not read as the paper's last prose
+    section."""
+    body = (
+        "A point [1].\n\n"
+        "## Next step\n\n"
+        "- Evaluate X on a live ticket.\n\n"
+        "## Figures\n\n"
+        "![orphan](diagrams/orphan_imagen.png)\n\n"
+        "## Glossary\n\n**widget.** A term the body uses.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "next_step" not in score.signature(), score.report()
+
+
+def test_the_rest_of_the_460_ban_list_fails_in_the_next_step_section():
+    """Ticket #460 also names these four; `CTA_PHRASE` was missing them."""
+    for phrase in ("subscribe", "get started", "only solution", "contact sales"):
+        body = (
+            "A point [1].\n\n"
+            f"## Next step\n\n- {phrase.capitalize()} today.\n\n"
+            "## References\n\n1. https://a\n"
+        )
+        score = checks.check(body, ["https://a"], enforce_structure=True)
+        assert "cta_language" in score.signature(), (phrase, score.report())
+
+
+def test_a_step_over_twenty_words_fails():
+    """Each step in the next-step section is 20 words or fewer."""
+    long_step = "- " + " ".join(["evaluate"] * 21) + "."
+    body = (
+        "A point [1].\n\n"
+        f"## Next step\n\n{long_step}\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "cta_language" in score.signature(), score.report()
+
+
+def test_a_body_with_no_heading_passes_next_step_by_construction():
+    """A heading-less snippet, the shape other rows' tests build, has
+    nothing to grade and passes rather than fails."""
+    score = checks.check("A point [1].", ["https://a"], enforce_structure=True)
+    assert "next_step" not in score.signature(), score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_next_step_rows(tmp_path):
+    """After the fixture repair, `task demo` assembles a paper whose last
+    prose section is the next step, and `next_step`/`cta_language` both pass
+    under the harness's own `require_next_step=True`/`enforce_structure=True`.
+    """
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    assert body.index("## Next step") < body.index("## References")
+    assert "Evaluate the three exits on a live ticket" in body, "the CTA steps, not a coverage stub"
+    report = json.loads((work / "check.json").read_text(encoding="utf-8"))
+    names = {row["name"] for row in report["checks"]}
+    assert "next_step" in names
+    assert "cta_language" in names
     assert report["passed"], report

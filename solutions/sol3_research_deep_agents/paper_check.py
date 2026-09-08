@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 import brief
 import evidence
+import outline as outlines
 import source_policy
 
 # The sections a technical white paper has. A reader looking for limitations
@@ -313,6 +314,55 @@ def marketing_violations(body: str) -> list[str]:
     return [sentence[:160] for sentence in _prose_sentences(masked) if MARKETING_VERB.search(sentence)]
 
 
+# P4, the next-step section may use imperative CTA steps, but it may not sell.
+# `unlock`, `revolutionize`, and the rest of the marketing lexicon are already
+# banned everywhere by `MARKETING_VERB`; this phrase list is the CTA ban list
+# ticket #460 names, minus those two, which are not marketing verbs on their
+# own. Copied from the SDK port, not imported.
+CTA_PHRASE = re.compile(
+    r"\b(buy|sign up|subscribe|get started|only solution|contact sales|transform your|contact us)\b",
+    re.I,
+)
+
+
+def _cta_steps(text: str) -> list[str]:
+    """Every step in the next-step section: a bullet line, or a prose
+    sentence when a block carries no bullet. A CTA line is short by design,
+    so the word cap and the ban list both grade per step, not per section.
+    """
+    masked = _mask_code(text)
+    steps: list[str] = []
+    for block in re.split(r"\n\s*\n", masked):
+        block = block.strip()
+        if not block:
+            continue
+        bullets = [line.strip() for line in block.splitlines() if re.match(r"^[-*]\s+", line.strip())]
+        if bullets:
+            steps += [re.sub(r"^[-*]\s+", "", line) for line in bullets]
+            continue
+        if block.startswith(("#", "!", "|", ">", "```")):
+            continue
+        for piece in SENTENCE_END.split(block):
+            piece = piece.strip()
+            if piece:
+                steps.append(piece)
+    return steps
+
+
+def cta_violations(section_text: str) -> list[str]:
+    """Every step in the next-step section that sells, or runs past 20 words.
+
+    Scoped to the one section `check` hands it. `unlock` in a body section is
+    the unconditional `marketing` row's business, not this one.
+    """
+    hits = []
+    for step in _cta_steps(section_text):
+        words = len(re.findall(r"\b[\w'-]+\b", step))
+        if CTA_PHRASE.search(step) or MARKETING_VERB.search(step) or words > 20:
+            hits.append(step[:160])
+    return hits
+
+
 def take_terms(body: str) -> tuple[str, list[tuple[str, str]]]:
     """Pull every TERM marker out of the text, and return both.
 
@@ -467,6 +517,44 @@ def glossary_unused(body: str) -> list[str]:
         for term, definition in terms.items()
         if not _term_used(term, prose) and not _term_used(term, definition)
     ]
+
+
+# P4. Glossary and References are assembled, never written by a model, so the
+# last heading a writer could have produced is the last one before them.
+# Figures is assembled too, an orphan appendix for a diagram no section
+# claimed, so it is not a prose section either.
+NON_PROSE_TRAILING = {"glossary", "references", "figures"}
+
+
+def last_prose_heading(body: str) -> str | None:
+    """The last top-level (`##`) section heading before Glossary and References.
+
+    Frozen order: front matter, Abstract, Introduction, Methods, study table,
+    body sections, Conclusion, Next step, Glossary, References. `None` when
+    the paper has no top-level heading at all.
+    """
+    headings = [
+        match.group(2).strip()
+        for match in SECTION_HEADING.finditer(body)
+        if len(match.group(1)) == 2 and match.group(2).strip().lower() not in NON_PROSE_TRAILING
+    ]
+    return headings[-1] if headings else None
+
+
+def _section_text(body: str, name: str) -> str:
+    """One named heading's own body, the same boundary rule `glossary_terms` uses."""
+    matches = list(SECTION_HEADING.finditer(body))
+    for index, match in enumerate(matches):
+        if match.group(2).strip().lower() != name:
+            continue
+        level = len(match.group(1))
+        end = len(body)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        return body[match.end() : end]
+    return ""
 
 
 @dataclass
@@ -872,6 +960,36 @@ def check(
         # `loop_doctrine` already sets. A clean snippet with no glossary at
         # all passes both rows by construction: no captured term means
         # nothing missing, and no glossary entry means nothing unused.
+        # A body with no top-level heading at all is not a paper, it is a
+        # snippet another row's test built. Nothing to grade, so this passes
+        # by construction, the same defence `glossary_complete` gives a body
+        # with no captured term.
+        last_heading = last_prose_heading(body)
+        if last_heading is None:
+            next_step_ok, next_step_detail = True, "no prose section to grade"
+        elif outlines.is_bare_conclusion(last_heading):
+            next_step_ok, next_step_detail = False, f"last prose heading is a bare Conclusion: {last_heading!r}"
+        elif not outlines.starts_with_next_step_verb(last_heading):
+            next_step_ok, next_step_detail = (
+                False,
+                f"last prose heading has no next-step verb: {last_heading!r}",
+            )
+        else:
+            next_step_ok, next_step_detail = True, f"last prose heading is a next step: {last_heading!r}"
+        checks.append(Check("next_step", next_step_ok, next_step_detail))
+
+        cta_text = _section_text(body, last_heading.strip().lower()) if last_heading else ""
+        cta_bad = cta_violations(cta_text)
+        checks.append(
+            Check(
+                "cta_language",
+                not cta_bad,
+                "the next-step section sells nothing and every step is 20 words or fewer"
+                if not cta_bad
+                else f"cta language or a step over 20 words: {cta_bad[:3]}",
+            )
+        )
+
         incomplete = glossary_incomplete(body)
         checks.append(
             Check(
@@ -1246,6 +1364,19 @@ def demo() -> None:
     # suffix rule, since "criteria" does not end in s, es, or ies.
     irregular = "The run checks one exit criterion.\n\n## Glossary\n\n**exit criteria.** What a run must clear before it stops.\n"
     assert glossary_unused(irregular) == []
+
+    # P4, the next-step section.
+    assert last_prose_heading("## Introduction\n\ntext\n\n## Next step\n\ntext\n\n## Glossary\n\nt\n") == "Next step"
+    assert last_prose_heading("## Introduction\n\ntext\n\n## References\n\n1. u\n") == "Introduction"
+    assert last_prose_heading("no heading here") is None
+    assert outlines.is_bare_conclusion("Conclusion") and not outlines.is_bare_conclusion("Next step")
+    assert outlines.starts_with_next_step_verb("Next step") and outlines.starts_with_next_step_verb("Evaluate X")
+    assert not outlines.starts_with_next_step_verb("Limitations")
+    assert cta_violations("- Evaluate X on a live ticket.\n- Run the fixture with --doer none.\n") == []
+    assert cta_violations("- Unlock the platform for every team.\n")
+    assert cta_violations("- Buy the enterprise plan today and contact us for a demo.\n")
+    long_step = "- " + " ".join(["word"] * 21) + "."
+    assert cta_violations(long_step)
 
     print("paper_check: all demo assertions passed")
 

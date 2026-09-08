@@ -252,6 +252,12 @@ CREATINE_PLAN = {
             "key_questions": ["where does the evidence run out", "what is understudied"],
         },
         {
+            "heading": "Next step",
+            "objective": "Tell a colleague what to do with this review before adopting it.",
+            "abstract": "A colleague evaluates the dosing protocol against a live cutting cycle.",
+            "key_questions": ["what should a colleague do with these findings", "how is the protocol tried"],
+        },
+        {
             "heading": "References",
             "objective": "List every source the body cites, in citation order.",
             "abstract": "Generated from the evidence ledger.",
@@ -310,6 +316,26 @@ def test_stage_plan_does_not_force_the_doctrine_question_when_the_flag_is_off(ru
         text = " ".join(section.get("key_questions") or []).lower()
         assert not any(word in heading for word in doctrine_words), section
         assert not any(word in text for word in doctrine_words), section
+
+
+def test_a_real_run_rejects_a_plan_with_no_next_step_section(run_dir, stub_renderer):
+    """`_approve_outline` passes `require_next_step=True` at both its call
+    sites. A plan whose last body section is not a next step must be
+    rejected there, not only in `outlines.validate` called directly."""
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    no_next_step = dict(CREATINE_PLAN)
+    no_next_step["sections"] = [s for s in CREATINE_PLAN["sections"] if s["heading"] != "Next step"]
+
+    class Runner(paper.FixtureRunner):
+        def ask(self, role, prompt):
+            if role == "planner":
+                return paper.Reply(data=no_next_step)
+            return super().ask(role, prompt)
+
+    run = build_run(run_dir, runner=Runner(FIXTURES / "replies.json"), loop_doctrine=False)
+    with pytest.raises(stages.GateFailed, match="next-step"):
+        run.stage_plan()
 
 
 class RecordingPlannerRunner(paper.FixtureRunner):

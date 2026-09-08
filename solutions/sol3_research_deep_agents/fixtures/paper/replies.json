@@ -74,6 +74,15 @@
             ]
           },
           {
+            "heading": "Next step",
+            "objective": "Tell a colleague what to do with this design before adopting it.",
+            "abstract": "A colleague evaluates the three exits on a live ticket before adopting them elsewhere.",
+            "key_questions": [
+              "what should a colleague do with these findings",
+              "how does a colleague evaluate the design on a live case"
+            ]
+          },
+          {
             "heading": "References",
             "objective": "List every source the body cites, in citation order.",
             "abstract": "Generated from the evidence ledger.",
@@ -115,12 +124,25 @@
   "researcher": {
     "This is a briefing, not research": {
       "data": {
-        "headings": ["Background", "Mechanism", "Evidence", "Limitations"],
-        "domains": [
-          {"host": "arxiv.org", "org_type": "preprint"},
-          {"host": ".gov", "org_type": "government"}
+        "headings": [
+          "Background",
+          "Mechanism",
+          "Evidence",
+          "Limitations"
         ],
-        "titles": ["A flagship work"]
+        "domains": [
+          {
+            "host": "arxiv.org",
+            "org_type": "preprint"
+          },
+          {
+            "host": ".gov",
+            "org_type": "government"
+          }
+        ],
+        "titles": [
+          "A flagship work"
+        ]
       },
       "usd": 0.01
     },
@@ -324,6 +346,14 @@
             "figures": []
           },
           {
+            "heading": "Next step",
+            "purpose": "tell a colleague what to do with this design",
+            "claim_ids": [
+              "*exit-conditions*0"
+            ],
+            "figures": []
+          },
+          {
             "heading": "References",
             "purpose": "generated",
             "claim_ids": [],
@@ -346,6 +376,9 @@
     },
     "'Limitations' section": {
       "text": "This paper combines one reference implementation, two runtime documents, and one paper on self-correction. [1][2][3][5]\n\nIt measures no production loops and reports no cost figures of its own. The three-exit order is the local doctrine. It is not a standard, and it is not a claim that other runtimes should copy it. [1]\n\nThe runtime limits are each single source observations. Treat them as documented behavior for those runtimes, not as a universal property of agent systems. [2][3]\n\nThe maker and checker split is motivated by CRITIC. It is not proven here. A host that wants the split still has to put it in the role table, not in the prompt. [5]\n\nA live run against a different topic will retrieve different pages. The gates in this paper check citations, section shape, figure assets, and length. They do not check whether the argument is the one a specialist would have written. That judgment stays with the reviewer, and the reviewer can be wrong without corrupting the evidence bundle. [1][5]\n"
+    },
+    "'Next step' section": {
+      "text": "- Evaluate the three exits on a live ticket before adopting them elsewhere. [1]\n- Run the fixture with --backend fixture, then again against a live backend.\n- Compare this port against the sibling runtime on the same topic and budget.\n- Measure each section's word count before raising that section's target higher.\n- Try the offline demo first, then repeat the same run against a live backend.\n- Adopt the exit order only after a team reviews the evidence behind it.\n- Pilot the maker and checker split on one section before the whole paper.\n"
     }
   },
   "section_judge": {
@@ -381,7 +414,10 @@
     "PAIRED_SHAPE_PROBE": {
       "data": {
         "failed_rows": [
-          {"row": "no_filler", "note": "Paragraph two restates the abstract."}
+          {
+            "row": "no_filler",
+            "note": "Paragraph two restates the abstract."
+          }
         ],
         "score": 0.55
       }

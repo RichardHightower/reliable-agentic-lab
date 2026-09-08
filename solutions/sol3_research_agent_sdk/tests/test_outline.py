@@ -71,6 +71,35 @@ def test_a_valid_outline_has_no_errors():
     assert outlines.validate(sample_outline()) == []
 
 
+# -- P4, the next-step section --------------------------------------------
+
+
+def test_an_outline_without_a_next_step_section_is_rejected():
+    """The validator error text is the retry instruction the outline editor
+    sees. `sample_outline`'s only section is headed "The problem", which
+    carries no next-step verb."""
+    errors = outlines.validate(sample_outline(), require_next_step=True)
+    assert any("next step" in item.lower() for item in errors), errors
+
+
+def test_a_next_step_heading_passes():
+    drafted = sample_outline(sections=[sample_section(heading="Next step")])
+    assert outlines.validate(drafted, require_next_step=True) == []
+
+
+def test_a_bare_conclusion_heading_is_named_as_such():
+    drafted = sample_outline(sections=[sample_section(heading="Conclusion")])
+    errors = outlines.validate(drafted, require_next_step=True)
+    assert any("bare Conclusion" in item for item in errors), errors
+
+
+def test_require_next_step_is_off_by_default():
+    """`sample_outline`'s last section is "The problem", which would fail the
+    rule if it ran. The dozens of other tests in this file rely on it not
+    running unless a caller opts in."""
+    assert outlines.validate(sample_outline()) == []
+
+
 def test_duplicate_ids_fail():
     drafted = sample_outline(
         word_target_total=800,
@@ -468,6 +497,43 @@ def test_the_offline_recorded_outline_still_carries_the_doctrine_question():
         question for section in drafted["sections"] for question in section.get("key_questions", [])
     )
     assert t.EXIT_DOCTRINE_QUESTION in all_questions
+
+
+def test_the_recorded_outline_now_ends_in_next_step():
+    """P4's fixture repair: the SDK recorded outline (`OfflineTurns`, the
+    offline backend `task demo` uses) ends its prose on a next-step section,
+    and `validate` accepts it under `require_next_step=True`."""
+    import research  # noqa: PLC0415
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
+    offline = t.OfflineTurns(backend=research.FixtureBackend(fixture))
+    drafted = offline.outline("a topic", "")
+    assert drafted["sections"][-1]["heading"] == "Next step"
+    assert outlines.validate(drafted, require_next_step=True) == []
+
+
+def test_the_word_targets_still_sum_within_ten_percent():
+    """The fixture rebalance is correct: adding the next-step section did not
+    push the section word_targets outside `validate`'s ten percent band."""
+    import research  # noqa: PLC0415
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
+    offline = t.OfflineTurns(backend=research.FixtureBackend(fixture))
+    drafted = offline.outline("a topic", "", budget={"words": 2000})
+    summed = sum(section["word_target"] for section in drafted["sections"])
+    assert abs(summed - drafted["word_target_total"]) <= 0.10 * drafted["word_target_total"]
+    assert outlines.validate(drafted, word_target_total=2000) == []
+
+
+def test_a_real_run_rejects_an_outline_with_no_next_step_section(work, turns):
+    """`paper.py`'s four `outlines.validate` call sites pass
+    `require_next_step=run.require_next_step`, which `loop.py` sets True for
+    a real run. `turns()`'s stub outline ends on "The problem", so a `Run`
+    built the same way must reject it, not just `outlines.validate` in
+    isolation."""
+    run = make_run(work, turns(), require_next_step=True)
+    with pytest.raises(paper.RunFailed, match="next-step"):
+        paper.plan(run)
 
 
 # -- corpus references ------------------------------------------------------

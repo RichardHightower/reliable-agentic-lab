@@ -223,6 +223,11 @@ class Run:
     # to manufacture the whole loop-control paper contract.
     enforce_research_policy: bool = False
     enforce_loop_doctrine: bool = False
+    # P4. Separate from `enforce_research_policy`, because many phase tests
+    # set that flag to exercise a different structural gate against a
+    # single-section outline stub that carries no next-step section. Only
+    # `loop.py`'s real CLI run sets this one.
+    require_next_step: bool = False
     log: object = print
 
     # -- files -------------------------------------------------------------
@@ -548,6 +553,7 @@ def _call_outliner(run: Run, note: str) -> dict:
         drafted,
         word_target_total=run.word_target_total,
         corpus_keys=_pack_keys(run),
+        require_next_step=run.require_next_step,
     )
     if errors:
         raise RunFailed(outlines.retry_note(errors))
@@ -657,7 +663,10 @@ def _edit_outline(run: Run, current: dict, note: str, verdict: dict) -> dict:
         revised = _draft_valid_outline_with_note(run, note + _revision_note(current, targets))
         merged = _merge_revision(current, revised, targets)
         errors = outlines.validate(
-            merged, word_target_total=run.word_target_total, corpus_keys=_pack_keys(run)
+            merged,
+            word_target_total=run.word_target_total,
+            corpus_keys=_pack_keys(run),
+            require_next_step=run.require_next_step,
         )
         return revised if errors else merged
 
@@ -666,7 +675,10 @@ def _edit_outline(run: Run, current: dict, note: str, verdict: dict) -> dict:
         if not isinstance(edited, dict):
             raise TurnFailed("the outline editor returned no outline object")
         errors = outlines.validate(
-            edited, word_target_total=run.word_target_total, corpus_keys=_pack_keys(run)
+            edited,
+            word_target_total=run.word_target_total,
+            corpus_keys=_pack_keys(run),
+            require_next_step=run.require_next_step,
         )
         if errors:
             raise TurnFailed(outlines.retry_note(errors))
@@ -796,6 +808,7 @@ def do_outline(run: Run) -> dict:
             drafted,
             word_target_total=run.word_target_total,
             corpus_keys=_pack_keys(run),
+            require_next_step=run.require_next_step,
         )
         if errors:
             raise RunFailed(outlines.retry_note(errors))

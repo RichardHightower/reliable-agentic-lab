@@ -16,6 +16,25 @@ from datetime import datetime, timezone
 # Prompt-side checklist, not a hard validator rule. The outliner is told this.
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 
+# P4, the last prose section is a next step, not a restated conclusion. "Next"
+# is in the list because the house style's own recommended heading for this
+# section is literally "Next step". `require_next_step` gates the rule below,
+# so the dozens of existing outline fixtures that end on an arbitrary heading
+# keep validating with no changes. Copied from the SDK port, not imported.
+NEXT_STEP_VERBS = ("Next", "Evaluate", "Run", "Compare", "Try", "Measure", "Adopt", "Pilot")
+
+
+def is_bare_conclusion(heading: str) -> bool:
+    """A last section headed exactly `Conclusion`, which only restates the
+    abstract and is banned as the paper's closing prose section."""
+    return str(heading or "").strip().lower() == "conclusion"
+
+
+def starts_with_next_step_verb(heading: str) -> bool:
+    """The heading's first word is a next-step verb, case insensitive."""
+    first = re.match(r"[A-Za-z]+", str(heading or "").strip())
+    return bool(first) and first.group(0).lower() in {verb.lower() for verb in NEXT_STEP_VERBS}
+
 
 def canonical(outline: dict) -> str:
     """Stable JSON for hashing and for the resume diff."""
@@ -83,7 +102,13 @@ def _cycle(ids: list[str], edges: dict[str, list[str]]) -> str | None:
     return None
 
 
-def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys: list[str] | None = None) -> list[str]:
+def validate(
+    outline: dict,
+    *,
+    word_target_total: int | None = None,
+    corpus_keys: list[str] | None = None,
+    require_next_step: bool = False,
+) -> list[str]:
     """Return human-readable errors. Empty means the outline is usable.
 
     The exact strings are the retry instruction handed back to the outliner.
@@ -218,6 +243,22 @@ def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys
                         f"section {sid!r} corpus_refs names unknown key {ref!r}. "
                         "Use keys from corpus/brain-pack.json."
                     )
+
+    if require_next_step:
+        heading = str(sections[-1].get("heading") or "").strip()
+        if is_bare_conclusion(heading):
+            errors.append(
+                f"the last section is headed {heading!r}, a bare Conclusion that "
+                "only restates the abstract. Head it with a next-step verb "
+                "instead, for example 'Evaluate X on a live ticket' or 'Next step'."
+            )
+        elif not starts_with_next_step_verb(heading):
+            errors.append(
+                f"the last section is headed {heading!r}. The paper's last prose "
+                "section must tell a colleague what to do next, headed with a "
+                f"next-step verb such as {', '.join(NEXT_STEP_VERBS[1:4])}, for "
+                "example 'Evaluate X on a live ticket' or 'Next step'."
+            )
 
     return errors
 
