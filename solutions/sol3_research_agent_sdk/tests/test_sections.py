@@ -55,9 +55,24 @@ def test_section_check_stub_fails_on_todo():
 
 
 def test_section_check_coverage_fails_when_a_question_is_missing():
+    """#385: `coverage` scores token overlap, not the verbatim question. The
+    body must share no term with the missing question, not merely omit its
+    exact wording, for the row to fail."""
     body = "what failed is named [1]. " + ("word " * 80)
-    score = checks.section_check(body, section=_section(word_target=80), findings=[{"number": 1}])
+    section = _section(word_target=80, key_questions=["what failed", "why the deploy stalled"])
+    score = checks.section_check(body, section=section, findings=[{"number": 1}])
     assert "coverage" in score.signature()
+
+
+def test_section_check_coverage_passes_when_the_body_answers_the_question():
+    """The exact-string rule this replaces would have failed this body: the
+    question never appears verbatim, but its terms do. #385."""
+    body = "A rubric computed in code decides when the loop stops [1]. " + ("word " * 80)
+    section = _section(
+        word_target=80, key_questions=["What stops the loop from running forever?"]
+    )
+    score = checks.section_check(body, section=section, findings=[{"number": 1}])
+    assert "coverage" not in score.signature(), score.to_dict()["checks"]
 
 
 def test_section_check_cited_accepts_the_finding_id_the_writer_holds():

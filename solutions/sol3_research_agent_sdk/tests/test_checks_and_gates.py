@@ -735,4 +735,125 @@ def test_the_recorded_fixture_paper_passes_the_next_step_rows(tmp_path):
     names = {row["name"] for row in report["checks"]}
     assert "next_step" in names
     assert "cta_language" in names
+
+
+# -- P5, headings are answers -------------------------------------------------
+
+
+def test_a_raw_key_question_as_a_heading_fails():
+    """A section that pastes its outline key question as an H3 fails
+    `question_heading`, and the detail names the offending heading."""
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = (
+        "## One\n\n"
+        "### What stops the loop from running forever?\n\n"
+        "A rubric computed in code, not left to the model, stops it [1].\n"
+    )
+    score = checks.check(body, ["https://a"], outline=outline)
+    assert "question_heading" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "question_heading")
+    assert "What stops the loop from running forever?" in row.detail
+
+
+def test_a_heading_ending_in_a_question_mark_fails():
+    """The row is unconditional: a heading ending in `?` fails with no
+    outline handed to `check` at all."""
+    body = (
+        "## Is the harness safe to run unattended?\n\n"
+        "A rubric computed in code stops it, not a model's own judgment [1].\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "question_heading" in score.signature(), score.report()
+
+
+def test_a_clean_heading_passes_question_heading():
+    """A heading that answers the question, rather than asking it, passes."""
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = (
+        "## One\n\n"
+        "### A rubric in code stops the loop\n\n"
+        "The rubric decides when the loop stops, never a model's own "
+        "judgment [1].\n"
+    )
+    score = checks.check(body, ["https://a"], outline=outline)
+    assert "question_heading" not in score.signature(), score.report()
+
+
+def test_coverage_passes_when_the_body_answers_the_question():
+    """`outline_coverage_gaps` no longer requires the verbatim question. Token
+    overlap between the question and the section body carries it. #385."""
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = (
+        "## One\n\n"
+        "A deterministic rubric in code decides when the loop stops, never a "
+        "model's own judgment. [1]\n"
+    )
+    assert outline_coverage_gaps(body, outline) == []
+
+
+def test_coverage_still_fails_a_paper_section_that_never_answers_the_question():
+    """A body with no term overlap with the question is still a gap."""
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = "## One\n\nThis section is about something else entirely [1].\n"
+    gaps = outline_coverage_gaps(body, outline)
+    assert gaps and "One" in gaps[0]
+
+
+def test_the_recorded_fixture_paper_passes_question_heading(tmp_path):
+    """The paper `task demo` writes has no heading that pastes a key
+    question, under the harness's own outline. Same command as the
+    Taskfile: `--backend fixture --fresh --brain tests/fixtures/brain`."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    report = json.loads((work / "check.json").read_text(encoding="utf-8"))
+    names = {row["name"] for row in report["checks"]}
+    assert "question_heading" in names
+    assert report["passed"], report
     assert report["passed"], report

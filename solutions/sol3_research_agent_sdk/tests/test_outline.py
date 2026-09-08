@@ -339,7 +339,9 @@ def test_outline_coverage_fails_when_a_key_question_is_missing():
     drafted = sample_outline()
     body = "# T\n\n## The problem\n\nA point [1].\n"
     gaps = checks.outline_coverage_gaps(body, drafted)
-    assert any("never names" in item for item in gaps)
+    # #385: `outline_coverage_gaps` scores token overlap, not the verbatim
+    # question, so a gap is now phrased as never answered, not never named.
+    assert any("never answers" in item for item in gaps)
     score = checks.check(body, ["https://a"], headings=["The problem"], outline=drafted)
     assert "outline_coverage" in score.signature()
 

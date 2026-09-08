@@ -608,9 +608,10 @@ class SdkTurns(Turns):
         self, section: dict, claims: list[dict], figures: list[dict], notes: str, path: str = ""
     ) -> str:
         questions = section.get("key_questions") or []
-        # The same string the `coverage` row matches. Showing the writer the
-        # raw question, notes and corpus ULIDs included, told it to reproduce
-        # 460 characters of research note in the published paper.
+        # #385: pasting the question, notes and corpus ULIDs included, told
+        # the writer to reproduce it as a heading. Coverage now scores
+        # whether the answer's words overlap the question, so the
+        # instruction asks for an answer, not a copy.
         question_lines = "\n".join(f"- {checks.question_text(item)}" for item in questions)
         payload = json.dumps({"claims": claims, "figures": figures}, indent=2)
         target = path or f"sections/{section['id']}.md"
@@ -622,8 +623,8 @@ class SdkTurns(Turns):
             f"Claims to support: {json.dumps(section.get('claims_to_support') or [])}\n"
             f"Word target: {section.get('word_target') or 'unspecified'} words. "
             "Aim within ten percent of that target.\n\n"
-            "Coverage is a case-insensitive substring. Each key question below "
-            "must appear in the section body as that string, not a paraphrase:\n"
+            "Answer each key question below in prose, in the body. Do not "
+            "paste a question as a heading and do not repeat it verbatim:\n"
             f"{question_lines or '(none)'}\n\n"
             f"Write it to {target} and also return it as your final message.\n\n"
             "Cite each claim by its `number` field, like [3]. Do not cite the id. "
@@ -718,7 +719,8 @@ class SdkTurns(Turns):
             f"\n\nObjective: {section.get('objective') or section.get('goal', '')}"
             f"\nWord target: {section.get('word_target') or 'unspecified'} words, "
             "and aim within ten percent of that.\n"
-            "Each key question must appear in the body as this exact string:\n"
+            "The body must answer each key question below, in prose. Do not "
+            "paste a question as a heading and do not repeat it verbatim:\n"
             f"{questions or '(none)'}\n"
             "Cite each claim by its `number` field, like [3]. Do not cite the id. "
             "Use only the claims below, and add no facts that are not in them:\n"

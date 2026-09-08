@@ -16,6 +16,7 @@ what needs judgement.
     corpus_marked a model-written corpus brief is labelled in the reference list
     gaps_stated   a coverage gap is named in Limitations
     charted       every plotted value is in the corpus and the caption cites
+    question_heading a heading pastes a question instead of answering it
 
 `complete` looks redundant and is not. Without it a paper with no body at all
 passes every other row: the abstract is exempt from `cited`, the reference list
@@ -805,12 +806,27 @@ def last_prose_heading(body: str) -> str | None:
     return headings[-1] if headings else None
 
 
-def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
-    """Approved sections missing from the paper, or key questions never named.
+# Copied from Deep Agents `sections.py` `STOP`/`_terms`, the token-overlap
+# rule this row and `section_check`'s `coverage` row now both apply. #385:
+# requiring the verbatim question taught the writer to paste it as a
+# heading. Scoring whether the question is answered removes that incentive.
+# Copied, not imported, per the house rule against a shared loop package.
+COVERAGE_STOP = {
+    "a", "an", "the", "is", "are", "of", "in", "on", "to", "and", "or", "for",
+    "what", "how", "why", "does", "do", "this", "that", "with", "from",
+}
 
-    A key question is named when its text appears in the section body, case
-    insensitive. The writer is handed the questions; this row checks they
-    reached the page.
+
+def _coverage_terms(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in COVERAGE_STOP and len(w) > 2}
+
+
+def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
+    """Approved sections missing from the paper, or key questions never answered.
+
+    A key question is answered when its terms overlap the section body. The
+    exact wording is not required; a heading that pastes the question passes
+    this row for the wrong reason, which is what `question_headings` catches.
     """
     if not outline:
         return []
@@ -822,15 +838,42 @@ def outline_coverage_gaps(body: str, outline: dict | None) -> list[str]:
         if key not in bodies:
             gaps.append(f"section {heading!r} never written")
             continue
-        text = bodies[key].lower()
+        body_terms = _coverage_terms(bodies[key])
         for question in section.get("key_questions") or []:
             # The question, not the researcher's note stapled to it. #351
             # applied this at the section gate; the paper gate kept matching
             # the raw 460-character string and could never find it.
             named = question_text(question)
-            if named and named.lower() not in text:
-                gaps.append(f"section {heading!r} never names {named!r}")
+            terms = _coverage_terms(named) if named else set()
+            if terms and len(terms & body_terms) < min(2, len(terms)):
+                gaps.append(f"section {heading!r} never answers {named!r}")
     return gaps
+
+
+def question_headings(body: str, outline: dict | None) -> list[str]:
+    """H2/H3 headings that are pasted questions, not the answers to them.
+
+    A heading that ends in a question mark reads as a slide prompt, not a
+    finding. A heading that repeats an outline key question verbatim is the
+    same defect with the question mark trimmed off. #385: coverage cannot
+    require the answer in the body and also accept the question as the
+    heading; this row closes the second half.
+    """
+    wanted = set()
+    for section in (outline or {}).get("sections") or []:
+        for item in section.get("key_questions") or []:
+            text = question_text(item).strip().lower()
+            if text:
+                wanted.add(text)
+                wanted.add(text.rstrip("?").strip())
+    bad = []
+    for match in SECTION_HEADING.finditer(body):
+        if len(match.group(1)) not in (2, 3):
+            continue
+        heading = match.group(2).strip()
+        if heading.endswith("?") or heading.lower() in wanted:
+            bad.append(heading)
+    return bad
 
 
 def missing_sections(body: str, headings: list[str]) -> list[str]:
@@ -1036,6 +1079,20 @@ def check(
             f"{len(headings or [])} sections present"
             if not absent
             else f"never written: {absent[:3]}",
+        )
+    )
+
+    # Unconditional: a heading ending in "?" is checked with no outline at
+    # all. A clean paper has no interrogative heading, so this never fires
+    # on a snippet the outline was never handed. #385 #463.
+    bad_headings = question_headings(body, outline)
+    checks.append(
+        Check(
+            "question_heading",
+            not bad_headings,
+            "no heading is a pasted question"
+            if not bad_headings
+            else f"heading is a question: {bad_headings[0]!r}",
         )
     )
 
@@ -1495,12 +1552,21 @@ def section_check(
     questions = [
         text for text in (question_text(item) for item in section.get("key_questions") or []) if text
     ]
-    missing_q = [q for q in questions if q.lower() not in body.lower()]
+    # Token overlap, not the verbatim question. #385: requiring the exact
+    # string left the writer no way to answer a question except by pasting
+    # it, and a pasted question is a heading, not an answer. Deep Agents
+    # `sections.py` `_terms`/`STOP` carries the same rule.
+    body_terms = _coverage_terms(body)
+    missing_q = []
+    for question in questions:
+        terms = _coverage_terms(question)
+        if terms and len(terms & body_terms) < min(2, len(terms)):
+            missing_q.append(question)
     checks.append(
         Check(
             "coverage",
             not missing_q,
-            "every key question is named" if not missing_q else f"unnamed: {missing_q[:2]}",
+            "every key question is answered" if not missing_q else f"unanswered: {missing_q[:2]}",
         )
     )
 

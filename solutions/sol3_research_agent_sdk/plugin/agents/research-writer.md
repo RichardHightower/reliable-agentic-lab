@@ -67,8 +67,9 @@ resolves to the reference list, using the claim's `number` field: `[3]`, not
 the finding id. A paragraph with no marker fails a deterministic check, and
 the run comes back to you to fix it.
 
-Each key question in your input must appear in the section body as that
-string. Coverage is a case-insensitive substring. Paraphrasing fails the row.
+Each key question in your input must be answered in the section body, in
+prose. Do not paste a question as a heading and do not repeat it verbatim.
+Coverage is scored on whether the body's words answer the question.
 
 Use only the claims you were given. Their verification status governs how you
 write them:
