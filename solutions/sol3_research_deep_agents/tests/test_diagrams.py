@@ -398,6 +398,18 @@ def test_a_corroborated_claim_backing_a_direction_needs_no_hedge():
     assert diagrams.figure_claims(labels, claims) == []
 
 
+def test_two_single_source_claims_still_need_the_word_reported():
+    """#476 B4: the rule reads `truth_state`, not how many claims restate
+    the same direction. Two single-source claims are still zero corroborated
+    sources; a count-based proxy would wrongly wave a bare label through."""
+    labels = ["Lean mass gain"]
+    claims = [
+        _claim("One trial found a lean mass gain.", evidence.SINGLE_SOURCE),
+        _claim("A second, uncorroborated trial also found a gain.", evidence.SINGLE_SOURCE),
+    ]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass gain"]
+
+
 def test_an_outcome_label_with_no_claims_fails():
     """#476 F3: absence of claims is not support."""
     assert diagrams.figure_claims(["Lean mass gain"], []) == ["Lean mass gain"]

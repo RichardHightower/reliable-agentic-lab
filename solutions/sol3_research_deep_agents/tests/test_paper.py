@@ -1036,14 +1036,26 @@ def test_the_attempt_budget_is_durable_across_a_changed_section(offline, run_dir
     assert "three-exits" not in body
 
 
-def test_redraw_state_does_not_leak_into_a_later_call(offline, run_dir, stub_renderer):
+def test_redraw_state_does_not_leak_into_a_later_call(
+    offline, run_dir, stub_renderer, monkeypatch
+):
     """#476 F4: `_redraw` must not survive a successful commission into a
-    later, unrelated `stage_diagram` call, or that call wrongly reads it as
-    still mid-retry and skips both the stale-source wipe and every figure
-    whose source is on disk."""
+    later, unrelated `stage_diagram` call. A fidelity complaint that does
+    not trip `diagram_gate` (the figure still renders, `best` is not None)
+    still populates `_redraw`; without a reset that state wrongly reads as
+    still mid-retry next time, skipping both the stale-source wipe and
+    every figure whose source is on disk, claims gate included."""
     _run_up_to_write(offline)
+
+    def render_with_a_non_blocking_complaint(src_dir, out_dir, topic, **kwargs):
+        figures, _ = stub_renderer(src_dir, out_dir, topic, **kwargs)
+        return figures, ["three-exits.mmd: imagen-diagrams fidelity miss: a minor cosmetic note"]
+
+    monkeypatch.setattr(stages, "render_figures", render_with_a_non_blocking_complaint)
     offline.stage_diagram()
-    assert offline._redraw == set()
+    assert offline._redraw == set(), (
+        "a non-blocking complaint must not leak into a later, unrelated call"
+    )
 
 
 def test_a_second_write_attempt_does_not_recommission_a_figure(offline, run_dir, stub_renderer):
