@@ -39,7 +39,7 @@
       }
     ]
   },
-  "How does this pipeline separate research from writing?": {
+  "Where does this pipeline refuse to guess?": {
     "question": "mcp tool boundary",
     "answer": "The Model Context Protocol defines how a host exposes tools, resources, and prompts to a model over a transport, which lets a loop name its boundary once and stay ignorant of what is behind it.",
     "citations": [
