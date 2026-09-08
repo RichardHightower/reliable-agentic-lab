@@ -1019,7 +1019,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--doer",
         default="reference",
-        help="none | reference | reference:<ref> | claude | codex | grok | opencode",
+        help="none | reference | reference:<ref> | judge-no",
     )
     parser.add_argument("--budget", type=int, default=None)
     parser.add_argument(

@@ -665,6 +665,67 @@ def test_build_reference_is_unaffected_by_the_judge_no_wrapper():
     assert not isinstance(backend, doers.JudgeSaysNoBackend)
 
 
+def test_build_unknown_spec_raises_value_error_naming_the_valid_specs():
+    """A8 (#441). CliBackend is gone; an unknown spec fails closed with a
+    message a reader can act on, instead of shelling out to a bare word."""
+    with pytest.raises(ValueError) as excinfo:
+        doers.build("claude")
+
+    message = str(excinfo.value)
+    for valid in ("none", "reference", "judge-no"):
+        assert valid in message
+
+
+def test_doers_module_has_no_cli_backend_or_cli_commands():
+    """A8 (#441). The fence-or-drop ticket resolved to drop."""
+    assert not hasattr(doers, "CliBackend")
+    assert not hasattr(doers, "CLI_COMMANDS")
+
+
+def test_doers_docstring_names_the_real_backend_set_including_judge_no():
+    """A8 (#441) plus the PR #485 judge follow-up: the docstring must not
+    still claim three backends, and must name judge-no."""
+    doc = doers.__doc__ or ""
+    assert "judge-no" in doc
+    for name in ("none", "reference"):
+        assert name in doc
+
+
+def test_no_source_file_in_this_port_names_clibackend():
+    """A8 (#441). `grep -rn CliBackend` over this port's own files, skipping
+    .venv, __pycache__, and this test file itself (which names the deleted
+    class only to assert its absence), must find nothing. Each port carries
+    this test for its own tree; together the two suites cover both port
+    folders."""
+    port_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            "grep",
+            "-rn",
+            "--exclude-dir=.venv",
+            "--exclude-dir=__pycache__",
+            "--exclude=test_implementer.py",
+            "CliBackend",
+            str(port_root),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, f"found CliBackend references:\n{result.stdout}"
+
+
+def test_doer_help_names_no_cli_and_names_judge_no(capsys):
+    """A8 (#441). The --doer help string must not advertise a CLI this build
+    cannot fence, and must name judge-no."""
+    with pytest.raises(SystemExit):
+        implementer.main(["--help"])
+
+    out = capsys.readouterr().out
+    assert "judge-no" in out
+    for cli in ("claude", "codex", "grok", "opencode"):
+        assert cli not in out
+
+
 def test_judge_says_no_backend_escalates_on_a_green_rubric(tmp_path, monkeypatch):
     """A1 (#430). Wrap a scripted backend in JudgeSaysNoBackend, not a live
     judge patch: the fixture backend is what a room can actually run."""
