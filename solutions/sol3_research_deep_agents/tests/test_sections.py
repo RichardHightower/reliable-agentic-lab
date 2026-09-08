@@ -238,7 +238,12 @@ def test_a_guideline_retrieved_elsewhere_must_be_cited_by_the_safety_section():
 def test_the_same_section_citing_it_passes():
     """#517: citing the ledger guideline's own reference number passes the
     row, and the number is never flagged dangling either -- the row that
-    requires the citation and the row that would call it ungrounded agree."""
+    requires the citation and the row that would call it ungrounded agree.
+
+    `findings` carries an unrelated numbered finding, [1], so `grounded`'s
+    own `numbers` set is not empty on its own -- the same shape a real
+    section has -- and its "and numbers" short-circuit does not hide a
+    reverted ledger widening for [7]."""
     section = _safety_section()
     ledger_sources = [
         {
@@ -250,9 +255,9 @@ def test_the_same_section_citing_it_passes():
         }
     ]
     score = sections.section_check(
-        "A claim about the safe dose, per the position stand [7].",
+        "A claim about the safe dose, per the position stand [7] and a trial [1].",
         section=section,
-        findings=[],
+        findings=[{"id": "s1-f1", "number": 1, "evidence_tier": "primary_trial"}],
         ledger_sources=ledger_sources,
     )
     assert "guideline_cited" not in score.signature()
