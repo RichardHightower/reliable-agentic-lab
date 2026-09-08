@@ -1378,6 +1378,98 @@ def test_a_planted_file_under_harness_is_a_scope_violation(tmp_path, monkeypatch
     assert any(".harness/planted.py" in v for v in trace["scope_violations"])
 
 
+def test_a_doer_that_overwrites_steps_jsonl_is_a_scope_violation(tmp_path, monkeypatch):
+    """#501. `steps.jsonl` is one of the loop's own named outputs, excluded
+    by name from every changed-files scan -- so an overwrite of it used to
+    match the same exclusion as the loop's own write, regardless of who made
+    it. A doer scoped to tests/** that plants a new steps.jsonl is still a
+    write outside its declared scope, the same as `.harness/planted.py`
+    above."""
+    repo = _git_repo(tmp_path / "repo")
+    baseline = _run(passed=("tests/test_health.py::test_health",))
+    still_green = _run(passed=("tests/test_health.py::test_health",))
+    _patch_runs(monkeypatch, [baseline, still_green])
+
+    backend = ScriptedBackend([[("steps.jsonl", '{"id": "evil"}\n')]])
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=3, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert "steps.jsonl" in trace["scope_violations"]
+    assert backend.calls == 1
+
+
+def _patch_runs_and_lint(monkeypatch, test_runs: list[RunResult], lint_oks: list[bool]):
+    """Like `_patch_runs`, plus a scripted `lint` result per call. Used only
+    by `test_the_loops_own_plan_write_is_bookkeeping`, to force a second code
+    iteration after `_mark_proven` has already rewritten steps.jsonl once."""
+    leftover_tests = list(test_runs)
+    leftover_lint = list(lint_oks)
+
+    def fake_run(self, task: str, timeout: int = 900) -> RunResult:
+        if task == "lint":
+            ok = leftover_lint.pop(0) if leftover_lint else True
+            return RunResult(
+                task=task, exit_code=0 if ok else 1, output="",
+                junit=SuiteReport(), coverage=CoverageReport(),
+            )
+        if task != "test":
+            return RunResult(
+                task=task,
+                exit_code=0,
+                output="",
+                junit=_suite(passed=("e2e::ok",)) if task == "e2e" else SuiteReport(),
+                coverage=CoverageReport(),
+            )
+        if leftover_tests:
+            return leftover_tests.pop(0)
+        return _run(passed=("tests/test_health.py::test_health",), failed=())
+
+    monkeypatch.setattr(contract_mod.Contract, "run", fake_run)
+    monkeypatch.setattr(implementer.Contract, "run", fake_run)
+
+
+def test_the_loops_own_plan_write_is_bookkeeping(tmp_path, monkeypatch):
+    """#501. `plan.save` writes steps.jsonl once before the test phase, and
+    `_mark_proven` rewrites it again on every code turn to record which
+    steps a passing test proved. Both are this loop's own writes, and
+    neither may read back as a scope violation.
+
+    AC-1 already has a passing test on the first code turn here, so
+    `_mark_proven` changes steps.jsonl's bytes on iteration 1, not the last
+    iteration. Lint fails once, forcing a second code turn: without
+    refreshing `last_steps_bytes` right after that first `_mark_proven`
+    write, iteration 2's scan would compare against the stale,
+    pre-iteration-1 bytes and read the loop's own iteration-1 write as a
+    doer's."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs_and_lint(
+        monkeypatch,
+        test_runs=[
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+            _run(passed=(health, new_test)),
+        ],
+        lint_oks=[False, True],
+    )
+    backend = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+            [],
+        ]
+    )
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=3, write_trace=True)
+
+    assert trace["gate"] == "pass"
+    assert not trace.get("scope_violations")
+    assert len(trace["iterations"]) == 2
+    assert (Path(trace["repo"]) / "steps.jsonl").exists()
+
+
 def test_a_forged_state_json_overwrite_is_overwritten_back_by_the_loop(tmp_path, monkeypatch):
     """Judge's blocker on PR #500, second half. state.json is one of the
     loop's own named outputs, so a doer overwriting it mid-test-phase is not

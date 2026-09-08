@@ -69,7 +69,7 @@ _LAST_TRACE_FILE = HARNESS_DIR + "last-implementer.json"
 _LOOP_OUTPUTS = frozenset({steps.STEPS_FILE, _STATE_FILE, _LAST_TRACE_FILE, receipt.RECEIPT})
 
 
-def _is_loop_bookkeeping(path: str) -> bool:
+def _is_loop_bookkeeping(path: str, target: Path, last_steps_bytes: bytes | None) -> bool:
     """`steps.jsonl` and this loop's own three `.harness/` files are its own
     output, never a role's. Excluded everywhere `rubric.changed_files` feeds
     `preexisting`, `after_test_phase`, or the code phase's own `changed`
@@ -88,8 +88,20 @@ def _is_loop_bookkeeping(path: str) -> bool:
     else under `.harness/` -- a doer planting a file, or overwriting one of
     these four itself -- is still a write this loop did not make, and stays
     visible to `write_scope` and the checkpoint's own read-then-merge.
+
+    `steps.jsonl` is the one member of this set a doer can reach without
+    ever touching `.harness/`: it lives at the repo root, inside no role's
+    declared scope, and the exclusion above used to match it by name alone,
+    the same bug PR #500's judge found in `state.json` before
+    `_state_tampered` closed it. `last_steps_bytes` is this run's own last
+    write of `steps.jsonl` (set right after `plan.save`, and refreshed after
+    every `_mark_proven` save in the code loop); a `steps.jsonl` whose bytes
+    differ from that is a doer's hand, not this loop's, and stays visible to
+    `write_scope` the same way `.harness/planted.py` already does.
     """
-    return path in _LOOP_OUTPUTS
+    if path != steps.STEPS_FILE:
+        return path in _LOOP_OUTPUTS
+    return not _state_tampered(target / steps.STEPS_FILE, last_steps_bytes)
 
 
 def _state_tampered(path: Path, last_written: bytes | None) -> bool:
@@ -595,6 +607,10 @@ def run(  # noqa: PLR0915
             source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
         )
     plan.save(target)
+    # This run's own last write of steps.jsonl. `_is_loop_bookkeeping` reads
+    # it back at every changed-files scan below; a doer overwrite between
+    # scans shows up as a byte difference, never as a silent exclusion.
+    last_steps_bytes = (target / steps.STEPS_FILE).read_bytes()
 
     trace: dict = {
         "ticket": the_ticket.id,
@@ -624,7 +640,9 @@ def run(  # noqa: PLR0915
         # edits tickets before the implementer runs, and blaming this loop
         # for that would fail write_scope for a change it never made.
         preexisting = {
-            path for path in rubric.changed_files(target) if not _is_loop_bookkeeping(path)
+            path
+            for path in rubric.changed_files(target)
+            if not _is_loop_bookkeeping(path, target, last_steps_bytes)
         }
 
     if resume_into_code:
@@ -670,7 +688,8 @@ def run(  # noqa: PLR0915
             after_test_phase = {
                 path
                 for path in rubric.changed_files(target)
-                if not _is_loop_bookkeeping(path) and path not in preexisting
+                if not _is_loop_bookkeeping(path, target, last_steps_bytes)
+                and path not in preexisting
             }
             scope_violations = tester.violations(sorted(after_test_phase))
             trace["test_phase"] = {
@@ -825,14 +844,21 @@ def run(  # noqa: PLR0915
         changed = [
             c
             for c in rubric.changed_files(target)
-            if not _is_loop_bookkeeping(c) and c not in preexisting
+            if not _is_loop_bookkeeping(c, target, last_steps_bytes) and c not in preexisting
         ]
         code_phase = [path for path in changed if path not in after_test_phase]
         violations = sorted(set(scope_violations) | set(coder.violations(code_phase)))
 
+        # `_mark_proven` is this loop's own rewrite of steps.jsonl, the same
+        # kind of write `plan.save` made above -- refresh the tamper baseline
+        # right after it, or next iteration's scan would read this turn's own
+        # legitimate write as a doer's.
+        plan = _mark_proven(plan, test_run.junit.passed_ids, target)
+        last_steps_bytes = (target / steps.STEPS_FILE).read_bytes()
+
         score = rubric.score(
             contract=contract,
-            plan=_mark_proven(plan, test_run.junit.passed_ids, target),
+            plan=plan,
             criteria=the_ticket.criterion_ids,
             test_run=test_run,
             e2e_run=e2e_run,
