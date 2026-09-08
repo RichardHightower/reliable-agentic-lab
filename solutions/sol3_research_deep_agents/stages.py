@@ -43,7 +43,9 @@ EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, an
 # Sections that bind to no claims of their own. The abstract restates what the
 # body already cited, so binding it would mean listing every claim twice and
 # keeping the two lists in step. References is generated from the ledger.
-UNBOUND_SECTIONS = ("abstract", "references")
+# Methods is Python-written from the run record, never bound to a claim at
+# all. The conclusion restates the body the same way the abstract does. #478
+UNBOUND_SECTIONS = ("abstract", "conclusion", "methods", "references")
 
 FENCED_JSON = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 CITATION = re.compile(r"\[(\d+)\]")
@@ -272,11 +274,17 @@ def plan_gate(
         raise GateFailed(" ".join(misses), tuple(sorted({m.split()[0] for m in misses})))
 
 
-# What the three structural sections are for. A planner does not write these,
-# because `normalize_plan` is what puts them there.
+# What the structural sections are for. A planner does not write these,
+# because `normalize_plan` is what puts them there. Methods is Python-written
+# at assemble time (`Paper.stage_assemble`), never by the writer, so its
+# objective here is never read as a writing instruction; it exists only so
+# `outline_gate` and `stage_outline`'s prompt see a named section like any
+# other. #478
 STRUCTURAL = {
     "abstract": "State the thesis, the evidence behind it, and the limit, in one paragraph.",
     "introduction": "Name the problem, who has it, and what this paper settles about it.",
+    "methods": "Python-written from the run record. No model turn.",
+    "conclusion": "Restate the body's own findings, from the body, with no new citation.",
     "references": "List every source the body cites, in citation order.",
 }
 
@@ -332,6 +340,27 @@ def normalize_plan(plan: dict) -> dict:
         sections.insert(
             lowered.index("abstract") + 1, as_section("Introduction", STRUCTURAL["introduction"])
         )
+        lowered.insert(lowered.index("abstract") + 1, "introduction")
+    # #478. Methods sits right after Introduction, the frozen heading
+    # order's own position for it. Conclusion sits right before Next step,
+    # the paper's own last prose heading (P4): second to last, never last.
+    # A plan with no Next step section (an old fixture, or a test outline
+    # that never calls `validate`) puts Conclusion right before References
+    # instead, still ahead of Glossary and References.
+    if "methods" not in lowered:
+        sections.insert(
+            lowered.index("introduction") + 1, as_section("Methods", STRUCTURAL["methods"])
+        )
+        lowered.insert(lowered.index("introduction") + 1, "methods")
+    if "conclusion" not in lowered:
+        if "next step" in lowered:
+            insert_at = lowered.index("next step")
+        elif "references" in lowered:
+            insert_at = lowered.index("references")
+        else:
+            insert_at = len(sections)
+        sections.insert(insert_at, as_section("Conclusion", STRUCTURAL["conclusion"]))
+        lowered.insert(insert_at, "conclusion")
     if "references" not in lowered:
         sections.append(as_section("References", STRUCTURAL["references"]))
     plan["sections"] = sections
@@ -1083,7 +1112,7 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
 
     required = {plan_heading(item).lower() for item in plan.get("sections", [])}
     present = {str(section.get("heading", "")).lower() for section in sections}
-    for name in ("abstract", "introduction", "references"):
+    for name in ("abstract", "introduction", "methods", "conclusion", "references"):
         if name in required and not any(name in heading for heading in present):
             misses.append(f"the outline is missing the {name} section.")
 
@@ -1435,6 +1464,50 @@ def references_block(urls: list[str], sources: list) -> str:
     return "\n".join(rows) + "\n"
 
 
+def study_table(ledger: evidence.Ledger, index: dict[str, int]) -> str:
+    """The Evidence Summary table, or "" when the ledger holds no
+    human-study claim. Python from the ledger: one row per usable claim
+    that carries E3's `study` object, reading E4's `SourceDocument.tier`
+    for its own source. Not deduped by study identity: two claims about
+    the same trial are two citations already, the same way the reference
+    list treats them. #478
+    """
+    rows = [claim for claim in ledger.claims.values() if claim.usable and claim.study]
+    if not rows:
+        return ""
+    lines = [
+        "## Evidence Summary",
+        "",
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for claim in rows:
+        study = claim.study or {}
+        participants = study.get("participants") or {}
+        n = participants.get("n")
+        population = str(participants.get("population") or "").strip()
+        who = f"{n} ({population})" if n and population else str(n or population or "not reported")
+        duration = str(study.get("duration") or "not reported")
+        deficit = str(study.get("deficit") or "not reported")
+        training = study.get("training")
+        training_cell = "yes" if training is True else "no" if training is False else "not reported"
+        assay = str(study.get("assay") or "not reported")
+        result = str(study.get("result") or claim.text or "not reported")
+        tier = "other"
+        for source_id in claim.source_ids:
+            source = ledger.sources.get(source_id)
+            if source is not None and source.tier:
+                tier = source.tier
+                break
+        markers = "".join(f"[{index[sid]}]" for sid in claim.source_ids if sid in index)
+        lines.append(
+            f"| {who} | {duration} | {deficit} | {training_cell} | {assay} | "
+            f"{result} {markers} | {tier} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def assemble(
     plan: dict,
     outline: dict,
@@ -1452,7 +1525,11 @@ def assemble(
     retrieved, and a generated glossary cannot list a term the body never
     marked.
     """
-    _, urls = numbering(ledger)
+    index, urls = numbering(ledger)
+    # #478. Python, from the ledger: one row per human-study claim, spliced
+    # in right after Methods, below. "" when the ledger holds none, and the
+    # note that says so lives in Methods' own body, `Paper.stage_assemble`.
+    table_block = study_table(ledger, index)
     by_name = {figure.name: figure for figure in figures}
     used_figures: set[str] = set()
     charts = [item for item in (charts or []) if item.get("path")]
@@ -1497,6 +1574,9 @@ def assemble(
             glossary.setdefault(term, definition)
         if body:
             parts.append(body)
+            parts.append("")
+        if heading.lower() == "methods" and table_block:
+            parts.append(table_block)
             parts.append("")
         sid = str(section.get("id") or "")
         for chart in charts:

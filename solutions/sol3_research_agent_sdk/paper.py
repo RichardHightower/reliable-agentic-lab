@@ -1743,24 +1743,24 @@ def _sections_sha(run: Run, planned: dict) -> str:
     return hashlib.sha1("\n\n".join(parts).encode("utf-8")).hexdigest()
 
 
-def write_abstract(run: Run) -> dict:
-    """One writer turn, run once per stable body, that states only what the
-    body already states. `CYCLE` runs this every attempt; a sha guard skips
-    the turn when the body has not changed since the last one, the same
-    shape `diagram()`'s `sections_sha` guard uses. `assemble` reads what
-    this wrote, falling back to the outline's own thesis line when it never
-    ran or produced nothing. P7, #472.
+def _write_summary_turn(run: Run, *, kind: str, filename: str, turn_name: str) -> dict:
+    """Shared shape behind `write_abstract` and `write_conclusion`: one
+    writer turn, run once per stable body, that states only what the body
+    already states. `CYCLE` runs both every attempt; a sha guard skips the
+    turn when the body has not changed since the last one, the same shape
+    `diagram()`'s `sections_sha` guard uses. P7, #472. P11 reuses this for
+    the conclusion turn, #478.
     """
     planned = outlines.plan_view(approved_outline(run))
     sha = _sections_sha(run, planned)
-    path = run.file("abstract.json")
+    path = run.file(filename)
     existing = {}
     if path.exists():
         try:
             existing = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             existing = {}
-    if existing.get("sections_sha") == sha and existing.get("abstract"):
+    if existing.get("sections_sha") == sha and existing.get(kind):
         return {"written": False, "skipped": True}
 
     out = run.file("sections")
@@ -1773,18 +1773,146 @@ def write_abstract(run: Run) -> dict:
     if not body.strip():
         return {"written": False, "skipped": True}
     try:
-        text = run.turns.write_abstract(body, _ledger(run))
+        text = getattr(run.turns, turn_name)(body, _ledger(run))
     except (TurnFailed, Escalate) as exc:
         # A budget spent on the last section already stamped every section
-        # that matters. `assemble` falls back to the outline's thesis line
-        # rather than losing the whole run over the one turn on top.
-        run.log(f"    abstract: the writer turn failed ({exc}). Falling back to the thesis line.")
+        # that matters. `assemble` falls back to a Python default rather
+        # than losing the whole run over the one turn on top.
+        run.log(f"    {kind}: the writer turn failed ({exc}).")
         return {"written": False, "skipped": False}
     text = (text or "").strip()
     if not text:
         return {"written": False, "skipped": False}
-    run.write_json("abstract.json", {"abstract": text, "sections_sha": sha})
+    run.write_json(filename, {kind: text, "sections_sha": sha})
     return {"written": True, "skipped": False}
+
+
+def write_abstract(run: Run) -> dict:
+    """`assemble` reads what this wrote, falling back to the outline's own
+    thesis line when it never ran or produced nothing. P7, #472.
+    """
+    return _write_summary_turn(run, kind="abstract", filename="abstract.json", turn_name="write_abstract")
+
+
+def write_conclusion(run: Run) -> dict:
+    """One writer turn after the body, from the body, with no new citation.
+    `assemble` reads what this wrote and places it before Next step. A run
+    that never produces one still assembles: `conclusion_present` then
+    names the gap the same way `complete` names a missing outline section.
+    #478
+    """
+    return _write_summary_turn(
+        run, kind="conclusion", filename="conclusion.json", turn_name="write_conclusion"
+    )
+
+
+def _methods_lines(run: Run, planned: dict) -> list[str]:
+    """Methods, Python-written from the run record. No model turn. #478
+
+    Names the admitted hosts by design, which is why `checks.policy_leak`
+    and `checks.caveat_once` both exempt this section
+    (`_mask_for_policy`, `CAVEAT_EXEMPT_SECTIONS`).
+    """
+    allowlist = _load_json(run, "corpus/source_allowlist.json")
+    briefing = _load_json(run, "corpus/scout-briefing.json")
+    # source_allowlist.json is the librarian's own decision; the scout
+    # briefing (the E1 field seed) is the fallback for a run, or a phase
+    # test, that never reached that phase.
+    admitted = list(allowlist.get("admitted") or briefing.get("admitted") or [])
+    dropped = list(allowlist.get("dropped") or briefing.get("dropped") or [])
+    fields = [str(s.get("heading") or "") for s in planned["sections"] if s.get("heading")]
+    sources_payload = _load_json(run, "sources.json")
+    retrieved = len(sources_payload.get("sources") or [])
+    claims_payload = _load_json(run, "claims.json")
+    admitted_claims = sum(
+        1
+        for claim in claims_payload.get("claims") or []
+        if claim.get("status") in USABLE and claim.get("number")
+    )
+    started = (run.state.started_at or "")[:10] or "an unrecorded date"
+
+    lines = [
+        f"This paper searched {len(fields)} planned sections for evidence, starting "
+        f"{started}: {', '.join(fields)}. Each planned section names a facet of the "
+        "topic the outline settled before research began."
+        if fields
+        else f"This paper searched the topic for evidence, starting {started}, "
+        "before the outline named any section.",
+        f"Admitted search hosts, decided once before any paid search ran: "
+        f"{', '.join(admitted)}. A host outside this list was not searched, and a "
+        "source from it never reached a claim."
+        if admitted
+        else "Admitted search hosts, decided once before any paid search ran: the "
+        "vendor documentation seed. No topic-specific host was proposed.",
+        f"Sources retrieved during research: {retrieved}. Sources admitted to the "
+        "reference list, after the same host and claim checks every finding in this "
+        f"paper passed: {admitted_claims}.",
+        f"The verification cap for this run allows a second opinion on up to "
+        f"{run.max_claims} claims. The follow-turn cap allows {run.max_follow} "
+        f"secondary claims a look at their own primary study, of which "
+        f"{run.follow_used} were spent. The counter-evidence cap allows "
+        f"{run.max_counter} generalizing claims a search for a contrary finding, "
+        f"of which {run.counter_used} were spent.",
+    ]
+    if dropped:
+        reasons = "; ".join(
+            f"{item.get('host')} ({item.get('why')})" for item in dropped[:5] if item.get("host")
+        )
+        lines.append(
+            f"Hosts excluded during admission, with the reason each was dropped: {reasons}."
+            if reasons
+            else "No proposed host was excluded during admission; every host cleared the wall."
+        )
+    else:
+        lines.append("No proposed host was excluded during admission; every host cleared the wall.")
+    return lines
+
+
+def _study_rows(claims: list[dict]) -> list[dict]:
+    """Claims the paper actually cites (`number` set by `_numbered`) that
+    carry a non-empty E3 `study` object. One row per claim, not deduped by
+    study identity: two claims about the same trial are two citations
+    already, the same way the reference list treats them. #478
+    """
+    return [claim for claim in claims if claim.get("study") and claim.get("number")]
+
+
+def _study_table_block(claims: list[dict]) -> str:
+    """The Evidence Summary table, or "" when the ledger holds no
+    human-study claim. Python from the ledger, reading E3's `study` object
+    and E4's `evidence_tier`. #478
+    """
+    rows = _study_rows(claims)
+    if not rows:
+        return ""
+    lines = [
+        "## Evidence Summary",
+        "",
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for claim in rows:
+        study = claim.get("study") or {}
+        participants = study.get("participants") or {}
+        n = participants.get("n")
+        population = str(participants.get("population") or "").strip()
+        if n and population:
+            who = f"{n} ({population})"
+        else:
+            who = str(n or population or "not reported")
+        duration = str(study.get("duration") or "not reported")
+        deficit = str(study.get("deficit") or "not reported")
+        training = study.get("training")
+        training_cell = "yes" if training is True else "no" if training is False else "not reported"
+        assay = str(study.get("assay") or "not reported")
+        result = str(study.get("result") or claim.get("text") or "not reported")
+        tier = str(claim.get("evidence_tier") or "other")
+        lines.append(
+            f"| {who} | {duration} | {deficit} | {training_cell} | {assay} | "
+            f"{result} [{claim['number']}] | {tier} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def assemble(run: Run) -> dict:
@@ -1848,7 +1976,44 @@ def assemble(run: Run) -> dict:
             glossary.setdefault(term, definition)
         abstract_text = _resolve_markers(abstract_text, numbers)
         parts += ["## Abstract", "", abstract_text.strip(), ""]
+    # #478. Methods is Python-written, right after the Abstract and before
+    # every outline section: it is not itself an outline section, so the
+    # loop below never has to skip it. The Evidence Summary table (Python,
+    # from the ledger) sits immediately after it, when the run cites at
+    # least one human-study claim; otherwise Methods carries a one-line
+    # note instead of a table nobody could fill.
+    methods_lines = _methods_lines(run, planned)
+    table_block = _study_table_block(usable)
+    if not table_block:
+        methods_lines.append("No claim in this run carries a recorded human study.")
+    parts += ["## Methods", "", "\n\n".join(methods_lines), ""]
+    if table_block:
+        parts += [table_block, ""]
+    # #478. One writer turn after the body, from the body, with no new
+    # citation: the same cleanup pass the abstract gets. Built now, spliced
+    # in below right before the "Next step" section, the house convention
+    # for the paper's own last prose heading (P4): Conclusion sits second
+    # to last, never last, so `next_step` keeps grading Next step.
+    conclusion_text = _written_conclusion(run)
+    conclusion_parts: list[str] = []
+    if conclusion_text:
+        conclusion_text = checks.drop_owned_headings(conclusion_text)
+        conclusion_text, found = checks.take_flags(conclusion_text)
+        flags += [{"section": "conclusion", "flag": flag} for flag in found]
+        conclusion_text, term_hits = checks.take_terms(conclusion_text)
+        for term, definition in term_hits:
+            glossary.setdefault(term, definition)
+        conclusion_text = _resolve_markers(conclusion_text, numbers)
+        conclusion_parts = ["## Conclusion", "", conclusion_text.strip(), ""]
+    conclusion_placed = False
     for section in planned["sections"]:
+        if (
+            not conclusion_placed
+            and conclusion_parts
+            and str(section.get("heading") or "").strip().lower() == "next step"
+        ):
+            parts += conclusion_parts
+            conclusion_placed = True
         path = run.file("sections") / f"{section['id']}.md"
         if not path.exists():
             continue
@@ -1921,6 +2086,12 @@ def assemble(run: Run) -> dict:
         if id(skip) in noted_skips:
             continue
         parts += [f"> {skip['name']} was not shown: {skip['reason']}.", ""]
+    # #478. A run whose outline never carried a "Next step" heading at all
+    # (many phase tests, and any outline predating P4) never found the
+    # splice point above, so it lands here, still before Glossary and
+    # References.
+    if not conclusion_placed and conclusion_parts:
+        parts += conclusion_parts
     # No captured term means no section, not an empty one. Alphabetical, case
     # insensitive, so "Loop" and "loop" do not sort by accident of case.
     if glossary:
@@ -2104,6 +2275,20 @@ def _written_abstract(run: Run) -> str:
     except (OSError, json.JSONDecodeError):
         return ""
     return str(payload.get("abstract") or "").strip()
+
+
+def _written_conclusion(run: Run) -> str:
+    """The conclusion `write_conclusion` wrote, or empty when it never ran
+    or produced nothing. #478
+    """
+    path = run.file("conclusion.json")
+    if not path.exists():
+        return ""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return str(payload.get("conclusion") or "").strip()
 
 
 def _ledger(run: Run):
@@ -2343,6 +2528,7 @@ LINEAR = [
 CYCLE = [
     (5, "write", maybe_write),
     (6, "abstract", write_abstract),
+    (6, "conclusion", write_conclusion),
     (7, "diagram", diagram),
     (8, "assemble", assemble),
     (9, "check", check),

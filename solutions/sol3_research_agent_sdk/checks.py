@@ -49,6 +49,9 @@ Rows `check()` added later, still Python's, still no vote for the model:
     captioned     every placed image is followed by a Figure N. caption
     figure_referenced every placed figure is named Figure N in its own section's prose
     skip_noted    every skipped figure is named, with its reason, on the page
+    methods_present the Methods section, Python-written from the run record, is present
+    conclusion_present the Conclusion section, one writer turn from the body, is present
+    study_table   one Evidence Summary row per human-study claim, placed after Methods
 
 Belt versus judge, matching the house style page's ownership table
 (https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style).
@@ -94,8 +97,9 @@ HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.M)  # re.M so finditer sees every he
 # Sections where a paragraph without a citation is correct, not sloppy. An
 # abstract summarizes material that is cited below it, and a reference list is
 # the citation. Demanding a marker in either produces a paper that cites its own
-# bibliography.
-UNCITED_SECTIONS = {"abstract", "references", "summary"}
+# bibliography. Methods is Python-written process description, #478: it states
+# what the run did, not a claim about the topic, so it needs no citation either.
+UNCITED_SECTIONS = {"abstract", "references", "summary", "methods"}
 
 # Opt-in floors. Unit tests of other rows stay short. The pipeline passes
 # these when it is producing a paper rather than exercising one phase.
@@ -103,7 +107,11 @@ UNCITED_SECTIONS = {"abstract", "references", "summary"}
 # does not apply to it. The whole-paper floor still does.
 MIN_WORDS = 2000
 MIN_SECTION_WORDS = 80
-PROSE_EXEMPT = {"references", "figures", "abstract"}
+# The conclusion joins the abstract here for the same reason: `OfflineTurns`
+# stands in with a short, deterministic placeholder rather than a full-length
+# turn, so the floor below would fail every offline run over a section no
+# model actually wrote at length. #478
+PROSE_EXEMPT = {"references", "figures", "abstract", "conclusion"}
 SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
 # A judge on PR #529 found three fence shapes this pattern missed. Group 1 is
 # the delimiter run, backtick or tilde, backreferenced so a closer must use
@@ -1138,7 +1146,11 @@ def abstract_matches_body(body: str, claims: list[dict] | None = None) -> list[s
     return issues
 
 
-CAVEAT_EXEMPT_SECTIONS = {"glossary", "references"}
+# Methods restates run-record numbers (hosts, dates, caps spent) that have
+# nothing to do with a body finding's own numbers, and the same count can
+# land in both by coincidence. #478: exempt for the same reason Glossary and
+# References are, not narrative prose a "said once" rule should hold.
+CAVEAT_EXEMPT_SECTIONS = {"glossary", "references", "methods"}
 # P9, #477. A numeric finding stated in full twice, with the same value and
 # unit, is a repeat even when the wording around it differs enough to dodge
 # the shingle threshold below: "2.4 percent" once, then "2.4%" a paragraph
@@ -1593,7 +1605,9 @@ def figure_referenced_violations(body: str) -> list[str]:
     return missing
 
 
-def skip_noted_violations(body: str, skipped: list[dict] | None) -> list[str]:
+def skip_noted_violations(
+    body: str, skipped: list[dict] | None, heading_by_id: dict[str, str] | None = None
+) -> list[str]:
     """Every recorded skip is named, with its reason, under the section it
     names -- or somewhere on the page, for a skip with no section at all.
 
@@ -1601,16 +1615,29 @@ def skip_noted_violations(body: str, skipped: list[dict] | None) -> list[str]:
     a note with nothing to show for it is the defect #386 named. Grading
     only the name let a note that dropped its reason, or landed under the
     wrong section, still pass. #464, F3.
+
+    A skip's own `section` field is a section id, `assemble`'s own
+    `fallback_section` shape and every real caller's shape, never a heading
+    string. `top_level_sections` keys by heading text. A PR #534 judge
+    follow-up: no SDK id equals its own heading, so the lookup below widened
+    to whole-body scope for every real skip until this map resolved the id
+    through the outline the run already keeps, not by string-matching a
+    heading. #478
     """
     sections = top_level_sections(body)
+    heading_by_id = heading_by_id or {}
     missing = []
     for item in skipped or []:
         name = str((item or {}).get("name") or "").strip()
         if not name:
             continue
         reason = str((item or {}).get("reason") or "").strip()
-        section = str((item or {}).get("section") or "").strip().lower()
-        scope = sections.get(section, body) if section else body
+        section_id = str((item or {}).get("section") or "").strip().lower()
+        # A run with no id-to-heading map (a snippet test, or an outline this
+        # call was never handed) falls back to treating the id as the
+        # heading, which is exactly right when the two already agree.
+        heading = heading_by_id.get(section_id, section_id).strip().lower()
+        scope = sections.get(heading, body) if section_id else body
         if name not in scope or (reason and reason not in scope):
             missing.append(name)
     return missing
@@ -1745,6 +1772,35 @@ def sections_without_prose(body: str, min_words: int) -> list[str]:
     return thin
 
 
+def study_table_violations(body: str, human_studies: list[dict], headings: list[str]) -> list[str]:
+    """The Evidence Summary table exists, holds one row per human-study
+    claim, and sits after Methods and before the first evidence section.
+    #478. Called only when `human_studies` is non-empty; a paper with no
+    human-study claim carries no table to grade.
+    """
+    sections = top_level_sections(body)
+    order = list(sections)
+    if "evidence summary" not in order:
+        return ["no Evidence Summary table for a ledger holding a human-study claim"]
+    rows = [
+        line
+        for line in sections["evidence summary"].strip().splitlines()
+        if line.strip().startswith("|")
+    ]
+    # The first row is the header, the second the `---` separator.
+    data_rows = rows[2:]
+    problems = []
+    if len(data_rows) != len(human_studies):
+        problems.append(f"{len(data_rows)} table rows for {len(human_studies)} human-study claims")
+    methods_at = order.index("methods") if "methods" in order else -1
+    table_at = order.index("evidence summary")
+    first_section = next((h.strip().lower() for h in headings if h.strip().lower() in order), None)
+    first_at = order.index(first_section) if first_section else len(order)
+    if not (methods_at != -1 and methods_at < table_at < first_at):
+        problems.append("the table is not between Methods and the first evidence section")
+    return problems
+
+
 def check(
     body: str,
     sources: list[str],
@@ -1770,6 +1826,16 @@ def check(
 ) -> Score:
     """Score a paper. No model call."""
     checks: list[Check] = []
+
+    # The outline's own id-to-heading map. `skip_noted_violations` resolves a
+    # skip's section id through it, never by treating the id as a heading
+    # string. Empty when this call carries no outline, which every row below
+    # that reads it already tolerates. #478
+    heading_by_id = {
+        str(section.get("id") or "").strip().lower(): str(section.get("heading") or "")
+        for section in (outline or {}).get("sections") or []
+        if section.get("id")
+    }
 
     checks.append(Check("sources", bool(sources), f"{len(sources)} sources retrieved"))
 
@@ -1936,7 +2002,7 @@ def check(
 
     # Unconditional, and inert with nothing skipped: a snippet another
     # row's test built has no skip to note. #386, #464.
-    skip_missing = skip_noted_violations(body, skipped_figures)
+    skip_missing = skip_noted_violations(body, skipped_figures, heading_by_id)
     checks.append(
         Check(
             "skip_noted",
@@ -2068,6 +2134,46 @@ def check(
                 else f"glossary-only or search-host term: {exact_bad[:3]}",
             )
         )
+
+        # #478. A body with no top-level heading at all is not a paper, the
+        # same defence `next_step` above already gives: nothing to grade,
+        # so this passes by construction rather than failing every snippet
+        # another row's test built.
+        sections_present = top_level_sections(body)
+        methods_missing = last_heading is not None and "methods" not in sections_present
+        checks.append(
+            Check(
+                "methods_present",
+                not methods_missing,
+                "the Methods section is present" if not methods_missing else "no Methods section",
+            )
+        )
+
+        conclusion_missing = last_heading is not None and "conclusion" not in sections_present
+        checks.append(
+            Check(
+                "conclusion_present",
+                not conclusion_missing,
+                "the Conclusion section is present"
+                if not conclusion_missing
+                else "no Conclusion section",
+            )
+        )
+
+        # Only when the ledger holds a human-study claim: a paper about a
+        # topic with none must not be told to grow a table for it.
+        human_studies = [c for c in (claims or []) if c.get("study") and c.get("number")]
+        if human_studies:
+            table_bad = study_table_violations(body, human_studies, headings or [])
+            checks.append(
+                Check(
+                    "study_table",
+                    not table_bad,
+                    f"{len(human_studies)} human-study rows, correctly placed"
+                    if not table_bad
+                    else f"study table: {table_bad[0]}",
+                )
+            )
 
     if min_section_words:
         thin = sections_without_prose(body, min_section_words)

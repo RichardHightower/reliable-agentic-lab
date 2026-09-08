@@ -466,7 +466,9 @@ def test_a_retry_keeps_the_sections_that_passed(offline, run_dir):
 
 def test_the_abstract_turn_runs_after_the_last_section(offline):
     """P7, #472. `stage_write` reorders its loop so every bound section is
-    stamped before the abstract restates them."""
+    stamped before the abstract restates them. #478: the conclusion joins
+    the abstract at the end, and being written after it, is the true last
+    writer turn."""
     prompts: list[str] = []
     original_ask = offline.runner.ask
 
@@ -478,8 +480,16 @@ def test_the_abstract_turn_runs_after_the_last_section(offline):
     offline.runner.ask = spy
     assert offline.run() == 0
     assert prompts, "the writer never ran"
-    assert "'Abstract' section" in prompts[-1]
-    assert all("'Abstract' section" not in p for p in prompts[:-1])
+    assert "'Conclusion' section" in prompts[-1]
+    assert "'Abstract' section" in prompts[-2]
+    assert all(
+        "'Abstract' section" not in p and "'Conclusion' section" not in p for p in prompts[:-2]
+    )
+    # #478. The conclusion turn reads the whole body already written, the
+    # same shape the abstract turn gets, and is told to introduce no new
+    # citation.
+    assert "already written below" in prompts[-1]
+    assert "no new citation" in prompts[-1]
 
 
 def test_a_review_retry_sends_failed_rows_to_the_writer(offline, monkeypatch):

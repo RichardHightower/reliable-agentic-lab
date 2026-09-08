@@ -450,3 +450,19 @@ def test_new_claims_is_copied_and_working():
     assert "3.13" in novel
     assert "2024" in novel
     assert paper_check.new_claims(before, before) == []
+
+
+def test_methods_is_exempt_from_the_numeric_repeat_rule():
+    """#478. Methods restates run-record counts (sources retrieved, claims
+    verified) that legitimately recur in a body section's own numbers for
+    an unrelated reason. `caveat_once` must not read that as the same
+    finding stated twice."""
+    body = (
+        "# On a topic\n\n"
+        "## Methods\n\n- Sources admitted to the reference list: 75 percent "
+        "of those proposed.\n\n"
+        "## Discussion\n\nThe measured effect held in 75 percent of the "
+        "trials reviewed. [1]\n"
+    )
+    score = paper_check.check(body, ["https://a"])
+    assert "caveat_once" not in score.signature(), score.report()

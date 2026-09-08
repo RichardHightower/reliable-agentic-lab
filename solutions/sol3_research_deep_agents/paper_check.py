@@ -43,6 +43,9 @@ Rows `check()` appends, past the three it reuses from `brief`:
     has_body       every section carries real prose, not a heading
     length         the paper clears the word floor
     charted        every plotted value is in the corpus and the caption cites
+    methods_present the Methods section, Python-written from the run record, is present
+    conclusion_present the Conclusion section, one writer turn from the body, is present
+    study_table    one Evidence Summary row per human-study claim, placed after Methods
 
 Belt versus judge, matching the house style page's ownership table
 (https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style).
@@ -234,13 +237,12 @@ QUOTED = re.compile(r'"([^"]{3,})"')
 # the shingle threshold below: "2.4 percent" once, then "2.4%" a paragraph
 # later, is one finding either way.
 #
-# Methods is exempt from this rule once P11 lands: it is Python-written from
+# Methods is exempt from this rule, P11, #478: it is Python-written from
 # the run's own ledger, so the same count it names (sources retrieved,
 # claims verified) legitimately recurs there in the same units a body
-# section reports for an unrelated reason. Not built yet; noted here so the
-# exemption is not lost when Methods is.
+# section reports for an unrelated reason.
 NUMERIC_FULL = re.compile(r"\b\d+(?:\.\d+)?\s*(?:%|percent)\b", re.I)
-CAVEAT_EXEMPT_SECTIONS = {"glossary", "references"}
+CAVEAT_EXEMPT_SECTIONS = {"glossary", "references", "methods"}
 # D2, #477. The whole-paper pass replaces a repeat with a short sentence
 # that points back to the section stating it first. That sentence is not
 # itself a repeat, even when the exact same short sentence appears in two
@@ -1594,6 +1596,35 @@ def caveat_once_violations(body: str) -> list[str]:
     return hits
 
 
+def study_table_violations(body: str, human_studies: list, outline: dict | None) -> list[str]:
+    """The Evidence Summary table exists, holds one row per human-study
+    claim, and sits after Methods and before the first evidence section.
+    #478. Called only when `human_studies` is non-empty.
+    """
+    sections = top_level_sections(body)
+    order = list(sections)
+    if "evidence summary" not in order:
+        return ["no Evidence Summary table for a ledger holding a human-study claim"]
+    rows = [
+        line
+        for line in sections["evidence summary"].strip().splitlines()
+        if line.strip().startswith("|")
+    ]
+    # The first row is the header, the second the `---` separator.
+    data_rows = rows[2:]
+    problems = []
+    if len(data_rows) != len(human_studies):
+        problems.append(f"{len(data_rows)} table rows for {len(human_studies)} human-study claims")
+    methods_at = order.index("methods") if "methods" in order else -1
+    table_at = order.index("evidence summary")
+    headings = [str(s.get("heading") or "").strip().lower() for s in (outline or {}).get("sections") or []]
+    first_section = next((h for h in headings if h in order), None)
+    first_at = order.index(first_section) if first_section else len(order)
+    if not (methods_at != -1 and methods_at < table_at < first_at):
+        problems.append("the table is not between Methods and the first evidence section")
+    return problems
+
+
 def check(
     body: str,
     sources: list[str],
@@ -1867,6 +1898,46 @@ def check(
                 else f"glossary-only or search-host term: {exact_bad[:3]}",
             )
         )
+
+        # #478. A body with no top-level heading at all is not a paper, the
+        # same defence `next_step` above already gives.
+        sections_present = top_level_sections(body)
+        methods_missing = last_heading is not None and "methods" not in sections_present
+        checks.append(
+            Check(
+                "methods_present",
+                not methods_missing,
+                "the Methods section is present" if not methods_missing else "no Methods section",
+            )
+        )
+
+        conclusion_missing = last_heading is not None and "conclusion" not in sections_present
+        checks.append(
+            Check(
+                "conclusion_present",
+                not conclusion_missing,
+                "the Conclusion section is present"
+                if not conclusion_missing
+                else "no Conclusion section",
+            )
+        )
+
+        # Only when the ledger holds a human-study claim: a paper on a
+        # topic with none must not be told to grow a table for it.
+        human_studies = [
+            claim for claim in (ledger.claims.values() if ledger else []) if claim.usable and claim.study
+        ]
+        if human_studies:
+            table_bad = study_table_violations(body, human_studies, outline)
+            checks.append(
+                Check(
+                    "study_table",
+                    not table_bad,
+                    f"{len(human_studies)} human-study rows, correctly placed"
+                    if not table_bad
+                    else f"study table: {table_bad[0]}",
+                )
+            )
 
     rows = reference_rows(body)
     checks.append(

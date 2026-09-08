@@ -18,6 +18,7 @@ exists to catch.
 
 from __future__ import annotations
 
+import re
 import sys
 import types
 from dataclasses import dataclass, field
@@ -293,6 +294,12 @@ class RecordingTurns:
     def write_abstract(self, body, ledger=None):
         self.asked.append(("write_abstract", len(body)))
         return "A recorded abstract."
+
+    def write_conclusion(self, body, ledger=None):
+        self.asked.append(("write_conclusion", len(body)))
+        match = re.search(r"\[(\d+)\]", body)
+        marker = f" [{match.group(1)}]" if match else ""
+        return f"A recorded conclusion{marker}."
 
     def review(self, paper, report):
         self.asked.append(("review", report))

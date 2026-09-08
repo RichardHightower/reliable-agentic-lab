@@ -409,18 +409,50 @@ def headings(plan):
 def test_normalize_adds_the_sections_every_paper_has():
     """Otherwise the section gate fails at stage 8, four stages too late."""
     out = stages.normalize_plan({"questions": [], "sections": ["Body"]})
-    assert headings(out) == ["Abstract", "Introduction", "Body", "References"]
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
 
 
 def test_a_missing_introduction_lands_after_the_abstract():
     """Inserting it at the front would put the introduction first, which is a
     different paper."""
     out = stages.normalize_plan({"questions": [], "sections": ["Abstract", "Body", "References"]})
-    assert headings(out) == ["Abstract", "Introduction", "Body", "References"]
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
+
+
+def test_normalize_plan_inserts_methods_and_conclusion_in_position():
+    """#478. Methods lands right after Introduction. Conclusion lands right
+    before Next step when one exists, second to last so `next_step` still
+    grades Next step, not Conclusion.
+    """
+    out = stages.normalize_plan(
+        {"questions": [], "sections": ["Abstract", "Introduction", "Body", "Next step", "References"]}
+    )
+    assert headings(out) == [
+        "Abstract",
+        "Introduction",
+        "Methods",
+        "Body",
+        "Conclusion",
+        "Next step",
+        "References",
+    ]
+
+
+def test_normalize_puts_conclusion_before_references_with_no_next_step():
+    out = stages.normalize_plan({"questions": [], "sections": ["Abstract", "Introduction", "Body"]})
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
 
 
 def test_normalize_leaves_a_complete_plan_alone():
-    given = ["Abstract", "Introduction", "Method", "Limitations", "References"]
+    given = [
+        "Abstract",
+        "Introduction",
+        "Methods",
+        "Limitations",
+        "Conclusion",
+        "Next step",
+        "References",
+    ]
     assert headings(stages.normalize_plan({"questions": [], "sections": list(given)})) == given
 
 
@@ -2030,8 +2062,20 @@ def test_a_body_section_must_bind_something():
     assert "no claim ids" in str(exc.value)
 
 
+def test_outline_gate_requires_methods_and_conclusion_when_the_plan_named_them():
+    """#478. The plan names Methods and Conclusion once `normalize_plan`
+    runs; the belt check here catches a model outline turn that dropped
+    one of them from its echoed `sections` list."""
+    led, claims = ledger_with()
+    structured_plan = plan(sections=["Abstract", "Introduction", "Methods", "Conclusion", "References"])
+    with pytest.raises(GateFailed) as exc:
+        stages.outline_gate(outline(claims[0].id), led, structured_plan)
+    assert "missing the methods section" in str(exc.value)
+    assert "missing the conclusion section" in str(exc.value)
+
+
 def test_abstract_and_references_need_no_binding():
-    assert stages.UNBOUND_SECTIONS == ("abstract", "references")
+    assert stages.UNBOUND_SECTIONS == ("abstract", "conclusion", "methods", "references")
 
 
 # -- 5. diagram ------------------------------------------------------------
@@ -2275,6 +2319,120 @@ def test_a_rendered_figure_the_outline_forgot_becomes_a_named_skip():
     assert not paper_check.placed_figures(body)
 
 
+# -- P11, methods, conclusion, and the study table --------------------------
+
+
+def test_methods_names_the_admitted_hosts(run_dir):
+    """Methods is Python-written from the run record and names the admitted
+    hosts by design, which is why `policy_leak` exempts it. #478"""
+    run = build_run(run_dir)
+    run.plan = {"sections": [{"heading": "Introduction"}]}
+    (run.work_dir / "corpus").mkdir(parents=True, exist_ok=True)
+    (run.work_dir / "corpus" / "source_allowlist.json").write_text(
+        json.dumps({"admitted": ["docs.example-field.org"], "dropped": []}),
+        encoding="utf-8",
+    )
+    body = "## Methods\n\n" + "\n".join(run._methods_lines())
+    assert "docs.example-field.org" in body
+    assert not paper_check.policy_leak_violations(body, ("docs.example-field.org",))
+
+
+def _study_ledger():
+    led = evidence.Ledger("/nonexistent")
+    a = led.add_source(
+        evidence.SourceDocument(
+            title="a", url="https://pubmed.ncbi.nlm.nih.gov/one", subject="s1", tier="primary_trial"
+        )
+    )
+    b = led.add_source(
+        evidence.SourceDocument(
+            title="b",
+            url="https://pubmed.ncbi.nlm.nih.gov/two",
+            subject="s1",
+            tier="meta_analysis_or_systematic_review",
+        )
+    )
+    c1 = led.add_claim(
+        evidence.Claim(
+            text="preserved lean mass",
+            subject="s1",
+            source_ids=[a.id],
+            study={
+                "participants": {"n": 24, "population": "older men"},
+                "duration": "12 weeks",
+                "deficit": "500 kcal per day",
+                "training": True,
+                "assay": "DXA",
+                "result": "preserved lean mass",
+            },
+        )
+    )
+    c2 = led.add_claim(
+        evidence.Claim(
+            text="less lean mass loss",
+            subject="s1",
+            source_ids=[b.id],
+            study={
+                "participants": {"n": 40, "population": "postmenopausal women"},
+                "duration": "8 weeks",
+                "deficit": "20 percent caloric restriction",
+                "training": False,
+                "assay": "bioimpedance",
+                "result": "less lean mass loss",
+            },
+        )
+    )
+    return led, [c1, c2]
+
+
+def test_two_human_study_claims_render_a_two_row_table():
+    """`stages.study_table` is Python from the ledger: one row per
+    human-study claim, reading E3's `study` object and E4's `tier`. #478"""
+    led, _claims = _study_ledger()
+    index, _ = stages.numbering(led)
+    table = stages.study_table(led, index)
+    rows = [line for line in table.strip().splitlines() if line.strip().startswith("|")]
+    data_rows = rows[2:]
+    assert len(data_rows) == 2, table
+    assert "24 (older men)" in table
+    assert "12 weeks" in table
+    assert "500 kcal per day" in table
+    assert "yes" in table
+    assert "DXA" in table
+    assert "preserved lean mass" in table
+    assert "primary_trial" in table
+    assert "40 (postmenopausal women)" in table
+    assert "meta_analysis_or_systematic_review" in table
+
+
+def test_the_table_sits_after_methods_and_before_the_first_evidence_section():
+    led, claims = _study_ledger()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id, claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(plan(title="T"), out, {"Introduction": "A fact. [1][2]"}, [], led)
+    assert body.index("## Methods") < body.index("## Evidence Summary") < body.index("## Introduction")
+
+
+def test_no_human_study_claim_renders_no_table():
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(plan(title="T"), out, {"Introduction": "A fact. [1]"}, [], led)
+    assert "## Evidence Summary" not in body
+
+
 def test_a_term_marker_is_harvested_and_stripped():
     """The writer's `TERM` marker never reaches the reader, and its term
     reaches the glossary assembly writes."""
@@ -2371,7 +2529,24 @@ def test_assemble_gate_fails_a_heading_that_pastes_a_key_question(monkeypatch):
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
         "### What stops the loop from running forever\n\n"
         "A rubric computed in code decides when the loop stops. [1]\n\n"
+        "## Methods\n\n"
+        "- This paper searched two planned sections for evidence, starting 2026-01-01: "
+        "Abstract, Introduction. Each planned section names a facet of the topic the "
+        "outline settled before research began.\n"
+        "- Admitted search hosts, decided once before any paid search ran: "
+        "docs.langchain.com, docs.claude.com. A host outside this list was not searched.\n"
+        "- Sources retrieved during research: 2. Sources admitted to the reference "
+        "list, after the same host and claim checks every finding in this paper "
+        "passed: 2.\n"
+        "- The verification cap for this run allows a second opinion on up to 24 "
+        "claims. The follow-turn cap allows 6 secondary claims a look at their own "
+        "primary study, of which 0 were spent. The counter-evidence cap allows 6 "
+        "generalizing claims a search for a contrary finding, of which 0 were spent.\n"
+        "- No proposed host was excluded during admission; every host cleared the wall.\n"
+        "- No claim in this run carries a recorded human study.\n\n"
         "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
+        "## Conclusion\n\nThe evidence above supports the three exits, with the runtime scope "
+        "noted as a limit. [1][2]\n\n"
         "## Next step\n\n"
         "- Evaluate the three exits on a live ticket before adopting them.\n"
         "- Run the fixture with --backend fixture, then again with a live backend.\n"

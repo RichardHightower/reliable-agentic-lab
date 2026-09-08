@@ -459,7 +459,10 @@ def to_markdown(outline: dict) -> str:
     return "\n".join(lines)
 
 
-SKIP_HEADINGS = {"abstract", "references", "summary", "bibliography"}
+# Methods is Python-written (no key_questions, no abstract of its own) and
+# the conclusion restates the body rather than answering a key question, the
+# same reason the abstract is already skipped here. #478
+SKIP_HEADINGS = {"abstract", "conclusion", "methods", "references", "summary", "bibliography"}
 
 
 def _question_text(question) -> str:

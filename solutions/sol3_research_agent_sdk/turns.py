@@ -273,6 +273,12 @@ class Turns:
         """
         raise NotImplementedError
 
+    def write_conclusion(self, body: str, ledger=None) -> str:
+        """One turn, after every section is written, that restates the
+        body's own findings with no new citation. #478.
+        """
+        raise NotImplementedError
+
     def review(self, paper: str, report: str, ledger=None) -> dict:
         raise NotImplementedError
 
@@ -745,6 +751,28 @@ class SdkTurns(Turns):
             "against the same claims the body already cites. Do not invent a "
             "fact the body does not already state. Return the abstract text "
             "only, no heading.\n\n"
+            f"The paper body, already written:\n{whole(body)}\n{payload}",
+        )
+        return result.output or ""
+
+    def write_conclusion(self, body: str, ledger=None) -> str:
+        """One turn, after the body, that restates only what it already
+        states, with no new citation. #478.
+        """
+        payload = ""
+        if ledger:
+            payload = "\nThe paper ledger:\n" + json.dumps(ledger, indent=2)[:6000]
+        result = self._ask(
+            "research-writer",
+            "Write the paper's conclusion, from the body already written "
+            "below. State only what that body states. Cite only a number "
+            "the body already cites; introduce no new source and no new "
+            "citation. Carry the same hedge the body carries for a "
+            "single-source claim: say \"single source\", \"one study\", "
+            "\"one trial\", or \"preliminary\" in the same sentence that "
+            "cites it. Never write \"proves\", \"definitively\", "
+            "\"conclusively\", or \"establishes that\" for a claim the "
+            "body hedges. Return the conclusion text only, no heading.\n\n"
             f"The paper body, already written:\n{whole(body)}\n{payload}",
         )
         return result.output or ""
@@ -1428,6 +1456,15 @@ class OfflineTurns(Turns):
         needs no hedge and cannot overclaim.
         """
         return "This paper summarizes the sections that follow, from the sources verified in the run."
+
+    def write_conclusion(self, body: str, ledger=None) -> str:
+        """No model, so no new citation to check. Reuses the body's own
+        first citation number rather than inventing one, so `cited` and
+        `grounded` both pass the same way a section's own prose does. #478.
+        """
+        match = re.search(r"\[(\d+)\]", body)
+        marker = f" [{match.group(1)}]" if match else ""
+        return f"The findings above hold under the limits already noted{marker}."
 
     def judge_section(self, section: dict, body: str, findings: list, note: str = "") -> dict:
         return {"passed": True, "failed_rows": [], "notes": []}

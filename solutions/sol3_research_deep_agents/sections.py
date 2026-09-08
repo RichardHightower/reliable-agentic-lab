@@ -529,7 +529,9 @@ def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
 
     claim_ids = list(section.get("claim_ids") or [])
     heading = (section.get("heading") or "").lower()
-    if heading in ("abstract", "references"):
+    # #478. The conclusion restates the body the same way the abstract
+    # does, so it gets the same all-usable-claims binding.
+    if heading in ("abstract", "conclusion", "references"):
         claim_ids = [c.id for c in paper.ledger.claims.values() if c.usable]
     out = []
     number = 1
