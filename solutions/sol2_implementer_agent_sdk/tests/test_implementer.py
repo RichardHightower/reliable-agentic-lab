@@ -442,6 +442,90 @@ def test_an_unparseable_verdict_is_a_fail(tmp_path, monkeypatch):
     assert trace["judge"]["why"] == "unparseable verdict"
 
 
+def test_judge_prompt_names_a_changed_path_and_a_plan_step_id(tmp_path, monkeypatch):
+    """A1 (#429). The judge gets the code phase's own paths and the plan, not
+    just the rubric's word for it."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+
+    class RecordingJudge(ScriptedBackend):
+        def __init__(self, script):
+            super().__init__(script)
+            self.judge_prompts: list[str] = []
+
+        def judge(self, *, repo: Path, prompt: str) -> doers.DoerResult:
+            self.judge_prompts.append(prompt)
+            return doers.DoerResult(output='{"done": true, "why": "looks right"}')
+
+    backend = RecordingJudge(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    assert trace["gate"] == "pass"
+    assert len(backend.judge_prompts) == 1
+    prompt = backend.judge_prompts[0]
+    assert "app/greet.py" in prompt
+    assert "S1C" in prompt
+
+
+def test_build_judge_no_wraps_reference_backend():
+    """A1 (#430). `--doer judge-no` is the classroom demo: a green rubric that
+    still escalates because the judge refuses."""
+    backend = doers.build("judge-no")
+
+    assert isinstance(backend, doers.JudgeSaysNoBackend)
+    assert isinstance(backend.inner, doers.ReferenceBackend)
+
+
+def test_build_reference_is_unaffected_by_the_judge_no_wrapper():
+    backend = doers.build("reference")
+
+    assert isinstance(backend, doers.ReferenceBackend)
+    assert not isinstance(backend, doers.JudgeSaysNoBackend)
+
+
+def test_judge_says_no_backend_escalates_on_a_green_rubric(tmp_path, monkeypatch):
+    """A1 (#430). Wrap a scripted backend in JudgeSaysNoBackend, not a live
+    judge patch: the fixture backend is what a room can actually run."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    inner = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+    backend = doers.JudgeSaysNoBackend(inner)
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert trace["judge"]["done"] is False
+    assert "final judge says the ticket is not done" in trace["reason"]
+
+
 def test_due_date_in_a_passing_id_does_not_prove_every_step(tmp_path):
     """The old T001 leak. A passing test named due_date is not evidence for AC-9."""
     plan = implementer.plan_for(

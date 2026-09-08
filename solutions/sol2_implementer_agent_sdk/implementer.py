@@ -40,8 +40,6 @@ import ticket as tickets
 import write_scope as roles
 from contract import Contract, ContractError
 
-TEST_GLOBS = ("tests/**",)
-
 
 def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
     """Test ids that are failing now and did not exist before. The red proof."""
@@ -111,12 +109,29 @@ def parse_judge_verdict(text: str, structured: dict | None = None) -> tuple[bool
     return bool(payload["done"]), payload
 
 
-def _ask_judge(backend, *, repo: Path, ticket: tickets.Ticket, score: rubric.Score) -> tuple[bool, dict, float]:
-    """Invoke the judge once. Offline backends return valid JSON; live ones run."""
+def _ask_judge(
+    backend,
+    *,
+    repo: Path,
+    ticket: tickets.Ticket,
+    score: rubric.Score,
+    changed: list[str],
+    plan: steps.Plan,
+) -> tuple[bool, dict, float]:
+    """Invoke the judge once. Offline backends return valid JSON; live ones run.
+
+    `changed` is the code phase's own files, so the judge can name what it is
+    grading instead of taking the rubric's word for it. `plan` is the ticket's
+    steps.jsonl, so the judge can point at the step a criterion maps to.
+    """
+    changed_lines = "\n".join(f"- {path}" for path in changed) or "- (no files changed)"
+    plan_lines = "\n".join(f"- {step.id}: {step.validation}" for step in plan.steps)
     prompt = (
         f"{ticket.for_prompt()}\n\n"
         "The ten-row rubric is green.\n\n"
         f"{score.report()}\n\n"
+        f"Files changed in the code phase:\n{changed_lines}\n\n"
+        f"Plan steps:\n{plan_lines}\n\n"
         "Does this diff do what the ticket asked? Reply with JSON only: "
         '{"done": true, "why": "one sentence"}. Do not name a gate. '
         "Do not say pass, retry, or escalate."
@@ -298,7 +313,8 @@ def run(  # noqa: PLR0915
         judge_done: bool | None = None
         if score.passed:
             judge_done, judge_payload, judge_usd = _ask_judge(
-                backend, repo=target, ticket=the_ticket, score=score
+                backend, repo=target, ticket=the_ticket, score=score,
+                changed=code_phase, plan=plan,
             )
             boss.spend(judge_usd)
             trace["judge"] = judge_payload
