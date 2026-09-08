@@ -31,7 +31,7 @@ It is not a blog post, a Medium article, a sales deck, or a product
 one-pager.
 
 About 90 percent of the page is education: problem, mechanism, evidence,
-limits. The last prose section is a next-step call to action. That CTA
+limits. The last prose section is a next-step call to action. This CTA
 is not marketing.
 
 ## Language: STE-100 principles, not the aerospace dictionary
@@ -40,7 +40,7 @@ The seminar writes **Simplified Technical English** in the sense of
 ASD-STE100 *principles*. The local skill pack is
 `ste100` (`rules.md` STE-S1 to STE-S15). Sol 3 does **not** load the
 official ASD dictionary and does **not** run the STE editor/adversary
-loop on the paper. That loop is for procedures and runbooks.
+loop on the paper. This loop is for procedures and runbooks.
 
 The paper is descriptive prose with citations. Apply the subset a
 briefing can keep without fighting bound claims:
@@ -119,7 +119,7 @@ American spelling. Serial comma. No em dashes.
 - Search-host names in the body. The reference list is exempt.
 
 The reader is reading about the subject. They are not reading how the
-paper was made. That is #412.
+paper was made. This is #412.
 
 ## Evidence, not opinion
 
@@ -151,7 +151,7 @@ statements, not pasted research questions.
 - Good H3: "MAST reports failure categories from 1,600 traces"
 
 A white paper answers questions. It does not title subsections with
-them. That is #385. Coverage scores whether the question is *answered*
+them. This is #385. Coverage scores whether the question is *answered*
 in the body. It does not require the question string as a heading.
 
 Recommended arc:
@@ -186,7 +186,7 @@ Allowed shape:
 Forbidden in that section: buy, sign up, get started today, revolutionize,
 unlock, only solution, contact sales, subscribe.
 
-The CTA may use imperative verbs. That is the one place STE procedure
+The CTA may use imperative verbs. This is the one place STE procedure
 shape is welcome. Keep each step under 20 words.
 
 ## Glossary
@@ -225,7 +225,7 @@ After the image, three to five sentences on what the figure makes
 visible. Never paste diagram source into the paper.
 
 A skipped figure is named in the owning section, with the reason already
-in the log. Silence is the defect. That is #386 and #413.
+in the log. Silence is the defect. This is #386 and #413.
 
 ## Who owns which rule
 
@@ -290,7 +290,7 @@ usual guides, and what it leaves because the loop already decided.
 | Gordon Graham (That White Paper Guy) | One house style. Headings, lists, and a figure where the outline planned one. Do not dress the page like a sales deck. Consistent names. | B2B product paper. Print line length 45–75. Pull quotes. Multi-column layout. "Figure on most pages" as a quota. | The artifact is GitHub markdown. Assemble owns figures. A quota would invent charts. |
 | IEEE citation practice | Numbered `[n]` in the body. Numbered reference list at the end. | Author–date. Footnotes. | Assemble already prints this. APA author–date would break the registry belt (#384). |
 | APA 7e | Evidence honesty. Define a term on first use. Do not overclaim. | Author–date citations. Running head. 350–500 exec summary as a floor. | Abstract stays 120–180 on a 2,000-word paper. |
-| AP Stylebook | American spelling. Consistency on names and acronyms. Gender-neutral wording. No competitor smears; facts only. | AP's no-serial-comma default. AP news lede. | These ports keep the serial comma. That is IEEE/Chicago, not AP. |
+| AP Stylebook | American spelling. Consistency on names and acronyms. Gender-neutral wording. No competitor smears; facts only. | AP's no-serial-comma default. AP news lede. | These ports keep the serial comma. This is IEEE/Chicago, not AP. |
 | GOV.UK style | Plain English. Short paragraphs. Say what the reader can do next. | UK spelling. Public-sector service voice. | STE-adapted English is the plain-English belt. CTA is the next step. |
 | ASD-STE100 (local `ste100` skill) | Descriptive subset: ≤25 word sentences, one idea, active voice, no contractions, no `e.g.`, one word one meaning, noun cluster ≤3. | Official dictionary. Procedure template. Ban on `may`/`might`. Editor/adversary loop on every section. | A briefing must name uncertainty. Bound terms stay as the claim named them. |
 

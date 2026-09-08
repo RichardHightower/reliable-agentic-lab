@@ -10,7 +10,7 @@ Tickets and plans only in the filing PR. Do not implement the loop from this pag
 
 ## Epic
 
-[#445](https://github.com/RichardHightower/reliable-agentic-lab/issues/445) — `sol3: adopt a house style the ports can enforce`
+[#445](https://github.com/RichardHightower/reliable-agentic-lab/issues/445): `sol3: adopt a house style the ports can enforce`
 
 ## Queue
 
