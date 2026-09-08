@@ -420,6 +420,21 @@ def test_redact_widens_to_tilde_home_ghp_tokens_and_bearer_headers():
     assert "Bearer <REDACTED-TOKEN>" in redacted
 
 
+def test_redact_strips_a_slugified_home_path_with_no_slashes():
+    """#444 step 2 finding. A live run's own tooling (Claude Code's own
+    transcript directory, a scratchpad tmp path) names the home directory
+    with `-` in place of `/`, e.g. `-Users-jdoe-work-crm`. The literal
+    `str(Path.home())` replace never matches that string; only the bare
+    account name is common to every encoding of the same path."""
+    name = e2e_t001.Path.home().name
+    text = f"output_file: /private/tmp/claude-501/-Users-{name}-clients-crm/tasks/x.output\n"
+
+    redacted = e2e_t001._redact(text)
+
+    assert name not in redacted
+    assert "<HOME>" in redacted
+
+
 def test_the_raw_log_survives_cleanup_via_raw_log_dir_with_secrets_stripped(
     tmp_path, monkeypatch
 ):

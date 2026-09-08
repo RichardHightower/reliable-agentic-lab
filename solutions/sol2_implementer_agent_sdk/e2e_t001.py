@@ -244,17 +244,24 @@ _KEY_PATTERN = re.compile(r"sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]+")
 # its own pattern rather than a wider `_KEY_PATTERN`.
 _HOME_TILDE_PATTERN = re.compile(r"~/[^\s'\"]*")
 _BEARER_PATTERN = re.compile(r"Bearer\s+\S+")
+# A live run's own tooling (Claude Code's transcript directory, this
+# scratchpad's own tmp path) slugifies the home directory with `-` in place
+# of `/`, so `/Users/<name>/...` never matches there. The bare account name
+# is the one string common to every encoding of the same path.
+_HOME_NAME = Path.home().name
 
 
 def _redact(text: str) -> str:
     """#543, widened by #545 follow-up. Strip what a durable, checked-in
-    copy must never carry: the operator's own home directory (resolved or
-    `~/`-shorthand), anything shaped like a live key (`sk-ant-...`,
-    `ghp_...`), and a bearer auth header. `docs/status/` is a git-tracked
-    path; the worktree's own copy this replaces stays wherever `--repo`
-    names, cleaned up by hand."""
+    copy must never carry: the operator's own home directory (resolved,
+    `~/`-shorthand, or slugified with `-` in place of `/`), anything shaped
+    like a live key (`sk-ant-...`, `ghp_...`), and a bearer auth header.
+    `docs/status/` is a git-tracked path; the worktree's own copy this
+    replaces stays wherever `--repo` names, cleaned up by hand."""
     text = text.replace(str(Path.home()), "<HOME>")
     text = _HOME_TILDE_PATTERN.sub("<HOME>", text)
+    if _HOME_NAME:
+        text = re.sub(re.escape(_HOME_NAME), "<HOME>", text)
     text = _BEARER_PATTERN.sub("Bearer <REDACTED-TOKEN>", text)
     return _KEY_PATTERN.sub("<REDACTED-KEY>", text)
 
