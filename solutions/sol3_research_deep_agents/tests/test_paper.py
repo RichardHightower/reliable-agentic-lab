@@ -1102,6 +1102,48 @@ def test_a_shortfall_hedges_the_writer_brief(offline, run_dir, stub_renderer):
     ), "at least one section's brief must carry the shortfall hedge"
 
 
+def test_an_em_dash_is_normalized_before_the_section_is_graded(offline, run_dir, stub_renderer):
+    """#517 follow-up 2: `style` is now a hard row (`close_section` raises
+    on any hard row's failure), and `stage_assemble` strips em dashes
+    deterministically anyway (`brief.strip_em_dashes`). A writer's em dash
+    must not cost a section an attempt over something the paper would have
+    fixed silently: normalized before `close_section` grades the body, so
+    `style` passes at write time and the assembled paper carries none."""
+    import dataclasses  # noqa: PLC0415
+
+    real_ask = offline.runner.ask
+
+    def dashed(role, prompt):
+        reply = real_ask(role, prompt)
+        if role == "writer" and "'Introduction' section" in prompt:
+            return dataclasses.replace(reply, text=reply.text.replace(". ", " — noted. ", 1))
+        return reply
+
+    offline.runner.ask = dashed
+
+    offline.stage_corpus()
+    offline.stage_scout()
+    offline.stage_plan()
+    offline.stage_sources()
+    offline.stage_search()
+    offline.stage_verify()
+    offline.stage_outline()
+    offline.stage_charts()
+    offline.stage_write()
+
+    section_body = (run_dir / "sections" / "introduction.md").read_text(encoding="utf-8")
+    assert "—" not in section_body
+
+    score = json.loads((run_dir / "knowledge" / "introduction" / "section-check.json").read_text())
+    assert "style" not in score["signature"]
+
+    offline.stage_diagram()
+    offline.stage_review()
+    offline.stage_assemble()
+    assembled = offline.paper_path.read_text(encoding="utf-8")
+    assert "—" not in assembled
+
+
 def test_stage_write_fails_an_uncited_ledger_guideline_and_briefs_it(offline, run_dir, stub_renderer):
     """#517 follow-up 3. `guideline_brief`'s call site inside `stage_write`
     is what a live run actually executes, not only the unit call to

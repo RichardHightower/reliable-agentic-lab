@@ -35,6 +35,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import brief
 import diagrams
 import evidence
 import gates
@@ -2523,6 +2524,11 @@ class Paper:
                     body, encoding="utf-8"
                 )
             body = stages.drop_uncited_prose(body)
+            # `assemble` strips em dashes deterministically; `style` is a hard
+            # row since #517 follow-up 2, so a writer's em dash must not cost
+            # this section an attempt over something `assemble` would have
+            # fixed silently anyway. Same normalization, applied here first.
+            body = brief.strip_em_dashes(body)
             # Store first, then gate. A failure drops this section only, so the
             # retry re-asks for it and leaves its neighbours alone.
             stages.write_gate(heading, body, allowed)
@@ -2637,6 +2643,9 @@ class Paper:
             usd += reply.usd
             body = section_body(reply.text, heading)
             body = stages.drop_uncited_prose(body)
+            # See `stage_write`'s own call: `style` is hard, `assemble` is not
+            # the first reader to see this text any more.
+            body = brief.strip_em_dashes(body)
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body
             self._save_sections()

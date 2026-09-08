@@ -1567,6 +1567,18 @@ def run_section(run, section: dict) -> dict:
                 run.log(f"    {sid}: the writer produced nothing on the first attempt.")
                 path.unlink(missing_ok=True)
         body = path.read_text(encoding="utf-8") if path.exists() else ""
+        # #517 follow-up 2. `assemble` strips em dashes deterministically at
+        # `paper.py`'s own call to `checks.strip_em_dashes`; `style` already
+        # fails a section over one. Normalized here too, before the section
+        # is graded, so a writer's em dash never costs an attempt over
+        # something `assemble` would have fixed silently anyway. The writer
+        # can hold `Write` on `path` directly, so the file, not only the
+        # return value, is what gets rewritten.
+        if body:
+            normalized = checks.strip_em_dashes(body)
+            if normalized != body:
+                body = normalized
+                path.write_text(body, encoding="utf-8")
         last_score = checks.section_check(
             body,
             section=section,

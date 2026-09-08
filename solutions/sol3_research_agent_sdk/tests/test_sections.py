@@ -930,6 +930,42 @@ def test_the_ledger_appends_one_entry_per_section(work, turns, no_renderer):
     assert (Path(work) / "knowledge" / "s1" / "findings.json").is_file()
 
 
+def test_an_em_dash_is_normalized_before_the_section_is_graded(work, turns, no_renderer):
+    """#517 follow-up 2: `style` is a hard row, and `paper.assemble` strips
+    em dashes deterministically anyway (`checks.strip_em_dashes`). A
+    writer's em dash must not cost a section an attempt over something the
+    paper would have fixed silently. Normalized before `section_check`
+    grades the body, so `style` passes at write time and the assembled
+    paper carries no em dash either."""
+
+    class DashTurns(turns):
+        def write(self, section, claims, figures, notes, path=""):
+            body = super().write(section, claims, figures, notes, path)
+            return body.replace(" [", " — noted [", 1)
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=DashTurns(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    section_body = (Path(work) / "sections" / "s1.md").read_text(encoding="utf-8")
+    assert "—" not in section_body
+
+    score = json.loads((Path(work) / "knowledge" / "s1" / "section-check.json").read_text())
+    assert "style" not in score["signature"]
+
+    paper.assemble(run)
+    assembled = (Path(work) / "paper.md").read_text(encoding="utf-8")
+    assert "—" not in assembled
+
+
 def test_run_section_enriches_metadata_through_the_real_pipeline(work, turns, no_renderer, monkeypatch):
     """#470, the call site, not the helper (same shape of gap as #355 finding 6).
 

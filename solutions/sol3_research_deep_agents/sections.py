@@ -576,12 +576,14 @@ def close_section(paper, section: dict, body: str, *, force: bool = False) -> fl
     """Write findings, check, judge, and ledger for one accepted section.
 
     Returns USD spent on the judge and ledger turns. Any hard row's failure
-    (`stub`, `cited`, `counterweighed`, `evidence_requirements_met`,
-    `guideline_cited`, and so on -- every `Check` this file does not mark
-    `hard=False`) raises `GateFailed` so a retry rewrites only this
-    section. #517 follow-up: before this, `close_section` raised only for
-    `stub`; every other hard row was written to `section-check.json` and
-    never read back, so a section that failed `guideline_cited` still
+    (`stub`, `cited`, `style`, `counterweighed`, `guideline_cited` -- every
+    `Check` this file does not mark `hard=False`) raises `GateFailed` so a
+    retry rewrites only this section. `evidence_requirements_met` is not
+    one of this file's own rows; it is graded in `stages.search_gate`,
+    against the whole plan, not one section. #517 follow-up: before this,
+    `close_section` raised only for `stub`; every other hard row was
+    written to `section-check.json` and never read back, so a section
+    that failed `guideline_cited` still
     shipped. The SDK twin already enforces every hard row this way,
     through `check_failed = bool(last_score.signature())`.
     """
