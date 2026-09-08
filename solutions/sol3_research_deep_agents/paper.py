@@ -768,10 +768,15 @@ class Paper:
 
         dest = self.work_dir / "corpus"
         packed = corpus_mod.pack(self.topic, list(self.brains), dest, limit=40)
+        summary = (
+            f"{len(packed.get('hits') or [])} hits, "
+            f"{packed.get('relevant', 0)} relevant, "
+            f"thin={packed.get('corpus_thin')}"
+        )
         return StageResult(
             "corpus",
             artifacts={"corpus/brain-pack.json": str(dest / "brain-pack.json")},
-            summary=f"{packed.get('hits') or 0} hits, thin={packed.get('corpus_thin')}",
+            summary=summary,
         )
 
     def stage_scout(self, extra: str = "") -> StageResult:
