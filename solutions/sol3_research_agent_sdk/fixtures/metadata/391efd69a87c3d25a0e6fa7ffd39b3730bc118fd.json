@@ -1,5 +1,5 @@
 {
-  "_comment": "arXiv API reply for https://arxiv.org/abs/2401.01234, recorded for tests/test_metadata.py",
+  "_comment": "arXiv API reply for https://arxiv.org/abs/2401.01234, recorded for tests/test_metadata.py #473 adds category for source_policy.tier_for().",
   "title": "Exit Conditions for Long-Running Agent Loops",
   "authors": [
     "A. Researcher",
@@ -7,5 +7,6 @@
   ],
   "year": "2024",
   "venue": "arXiv",
-  "text": "We define three exit conditions for a long running agent loop: task completion, a cost ceiling, and a turn limit, and show that checking all three reduces runaway cost incidents by 90 percent across 12 evaluated repositories."
+  "text": "We define three exit conditions for a long running agent loop: task completion, a cost ceiling, and a turn limit, and show that checking all three reduces runaway cost incidents by 90 percent across 12 evaluated repositories.",
+  "category": "cs.MA"
 }

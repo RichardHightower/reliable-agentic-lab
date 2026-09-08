@@ -147,6 +147,19 @@ def _terms(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOP and len(w) > 2}
 
 
+# #473. What names a section's own topic as safety, dosing, or protocol.
+GUIDELINE_TOPIC_WORDS = ("safety", "dosing", "protocol")
+
+
+def _is_guideline_topic(section: dict) -> bool:
+    heading = str(section.get("heading") or "").lower()
+    parts = [heading]
+    for item in section.get("key_questions") or []:
+        text = item if not isinstance(item, dict) else item.get("text") or item.get("question") or ""
+        parts.append(str(text))
+    return any(word in " ".join(parts).lower() for word in GUIDELINE_TOPIC_WORDS)
+
+
 def section_check(
     body: str,
     *,
@@ -155,7 +168,7 @@ def section_check(
     evidence_blob: str = "",
     word_target: int = 0,
 ) -> PaperScore:
-    """Eight deterministic rows on one section, before any judge.
+    """Nine deterministic rows on one section, before any judge.
 
     `stub` is hard. Length, coverage, and figures are recorded but soft on
     this port so the existing writer fixtures still finish; the SDK port
@@ -282,6 +295,36 @@ def section_check(
     checks.append(
         Check("style", not style_hits, "clean" if not style_hits else ", ".join(style_hits))
     )
+
+    # #473. A section about safety, dosing, or protocol re-derives from
+    # primaries exactly what a position stand or guideline already answers,
+    # unless it is made to cite one. Graded against `findings` (this call's
+    # own evidence), not a whole-run source ledger this function has no
+    # access to: a section with no `position_stand_or_guideline` source
+    # among its own findings passes.
+    guideline_numbers = set()
+    for f in findings:
+        if f.get("evidence_tier") != "position_stand_or_guideline" or not f.get("number"):
+            continue
+        try:
+            guideline_numbers.add(int(f["number"]))
+        except (TypeError, ValueError):
+            # A truthy, non-numeric `number` is not this row's problem to
+            # raise on; every current producer supplies an int. #473
+            continue
+    guideline_numbers = sorted(guideline_numbers)
+    missing_guideline = (
+        [number for number in guideline_numbers if f"[{number}]" not in body]
+        if guideline_numbers and _is_guideline_topic(section)
+        else []
+    )
+    checks.append(
+        Check(
+            "guideline_cited",
+            not missing_guideline,
+            "every position stand is cited" if not missing_guideline else f"missing: {missing_guideline}",
+        )
+    )
     return PaperScore(checks=checks)
 
 
@@ -318,6 +361,10 @@ def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
                 "numbers": [],
                 "number": index.get(source_id) if source_id in index else number,
                 "status": claim.truth_state,
+                # `source.tier` (#473), not `source["tier"]` above: that key
+                # already means "corpus vs web citation weight" and predates
+                # this ticket. Read by `section_check`'s `guideline_cited` row.
+                "evidence_tier": source.tier if source is not None else "",
             }
         )
         number += 1

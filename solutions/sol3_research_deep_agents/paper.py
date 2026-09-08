@@ -476,6 +476,13 @@ class Paper:
     search_budget: research.Budget | None = None
     max_usd: float = DEFAULT_MAX_USD
     max_verify: int = stages.MAX_VERIFY_CLAIMS
+    # #473. How many secondary-tier numeric claims get a follow turn asking
+    # for the primary study, per run: the ticket asked for a cap per
+    # section, and eight sections at six each would roughly double a run.
+    # `self.follow_used`, synced with `state.follow_used`, is the running
+    # count `_follow_primaries` checks and increments on every call,
+    # `stage_search` retries included.
+    max_follow: int = 6
     attempts: int = DEFAULT_STAGE_ATTEMPTS
     theme: str = "spillwave-light"
     publish: bool = False
@@ -500,6 +507,10 @@ class Paper:
     charts: list = field(default_factory=list, init=False)
     allowed_domains: tuple = field(default_factory=tuple, init=False)
     budget: research.Budget = field(init=False)
+    # #473. Loaded from `state.follow_used` in `__post_init__`, so a
+    # `search_gate` retry re-entering `stage_search` sees what earlier
+    # attempts already spent, not a fresh `max_follow`.
+    follow_used: int = field(default=0, init=False)
     # Diagram names the complexity gate rejected, so a retry redraws only those.
     _redraw: set = field(default_factory=set, init=False)
     # The most expensive call seen per role. The budget check reads it as the
@@ -520,6 +531,7 @@ class Paper:
         self.budget.spent_usd = self.state.search_cost_usd
         self.budget.calls = self.state.search_calls
         self.budget.on_charge = self._reserve_search
+        self.follow_used = self.state.follow_used
         self._load_allowlist()
 
     def _load_allowlist(self) -> None:
@@ -1563,6 +1575,7 @@ class Paper:
             # Persist per question. A stop between questions must not discard
             # the answers this run already paid for.
             self.ledger.write()
+        self._follow_primaries()
         stages.search_gate(self.ledger, self.plan)
         self.ledger.write()
         provider = self.backend.active_name
@@ -1581,6 +1594,48 @@ class Paper:
                 f"via {provider}" + (f" ({transport})" if transport else "")
             ),
         )
+
+    def _follow_primaries(self) -> None:
+        """One follow turn per shaky numeric claim, capped at `self.max_follow`
+        across the whole run, not per `stage_search` attempt. #473
+
+        A claim bound only to a review, a preprint, or a compilation is
+        asked once for the primary study behind its number. A hit rebinds
+        the claim to that primary; a miss is recorded `secondary`, so
+        `stages.claim_brief` can tell the writer "as summarized by [n]".
+
+        `self.follow_used`, loaded from `state.follow_used`, is the running
+        count across every call. `stage_search` retries on a `search_gate`
+        failure by re-entering this same method from the top; without the
+        persisted count, each retry saw a fresh `max_follow` and a run could
+        spend `max_follow * attempts` turns rather than `max_follow`.
+        """
+        candidates = stages.claims_needing_a_primary(self.ledger)
+        if not candidates:
+            return
+        remaining = max(0, self.max_follow - self.follow_used)
+        followed = candidates[:remaining]
+        self.say(
+            f"    follow: {len(followed)} of {len(candidates)} candidate(s), "
+            f"{self.follow_used + len(followed)}/{self.max_follow} used this run"
+        )
+        for claim in followed:
+            self.budget.begin_request(max_calls=1, max_provider_calls=3)
+            try:
+                reply = self._ask(
+                    "researcher",
+                    f"This numeric claim rests only on a summary, not the primary study: "
+                    f"{claim.text}\n\nFind the primary study the summary cites for this "
+                    "number. Search once. Return JSON: "
+                    '{"found": true|false, "url": "...", "title": "...", "quote": "..."}.',
+                )
+            finally:
+                self.budget.end_request()
+            parsed = self._json_reply("researcher", reply)
+            stages.apply_follow_result(self.ledger, claim, parsed, backend=self.backend)
+            self.follow_used += 1
+            self.state.follow_used = self.follow_used
+            self.state.save()
 
     # -- 3. verify ---------------------------------------------------------
 

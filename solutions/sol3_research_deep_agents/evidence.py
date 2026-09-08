@@ -224,6 +224,11 @@ class SourceDocument:
     # no text; a claim bound to this source then keeps its binding
     # unattributed rather than dropped. #471
     text: str = ""
+    # What kind of source this is, from `source_policy.tier_for()` reading
+    # `metadata.fetch_record`'s raw publication-type fields. No model. `""`
+    # for a source retrieved before this ticket, or one nothing here could
+    # classify past `tier_for`'s own `other` default. #473
+    tier: str = ""
 
     def __post_init__(self) -> None:
         self.id = self.id or f"source.{slug(self.subject, 40)}.{new_id()}"
@@ -250,6 +255,7 @@ class SourceDocument:
                 "venue": self.venue or None,
                 "note": self.note or None,
                 "fetched_text": self.text or None,
+                "tier": self.tier or None,
             }
         )
         return f"{head}\n\n{self.body or self.url}\n"
@@ -282,6 +288,13 @@ class Claim:
     # Unused until #478's study table; carried here only so it survives a
     # ledger round trip. #471
     study: dict = field(default_factory=dict)
+    # Whether this claim rests only on a review, a preprint, or a
+    # compilation, with no primary study to follow to. #473. A dedicated
+    # field, not `note`: `apply_verification` overwrites `note` on
+    # `disagreed` and `not_found`, and the verifier runs right after the
+    # follow pass, so a text marker in `note` was gone before the writer
+    # ever saw it. `apply_verification` never touches this field.
+    secondary: bool = False
     id: str = ""
     as_of: str = ""
 
@@ -317,6 +330,7 @@ class Claim:
                 "important": self.important,
                 "cross_checked": self.cross_checked,
                 "attributed_source_ids": self.attributed_source_ids,
+                "secondary": self.secondary,
                 "study": json.dumps(self.study, sort_keys=True) if self.study else None,
                 "links": [{"rel": "sourced_from", "target": sid} for sid in self.source_ids],
             }
@@ -555,6 +569,7 @@ class Ledger:
                         venue=fields.get("venue", "") or "",
                         note=fields.get("note", "") or "",
                         text=fields.get("fetched_text", "") or "",
+                        tier=fields.get("tier", "") or "",
                     )
                 )
             elif kind == "Claim":
@@ -569,6 +584,7 @@ class Ledger:
                         important=bool(fields.get("important", False)),
                         cross_checked=bool(fields.get("cross_checked", False)),
                         attributed_source_ids=list(fields.get("attributed_source_ids") or []),
+                        secondary=bool(fields.get("secondary", False)),
                         study=json.loads(fields["study"]) if fields.get("study") else {},
                         id=fields["id"],
                         as_of=fields.get("as_of", ""),

@@ -88,6 +88,11 @@ class PaperState:
     total_calls: int = 0
     search_cost_usd: float = 0.0
     search_calls: int = 0
+    # #473. How many secondary-tier claims a follow turn has already spent
+    # this run. Persisted so a `search_gate` retry, which re-enters
+    # `stage_search` and `_follow_primaries` from the top, does not get a
+    # fresh slice of `max_follow` on every attempt.
+    follow_used: int = 0
     total_retries: int = 0
     backend: str = ""
     # Live position, written every call rather than every stage. A stage that
@@ -198,6 +203,7 @@ class PaperState:
             "total_calls": self.total_calls,
             "search_cost_usd": round(self.search_cost_usd, 4),
             "search_calls": self.search_calls,
+            "follow_used": self.follow_used,
             "total_retries": self.total_retries,
             "backend": self.backend,
             "current_role": self.current_role,
@@ -239,6 +245,7 @@ class PaperState:
             total_calls=int(data.get("total_calls", 0)),
             search_cost_usd=float(data.get("search_cost_usd", 0.0)),
             search_calls=int(data.get("search_calls", 0)),
+            follow_used=int(data.get("follow_used", 0)),
             total_retries=int(data.get("total_retries", 0)),
             backend=data.get("backend", ""),
             current_role=data.get("current_role", ""),

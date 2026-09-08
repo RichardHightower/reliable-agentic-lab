@@ -165,6 +165,24 @@ def test_numbered_carries_the_fetched_metadata_into_the_reference(work):
     )
 
 
+def test_numbered_carries_the_tier_into_the_reference(work):
+    """#473: the tier `source_policy.tier_for()` gave a source survives into
+    the reference `_numbered` builds, the SDK twin of the ledger round trip."""
+    claims = [
+        {
+            "id": "s1-f1",
+            "text": "A fact.",
+            "source_url": "https://a.invalid",
+            "section": "s1",
+            "status": "verified",
+            "evidence_tier": "position_stand_or_guideline",
+        },
+    ]
+    planned = {"sections": [{"id": "s1"}]}
+    _, refs = paper._numbered(claims, planned, work)
+    assert refs[0]["evidence_tier"] == "position_stand_or_guideline"
+
+
 def test_do_sections_carries_metadata_from_findings_into_claims(work, turns, monkeypatch):
     """#470: the title, authors, year, and venue `metadata.fetch_record` found
     on a finding's source survive `do_sections`'s aggregation into
@@ -213,6 +231,51 @@ def test_do_sections_carries_metadata_from_findings_into_claims(work, turns, mon
     assert claims[0]["authors"] == ["Jane Doe"]
     assert claims[0]["year"] == "2020"
     assert claims[0]["venue"] == "A Journal"
+
+
+def test_do_sections_carries_the_tier_from_findings_into_claims(work, monkeypatch):
+    """#473: the SDK record twin of `test_tier_survives_a_ledger_round_trip`.
+    A finding's `evidence_tier` survives `do_sections`'s aggregation into
+    `claims.json` the same way title, authors, year, and venue already do."""
+    approved = {"title": "T", "sections": [{"id": "s1", "heading": "One"}]}
+    monkeypatch.setattr(paper, "approved_outline", lambda run: approved)
+    monkeypatch.setattr(sections, "run_section", lambda run, section: {"section": section["id"]})
+
+    knowledge = Path(work) / "knowledge" / "s1"
+    knowledge.mkdir(parents=True)
+    (knowledge / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "s1-f1",
+                        "claim": "A fact.",
+                        "quote": "",
+                        "answers_question": "q",
+                        "source": {
+                            "kind": "web",
+                            "url_or_path": "https://a.invalid",
+                            "title": "A Guideline",
+                            "note": "",
+                            "evidence_tier": "position_stand_or_guideline",
+                        },
+                    }
+                ],
+                "coverage_gaps": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = paper.Run(
+        topic="t",
+        work_dir=work,
+        turns=object(),
+        state=paper.State.load_or_new(work, "t"),
+    )
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text(encoding="utf-8"))["claims"]
+    assert claims[0]["evidence_tier"] == "position_stand_or_guideline"
 
 
 def test_a_bare_number_never_binds_to_a_finding_id_that_ends_in_it(work):
