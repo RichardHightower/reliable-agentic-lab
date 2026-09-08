@@ -83,3 +83,13 @@ def test_table_prints_the_writes_column():
     assert "chartist          no" in table
     assert "source_librarian  no" in table
     assert "planner           yes" in table
+
+
+def test_the_byline_model_matches_what_roles_actually_wires():
+    """PR #542 judge F5. `roleplan.DEFAULT_MODEL` is hand-written, and
+    `roles.build_paper_agents` puts every paper-cast role on `roles.py`'s
+    own `DEFAULT_MODEL` today. One assertion binds the two names, so the
+    byline stays truthful if either ever changes without the other."""
+    import roles  # noqa: PLC0415
+
+    assert roleplan.DEFAULT_MODEL == roles.DEFAULT_MODEL.split(":", 1)[1]

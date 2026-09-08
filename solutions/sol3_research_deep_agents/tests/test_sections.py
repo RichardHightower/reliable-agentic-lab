@@ -526,6 +526,19 @@ def test_offline_run_writes_section_files_and_ledger(finished_paper: Path):
     assert any((finished_paper / "knowledge").glob("*/findings.json"))
 
 
+def test_the_conclusion_binds_every_usable_claim(finished_paper: Path):
+    """PR #535 judge item 0: `findings_from_claims`'s Conclusion binding is
+    a real behavior, not a no-op that happened to leave the run green.
+    Reverting it (dropping "conclusion" from the special-binding tuple)
+    takes `knowledge/conclusion/findings.json` from seven findings to zero,
+    while the run's own hard gates never notice, which is why the earlier
+    judge found no dedicated failing test."""
+    findings = json.loads(
+        (finished_paper / "knowledge" / "conclusion" / "findings.json").read_text()
+    )["findings"]
+    assert len(findings) == 7
+
+
 def test_close_section_skips_a_finished_section(run_dir, stub_renderer):
     from conftest import build_run  # noqa: PLC0415
 

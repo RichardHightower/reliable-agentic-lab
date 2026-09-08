@@ -138,6 +138,25 @@ def markdown_blocks(markdown: str) -> list[Block]:
     return blocks
 
 
+def _front_matter_paragraphs(blocks: list[Block]) -> list[str]:
+    """Paragraph text between the H1 title and the first `##` heading.
+
+    That is where `paper.assemble` writes the byline, date, provenance, and
+    conflicts block (#479), and the loop that builds the story below skips
+    every level-1 heading rather than reading what sits beside it, so this
+    reads that same span on its own.
+    """
+    paragraphs: list[str] = []
+    for block in blocks:
+        if block.kind == "heading" and block.level == 1:
+            continue
+        if block.kind == "heading":
+            break
+        if block.kind == "paragraph":
+            paragraphs.append(block.text)
+    return paragraphs
+
+
 def _inline(text: str) -> str:
     """Translate conservative inline Markdown into ReportLab paragraph XML."""
     value = html.escape(text, quote=True)
@@ -220,6 +239,7 @@ def build_pdf(
         (block.text for block in blocks if block.kind == "heading" and block.level == 1),
         paper.stem.replace("-", " ").title(),
     )
+    front_matter = _front_matter_paragraphs(blocks)
     output.parent.mkdir(parents=True, exist_ok=True)
 
     palette = theme_palette()
@@ -358,8 +378,14 @@ def build_pdf(
         Paragraph("RESEARCH WHITE PAPER", styles["subtitle"]),
         Spacer(1, 0.12 * inch),
         Paragraph("Arctic Fox publication edition", styles["subtitle"]),
-        PageBreak(),
     ]
+    if front_matter:
+        # #479. The byline, date, provenance, and conflicts, on the title
+        # page itself, not the body page a reader turns to next.
+        story.append(Spacer(1, 0.25 * inch))
+        for paragraph_text in front_matter:
+            story.append(Paragraph(_inline(paragraph_text), styles["subtitle"]))
+    story.append(PageBreak())
 
     numbered = 0
     for block in blocks:
@@ -448,6 +474,9 @@ def build_pdf(
         "pages": len(reader.pages),
         "figures": [block.target for block in figures],
         "bytes": output.stat().st_size,
+        # #479. The block a reader sees on page one, so the sidecar states
+        # that it landed there rather than a caller re-parsing the PDF.
+        "front_matter": front_matter,
     }
     Path(f"{output}.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     return record

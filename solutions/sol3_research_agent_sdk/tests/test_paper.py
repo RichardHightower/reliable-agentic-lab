@@ -1504,3 +1504,63 @@ def test_a_retry_does_not_run_when_the_budget_is_spent(work, turns):
     with pytest.raises(paper.RunFailed):
         paper.do_research(run)
     assert len([a for a in run.turns.asked if a[0] == "research"]) == 1
+
+
+# -- P12, front matter --------------------------------------------------------
+
+
+def test_the_models_named_match_the_role_table(work, turns, no_renderer, monkeypatch):
+    """The byline is not invented: it reads `roleplan.plan()` at assemble
+    time, so a role table's own change is what a reader sees. #479"""
+    import roleplan  # noqa: PLC0415
+
+    fake_roles = {
+        "writer": roleplan.RolePlan(name="writer", purpose="p", tools=(), model="test-fixture-model")
+    }
+    monkeypatch.setattr(roleplan, "plan", lambda contract, loop: fake_roles)
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    front_matter = (Path(work) / "paper.md").read_text().split("## Abstract", 1)[0]
+    assert "writer: test-fixture-model" in front_matter
+    assert "claude-opus-5" not in front_matter
+    assert "claude-sonnet-5" not in front_matter
+
+
+def test_the_provenance_counts_match_the_ledger(work, turns, no_renderer):
+    """Sources retrieved, sources cited, and claims cross-checked come from
+    the run's own ledger, not a guess. #479"""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    sources = json.loads((Path(work) / "sources.json").read_text())
+    sources["sources"].append({"url": "https://example.invalid/unused", "title": "Unused"})
+    (Path(work) / "sources.json").write_text(json.dumps(sources), encoding="utf-8")
+    verdicts = json.loads((Path(work) / "verdicts.json").read_text())
+    verdicts["verdicts"].append(
+        {"claim_id": "past-cap", "status": "unverified", "note": "past verification cap"}
+    )
+    (Path(work) / "verdicts.json").write_text(json.dumps(verdicts), encoding="utf-8")
+    paper.assemble(run)
+    front_matter = (Path(work) / "paper.md").read_text().split("## Abstract", 1)[0]
+    assert (
+        "Sources: 2 retrieved, 1 cited. Verification: 1 claims cross-checked. See Methods."
+        in front_matter
+    ), front_matter
+
+
+def test_the_conflicts_line_is_overridable(work, turns, no_renderer, monkeypatch):
+    """The Taskfile's own `CONFLICTS` variable reaches `assemble` as an
+    environment variable, and a run with no override still states one. #479"""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    monkeypatch.setenv("CONFLICTS", "Funded by Example Research Fund.")
+    paper.assemble(run)
+    front_matter = (Path(work) / "paper.md").read_text().split("## Abstract", 1)[0]
+    assert "Funded by Example Research Fund." in front_matter
+    assert "No funding. No conflicts declared." not in front_matter
