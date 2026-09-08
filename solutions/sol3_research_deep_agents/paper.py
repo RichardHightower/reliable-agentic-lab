@@ -683,9 +683,27 @@ class Paper:
         """One stage, with its retry loop. None means it passed, an int stops."""
         handler = getattr(self, f"stage_{name}")
         previous: tuple[str, ...] | None = None
+        previous_score: float | None = None
         extra = ""
 
-        for attempt in range(1, self.attempts + 1):
+        # A `FAILED` stage re-entered here, on `--resume` or a same-process
+        # retry alike, used to start counting at 1 with no memory of what the
+        # state file already knows was spent. The persisted count is the
+        # truth: a resume is another attempt against the same budget, not a
+        # clean slate (#411).
+        entry = self.state.stages.get(name)
+        prior_attempts = entry.attempts if entry and entry.status == pstate.FAILED else 0
+        if prior_attempts >= self.attempts:
+            self.say(
+                f"  {name:<10} already spent {prior_attempts} of {self.attempts} "
+                "attempts before this resume"
+            )
+            reason = f"the iteration budget is spent after {self.attempts} attempts"
+            return self._escalate(name, reason, (entry.error or "") if entry else "")
+        if prior_attempts:
+            self.say(f"  resuming {name} at attempt {prior_attempts + 1} of {self.attempts}")
+
+        for attempt in range(prior_attempts + 1, self.attempts + 1):
             self.state.mark_in_progress(name)
             self.state.save()
             try:
@@ -700,6 +718,20 @@ class Paper:
                     self.state.save()
                     return self._escalate(name, MAX_TURNS, str(failure))
                 signature = failure.signature
+                score = failure.score
+                # A rubric row that measurably closed its gap since the last
+                # attempt is work in progress, not a stall: the failed-row
+                # count fell, or the reviewer's own score rose by a tenth.
+                # Copied from the SDK port's `decide(progressed=...)` rule
+                # (#361, #362).
+                progressed = previous is not None and (
+                    len(signature) < len(previous)
+                    or (
+                        score is not None
+                        and previous_score is not None
+                        and score - previous_score >= 0.1 - 1e-9
+                    )
+                )
                 decision = gates.decide(
                     passed=False,
                     iteration=attempt,
@@ -707,6 +739,7 @@ class Paper:
                     signature=signature,
                     previous_signature=previous,
                     usd_left=max(0.0, self.max_usd - self.state.total_cost_usd),
+                    progressed=progressed,
                 )
                 self.say(f"  {name:<10} attempt {attempt} failed: {', '.join(signature)}")
                 if decision.stop:
@@ -714,6 +747,7 @@ class Paper:
                     self.state.save()
                     return self._escalate(name, decision.reason, str(failure))
                 previous = signature
+                previous_score = score
                 extra = gates.retry_instruction(decision, list(signature)) + "\n" + str(failure)
                 # A failure inside the recovery path is a failure of this
                 # attempt, never a crash. These two calls run from inside the
@@ -1920,7 +1954,8 @@ class Paper:
         reply = self._ask(
             "reviewer",
             f"Grade this draft against the rubric.\n{extra}\n\n{draft}\n\n"
-            'Return JSON: {"failed_rows": ["..."], "notes": ["..."]}',
+            'Return JSON: {"failed_rows": [{"row": "...", "note": "..."}], '
+            '"score": 0.0 to 1.0}',
         )
         verdict = self._json_reply("reviewer", reply)
         stages.review_gate(verdict)

@@ -43,6 +43,7 @@ def decide(  # noqa: PLR0913, PLR0911
     previous_signature: tuple[str, ...] | None = None,
     usd_left: float = 1.0,
     judge_done: bool | None = None,
+    progressed: bool = False,
 ) -> Decision:
     """Choose the next move.
 
@@ -51,6 +52,12 @@ def decide(  # noqa: PLR0913, PLR0911
 
     `judge_done` is the final judge's verdict. None means it did not run, which
     is not the same as agreeing.
+
+    `progressed` says a failing row measurably closed its gap since the last
+    attempt. Two equal signatures with real movement behind them is work in
+    progress, not a stall: a section going 1739 words to 1600 against a 1500
+    ceiling fails `length` both times, and the names cannot tell the two apart.
+    The budget still ends it, so a section creeping one word at a time stops.
 
     One return per reason to stop. The reason is what the room reads off the
     trace, so collapsing the branches would save a line and cost the lesson.
@@ -65,7 +72,7 @@ def decide(  # noqa: PLR0913, PLR0911
             "the rubric is green but the final judge says the ticket is not done",
         )
 
-    if previous_signature is not None and signature == previous_signature:
+    if previous_signature is not None and signature == previous_signature and not progressed:
         return Decision(
             ESCALATE,
             f"the same rows failed twice: {', '.join(signature) or 'unknown'}. "

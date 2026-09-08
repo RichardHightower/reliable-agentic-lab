@@ -547,6 +547,52 @@ def test_review_gate_reports_the_rows_and_the_notes():
     assert exc.value.signature == ("voice",)
 
 
+def test_review_gate_reads_the_paired_reply_shape():
+    """#411: a row and its note travel in one object, so pairing never drifts."""
+    with pytest.raises(GateFailed) as exc:
+        stages.review_gate(
+            {
+                "failed_rows": [
+                    {"row": "no_filler", "note": "Paragraph two restates the abstract."},
+                    {"row": "depth", "note": "No mechanism, only the claim."},
+                ],
+                "score": 0.4,
+            }
+        )
+    assert "no_filler: Paragraph two restates the abstract." in str(exc.value)
+    assert "depth: No mechanism, only the claim." in str(exc.value)
+    assert exc.value.signature == ("depth", "no_filler")
+    assert exc.value.score == 0.4
+
+
+def test_review_gate_leaves_the_score_unset_on_the_legacy_shape():
+    with pytest.raises(GateFailed) as exc:
+        stages.review_gate({"failed_rows": ["voice"], "notes": ["a hook"]})
+    assert exc.value.score is None
+
+
+def test_split_verdict_parses_a_mixed_list_of_rows():
+    """A reviewer that names one row in the paired shape and one in the
+    legacy shape in the same reply must not crash (#411 follow-up)."""
+    rows, notes, score = stages._split_verdict(
+        {
+            "failed_rows": [{"row": "no_filler", "note": "restates the abstract"}, "voice"],
+            "score": 0.5,
+        }
+    )
+    assert rows == ["no_filler", "voice"]
+    assert notes == ["restates the abstract", ""]
+    assert score == 0.5
+
+
+def test_split_verdict_treats_a_non_list_failed_rows_as_empty():
+    """A schema violation from a live model, not a crash (#411 follow-up)."""
+    rows, notes, score = stages._split_verdict({"failed_rows": {"row": "voice"}, "score": 0.4})
+    assert rows == []
+    assert notes == []
+    assert score == 0.4
+
+
 # -- 8. assemble -----------------------------------------------------------
 
 

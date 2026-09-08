@@ -377,6 +377,14 @@
         "failed_rows": [],
         "notes": []
       }
+    },
+    "PAIRED_SHAPE_PROBE": {
+      "data": {
+        "failed_rows": [
+          {"row": "no_filler", "note": "Paragraph two restates the abstract."}
+        ],
+        "score": 0.55
+      }
     }
   }
 }

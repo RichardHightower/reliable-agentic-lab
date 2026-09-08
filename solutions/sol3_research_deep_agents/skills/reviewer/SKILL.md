@@ -42,15 +42,24 @@ you started.
 
 ## Report
 
-Return the failing row names, and one sentence per row saying where and why.
-Quote at most 15 words of the offending text. When every row passes, return an
-empty list.
+Return each failing row paired with its own note, and a `score` from 0.0 to
+1.0 for how close the draft is to passing every row. Quote at most 15 words of
+the offending text per note. When every row passes, return an empty list and a
+score of 1.0.
 
 ```json
-{"failed_rows": ["depth"], "notes": ["Anatomy restates its claims without naming a mechanism."]}
+{
+  "failed_rows": [
+    {"row": "depth", "note": "Anatomy restates its claims without naming a mechanism."}
+  ],
+  "score": 0.6
+}
 ```
 
-`notes` carries exactly one sentence per entry in `failed_rows`, in the same
-order. Write nothing else there. A note about a row that now passes shifts every
-pairing after it, and the writer is then told a row failed for another row's
-reason. Report only what is still wrong.
+Pairing the row and its note in the same object is the point: a note in a
+separate parallel list can drift out of step with the row that named it, and
+the writer then hears that a row failed for another row's reason. Put the
+note where it can never attach to the wrong row. `score` is not a grade for
+its own sake; it tells Python whether a second draft that still fails the
+same rows moved closer to passing or made no progress. Report only what is
+still wrong.
