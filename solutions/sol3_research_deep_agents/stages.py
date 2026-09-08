@@ -508,12 +508,12 @@ def claims_needing_a_primary(ledger: evidence.Ledger) -> list[evidence.Claim]:
     """Numeric claims bound only to a review, a preprint, or a compilation.
 
     Shakiest tier first. A claim `apply_follow_result` already marked
-    `secondary:` is skipped, so a resumed run does not spend a second follow
+    `secondary` is skipped, so a resumed run does not spend a second follow
     turn on the same miss.
     """
     candidates = []
     for claim in ledger.claims.values():
-        if str(claim.note or "").startswith("secondary:"):
+        if claim.secondary:
             continue
         if not re.search(r"\d", claim.text):
             continue
@@ -533,9 +533,18 @@ def claims_needing_a_primary(ledger: evidence.Ledger) -> list[evidence.Claim]:
 def apply_follow_result(ledger: evidence.Ledger, claim: evidence.Claim, result: dict, *, backend=None) -> bool:
     """Rebind a claim to the primary a follow turn found, or mark it secondary.
 
+    A hit only counts when the found source's own tier is not itself
+    secondary: the same review answering twice, or a different review, must
+    not clear the caveat (#473 item 2). `ledger.source_for_url` may hand
+    back a source this run already tiered elsewhere; that existing tier is
+    consulted the same way a freshly fetched one is.
+
     A hit whose fetched text contradicts the claim is treated the same as a
     miss: a primary study's own URL is not a licence to skip the check #471
-    already runs on every other binding.
+    already runs on every other binding. The primary is appended to
+    `source_ids`, never substituted, so a claim two secondaries already
+    corroborated stays corroborated (item 5); `claim.note` is left alone,
+    and a record with no fetched text is never marked attributed (item 4).
     """
     url = str(result.get("url") or "").strip()
     if result.get("found") and url.lower().startswith(("http://", "https://")):
@@ -557,13 +566,22 @@ def apply_follow_result(ledger: evidence.Ledger, claim: evidence.Claim, result: 
                     tier=source_policy.tier_for(fetched),
                 )
             )
-        if not source.text or evidence.attributed(claim, source.text, quote=result.get("quote", "")):
-            claim.source_ids = [source.id]
-            claim.attributed_source_ids = [source.id] if source.text else []
-            claim.note = ""
+        if source.tier not in source_policy.SECONDARY_TIERS and (
+            not source.text or evidence.attributed(claim, source.text, quote=result.get("quote", ""))
+        ):
+            if source.id not in claim.source_ids:
+                claim.source_ids.append(source.id)
+            if source.text:
+                if source.id not in claim.attributed_source_ids:
+                    claim.attributed_source_ids.append(source.id)
+            else:
+                marker = "unattributed: attribution not checked"
+                if marker not in (claim.note or ""):
+                    claim.note = f"{claim.note}; {marker}" if claim.note else marker
+            claim.secondary = False
             evidence.corroborate(claim)
             return True
-    claim.note = "secondary: the cited source only summarizes the primary"
+    claim.secondary = True
     return False
 
 
@@ -876,10 +894,11 @@ def claim_brief(ledger: evidence.Ledger, claim_id: str, index: dict[str, int]) -
     caveat = ""
     if claim.truth_state == evidence.SINGLE_SOURCE:
         caveat = "  (SINGLE SOURCE. Say so in the paragraph that uses this.)"
-    if str(claim.note or "").startswith("secondary:"):
+    if claim.secondary:
         # #473. A follow turn found no primary, so the writer is told
         # outright: this number is as summarized by the review or preprint
-        # bound here, not the primary study's own report.
+        # bound here, not the primary study's own report. A dedicated field,
+        # not `note`: `apply_verification` still owns that one.
         caveat += f"  (as summarized by {markers}. Say so in the paragraph that uses this.)"
     return f"- {claim.id}: {claim.text} {markers}{caveat}"
 

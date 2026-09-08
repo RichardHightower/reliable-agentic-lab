@@ -1743,13 +1743,17 @@ def section_check(
     # own evidence), not a whole-run source ledger this function has no
     # access to without opening `assemble`: a section with no
     # `position_stand_or_guideline` source among its own findings passes.
-    guideline_numbers = sorted(
-        {
-            int(f["number"])
-            for f in findings
-            if f.get("tier") == "position_stand_or_guideline" and f.get("number")
-        }
-    )
+    guideline_numbers = set()
+    for f in findings:
+        if f.get("tier") != "position_stand_or_guideline" or not f.get("number"):
+            continue
+        try:
+            guideline_numbers.add(int(f["number"]))
+        except (TypeError, ValueError):
+            # A truthy, non-numeric `number` is not this row's problem to
+            # raise on; every current producer supplies an int. #473
+            continue
+    guideline_numbers = sorted(guideline_numbers)
     missing_guideline = (
         [number for number in guideline_numbers if f"[{number}]" not in body]
         if guideline_numbers and _is_guideline_topic(section)

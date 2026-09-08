@@ -288,6 +288,13 @@ class Claim:
     # Unused until #478's study table; carried here only so it survives a
     # ledger round trip. #471
     study: dict = field(default_factory=dict)
+    # Whether this claim rests only on a review, a preprint, or a
+    # compilation, with no primary study to follow to. #473. A dedicated
+    # field, not `note`: `apply_verification` overwrites `note` on
+    # `disagreed` and `not_found`, and the verifier runs right after the
+    # follow pass, so a text marker in `note` was gone before the writer
+    # ever saw it. `apply_verification` never touches this field.
+    secondary: bool = False
     id: str = ""
     as_of: str = ""
 
@@ -323,6 +330,7 @@ class Claim:
                 "important": self.important,
                 "cross_checked": self.cross_checked,
                 "attributed_source_ids": self.attributed_source_ids,
+                "secondary": self.secondary,
                 "study": json.dumps(self.study, sort_keys=True) if self.study else None,
                 "links": [{"rel": "sourced_from", "target": sid} for sid in self.source_ids],
             }
@@ -576,6 +584,7 @@ class Ledger:
                         important=bool(fields.get("important", False)),
                         cross_checked=bool(fields.get("cross_checked", False)),
                         attributed_source_ids=list(fields.get("attributed_source_ids") or []),
+                        secondary=bool(fields.get("secondary", False)),
                         study=json.loads(fields["study"]) if fields.get("study") else {},
                         id=fields["id"],
                         as_of=fields.get("as_of", ""),

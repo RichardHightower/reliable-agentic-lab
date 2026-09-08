@@ -113,6 +113,16 @@ def test_the_record_carries_its_raw_publication_type():
     assert miss["pubtype"] == [] and miss["category"] == "" and miss["crossref_type"] == ""
 
 
+def test_a_position_stand_title_tiers_correctly_from_a_doi_alone():
+    """#473 item 6: Crossref's `type` has no guideline value, so the
+    recorded DOI fixture, a `journal-article`, needs the title match to
+    reach `position_stand_or_guideline`."""
+    import source_policy  # noqa: PLC0415
+
+    doi = metadata.fetch_record(DOI_URL, FixtureBackend())
+    assert source_policy.tier_for(doi) == "position_stand_or_guideline"
+
+
 def test_a_url_with_no_backend_information_keeps_the_model_title():
     record = metadata.fetch_record("", FixtureBackend(), model_title="Untouched")
     assert record["title"] == "Untouched"

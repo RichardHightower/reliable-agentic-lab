@@ -11,6 +11,7 @@ artifacts, not callers of a shared research package.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from urllib.parse import urlsplit
 
@@ -373,14 +374,24 @@ SECONDARY_TIERS = frozenset(
     {"narrative_review", "meta_analysis_or_systematic_review", "preprint_or_compilation"}
 )
 
+# Crossref's `type` enum has no guideline value, so a position stand or
+# consensus statement reached only by DOI, the ISSN one the ticket names
+# among them, tiers `other` from `TIERS` alone. #473 item 6: a title match
+# closes that gap without widening what `guideline_cited` grades.
+GUIDELINE_TITLE = re.compile(
+    r"\b(position stand|consensus statement|practice guideline|clinical guideline)\b", re.IGNORECASE
+)
+
 
 def tier_for(record: dict) -> str:
-    """The source's tier, from its own record. No model, no title-sniffing.
+    """The source's tier, from its own record. No model.
 
     Checks every PubMed/PMC `pubtype` entry against `TIERS` first, since a
     record commonly carries several ("Journal Article", "Randomized
     Controlled Trial") and the more specific one should win over the generic
-    one. Then Crossref's `type`. Then arXiv's `category`: present at all
+    one. Then Crossref's `type`. Then the title against `GUIDELINE_TITLE`,
+    the one title-based rule this function has, for exactly the case
+    neither raw field can name. Then arXiv's `category`: present at all
     means an unreviewed preprint, whatever the subject. No match anywhere:
     `other`.
     """
@@ -393,6 +404,8 @@ def tier_for(record: dict) -> str:
         tier = TIERS.get(crossref_type)
         if tier:
             return tier
+    if GUIDELINE_TITLE.search(str(record.get("title") or "")):
+        return "position_stand_or_guideline"
     if str(record.get("category") or "").strip():
         return "preprint_or_compilation"
     return "other"

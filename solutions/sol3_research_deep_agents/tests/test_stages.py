@@ -6,6 +6,7 @@ import evidence
 import paper
 import pytest
 import stages
+import state
 from conftest import build_run
 from stages import GateFailed
 
@@ -740,17 +741,83 @@ def test_a_numeric_preprint_claim_gets_one_follow_turn(monkeypatch):
         backend=_FakeBackend(),
     )
     assert hit
-    rebound = led.sources[claim.source_ids[0]]
-    assert rebound.url == "https://docs.claude.com/primary"
+    # Appended, not substituted (item 5): the original preprint stays bound.
+    assert len(claim.source_ids) == 2
+    rebound = led.source_for_url("https://docs.claude.com/primary")
+    assert rebound.id in claim.source_ids
     assert rebound.tier == "primary_trial"
-    assert not str(claim.note or "").startswith("secondary:")
+    assert not claim.secondary
     # A rebound claim no longer needs a second follow turn.
     assert stages.claims_needing_a_primary(led) == []
 
 
-def test_a_follow_miss_marks_the_claim_secondary(monkeypatch):
-    """A miss keeps the finding bound to the review it started with, and the
-    brief the writer reads says "as summarized by [n]"."""
+def test_a_rebind_keeps_a_corroborating_secondary_corroborated(monkeypatch):
+    """#473 item 5: a claim two secondary sources already corroborated stays
+    corroborated after a follow hit, since the primary is appended rather
+    than replacing the binding."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Preprint",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent",
+            "category": "cs.AI",
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [
+                {"title": "Preprint A", "url": "https://docs.claude.com/preprint-a"},
+                {"title": "Preprint B", "url": "https://docs.claude.com/preprint-b"},
+            ],
+            "claims": [
+                {
+                    "text": "The dose increased 42 percent.",
+                    "source_urls": ["https://docs.claude.com/preprint-a", "https://docs.claude.com/preprint-b"],
+                }
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.truth_state == evidence.CORROBORATED, claim.truth_state
+
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "The Primary Trial",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent",
+            "pubtype": ["Randomized Controlled Trial"],
+        },
+    )
+    hit = stages.apply_follow_result(
+        led,
+        claim,
+        {"found": True, "url": "https://docs.claude.com/primary", "title": "The Primary Trial", "quote": ""},
+        backend=_FakeBackend(),
+    )
+    assert hit
+    assert len(claim.source_ids) == 3
+    assert claim.truth_state == evidence.CORROBORATED, claim.truth_state
+
+
+def test_a_follow_hit_that_is_itself_secondary_does_not_clear_the_caveat(monkeypatch):
+    """#473 item 2: a follow turn that answers with another review must not
+    clear the caveat. The tier of the source `ledger.source_for_url`
+    already holds is consulted the same way a freshly fetched one is."""
     monkeypatch.setattr(
         stages.metadata,
         "fetch_record",
@@ -778,12 +845,122 @@ def test_a_follow_miss_marks_the_claim_secondary(monkeypatch):
         backend=_FakeBackend(),
     )
     claim = stages.claims_needing_a_primary(led)[0]
-    hit = stages.apply_follow_result(led, claim, {"found": False}, backend=_FakeBackend())
+
+    # The follow turn names a *different* review, still secondary-tier.
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "Another Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "pubtype": ["Review"],
+        },
+    )
+    hit = stages.apply_follow_result(
+        led,
+        claim,
+        {"found": True, "url": "https://docs.claude.com/another-review", "title": "Another Review", "quote": ""},
+        backend=_FakeBackend(),
+    )
     assert not hit
-    assert str(claim.note or "").startswith("secondary:")
+    assert claim.secondary
+    assert claim.source_ids == [led.source_for_url("https://docs.claude.com/review").id]
 
     index, _ = stages.numbering(led)
     brief = stages.claim_brief(led, claim.id, index)
+    assert "as summarized by" in brief
+
+
+class _SearchThenVerifyRunner(paper.Runner):
+    """Answers the researcher for search and follow, then the verifier.
+
+    Distinguishes the two "researcher" prompts by content, the same way the
+    live agent graph is distinguished only by what it was asked, not by a
+    separate role name: `_follow_primaries` and `stage_search`'s per-question
+    loop both call `_ask("researcher", ...)`.
+    """
+
+    name = "scripted"
+
+    def __init__(self):
+        self.verify_claim_id: str | None = None
+
+    def ask(self, role, prompt):
+        if role == "researcher" and "primary study" in prompt:
+            return paper.Reply(data={"found": False, "url": "", "title": "", "quote": ""})
+        if role == "researcher":
+            return paper.Reply(
+                data={
+                    "answer": "a",
+                    "sources": [{"title": "A Review", "url": "https://docs.claude.com/review"}],
+                    "claims": [
+                        {
+                            "text": "The effect was 20 percent.",
+                            "source_urls": ["https://docs.claude.com/review"],
+                        }
+                    ],
+                }
+            )
+        if role == "verifier":
+            return paper.Reply(
+                data={
+                    "checked": [
+                        {
+                            "claim_id": self.verify_claim_id,
+                            "second_source_url": "",
+                            "corroborate_status": "not_found",
+                            "quote": "",
+                            "queries_used": ["q"],
+                        }
+                    ]
+                }
+            )
+        return paper.Reply(data={})
+
+
+def test_a_follow_miss_marks_the_claim_secondary(run_dir, monkeypatch):
+    """A miss keeps the finding bound to the review it started with, and the
+    brief the writer reads still says "as summarized by [n]" after the
+    verify stage runs, the live `STAGE_ORDER` path between the follow and
+    the brief. #473 item 1: `apply_verification`'s `not_found` branch
+    overwrites `claim.note`, which is why the marker lives in a dedicated
+    `claim.secondary` field `apply_verification` never touches."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "category": "cs.AI",
+        },
+    )
+    runner = _SearchThenVerifyRunner()
+    run = build_run(run_dir, runner=runner, loop_doctrine=False)
+    run.plan = {
+        "title": "T",
+        "questions": [{"id": "q1", "subject": "s1", "question": "why?", "check": "a URL", "important": True}],
+        "sections": ["Abstract", "Introduction", "References"],
+        "diagrams": [],
+    }
+
+    run.stage_search()
+    claim = next(iter(run.ledger.claims.values()))
+    assert claim.secondary
+
+    runner.verify_claim_id = claim.id
+    run.stage_verify()
+
+    assert claim.secondary, "apply_verification must never touch this field"
+    index, _ = stages.numbering(run.ledger)
+    brief = stages.claim_brief(run.ledger, claim.id, index)
     assert "as summarized by" in brief
 
 
@@ -826,7 +1003,36 @@ def test_the_follow_pass_stops_at_the_run_cap(run_dir):
     assert followed.count("moved 2") == 3
     assert "effect was 99" not in followed, "the systematic review is the least shaky, and the one left out"
 
-    assert any("follow" in line and "cap 6" in line for line in logs), logs
+    assert any("follow" in line and "6/6 used this run" in line for line in logs), logs
+
+
+def test_a_stage_retry_does_not_exceed_max_follow_in_total(run_dir):
+    """#473 item 3: `stage_search` retries a `search_gate` failure by
+    re-entering `_follow_primaries` from the top. `self.follow_used`,
+    persisted in `state.follow_used`, must keep a second call from getting
+    a fresh slice of `max_follow`."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    for i in range(4):
+        _claim_with_tier(run.ledger, "preprint_or_compilation", f"The result changed {10 + i} percent.")
+
+    run._follow_primaries()
+    assert len(run.runner.prompts) == 4
+    assert run.follow_used == 4
+    assert run.state.follow_used == 4
+
+    # A fresh batch of candidates surfaces on the retry, as a re-searched
+    # question's new claims would.
+    for i in range(4):
+        _claim_with_tier(run.ledger, "narrative_review", f"The rate moved {20 + i} percent.")
+    run._follow_primaries()
+
+    assert len(run.runner.prompts) == run.max_follow == 6, run.runner.prompts
+    assert run.follow_used == 6
+    assert run.state.follow_used == 6
+
+    # A resumed run in a new process reads the same total back.
+    reloaded = state.PaperState.load_or_create(run.work_dir)
+    assert reloaded.follow_used == 6
 
 
 def test_search_gate_fails_with_no_claims():

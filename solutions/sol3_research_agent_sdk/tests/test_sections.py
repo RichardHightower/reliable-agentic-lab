@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import types
 from pathlib import Path
 
 import checks
@@ -459,6 +460,19 @@ def test_a_safety_section_without_a_position_stand_fails():
     assert "guideline_cited" not in off_topic.signature()
 
 
+def test_guideline_cited_skips_a_non_numeric_number_rather_than_raising():
+    """#473 item 7: every current producer supplies an int, but a truthy,
+    non-numeric `number` must not crash the row."""
+    section = _section(heading="Dosing and safety", key_questions=["what dose is safe"], word_target=0)
+    findings = [{"id": "s1-f1", "number": "not-a-number", "tier": "position_stand_or_guideline"}]
+    score = checks.section_check(
+        "A claim about the safe dose.",
+        section=section,
+        findings=findings,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
 def test_section_check_figures_fails_when_a_planned_figure_is_missing():
     body = "No picture here [1]. " + ("word " * 80)
     score = checks.section_check(
@@ -881,6 +895,54 @@ def test_a_follow_miss_marks_the_claim_secondary():
     assert bound[0]["tier"] == "narrative_review"
 
 
+def test_a_follow_miss_survives_the_live_path_into_the_writer_brief(work, turns, monkeypatch):
+    """#473 item 1's live-path shape for the SDK: the "as summarized by"
+    annotation, built after the follow miss, still reaches the writer once
+    `run_section`'s verify loop runs, since the SDK verifier writes into
+    `verdicts.json`, never into the finding dict `_claims_for_writer` reads.
+    Deep Agents needed a dedicated `Claim.secondary` field because its
+    verifier writes into the same `claim.note` the follow pass used; the
+    SDK has no such collision, and this proves it end to end."""
+    records = {"https://example.invalid/review": {"category": "cs.AI"}}
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    captured: dict = {}
+
+    class WithFollow(turns):
+        backend = _FakeBackend()
+
+        def follow_primary(self, claim, source_title, source_tier):
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+        def write(self, section, claims, figures, notes, path=""):
+            captured["claims"] = claims
+            return super().write(section, claims, figures, notes, path)
+
+    claims = [
+        {"text": "The effect was 20 percent.", "source_url": "https://example.invalid/review", "quote": ""}
+    ]
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithFollow(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert captured.get("claims"), "the writer was never called"
+    assert any("as summarized by" in c["text"] for c in captured["claims"])
+
+
 def test_a_numeric_preprint_claim_gets_one_follow_turn(work, turns, monkeypatch):
     """A numeric claim bound only to a preprint gets one follow turn. A hit
     rebinds the finding to the primary study it names."""
@@ -933,6 +995,116 @@ def test_a_numeric_preprint_claim_gets_one_follow_turn(work, turns, monkeypatch)
     assert saved[0]["source_url"] == "https://example.invalid/primary"
     assert saved[0]["evidence_tier"] == "primary_trial"
     assert "; " not in saved[0]["note"] and "secondary" not in saved[0]["note"]
+
+
+class _FakeFollowRun:
+    """The slice of `run` `_apply_follow_result` actually reads."""
+
+    def __init__(self, backend):
+        self.turns = types.SimpleNamespace(backend=backend)
+        self.work_dir = "/nonexistent"
+
+
+def test_a_follow_hit_keeps_the_review_under_via(monkeypatch):
+    """#473 item 5: a rebind keeps the original binding under `finding["via"]`
+    instead of discarding it, so the paper can still say the number arrived
+    through the review."""
+    records = {
+        "https://example.invalid/primary": {
+            "title": "The Primary Trial",
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "the dose increased 42 percent",
+        }
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    finding = {
+        "claim": "The dose increased 42 percent.",
+        "source": {
+            "url_or_path": "https://example.invalid/review",
+            "title": "A Review",
+            "evidence_tier": "narrative_review",
+        },
+    }
+    run = _FakeFollowRun(_FakeBackend())
+    hit = sections._apply_follow_result(
+        run, finding, {"found": True, "url": "https://example.invalid/primary", "title": "The Primary Trial", "quote": ""}
+    )
+    assert hit
+    assert finding["source"]["url_or_path"] == "https://example.invalid/primary"
+    assert finding["via"]["url_or_path"] == "https://example.invalid/review"
+    assert finding["via"]["title"] == "A Review"
+
+
+def test_a_follow_hit_that_is_itself_secondary_does_not_clear_the_caveat(monkeypatch):
+    """#473 item 2: a follow turn that answers with another review must not
+    clear the caveat."""
+    records = {
+        "https://example.invalid/another-review": {
+            "title": "Another Review",
+            "pubtype": ["Review"],
+            "text": "",
+        }
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    original_source = {
+        "url_or_path": "https://example.invalid/review",
+        "title": "A Review",
+        "evidence_tier": "narrative_review",
+    }
+    finding = {"claim": "The effect was 20 percent.", "source": dict(original_source)}
+    run = _FakeFollowRun(_FakeBackend())
+    hit = sections._apply_follow_result(
+        run,
+        finding,
+        {"found": True, "url": "https://example.invalid/another-review", "title": "Another Review", "quote": ""},
+    )
+    assert not hit
+    assert finding["secondary"]
+    assert finding["source"] == original_source
+    assert "via" not in finding
+
+
+def test_a_rebind_with_no_fetched_text_is_not_carried_as_attributed(monkeypatch):
+    """#473 item 4: a rebind to a record with no fetched text is not carried
+    as if it had been attributed."""
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        return {
+            "title": "The Primary Trial",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "pubtype": ["Randomized Controlled Trial"],
+        }
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    finding = {
+        "claim": "The dose increased 42 percent.",
+        "source": {"url_or_path": "https://example.invalid/review", "evidence_tier": "narrative_review"},
+    }
+    run = _FakeFollowRun(_FakeBackend())
+    hit = sections._apply_follow_result(
+        run, finding, {"found": True, "url": "https://example.invalid/primary", "title": "The Primary Trial", "quote": ""}
+    )
+    assert hit
+    assert "unattributed: attribution not checked" in finding["source"]["note"]
 
 
 def test_the_follow_pass_stops_at_the_run_cap(work, turns, monkeypatch):

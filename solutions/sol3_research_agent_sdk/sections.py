@@ -328,36 +328,54 @@ def _follow_candidates(findings: list[dict]) -> list[dict]:
 def _apply_follow_result(run, finding: dict, result: dict) -> bool:
     """Rebind a finding to the primary a follow turn found, or mark it secondary.
 
-    A hit whose fetched text contradicts the claim is treated the same as a
-    miss: a primary study's own URL is not a licence to skip the check #471
-    already runs on every other binding.
+    A hit only counts when the found source's own tier is not itself
+    secondary: the same review answering twice, or a different review, must
+    not clear the caveat (#473 item 2). A hit whose fetched text contradicts
+    the claim is treated the same as a miss: a primary study's own URL is
+    not a licence to skip the check #471 already runs on every other
+    binding.
+
+    The original review survives under `finding["via"]`, not discarded
+    (item 5): the paper can still say the number arrived through it. The
+    new source's own `note` is computed fresh, including the same
+    `unattributed: attribution not checked` marker `attribute_findings`
+    writes, so a rebind to a record with no fetched text is never carried
+    as if it had been attributed (item 4).
     """
     url = str(result.get("url") or "").strip()
     if result.get("found") and url.lower().startswith(("http://", "https://")):
         backend = run.turns.backend
         model_title = result.get("title") or url
         fetched = metadata.cached_fetch(run.work_dir, url, backend, model_title=model_title)
-        quote = str(result.get("quote") or "")
-        probe = {"quote": quote, "claim": finding.get("claim") or ""}
-        if not fetched.get("text") or attributed(probe, fetched.get("text") or ""):
-            finding["source"] = {
-                "kind": "web",
-                "ref": url,
-                "title": fetched.get("title") or model_title,
-                "url_or_path": url,
-                "vendor": "",
-                "tier": 1,
-                "evidence_tier": source_policy.tier_for(fetched),
-                "authors": fetched.get("authors") or [],
-                "year": fetched.get("year") or "",
-                "venue": fetched.get("venue") or "",
-                "note": fetched.get("note") or "",
-                "text": fetched.get("text") or "",
-            }
-            if quote:
-                finding["quote"] = quote
-            finding["secondary"] = False
-            return True
+        tier = source_policy.tier_for(fetched)
+        if tier not in source_policy.SECONDARY_TIERS:
+            quote = str(result.get("quote") or "")
+            fetched_text = fetched.get("text") or ""
+            probe = {"quote": quote, "claim": finding.get("claim") or ""}
+            if not fetched_text or attributed(probe, fetched_text):
+                note = fetched.get("note") or ""
+                if not fetched_text:
+                    marker = "unattributed: attribution not checked"
+                    note = f"{note}; {marker}" if note else marker
+                finding["via"] = finding.get("source") or {}
+                finding["source"] = {
+                    "kind": "web",
+                    "ref": url,
+                    "title": fetched.get("title") or model_title,
+                    "url_or_path": url,
+                    "vendor": "",
+                    "tier": 1,
+                    "evidence_tier": tier,
+                    "authors": fetched.get("authors") or [],
+                    "year": fetched.get("year") or "",
+                    "venue": fetched.get("venue") or "",
+                    "note": note,
+                    "text": fetched_text,
+                }
+                if quote:
+                    finding["quote"] = quote
+                finding["secondary"] = False
+                return True
     finding["secondary"] = True
     return False
 

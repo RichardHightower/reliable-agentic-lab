@@ -84,6 +84,15 @@ def test_a_safety_section_without_a_position_stand_fails():
     assert "guideline_cited" not in off_topic.signature()
 
 
+def test_guideline_cited_skips_a_non_numeric_number_rather_than_raising():
+    """#473 item 7: every current producer supplies an int, but a truthy,
+    non-numeric `number` must not crash the row."""
+    section = {"heading": "Dosing and safety", "key_questions": ["what dose is safe"]}
+    findings = [{"id": "s1-f1", "number": "not-a-number", "evidence_tier": "position_stand_or_guideline"}]
+    score = sections.section_check("A claim about the safe dose.", section=section, findings=findings)
+    assert "guideline_cited" not in score.signature()
+
+
 def test_findings_from_claims_carries_the_tier_from_the_ledger():
     """#473: `evidence_tier` on the finding survives from the ledger's
     `SourceDocument`, which is what wires `guideline_cited` to a real run."""
