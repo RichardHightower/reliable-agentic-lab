@@ -153,6 +153,45 @@ def test_cost_reads_an_object_result():
     assert adapter.last_usd(State([Message("ai", "x", usage={"cost": 0.75})])) == 0.75
 
 
+# -- #541: a raised backend never claims a silent 0.0 -----------------------
+
+
+class RaisingAgent:
+    """A Deep Agents graph whose `invoke()` never answers."""
+
+    def __init__(self, exc: Exception):
+        self.exc = exc
+
+    def invoke(self, payload):
+        raise self.exc
+
+
+def test_a_backend_that_raises_reports_usd_as_none_not_zero(tmp_path):
+    """A raise means `agent.invoke()` never answered. `usd=0.0` there reads
+    as "this turn was free", indistinguishable from an honest empty reply."""
+    result = adapter.DeepAgentsBackend(RaisingAgent(RuntimeError("boom"))).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert not result.ok
+    assert result.usd is None
+    assert "RuntimeError: boom" in result.output
+
+
+def test_a_backend_failure_names_the_exception_class(tmp_path):
+    """A `GraphRecursionError` must read as one, not survive only in the
+    driver's generic wording."""
+
+    class GraphRecursionError(RuntimeError):
+        pass
+
+    exc = GraphRecursionError("Recursion limit of 16 reached without hitting a stop condition.")
+    result = adapter.DeepAgentsBackend(RaisingAgent(exc)).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert "GraphRecursionError" in result.output
+    assert "Recursion limit of 16" in result.output
+
+
 # -- which message is the answer -------------------------------------------
 #
 # Two failure shapes, and this repo has shipped both. These four cases are the
