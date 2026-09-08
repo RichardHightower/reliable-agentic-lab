@@ -266,6 +266,7 @@ loop-engineering paper.
 
 ```bash
 task test      # no SDK, key, network, or plugin clone; image calls are stubbed
+task test-live # the one live renderer test; set SOL3_LIVE_TESTS=1 and a real key first
 task table     # the reviewer prints no in the writes column
 task checks    # every module's own assertions
 task brief -- --question "sqlalchemy nullable datetime column"

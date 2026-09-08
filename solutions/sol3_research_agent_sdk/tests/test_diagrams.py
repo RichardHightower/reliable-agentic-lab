@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 import diagrams
@@ -238,6 +239,60 @@ def test_no_image_backend_stops_immediately(renderer, tmp_path):
     assert figure.misses == ["the renderer produced no image"]
 
 
+def test_a_failing_image_backend_becomes_a_named_skip(renderer, tmp_path):
+    """#514: `available()` already said yes; `render()` then raising must
+    not crash the run. One figure skipped, named with the backend's own
+    error, not a traceback."""
+
+    def boom(source, topic, out_dir, theme=diagrams.DEFAULT_THEME):
+        raise diagrams.ImageBackendUnavailable(out_dir / "f_imagen.prompt.txt")
+
+    renderer.setattr(diagrams, "render", boom)
+    drawer = Drawer()
+    figure = diagrams.draw(
+        drawer, name="f", concept="c", section="s", topic="t", out_dir=tmp_path / "diagrams"
+    )
+    assert figure.attempts == 1
+    assert not figure.rendered
+    assert figure.path == ""
+    assert "image backend unavailable" in figure.misses[0]
+    assert "every approved image backend failed" in figure.misses[0]
+
+
+def test_available_is_a_real_probe(monkeypatch, tmp_path):
+    """#514: a file-exists check alone reports available on a clone whose
+    live call then fails. `available()` must actually invoke the renderer,
+    and cache the result for the process. A fake `SCRIPTS` folder keeps this
+    independent of whether the real renderer clone is on disk."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "render.py").write_text("")
+    (scripts / "judge.py").write_text("")
+    monkeypatch.setattr(diagrams, "SCRIPTS", scripts)
+    diagrams._probe_backend.cache_clear()
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+    calls = []
+
+    def ok(script, args):
+        calls.append((script, args))
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(diagrams, "_run", ok)
+    assert diagrams.available()
+    assert calls[0][0] == "render.py"
+    assert "--dry-run" in calls[0][1]
+    assert diagrams.available()
+    assert len(calls) == 1, "the probe result is cached for the process"
+    diagrams._probe_backend.cache_clear()
+
+    def fails(script, args):
+        return type("Result", (), {"returncode": 2})()
+
+    monkeypatch.setattr(diagrams, "_run", fails)
+    assert not diagrams.available()
+    diagrams._probe_backend.cache_clear()
+
+
 def test_a_missing_renderer_never_calls_the_model(monkeypatch, tmp_path):
     monkeypatch.setattr(diagrams, "available", lambda: False)
     drawer = Drawer()
@@ -453,3 +508,31 @@ def test_render_hands_the_backend_the_sanitized_source(tmp_path, monkeypatch):
     handed = pathlib.Path(seen[0][seen[0].index("--source") + 1])
     assert "{Gate}" not in handed.read_text(), handed
     assert handed.name == src.name
+
+
+# -- the live renderer, opt-in only, so `task test` stays deterministic ------
+
+_LIVE_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY")
+# `or`, short-circuited: the cheap env checks run first, so a plain `task
+# test` (opt-in unset) never pays for `diagrams.available()`'s subprocess
+# probe just to decide whether to skip. `task test-live` sets the variable.
+_LIVE_SKIP = (
+    os.environ.get("SOL3_LIVE_TESTS") != "1"
+    or not any(os.environ.get(k) for k in _LIVE_KEYS)
+    or not diagrams.available()
+)
+
+
+@pytest.mark.skipif(
+    _LIVE_SKIP,
+    reason="set SOL3_LIVE_TESTS=1 and a real image backend key to run this (task test-live)",
+)
+def test_a_live_render_when_keys_are_present(tmp_path):
+    """#514: the offline lane never touches this. One real render, only when
+    a key is actually present, covers the renderer itself."""
+    source = tmp_path / "probe.mmd"
+    source.write_text('flowchart LR\n  A["Plan"] --> B["Check"]\n', encoding="utf-8")
+    out_dir = tmp_path / "out"
+    png = diagrams.render(source, "loop safety", out_dir)
+    assert png is not None
+    assert png.exists() and png.stat().st_size >= 32

@@ -19,10 +19,12 @@ render.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -91,8 +93,43 @@ class Figure:
 
 
 def available() -> bool:
-    """Whether the renderer clone is present and runnable."""
-    return (SCRIPTS / "render.py").exists() and (SCRIPTS / "judge.py").exists()
+    """Whether the renderer clone is present and its backend actually runs.
+
+    A file-existence check alone reports available on a clone whose live
+    call then fails; #514 traced flaky CI to exactly that gap (keys set, the
+    clone present, the backend call itself erroring). The probe below is
+    cached for the life of the process: `diagram()` asks this once per
+    figure, and a subprocess round trip is not free.
+    `_probe_backend.cache_clear()` forgets it, for a test that changes what
+    the machine can do mid-run.
+    """
+    if not ((SCRIPTS / "render.py").exists() and (SCRIPTS / "judge.py").exists()):
+        return False
+    return _probe_backend()
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_backend() -> bool:
+    """A cheap `render.py --dry-run` call. No image is generated."""
+    ensure_theme()
+    with tempfile.TemporaryDirectory() as scratch:
+        probe_source = Path(scratch) / "probe.mmd"
+        probe_source.write_text("flowchart LR\n  A[A] --> B[B]\n", encoding="utf-8")
+        try:
+            proc = _run(
+                "render.py",
+                [
+                    "--source", str(probe_source),
+                    "--topic", "probe",
+                    "--theme", DEFAULT_THEME,
+                    "--density", "article",
+                    "--output-dir", scratch,
+                    "--dry-run",
+                ],
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+    return proc.returncode == 0
 
 
 def ensure_theme() -> None:
@@ -422,7 +459,16 @@ def draw(  # noqa: PLR0913  (every one of these is a distinct render input)
         source_path = out_dir / f"{name}{suffix}"
         source_path.write_text(figure.source, encoding="utf-8")
 
-        png = render(source_path, topic, out_dir, theme)
+        try:
+            png = render(source_path, topic, out_dir, theme)
+        except ImageBackendUnavailable as exc:
+            # #514: `available()` already said yes before this loop started;
+            # a live call failing here is a runtime miss, not a setup
+            # problem, and must not crash `task demo` or `task paper`. One
+            # figure skipped, named, the way `metadata.fetch_record`
+            # degrades instead of raising.
+            figure.misses = [f"image backend unavailable: {exc}"]
+            return figure
         if png is None:
             # No image backend on PATH, or the renderer refused this source.
             # Redrawing does not add a backend, so stop asking.

@@ -1290,6 +1290,100 @@ def test_a_missing_image_backend_is_never_retried(run_dir, no_renderer):
     assert run.state.attempts("diagram") == 1
 
 
+# -- #514: the offline lane never depends on a live image call -------------
+
+
+def test_the_recorded_fixture_tests_never_touch_the_renderer(offline, run_dir, monkeypatch):
+    """`diagrams.render` patched to blow up if it is ever invoked, and the
+    recorded fixture pipeline still passes end to end. `stub_renderer`
+    replaces `stages.render_figures` entirely; this proves it never falls
+    through to the real renderer underneath."""
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("the offline lane must never call the renderer")
+
+    monkeypatch.setattr(diagrams_mod, "render", boom)
+    assert offline.run() == 0
+    assert (run_dir / "whitepaper.md").exists()
+
+
+def test_a_failing_image_backend_becomes_a_named_skip(run_dir, monkeypatch):
+    """#514: `available()` already said yes; a live call failing for one
+    figure must not crash the run. That figure is skipped this
+    commissioning, named with the backend's own error, and the paper
+    still completes. `dropped` in the persisted record stays false, a
+    backend failure is not a label failure (#482 follow-up)."""
+    from conftest import build_run, stub_figure  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    _run_up_to_write(run)
+
+    monkeypatch.setattr(diagrams_mod, "available", lambda: True)
+
+    def flaky_render(src, out_dir, **_kwargs):
+        if src.stem == "three-exits":
+            prompt = Path(out_dir) / f"{src.stem}_imagen.prompt.txt"
+            prompt.parent.mkdir(parents=True, exist_ok=True)
+            prompt.write_text("plugin-built prompt", encoding="utf-8")
+            raise diagrams_mod.ImageBackendUnavailable(prompt, "503 from the backend")
+        return stub_figure(src.stem, Path(out_dir))
+
+    monkeypatch.setattr(diagrams_mod, "render", flaky_render)
+
+    result = run.stage_diagram()
+    assert "three-exits" in result.artifacts["dropped"]
+
+    recorded = json.loads((run_dir / "diagrams.json").read_text())["figures"]
+    entry = next(f for f in recorded if f["name"] == "three-exits")
+    assert entry["dropped"] is False
+    assert "503 from the backend" in entry["reason"]
+
+
+def test_a_backend_skip_never_sets_dropped_and_keeps_its_earned_attempts(run_dir, monkeypatch):
+    """#482 follow-up: the durable budget check (`spent = attempts if
+    dropped else 0`) would permanently disqualify a figure that already
+    earned its labels if a backend skip ever set `dropped`. A live call
+    failing must leave `dropped` false and the label-matching attempt
+    count exactly what it was before the backend was even asked."""
+    from conftest import build_run, stub_figure  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    _run_up_to_write(run)
+
+    monkeypatch.setattr(diagrams_mod, "available", lambda: True)
+
+    def flaky_render(src, out_dir, **_kwargs):
+        if src.stem == "three-exits":
+            prompt = Path(out_dir) / f"{src.stem}_imagen.prompt.txt"
+            prompt.parent.mkdir(parents=True, exist_ok=True)
+            prompt.write_text("plugin-built prompt", encoding="utf-8")
+            raise diagrams_mod.ImageBackendUnavailable(prompt, "still overloaded")
+        return stub_figure(src.stem, Path(out_dir))
+
+    monkeypatch.setattr(diagrams_mod, "render", flaky_render)
+
+    run.stage_diagram()
+    before = json.loads((run_dir / "diagrams.json").read_text())["figures"]
+    entry_before = next(f for f in before if f["name"] == "three-exits")
+    assert entry_before["dropped"] is False
+    spent_before = entry_before["attempts"]
+
+    # A real second commissioning, not the unchanged-sections shortcut:
+    # change a section body so `_sections_sha` differs and the wipe-on-
+    # change step redrafts every source, the same backend failure again.
+    # A durable `dropped` from the first call would refuse this figure
+    # outright once `attempts` reached the label-attempt cap; it must not,
+    # and the figure's earned attempts must land on the same number, not
+    # grow just because the backend failed twice.
+    heading = next(iter(run.written))
+    run.written[heading] = run.written[heading] + " Rewritten for this test.\n"
+    run.stage_diagram()
+    after = json.loads((run_dir / "diagrams.json").read_text())["figures"]
+    entry_after = next(f for f in after if f["name"] == "three-exits")
+    assert entry_after["dropped"] is False
+    assert entry_after["attempts"] == spent_before
+
+
 def test_sections_written_before_a_stop_survive(run_dir, stub_renderer):
     """A stage that persists only on success makes a mid-stage stop cost the
     whole stage again, which is the opposite of what a cost cap is for."""

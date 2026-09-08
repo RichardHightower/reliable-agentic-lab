@@ -1106,14 +1106,26 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
 # -- 5. diagram -----------------------------------------------------------
 
 
+# #514: the exact text `stage_diagram` matches to tell a live-call failure,
+# on an available renderer, apart from every other complaint this loop can
+# produce.
+BACKEND_FAILURE_MARK = "image backend unavailable: "
+
+
 def render_figures(src_dir: Path, out_dir: Path, topic: str, **kwargs) -> tuple[list, list[str]]:
     """Render every source through imagen-diagrams and its fidelity judge.
 
     A complexity failure is not an exception here. It is a message for the
     diagrammer, and the caller feeds it straight back as the retry prompt.
 
-    A missing plugin or image backend propagates immediately. Redrawing source
-    cannot install a backend, and publication has no SVG fallback.
+    A renderer that is genuinely absent propagates immediately: `available()`
+    already said no, every figure would fail the identical way, and there is
+    no SVG fallback to ship instead (#409's `test_a_missing_image_backend_
+    blocks_the_paper`). A renderer that reported itself available and then
+    had one live call fail (auth, quota, a transient error) is different:
+    #514 traced a whole run crashing over one bad live call, so that one
+    complaint is marked with the caller's own text and this loop keeps
+    going. `stage_diagram` reads the mark and drops just that figure.
     """
     figures, complaints = [], []
     if not src_dir.is_dir():
@@ -1130,6 +1142,10 @@ def render_figures(src_dir: Path, out_dir: Path, topic: str, **kwargs) -> tuple[
                 )
         except diagrams.DiagramTooComplex as exc:
             complaints.append(f"{path.name}: {exc}")
+        except diagrams.ImageBackendUnavailable as exc:
+            if not diagrams.available():
+                raise
+            complaints.append(f"{path.name}: {BACKEND_FAILURE_MARK}{exc}")
     return figures, complaints
 
 

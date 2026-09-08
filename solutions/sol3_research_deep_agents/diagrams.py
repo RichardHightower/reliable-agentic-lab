@@ -9,13 +9,17 @@ Only ``imagen-diagrams`` v0.2.0+ may create a diagram PNG for the paper.
 ``image-gen`` is deliberately absent from this module. That plugin owns cover
 and non-diagram artwork. It must not become an alternate diagram renderer.
 
-If the renderer or its image backend is unavailable, the run fails closed with
+If the renderer is genuinely absent, the run fails closed with
 ``<stem>_imagen.prompt.txt`` retained. There is no SVG or deterministic PNG
-fallback that can accidentally leak into the PDF.
+fallback that can accidentally leak into the PDF. If the renderer reports
+itself available and one live call still fails (auth, quota, a transient
+error), ``stages.render_figures`` and ``paper.stage_diagram`` degrade that
+one figure to a named skip instead (#514); every other figure still ships.
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -23,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -286,8 +291,43 @@ def alt_text(inv: Inventory, topic: str) -> str:
 
 
 def available() -> bool:
-    """Whether the pinned renderer and its fidelity judge are installed."""
-    return (SCRIPTS / "render.py").is_file() and (SCRIPTS / "judge.py").is_file()
+    """Whether the pinned renderer is installed and its backend actually runs.
+
+    A file-exists check alone reports available on a clone whose live call
+    then fails; #514 traced flaky CI to exactly that gap (keys set, the
+    clone present, the backend call itself erroring). The probe below is
+    cached for the life of the process: `stage_diagram` asks this once per
+    figure, and a subprocess round trip is not free.
+    `_probe_backend.cache_clear()` forgets it, for a test that changes what
+    the machine can do mid-run.
+    """
+    if not ((SCRIPTS / "render.py").is_file() and (SCRIPTS / "judge.py").is_file()):
+        return False
+    return _probe_backend()
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_backend() -> bool:
+    """A cheap `render.py --dry-run` call. No image is generated."""
+    ensure_theme()
+    with tempfile.TemporaryDirectory() as scratch:
+        probe_source = Path(scratch) / "probe.mmd"
+        probe_source.write_text("flowchart LR\n  A[A] --> B[B]\n", encoding="utf-8")
+        try:
+            proc = _run(
+                "render.py",
+                [
+                    "--source", str(probe_source),
+                    "--topic", "probe",
+                    "--theme", DEFAULT_THEME,
+                    "--density", "article",
+                    "--output-dir", scratch,
+                    "--dry-run",
+                ],
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+    return proc.returncode == 0
 
 
 def ensure_theme() -> None:
