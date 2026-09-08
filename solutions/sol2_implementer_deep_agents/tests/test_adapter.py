@@ -14,6 +14,7 @@ import doers
 import gates
 import loop_roles
 import pytest
+import roles
 import steps
 
 
@@ -567,3 +568,32 @@ def test_planner_deep_with_doer_deep_invokes_the_planner_graph(contract, monkeyp
     assert "planner" in calls
     assert result.ok
     assert result.output == "built:planner"
+
+
+def test_the_real_build_agent_accepts_planner_and_rejects_unknown_names(contract, monkeypatch):
+    """A9 (#437 #422). The test above monkeypatches `roles.build_agent`
+    itself, so it never proves the real one recognizes "planner" as a
+    subagent name. `deepagents` is installed in this environment, so run it
+    for real here, skipped only where it is not.
+
+    `create_deep_agent` and `register_harness_profile` are patched, not
+    `deepagents` itself: everything else `build_agent` builds -- the
+    subagent list, the permissions, the harness profile -- is still the
+    real package's own types, the same split `test_the_real_types_keep_the_fence`
+    in `tests/test_roles.py` uses.
+    """
+    deepagents = pytest.importorskip("deepagents")
+
+    def create_deep_agent(**kwargs):
+        return "agent"
+
+    def register_harness_profile(model, profile):
+        pass
+
+    monkeypatch.setattr(deepagents, "create_deep_agent", create_deep_agent)
+    monkeypatch.setattr(deepagents, "register_harness_profile", register_harness_profile)
+
+    assert roles.build_agent(contract, subagent_names=frozenset({"planner"})) == "agent"
+
+    with pytest.raises(ValueError, match="unknown Deep Agents subagent"):
+        roles.build_agent(contract, subagent_names=frozenset({"not-a-real-role"}))

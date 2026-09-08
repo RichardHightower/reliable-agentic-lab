@@ -1790,6 +1790,62 @@ def test_a_kind_path_goal_payload_never_becomes_a_plan_and_escalates(tmp_path, m
 
     assert trace["gate"] == "escalate"
     assert "the planner produced an unusable plan" in trace["reason"]
+    # Not just the generic prefix: this must be Plan.load's own missing-field
+    # message, or this assertion would pass just as well if plan.validate had
+    # fired instead, and the two failure modes would be indistinguishable.
+    assert "is missing: id, ticket, role, action, validation" in trace["reason"]
+
+
+def test_plan_validate_still_refuses_a_plan_that_covers_no_criterion(tmp_path, monkeypatch):
+    """#422. `plan.validate` must run after `Plan.load`'s schema check, not
+    only be implied by it: a payload can satisfy `Plan.load` (every field
+    present, every role known) and still be unusable because no step's
+    `criterion` covers the ticket's acceptance criteria. Deleting the
+    `plan.validate(criteria=...)` call in `run()` leaves this green, so this
+    is the test #422 names for that revert."""
+    repo = _git_repo(tmp_path / "repo")
+    _patch_runs(monkeypatch, [])
+
+    class NoCriterionPlanBackend(doers.Backend):
+        name = "no-criterion-planner"
+
+        def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+            raise AssertionError("a rejected plan must never reach the test or code phase")
+
+        def plan(self, *, repo: Path, prompt: str) -> doers.DoerResult:
+            lines = [
+                json.dumps(
+                    {
+                        "id": "S1",
+                        "ticket": "T001",
+                        "role": "test_implementer",
+                        "action": "write a test",
+                        "validation": "it fails",
+                        "status": "todo",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "id": "S2",
+                        "ticket": "T001",
+                        "role": "code_implementer",
+                        "action": "write the code",
+                        "validation": "the test passes",
+                        "status": "todo",
+                    }
+                ),
+            ]
+            (repo / "steps.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return doers.DoerResult(output="wrote a plan")
+
+    trace = implementer.run(
+        repo=repo, ticket_id="T001", doer=NoCriterionPlanBackend(), planner="sdk", budget=1,
+    )
+
+    assert trace["gate"] == "escalate"
+    assert "the planner produced an unusable plan" in trace["reason"]
+    assert "these acceptance criteria map to no step" in trace["reason"]
+    assert "AC-1" in trace["reason"]
 
 
 def test_doer_none_and_reference_force_derived_regardless_of_planner_flag(

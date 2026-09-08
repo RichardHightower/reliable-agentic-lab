@@ -218,6 +218,7 @@ def test_resume_flag_reaches_implementer_run(repo, monkeypatch):
     exit_code = harness.main(["--repo", str(repo), "--doer", "none", "--resume"])
 
     assert captured.get("resume") is True
+    assert exit_code == 0
 
 
 def test_planner_flag_reaches_implementer_run(repo, monkeypatch):
@@ -235,5 +236,4 @@ def test_planner_flag_reaches_implementer_run(repo, monkeypatch):
     exit_code = harness.main(["--repo", str(repo), "--doer", "none", "--planner", "sdk"])
 
     assert captured.get("planner") == "sdk"
-    assert exit_code == 0
     assert exit_code == 0

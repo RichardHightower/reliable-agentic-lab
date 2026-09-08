@@ -160,6 +160,13 @@ def _plan_from_backend(backend, *, repo: Path, ticket: tickets.Ticket) -> steps.
     maker = getattr(backend, "plan", None)
     if maker is None:
         raise steps.PlanRejected("this backend has no planner graph")
+    # The DoerResult itself is discarded: neither `.ok` nor `.wrote` is
+    # checked, only the file `Plan.load` reads back next. That is only safe
+    # because this path never runs on a resume -- `_worktree` resets the
+    # worktree to HEAD before every non-resume run, so a planner that wrote
+    # nothing (or failed) cannot be masked by a stale `steps.jsonl` left
+    # over from an earlier attempt. `Plan.load` then sees only this call's
+    # own output, or the file's absence.
     maker(repo=repo, prompt=ticket.for_prompt())
     return steps.Plan.load(repo)
 
