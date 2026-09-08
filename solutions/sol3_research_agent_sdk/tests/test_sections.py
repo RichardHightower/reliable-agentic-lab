@@ -915,6 +915,23 @@ def test_a_follow_miss_marks_the_claim_secondary():
     assert bound[0]["tier"] == "narrative_review"
 
 
+def test_an_evidence_shortfall_hedges_the_writer_brief():
+    """#475, judge revision on #520: a finding whose evidence_requirements
+    fell short carries the reason and an explicit hedge instruction into the
+    writer's brief, the same way `secondary` and `capped` already are."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "The effect was 20 percent.",
+            "source": {"url_or_path": "https://example.invalid/review"},
+            "evidence_shortfall": "needs 1 other, has 0",
+        }
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1")
+    assert "evidence requirement not fully met: needs 1 other, has 0" in bound[0]["text"]
+    assert "Hedge accordingly" in bound[0]["text"]
+
+
 def test_a_follow_miss_survives_the_live_path_into_the_writer_brief(work, turns, monkeypatch):
     """#473 item 1's live-path shape for the SDK: the "as summarized by"
     annotation, built after the follow miss, still reaches the writer once

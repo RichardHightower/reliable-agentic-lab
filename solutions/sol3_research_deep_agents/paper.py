@@ -25,6 +25,7 @@ same rows failing twice, which means the loop is not converging.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -34,6 +35,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import diagrams
 import evidence
 import gates
 import locate
@@ -1995,16 +1997,85 @@ class Paper:
     # -- 5. diagram --------------------------------------------------------
 
     def stage_diagram(self, extra: str = "") -> StageResult:
-        self._need_plan()
+        """Commission every planned figure, from the section's own claims.
+
+        `diagram` moved here from right after `outline` (#476): a figure
+        cannot be commissioned from claims that do not exist until the
+        section is written. Guarded by `sections_sha`, recorded in
+        `diagrams.json`: re-commissioning on every write retry is not
+        acceptable at a diagram's price, so a matching sha skips straight to
+        the already-rendered figures.
+
+        The guard is coarse (one hash for every section, not one per
+        figure), but the attempt budget is durable per figure regardless:
+        `diagrams.json` carries each figure's lifetime `attempts` and
+        `dropped` state, and a sections_sha change does not buy an
+        already-dropped figure a fresh three. #476 B2. A figure whose own
+        source still renders keeps redrawing on a real content change, the
+        same as before; only a figure that already exhausted its budget
+        stays untouched.
+        """
+        self._need_written()
         planned = self.plan.get("diagrams") or []
         if not planned:
             self.state.mark_skipped("diagram", "the plan asked for no figures")
             return StageResult("diagram", summary="no figures planned")
 
+        sections_sha = _sections_sha(self.written)
+        guard_path = self.work_dir / "diagrams.json"
+        recorded: dict = {}
+        if guard_path.exists():
+            try:
+                recorded = json.loads(guard_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                recorded = {}
+        if recorded.get("sections_sha") == sections_sha:
+            self.figures, _ = stages.render_figures(
+                self.diagram_src, self.figure_dir, self.plan.get("title") or self.topic,
+                theme_name=self.theme,
+            )
+            accepted = sum(1 for figure in self.figures if figure.best is not None)
+            return StageResult(
+                "diagram",
+                artifacts={"figures": len(self.figures), "accepted": accepted},
+                summary="unchanged sections, figures kept",
+            )
+        if recorded and not self._redraw:
+            # A previously commissioned run, but the sections moved. The
+            # guard is coarse the same way the Agent SDK port's is: redraw
+            # every figure rather than track which one's owning section
+            # changed. `self._redraw` is only non-empty mid-retry, inside one
+            # already-in-progress commissioning attempt; do not repeat this
+            # wipe on that path.
+            for stale in self.diagram_src.glob("*"):
+                if stale.suffix in (".mmd", ".puml"):
+                    stale.unlink()
+
         self.diagram_src.mkdir(parents=True, exist_ok=True)
         usd = 0.0
+        dropped: set[str] = set()
+        previous = {f.get("name"): f for f in (recorded.get("figures") or [])}
+        records: dict[str, dict] = dict(previous)
         for figure in planned:
             name = evidence.slug(figure["name"])
+            prior = previous.get(name) or {}
+            # #476 N2: the budget check reads `dropped`, not attempts alone.
+            # A figure that succeeded is not carrying a lifetime debt; only
+            # a durably dropped figure's prior attempts count against the
+            # next budget. Charging a passed figure's own `attempts: 3` here
+            # left `remaining` at 0, an empty attempt loop that never
+            # rebuilds a source the wipe-on-change step just deleted, and
+            # `diagram_gate` raised `missing_figures` on re-entry for a
+            # figure the run never dropped.
+            spent = int(prior.get("attempts") or 0) if prior.get("dropped") else 0
+            if prior.get("dropped") and spent >= diagrams.MAX_LABEL_ATTEMPTS:
+                # This figure already spent its lifetime attempt budget on
+                # an earlier commissioning. A section changing elsewhere in
+                # the paper must not buy it a fresh three; durable means
+                # durable. No source, no ask, no image.
+                dropped.add(name)
+                continue
+            remaining = diagrams.MAX_LABEL_ATTEMPTS - spent
             suffix = ".mmd" if figure["kind"] == "mermaid" else ".puml"
             target = self.diagram_src / f"{name}{suffix}"
             # Same rule as the writer: a source that already rendered is kept.
@@ -2023,23 +2094,65 @@ class Paper:
                 if ordered_exits
                 else ""
             )
-            reply = self._ask(
-                "diagrammer",
-                f"Draw a {figure['kind']} diagram named {name}.\n"
-                f"It must show: {figure['shows']}{order_instruction}\n"
-                f"Paper topic: {self.topic}\n{extra}\n\n"
-                "Return only the diagram source. No fences, no commentary.",
+            claims = self._claims_for_figure(figure["name"])
+            claim_texts = [claim.text for claim in claims]
+            grounding = (
+                "\nClaims this section may draw on:\n" + "\n".join(f"- {t}" for t in claim_texts)
+                if claim_texts
+                else ""
             )
-            usd += reply.usd
-            # A scoped Deep Agents diagrammer writes the requested source.
-            # Its final message may only acknowledge that tool call. Preserve
-            # the file in that case; answer-only and fixture runners still
-            # supply source in the reply for Python to checkpoint.
-            if not target.exists():
-                target.write_text(_strip_fence(reply.text), encoding="utf-8")
+            mismatch_note = ""
+            for attempt in range(1, remaining + 1):
+                # Clear any prior draft before asking: a redraw must land, not
+                # be skipped because the last attempt's file is still there.
+                # A live subagent then writes its own fresh file with its own
+                # tool during `_ask`; Python's fallback below only fires when
+                # that did not happen.
+                target.unlink(missing_ok=True)
+                reply = self._ask(
+                    "diagrammer",
+                    f"Draw a {figure['kind']} diagram named {name}.\n"
+                    f"It must show: {figure['shows']}{order_instruction}{grounding}\n"
+                    f"Paper topic: {self.topic}\n{extra}{mismatch_note}\n\n"
+                    "Return only the diagram source. No fences, no commentary.",
+                )
+                usd += reply.usd
+                # A scoped Deep Agents diagrammer writes the requested source.
+                # Its final message may only acknowledge that tool call.
+                # Preserve the file in that case; answer-only and fixture
+                # runners still supply source in the reply for Python to
+                # checkpoint.
+                if not target.exists():
+                    target.write_text(_strip_fence(reply.text), encoding="utf-8")
+                # #476 F3: absence of claims is not support, so this always
+                # runs, `claims` empty included.
+                inv = diagrams.inventory(target.read_text(encoding="utf-8"), diagrams.kind_of(target))
+                mismatches = diagrams.figure_claims(inv.labels, claims)
+                if not mismatches:
+                    records[name] = {"name": name, "attempts": spent + attempt, "dropped": False}
+                    break
+                if attempt == remaining:
+                    # #476 B2/B3: budget exhausted. The figure is dropped:
+                    # no source, no image, no dangling reference in the
+                    # paper, and it stays dropped through a later section
+                    # change instead of a later successful redraw landing
+                    # it as an orphan under a generated Figures heading.
+                    target.unlink(missing_ok=True)
+                    dropped.add(name)
+                    self._drop_figure_reference(figure["name"])
+                    self.say(f"    note: {name} dropped, labels never matched the section's claims")
+                    records[name] = {"name": name, "attempts": spent + attempt, "dropped": True}
+                    break
+                mismatch_note = (
+                    "\n\nThe last draft's labels do not match this section's claims: "
+                    + "; ".join(mismatches)
+                    + ". Redraw with labels the claims above support."
+                )
+
+        survivors = [f for f in planned if evidence.slug(f["name"]) not in dropped]
 
         semantic_complaints = []
-        for figure in planned:
+        for figure in survivors:
             description = figure.get("shows", "").lower()
             if not all(term in description for term in ("done", "cost", "max-turn", "order")):
                 continue
@@ -2066,16 +2179,75 @@ class Paper:
             theme_name=self.theme,
         )
         self._redraw = {Path(c.split(":", 1)[0]).stem for c in complaints}
-        stages.diagram_gate(self.figures, complaints, planned)
+        stages.diagram_gate(self.figures, complaints, survivors)
         for complaint in complaints:
             self.say(f"    note: {complaint}")
+        figure_records = [
+            records[evidence.slug(f["name"])]
+            for f in planned
+            if evidence.slug(f["name"]) in records
+        ]
+        guard_path.write_text(
+            json.dumps({"figures": figure_records, "sections_sha": sections_sha}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        # #476 F4: this stage is done. A complaint that did not trip
+        # `diagram_gate` above must not leave `_redraw` non-empty for a
+        # later, unrelated `stage_diagram` call to misread as "mid-retry",
+        # which would skip both the stale-source wipe and every figure
+        # whose source is still on disk, claims gate included.
+        self._redraw = set()
         accepted = sum(1 for figure in self.figures if figure.best is not None)
         return StageResult(
             "diagram",
             usd=usd,
-            artifacts={"figures": len(self.figures), "accepted": accepted},
-            summary=f"{accepted} judged imagen-diagrams PNGs",
+            artifacts={"figures": len(self.figures), "accepted": accepted, "dropped": sorted(dropped)},
+            summary=f"{accepted} judged imagen-diagrams PNGs"
+            + (f", {len(dropped)} dropped for a claims mismatch" if dropped else ""),
         )
+
+    def _section_for_figure(self, figure_name: str) -> dict | None:
+        """The outline section that named this figure in `figures: [...]`."""
+        slug = evidence.slug(figure_name)
+        for section in self.outline.get("sections", []):
+            for entry in section.get("figures") or []:
+                if evidence.slug(str(entry)) == slug:
+                    return section
+        return None
+
+    def _claims_for_figure(self, figure_name: str) -> list:
+        """This figure's owning section's usable claims, for the diagrammer
+        and for `figure_claims`. Empty when no section names this figure, or
+        the section is not yet bound to any claim."""
+        section = self._section_for_figure(figure_name)
+        if section is None:
+            return []
+        claims = []
+        for claim_id in section.get("claim_ids") or []:
+            claim = self.ledger.claim(claim_id)
+            if claim is not None and claim.usable:
+                claims.append(claim)
+        return claims
+
+    def _drop_figure_reference(self, figure_name: str) -> None:
+        """Remove a dropped figure's name from every section that named it.
+
+        `assemble` already skips a name with no rendered `Figure` behind it,
+        so this is not load bearing for "no dangling image" -- it keeps
+        `outline.json` honest about what the paper actually carries.
+        """
+        slug = evidence.slug(figure_name)
+        changed = False
+        for section in self.outline.get("sections", []):
+            figures = section.get("figures") or []
+            kept = [f for f in figures if evidence.slug(str(f)) != slug]
+            if len(kept) != len(figures):
+                section["figures"] = kept
+                changed = True
+        if changed:
+            (self.work_dir / "outline.json").write_text(
+                json.dumps(self.outline, indent=2), encoding="utf-8"
+            )
 
     # -- 5b. charts --------------------------------------------------------
 
@@ -2636,6 +2808,19 @@ def _strip_fence(text: str) -> str:
     """Diagram source, without the fence a model adds however often you ask."""
     match = FENCE.match(text.strip())
     return (match.group(1) if match else text).strip() + "\n"
+
+
+def _sections_sha(written: dict[str, str]) -> str:
+    """A digest of every section body, in a stable (heading-sorted) order.
+
+    `diagram` sits after `write` in `STAGE_ORDER` (#476) and commissions a
+    figure from the claims the section it belongs to actually landed. A
+    figure is not cheap enough to redraw every time the harness resumes into
+    an unchanged paper; this is the guard `stage_diagram` checks, recorded in
+    `diagrams.json`, before it spends a single diagrammer turn.
+    """
+    parts = [written[heading] for heading in sorted(written)]
+    return hashlib.sha1("".join(parts).encode("utf-8")).hexdigest()
 
 
 def _paper_ledger(work_dir: Path) -> dict:

@@ -286,7 +286,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"gate: {trace.get('gate', 'missing')}")
     print(f"reason: {trace.get('reason', 'missing')}")
     if backend.query_failed:
-        print("Agent SDK query failed; see .harness/last-sdk-e2e.md", file=sys.stderr)
+        # #506 follow-up (judge of PR #527, item 4). A bare relative path
+        # here reads as living next to wherever this command was invoked
+        # from, not the worktree `_write_extras` actually wrote to above.
+        summary_path = Path(trace["repo"]) / ".harness" / "last-sdk-e2e.md"
+        print(f"Agent SDK query failed; see {summary_path}", file=sys.stderr)
         return 2
     return 0 if trace.get("gate") == "pass" else 1
 

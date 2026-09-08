@@ -1106,22 +1106,102 @@ def verify(run: Run) -> dict:
     return counts
 
 
+def _diagram_sections_sha(run: Run) -> str:
+    """A digest of every section file, in a stable order.
+
+    `diagram` sits in `CYCLE` (#476) and re-runs on every write retry. A
+    diagram is not cheap enough to re-commission when the sections it was
+    drawn from have not changed, so this is the guard `diagram` checks
+    before it spends a single diagrammer turn.
+
+    Named apart from P7's `_sections_sha(run, planned)`: same idea, a
+    different guard, and the two must not collide as one shadowed name.
+    """
+    parts = [
+        path.read_text(encoding="utf-8")
+        for path in sorted(run.file("sections").glob("*.md"))
+    ]
+    return hashlib.sha1("".join(parts).encode("utf-8")).hexdigest()
+
+
+def _claims_for_section(run: Run, section_id: str) -> list[str]:
+    """This section's ledger claims, for the diagrammer and `figure_claims`.
+
+    Read from `paper_ledger.json`, not the outline: the outline only knows
+    what a section was asked to argue, the ledger knows what it actually
+    landed. Empty when the section has not written its ledger entry yet, the
+    path every call site before #476 took.
+    """
+    for entry in _ledger(run).get("entries", []):
+        if entry.get("section_id") == section_id:
+            return [c.get("claim", "") for c in entry.get("claims") or [] if c.get("claim")]
+    return []
+
+
 def diagram(run: Run) -> dict:
+    """Commission every planned figure, from the section's own claims.
+
+    Guarded by `sections_sha` (#476): `diagram` now sits in `CYCLE` and would
+    otherwise redraw every figure on every write retry. A matching sha means
+    no section changed since the figures on disk were drawn, so this returns
+    without spending a diagrammer turn.
+
+    The guard is coarse, one hash for every section, not one per figure, but
+    the attempt budget is durable per figure regardless: `diagrams.json`
+    carries each figure's lifetime `attempts`, and a sections_sha change does
+    not buy a figure a fresh three. #476 B2. A figure already at
+    `diagrams.MAX_ATTEMPTS` is carried forward unchanged, spending nothing.
+    """
     drafted = approved_outline(run)
+    sections_sha = _diagram_sections_sha(run)
+    existing = run.file("diagrams.json")
+    recorded: dict = {}
+    if existing.exists():
+        try:
+            recorded = json.loads(existing.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            recorded = {}
+    if recorded.get("sections_sha") == sections_sha:
+        figures = recorded.get("figures") or []
+        drawn = [f for f in figures if f.get("path")]
+        return {"figures": len(figures), "rendered": len(drawn), "skipped": "unchanged sections"}
+
+    previous = {f.get("name"): f for f in (recorded.get("figures") or [])}
     figures = []
     for spec in outlines.diagrams(drafted):
+        section_id = spec.get("section", "")
+        prior = previous.get(spec["name"]) or {}
+        spent = int(prior.get("attempts") or 0)
+        remaining = diagrams.MAX_ATTEMPTS - spent
+        if remaining <= 0:
+            # #476 B2: this figure already spent its lifetime attempt budget
+            # in an earlier commissioning. A section changing elsewhere in
+            # the paper must not buy it a fresh three; durable means durable.
+            figures.append(prior)
+            continue
         figure = diagrams.draw(
             run.turns,
             name=spec["name"],
             concept=spec["concept"],
-            section=spec.get("section", ""),
+            section=section_id,
             topic=run.topic,
             out_dir=run.file("diagrams"),
             theme=run.theme,
+            claims=_claims_for_section(run, section_id),
+            max_attempts=remaining,
         )
-        figures.append(figure.to_dict())
-    run.write_json("diagrams.json", {"figures": figures})
-    drawn = [f for f in figures if f["path"]]
+        record = figure.to_dict()
+        record["attempts"] = spent + record["attempts"]
+        figures.append(record)
+    # #476 F2: only record `sections_sha` when the renderer actually ran.
+    # `available()` False gives every figure an empty path with nothing
+    # attempted; recording the sha anyway would freeze that at zero figures
+    # until a section changes, even after the renderer is installed.
+    payload = {"figures": figures}
+    if diagrams.available():
+        payload["sections_sha"] = sections_sha
+    run.write_json("diagrams.json", payload)
+    drawn = [f for f in figures if f.get("path")]
     return {"figures": len(figures), "rendered": len(drawn)}
 
 
@@ -2126,16 +2206,21 @@ LINEAR = [
     (1, "outline", "outline.approved.json", do_outline),
     (1, "sources", "corpus/source_allowlist.json", source_allowlist),
     (2, "sections", "claims.json", do_sections),
-    (4, "diagram", "diagrams.json", diagram),
     (3, "charts", "charts.json", do_charts),
 ]
 
+# `diagram` moved out of `LINEAR` and into `CYCLE` (#476): a figure is
+# commissioned from the bound claims of the section that carries it, which
+# means it cannot be drawn until the section is written. `diagram` re-runs on
+# every write retry the same as the rest of `CYCLE`; the `sections_sha` guard
+# in `diagram()` itself is what keeps that cheap.
 CYCLE = [
     (5, "write", maybe_write),
-    (5, "abstract", write_abstract),
-    (6, "assemble", assemble),
-    (7, "check", check),
-    (8, "review", review),
+    (6, "abstract", write_abstract),
+    (7, "diagram", diagram),
+    (8, "assemble", assemble),
+    (9, "check", check),
+    (10, "review", review),
 ]
 
 # What a retry throws away, and it is only the section files. `paper.md`,
@@ -2315,17 +2400,17 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
             and not run.file("edit.done.json").exists()
             and not run.exhausted()
         ):
-            run.log("  8 edit      ...")
+            run.log("  11 edit      ...")
             before = run.state.total_usd
             meta = edit_paper(run)
             run.state.mark("edit", "complete", usd=round(run.state.total_usd - before, 4), **meta)
             run.state.save(work)
-            run.log(f"  8 edit      {meta}")
+            run.log(f"  11 edit      {meta}")
             assemble(run)
             check_meta = check(run)
             review(run)
-            run.log(f"  6 assemble  after edit")
-            run.log(f"  7 check     {check_meta['signature']}")
+            run.log(f"  8 assemble  after edit")
+            run.log(f"  9 check     {check_meta['signature']}")
             score = run.read_json("check.json")
             verdict = run.read_json("review.json")
             judge_done = bool(verdict.get("done"))
@@ -2374,18 +2459,18 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
     if run.ingest_brain is not None:
         ingest = rkc.ingest_brain(run.file("knowledge"), run.ingest_brain)
         run.state.mark("ingest", "complete" if ingest.get("ok") else "skipped", **ingest)
-        run.log(f"  9 ingest    {ingest}")
+        run.log(f"  12 ingest    {ingest}")
         run.state.save(work)
 
     gist = None
     if run.should_publish:
         if decision.gate != gates.PASS:
-            run.log("  9 publish    skipped. The paper did not pass.")
+            run.log("  12 publish    skipped. The paper did not pass.")
             run.state.mark("publish", "skipped", reason=decision.reason)
         else:
             gist = publisher.publish(work, topic=run.topic)
             run.state.mark("publish", "complete", url=gist["url"])
-            run.log(f"  9 publish    {gist['url']}")
+            run.log(f"  12 publish    {gist['url']}")
     run.state.save(work)
 
     return {

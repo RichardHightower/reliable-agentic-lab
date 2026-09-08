@@ -106,7 +106,6 @@ STAGE_ORDER = (
     "search",
     "verify",
     "outline",
-    "diagram",
     "charts",
     "write",
     # P9, #477. Between write and review, not after assemble: `stage_review`
@@ -115,6 +114,13 @@ STAGE_ORDER = (
     # caught after assembly would leave the reviewer grading a body that
     # already failed this row.
     "trim",
+    # `diagram` moved here from right after `outline` (#476): a figure is
+    # commissioned from the bound claims of the section that carries it, and
+    # those claims do not exist until the section is written. After `trim`,
+    # not before: `trim` can rewrite `self.written` (repeat removal), and the
+    # `sections_sha` guard should hash the section text the paper actually
+    # publishes, not a draft `trim` is about to change out from under it.
+    "diagram",
     "review",
     "assemble",
     "publish",

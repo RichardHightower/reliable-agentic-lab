@@ -375,10 +375,15 @@ def test_evidence_shortfall_excludes_a_review_counted_via_its_primary():
         )
     )
     led.add_finding(evidence.Finding(question="q", subject="s1", claim_ids=[claim.id]))
+    # F6b: `study_types` names both tiers, the review's included, so a
+    # tier-filter alone cannot explain what happens next. Only the
+    # `via_source_ids` exclusion can drop the review from the count.
     question = {
         "id": "q1",
         "subject": "s1",
-        "evidence_requirements": evidence_requirements(study_types=["primary_trial"], min_count=1),
+        "evidence_requirements": evidence_requirements(
+            study_types=["primary_trial", "narrative_review"], min_count=1
+        ),
     }
     assert stages.evidence_shortfall(led, question) == ""
 

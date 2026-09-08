@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import diagrams
+import evidence
 import pytest
 
 SIMPLE = 'flowchart LR\n  A["Plan"] --> B["Search"]\n  B --> C{"Grounded?"}\n'
@@ -349,6 +350,95 @@ def test_matching_accepted_hash_reuses_the_plugin_png(monkeypatch, tmp_path):
     reused = diagrams.render(source, out)
     assert calls == [True]
     assert reused.note == "unchanged, reused"
+
+
+# -- #476: a label must agree with the section's claims -----------------------
+
+
+def _claim(text, truth_state=evidence.CORROBORATED):
+    return evidence.Claim(text=text, subject="t", truth_state=truth_state)
+
+
+def test_label_direction_reads_the_three_outcome_buckets():
+    assert diagrams.label_direction("Reported strength increase") == "gain"
+    assert diagrams.label_direction("True fat-free loss") == "loss"
+    assert diagrams.label_direction("Lean mass preservation") == "preservation"
+    assert diagrams.label_direction("Corrected comparison") is None
+
+
+def test_label_direction_inverts_on_negation():
+    """#476 F1. "Did not prevent lean mass loss" is a loss claim, not a
+    preservation claim; the bare word list reads `prevent` the wrong way.
+
+    #476 N1: a negated gain or a negated loss is a preservation claim (a
+    neutral "nothing changed" reading), not each other's opposite. The
+    first cut of `_INVERT_DIRECTION` sent a negated loss to gain, so "no
+    loss of lean mass" read as a gain claim.
+    """
+    assert diagrams.label_direction("Creatine did not prevent lean mass loss") == "loss"
+    assert diagrams.label_direction("The trial found no strength gain") == "preservation"
+    assert diagrams.label_direction("Fails to increase strength") == "preservation"
+    assert diagrams.label_direction("Without a fat-free mass gain") == "preservation"
+    assert diagrams.label_direction("There was no loss of lean mass") == "preservation"
+    assert diagrams.label_direction("Strength gain, not measured directly") == "gain"
+
+
+def test_a_hedged_loss_does_not_back_a_gain_label():
+    """#476 N1: a negated loss is a preservation claim, not a gain claim.
+    `_INVERT_DIRECTION` used to send it the other way, so "there was no
+    loss of lean mass" backed a bare "Lean mass gain" label, the overclaim
+    this ticket exists to stop."""
+    labels = ["Lean mass gain"]
+    claims = [_claim("There was no loss of lean mass.")]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass gain"]
+
+
+def test_a_label_that_contradicts_the_section_claims_fails():
+    labels = ["Lean mass preservation", "Search"]
+    claims = [_claim("The trial could not distinguish water retention from tissue.")]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass preservation"]
+
+
+def test_a_single_source_label_needs_the_word_reported():
+    """#476 B4: read from `truth_state`, not a text-count proxy."""
+    labels = ["True fat-free gain", "Reported fat-free gain"]
+    claims = [_claim("One small trial reported a fat-free mass gain.", evidence.SINGLE_SOURCE)]
+    assert diagrams.figure_claims(labels, claims) == ["True fat-free gain"]
+
+
+def test_a_corroborated_claim_backing_a_direction_needs_no_hedge():
+    labels = ["Lean mass gain"]
+    claims = [
+        _claim("One trial found a lean mass gain.", evidence.SINGLE_SOURCE),
+        _claim("A second, corroborated trial also found a gain.", evidence.CORROBORATED),
+    ]
+    assert diagrams.figure_claims(labels, claims) == []
+
+
+def test_two_single_source_claims_still_need_the_word_reported():
+    """#476 B4: the rule reads `truth_state`, not how many claims restate
+    the same direction. Two single-source claims are still zero corroborated
+    sources; a count-based proxy would wrongly wave a bare label through."""
+    labels = ["Lean mass gain"]
+    claims = [
+        _claim("One trial found a lean mass gain.", evidence.SINGLE_SOURCE),
+        _claim("A second, uncorroborated trial also found a gain.", evidence.SINGLE_SOURCE),
+    ]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass gain"]
+
+
+def test_an_outcome_label_with_no_claims_fails():
+    """#476 F3: absence of claims is not support."""
+    assert diagrams.figure_claims(["Lean mass gain"], []) == ["Lean mass gain"]
+
+
+def test_node_labels_matches_the_sdk_ports_node_labels_on_arrows_and_ids():
+    """A label after an arrow (`Start --> Gain[Fat-free mass]`) must not glue
+    to the preceding `-->` or read as the node id `Gain`. Same fixture as the
+    Agent SDK port's `node_labels` test; the two parsers must agree. #476 B1
+    """
+    source = "flowchart LR\n  Start --> Gain[Fat-free mass]\n  Gain --> End[End]\n"
+    assert diagrams.inventory(source, "mermaid").labels == ["Fat-free mass", "End"]
 
 
 def test_main_returns_two_for_a_missing_backend(monkeypatch, tmp_path):
