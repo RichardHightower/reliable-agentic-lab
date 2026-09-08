@@ -31,6 +31,16 @@ itself never holds a built-in write tool. `ORCHESTRATOR_EXCLUDED_TOOLS` names
 `build_agent` passes that set into the harness profile the orchestrator's
 model runs under (`roles.py:254`).
 
+Tool access answers whether a role can write at all. It does not answer
+which paths. `scoped_write_tool` builds each writer's write tool around a
+`WriteScope` made from that role's own `allow` and `deny` lists
+(`roles.py:110-131`). `WriteScope.check` refuses a path outside that scope
+before the tool ever calls `_inside` or touches disk. `permission_rules`
+declares the same scope again, for the harness's own permission layer
+(`roles.py:170-190`). It denies a role's `deny` patterns first, allows its
+`allow` patterns second, and falls through every role to `DENY_EVERY_WRITE`
+last. Deny wins over allow in both layers, so they cannot disagree.
+
 The judge holds `read_file` only. The judge cannot write, so `subagents_for`
 skips the write branch for it and leaves `tools = [reader]`
 (`roles.py:201-203`). `reader` is the `read_file` tool (`roles.py:134-147`).
@@ -38,8 +48,8 @@ The judge subagent gets that one tool and nothing else.
 
 `virtual_mode` is routing, not a security boundary. `build_agent` mounts the
 target repo with `FilesystemBackend(root_dir=str(repo), virtual_mode=True)`
-(`roles.py:281`), so a built-in filesystem tool sees paths relative to the
-repo root instead of the real filesystem root. The mount does not stop a
+(`roles.py:281`). A built-in filesystem tool then sees paths relative to the
+repo root, not the real filesystem root. The mount does not stop a
 custom tool from walking `..` off the repo on its own. `_inside` is the real
 boundary. It resolves the requested path against the repo root and refuses
 anything that lands outside it. Both `read_file` and the scoped write tool
