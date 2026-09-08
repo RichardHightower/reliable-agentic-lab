@@ -273,7 +273,7 @@ def _ask_judge(
     score: rubric.Score,
     changed: list[str],
     plan: steps.Plan,
-) -> tuple[bool, dict, float]:
+) -> tuple[bool, dict, float | None]:
     """Invoke the judge once. Offline backends return valid JSON; live ones run.
 
     `changed` is the code phase's own files, so the judge can name what it is
@@ -303,7 +303,11 @@ def _ask_judge(
     if structured is not None and not isinstance(structured, dict):
         structured = None
     done, payload = parse_judge_verdict(getattr(result, "output", "") or "", structured)
-    return done, payload, float(getattr(result, "usd", 0.0) or 0.0)
+    # #539. `None` here means the judge backend never answered; coercing it
+    # to 0.0 with `or` is the exact silent-zero bug this ticket exists to
+    # kill, so it is preserved instead.
+    judge_usd = getattr(result, "usd", None)
+    return done, payload, None if judge_usd is None else float(judge_usd)
 
 
 def _test_prompt(ticket: tickets.Ticket, plan: steps.Plan) -> str:
@@ -669,6 +673,7 @@ def run(  # noqa: PLR0915
             test_phase_files=set(), test_phase_attempts=0,
             last_written=last_state_bytes,
             source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+            boss=boss,
         )
     plan.save(target)
     # This run's own last write of steps.jsonl. `_is_loop_bookkeeping` reads
@@ -767,6 +772,10 @@ def run(  # noqa: PLR0915
                 "violations": list(scope_violations),
                 "ok": test_result.ok,
                 "usd": test_result.usd,
+                # #539. The backend's own words, kept even when nothing was
+                # written. Without this, a query timeout or a raised
+                # exception reads identically to an honest empty attempt.
+                "output": test_result.output,
             }
             # A6 (#433). Checkpointed before the next line can escalate, or
             # this process can be killed outright, so a resume always finds
@@ -807,6 +816,7 @@ def run(  # noqa: PLR0915
                     test_phase_files=after_test_phase, test_phase_attempts=attempt,
                     last_written=last_state_bytes,
                     source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+                    boss=boss,
                 )
 
             if not contract.rubric.get("require_red", True) or red_ids:
@@ -828,7 +838,21 @@ def run(  # noqa: PLR0915
             )
             if decision.stop:
                 trace["gate"] = gates.ESCALATE
-                # A stop here is either a stable failure, the money budget,
+                # #539, judge of PR #540. Checked first, before the stop
+                # reason below: a backend that never answered (a timed-out
+                # query, a raised exception) always writes an empty
+                # signature, so two such attempts look identical to
+                # `gates.decide` and it returns `repeat_failure=True` before
+                # this branch ever saw the backend's own words. At the
+                # shipped `iterations: 3` a live loop reaches attempt 2
+                # before it stops, so this is the path a real run takes, not
+                # an edge case. Reordering below it would make the whole
+                # #539 fix unreachable there.
+                if not test_result.ok:
+                    trace["reason"] = (
+                        f"the test implementer backend did not answer: {test_result.output}"
+                    )
+                # A stop here is otherwise a stable failure, the money budget,
                 # or the iteration budget. The first two name a real reason
                 # worth keeping (the money one is a fold-in fix from A5:
                 # `decide` already says "the money budget is spent", and
@@ -841,7 +865,7 @@ def run(  # noqa: PLR0915
                 # turns that wrote nothing at all. Only a plain
                 # iteration-budget exhaustion falls through to the red-gate
                 # wording.
-                if decision.repeat_failure:
+                elif decision.repeat_failure:
                     trace["reason"] = (
                         decision.reason
                         if signature
@@ -862,6 +886,7 @@ def run(  # noqa: PLR0915
                     test_phase_files=after_test_phase, test_phase_attempts=attempt,
                     last_written=last_state_bytes,
                     source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+                    boss=boss,
                 )
             previous_test_signature = signature
 
@@ -887,6 +912,7 @@ def run(  # noqa: PLR0915
                 test_phase_files=after_test_phase, test_phase_attempts=attempt,
                 last_written=last_state_bytes,
                 source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+                boss=boss,
             )
 
     # Steps 5 to 8. Code until green, then judge.
@@ -985,6 +1011,13 @@ def run(  # noqa: PLR0915
                 "gate": decision.gate,
                 "reason": decision.reason,
                 "judge_done": judge_done,
+                # #539, follow-up 2. The test phase already names the
+                # backend's own words and whether it answered; the code
+                # phase carried none of that, so a `GraphRecursionError` or
+                # a query timeout here read as an honest empty turn.
+                "ok": code_result.ok,
+                "output": code_result.output,
+                "usd": code_result.usd,
             }
         )
         trace["rubric"] = score.report()
@@ -996,7 +1029,14 @@ def run(  # noqa: PLR0915
         last_failed_tests = sorted(test_run.junit.failed_ids)
 
     trace["gate"] = decision.gate
-    trace["reason"] = decision.reason
+    # #539, follow-up 2. The same priority as the test phase: a backend that
+    # never answered names itself instead of the rubric's generic wording,
+    # which on a code-phase failure to run at all is otherwise indistinguishable
+    # from an honest, converging miss.
+    if decision.gate != gates.PASS and not code_result.ok:
+        trace["reason"] = f"the code implementer backend did not answer: {code_result.output}"
+    else:
+        trace["reason"] = decision.reason
     trace["plan"] = plan.summary()
     # Sticky code-phase violations reach the trace here, even on an
     # eventual "pass": as long as `code_scope_violations` is non-empty the
@@ -1010,6 +1050,7 @@ def run(  # noqa: PLR0915
         test_phase_files=after_test_phase, test_phase_attempts=test_phase_attempts,
         last_written=last_state_bytes,
         source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+        boss=boss,
     )
 
 
@@ -1139,8 +1180,19 @@ def _finish(
     source_repo: Path | None = None,
     cleanup: bool = False,
     previous_runs: int = 0,
+    boss: roles.Orchestrator | None = None,
 ) -> dict:
     trace.setdefault("gate", gates.ESCALATE)
+    # #539. Every exit, pass or escalate, names what it spent against what
+    # it was allowed to spend. A trace that only shows 0.0 on a failure path
+    # cannot be told apart from a turn that genuinely cost nothing.
+    if boss is not None:
+        trace["spent_usd"] = boss.spent_usd
+        trace["budget_usd"] = boss.budget_usd
+        # #539, follow-up 7. `spent_usd` alone reads as a total; a nonzero
+        # count here says it is a floor instead, because at least one turn's
+        # cost was never reported.
+        trace["unknown_spend_turns"] = boss.unknown_spend_turns
     if write_trace:
         out = contract.repo / ".harness"
         out.mkdir(parents=True, exist_ok=True)

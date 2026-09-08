@@ -177,6 +177,85 @@ def test_a_hung_query_times_out(fake_sdk, target, monkeypatch):
     assert "never reached" not in result.output
 
 
+# -- #539: a failure path never claims a silent 0.0 -------------------------
+
+
+def test_a_timed_out_query_reports_elapsed_events_and_spend_so_far(fake_sdk, target):
+    """A query that already told us it had spent something before it hung
+    must not lose that number just because the ceiling then cut it off."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result="progress", total_cost_usd=0.33, subtype="partial")
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached", total_cost_usd=0.99)
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=0.05).run(
+        repo=target, prompt="p", allow=[]
+    )
+    assert not result.ok
+    assert result.stop_reason == "query timeout"
+    assert result.usd == 0.33
+    assert "elapsed=" in result.output
+    assert "events=1" in result.output
+    assert "usd=0.3300" in result.output
+
+
+def test_a_timed_out_query_with_no_cost_message_reports_usd_as_none(fake_sdk, target):
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached")
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=0.05).run(
+        repo=target, prompt="p", allow=[]
+    )
+    assert result.usd is None
+    assert "usd=unknown" in result.output
+
+
+def test_a_message_with_no_cost_field_reports_usd_as_none_not_zero(fake_sdk, target):
+    """`total_cost_usd=None` is "the SDK never told us", not "this was free"."""
+    fake_sdk([FakeResultMessage(result="x", total_cost_usd=None)])
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+    assert result.usd is None
+
+
+def test_a_later_zero_cost_message_does_not_erase_an_earlier_real_cost(fake_sdk, target):
+    """#539, follow-up 6. `total_cost_usd` is cumulative; a stray 0.0 in a
+    later message must not overwrite a real cost a message already reported."""
+    fake_sdk(
+        [
+            FakeResultMessage(result="progress", total_cost_usd=0.50, subtype="partial"),
+            FakeResultMessage(result="done", total_cost_usd=0.0),
+        ]
+    )
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+    assert result.usd == 0.50
+
+
+def test_a_backend_that_raises_after_spending_reports_the_spend(fake_sdk, target, monkeypatch):
+    """A crash after the query answered must not erase what it already cost."""
+    fake_sdk([FakeResultMessage(result="x", total_cost_usd=0.77)])
+    calls = {"n": 0}
+    real_changed_files = adapter._changed_files
+
+    def flaky(repo):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_changed_files(repo)
+        raise RuntimeError("boom after spend")
+
+    monkeypatch.setattr(adapter, "_changed_files", flaky)
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+    assert not result.ok
+    assert result.usd == 0.77
+    assert "boom after spend" in result.output
+
+
 # -- A9 (#437 #422): the planner scope and the planner graph -----------------
 
 

@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
 import subprocess
+import time
 from pathlib import Path
 
 import steps
@@ -33,7 +35,12 @@ from write_scope import WriteScope
 
 _TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
 _COST_STOP = {"error_max_budget_usd", "error_max_budget"}
-QUERY_TIMEOUT_SECONDS = 180
+
+# #539. A live T001 test-implementer turn ran past 180 seconds and the SDK
+# never got the chance to say what it had spent. sol3 hit the identical
+# defect (#301): a ceiling nobody can reach is the bug, not a safety net.
+# Read at import so a test can still patch the module attribute directly.
+QUERY_TIMEOUT_SECONDS = int(os.environ.get("SOL2_QUERY_TIMEOUT_SECONDS", "900"))
 
 
 def _changed_files(repo: Path) -> set[str]:
@@ -58,12 +65,18 @@ def _changed_files(repo: Path) -> set[str]:
     return names
 
 
-def _from_result(result) -> tuple[str, float, dict | None, bool | None, str | None]:
-    """Pull data from the SDK's final ``ResultMessage`` only."""
+def _from_result(result) -> tuple[str, float | None, dict | None, bool | None, str | None]:
+    """Pull data from the SDK's final ``ResultMessage`` only.
+
+    ``usd`` is ``None`` when the message carries no cost field at all, never
+    a bare 0.0, so a caller can tell "the SDK said zero" from "the SDK never
+    told us" (#539).
+    """
     if isinstance(result, str):
-        return result, 0.0, None, None, None
+        return result, None, None, None, None
     text = getattr(result, "result", None) or ""
-    usd = float(getattr(result, "total_cost_usd", None) or 0.0)
+    raw_cost = getattr(result, "total_cost_usd", None)
+    usd = None if raw_cost is None else float(raw_cost)
     structured = getattr(result, "structured_output", None)
     if structured is not None and not isinstance(structured, dict):
         structured = None
@@ -92,6 +105,12 @@ class AgentSdkBackend(Backend):
         self.timeout_seconds = timeout_seconds
 
     def run(self, *, repo: Path, prompt: str, allow: list[str], **extra) -> DoerResult:
+        # #539. Defined before the try, so a raise anywhere below (setup, a
+        # dropped connection mid-stream, or a bug after the query returned)
+        # still leaves the outer `except` able to say what this turn had
+        # spent, instead of falling back to a bare 0.0 that looks free.
+        progress: dict[str, float | None] = {"usd": None}
+        raw_events: list[str] = []
         try:
             from claude_agent_sdk import ResultError, ResultMessage, query  # noqa: PLC0415
 
@@ -113,11 +132,11 @@ class AgentSdkBackend(Backend):
             if overlay and dataclasses.is_dataclass(options):
                 options = dataclasses.replace(options, **overlay)
 
-            raw_events: list[str] = []
+            started = time.monotonic()
 
-            async def collect() -> tuple[str, float, dict | None, bool, str | None]:
+            async def collect() -> tuple[str, float | None, dict | None, bool, str | None]:
                 result_text = ""
-                usd = 0.0
+                usd = None
                 structured = None
                 ok = True
                 reason = None
@@ -131,8 +150,15 @@ class AgentSdkBackend(Backend):
                         text, cost, parsed, error, stop = _from_result(message)
                         if text:
                             result_text = text
-                        if cost:
-                            usd = cost
+                        if cost is not None:
+                            # #539, follow-up 6. `total_cost_usd` is
+                            # cumulative, so a later message should never
+                            # report less than an earlier one; `max` is the
+                            # guard against a stray 0.0 overwriting a real
+                            # cost already seen, the same shape as the
+                            # `_bookkeep` guard in `e2e_t001.py`.
+                            usd = cost if usd is None else max(usd, cost)
+                            progress["usd"] = usd
                         if parsed is not None:
                             structured = parsed
                         if error is True:
@@ -153,9 +179,17 @@ class AgentSdkBackend(Backend):
                     asyncio.wait_for(collect(), timeout=self.timeout_seconds)
                 )
             except asyncio.TimeoutError:
+                elapsed = time.monotonic() - started
+                spent = progress["usd"]
                 return DoerResult(
                     ok=False,
-                    output=f"agent sdk query timed out after {self.timeout_seconds} seconds",
+                    usd=spent,
+                    output=(
+                        f"agent sdk query timed out after {self.timeout_seconds:.0f} seconds "
+                        f"(elapsed={elapsed:.0f}s, events={len(raw_events)}, "
+                        f"usd={'unknown' if spent is None else format(spent, '.4f')}). "
+                        f"Raise SOL2_QUERY_TIMEOUT_SECONDS or shrink the prompt."
+                    ),
                     stop_reason="query timeout",
                     raw_output="\n".join(raw_events),
                 )
@@ -170,7 +204,15 @@ class AgentSdkBackend(Backend):
                 raw_output="\n".join(raw_events),
             )
         except Exception as exc:  # graceful failure. Never claim a write it did not make.
-            return DoerResult(ok=False, output=f"agent sdk backend failed: {exc}")
+            # #539. `progress["usd"]` survives a raise anywhere in the try
+            # block above, including one after the query itself answered, so
+            # a backend that spent money before failing still reports it.
+            return DoerResult(
+                ok=False,
+                usd=progress["usd"],
+                output=f"agent sdk backend failed: {exc}",
+                raw_output="\n".join(raw_events),
+            )
 
     def judge(self, *, repo: Path, prompt: str) -> DoerResult:
         """One judge turn. Structured output when the schema is available."""

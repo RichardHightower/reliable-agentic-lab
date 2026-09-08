@@ -30,7 +30,11 @@ from roles import WriteScope
 class DoerResult:
     wrote: list[str] = field(default_factory=list)
     output: str = ""
-    usd: float = 0.0
+    # #539. `None` means the backend never answered a turn (a timed-out
+    # query, a raised exception), which is not the same as an answered turn
+    # that cost nothing. The default stays 0.0: an offline classroom backend
+    # really did answer, for free.
+    usd: float | None = 0.0
     ok: bool = True
     structured: dict | None = None
     stop_reason: str | None = None

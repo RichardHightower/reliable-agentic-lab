@@ -289,3 +289,94 @@ def test_the_query_failed_message_names_the_absolute_worktree_path(tmp_path, mon
     err = capsys.readouterr().err
     assert str(worktree / ".harness" / "last-sdk-e2e.md") in err
     assert "see .harness/last-sdk-e2e.md\n" not in err  # the old bare relative path
+
+
+# -- #539: a failure path never claims a silent 0.0, the cap is the one --
+# -- applied, and the raw event log a failed call collected survives -----
+
+
+class TimedOutBackend:
+    """A phase backend whose query timed out: no cost, a raw event log."""
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]):
+        return SimpleNamespace(
+            wrote=[],
+            output="agent sdk query timed out after 900 seconds (elapsed=900s, events=3)",
+            usd=None,
+            ok=False,
+            stop_reason="query timeout",
+            structured=None,
+            raw_output="## AssistantMessage\n\nsome tool call\n",
+        )
+
+
+def test_a_timed_out_call_reports_usd_as_none_not_zero(tmp_path):
+    wrapper = e2e_t001.AgentSdkE2EBackend(TimedOutBackend())
+
+    result = wrapper.run(repo=tmp_path, prompt="p", allow=["tests/**"])
+
+    assert result.usd is None
+    assert wrapper.calls[0].usd is None
+    assert wrapper.spent_usd == 0.0
+    assert wrapper.query_failed
+
+
+def test_a_budget_exhausted_call_reports_a_known_zero_not_unknown(tmp_path):
+    """#539, follow-up 4. This call never reaches the backend, so its cost
+    is known to be exactly zero, not unreported. Reporting a known zero as
+    `usd=None` would be the mirror of the defect this ticket exists to fix."""
+    wrapper = e2e_t001.AgentSdkE2EBackend(TimedOutBackend(), max_total_usd=0.0)
+
+    result = wrapper.run(repo=tmp_path, prompt="p", allow=["tests/**"])
+
+    assert result.usd == 0.0
+    assert wrapper.calls[0].usd == 0.0
+    assert wrapper.calls[0].stop_reason == "cost budget spent"
+
+
+def test_a_negative_reported_cost_does_not_walk_spent_usd_backwards(tmp_path):
+    """#539, follow-up 5. The SDK has never emitted a negative cost, but the
+    old `float(... or 0.0)` line carried a `max(usd, 0.0)` clamp that the
+    `None`-preserving rewrite dropped."""
+
+    class NegativeCostBackend:
+        def run(self, *, repo: Path, prompt: str, allow: list[str]):
+            return SimpleNamespace(
+                wrote=[], output="x", usd=-1.0, ok=True, stop_reason=None, raw_output=""
+            )
+
+    wrapper = e2e_t001.AgentSdkE2EBackend(NegativeCostBackend())
+
+    wrapper.run(repo=tmp_path, prompt="p", allow=["tests/**"])
+
+    assert wrapper.spent_usd == 0.0
+
+
+def test_the_summary_reports_the_cap_it_applied_and_keeps_the_raw_event_log(
+    tmp_path, monkeypatch
+):
+    repo = _git_repo(tmp_path / "repo")
+    baseline = _run(passed=("tests/test_health.py::test_health",))
+    still_green = _run(passed=("tests/test_health.py::test_health",))
+    _patch_runs(monkeypatch, [baseline, still_green])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(e2e_t001, "_load_operator_env", lambda: None)
+    monkeypatch.setattr(
+        e2e_t001,
+        "_build_backend",
+        lambda repo, budget: (
+            e2e_t001.AgentSdkE2EBackend(TimedOutBackend(), max_total_usd=2.0),
+            [],
+        ),
+    )
+
+    e2e_t001.main(["--repo", str(repo), "--ticket", "T001", "--budget", "1"])
+
+    worktree = repo.parent / f"{repo.name}.worktrees" / "T001"
+    summary = (worktree / ".harness" / "last-sdk-e2e.md").read_text(encoding="utf-8")
+    assert "cap_usd: 2.00" in summary
+    assert "usd=unknown" in summary
+    raw = worktree / ".harness" / "last-sdk-e2e-raw-0-test.txt"
+    assert raw.is_file()
+    assert "some tool call" in raw.read_text(encoding="utf-8")
+    assert "raw: .harness/last-sdk-e2e-raw-0-test.txt" in summary
