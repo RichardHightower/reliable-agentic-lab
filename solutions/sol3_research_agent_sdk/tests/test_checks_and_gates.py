@@ -287,3 +287,81 @@ def test_the_hosts_row_grades_only_the_references_the_caller_hands_it():
     assert not rows["hosts"].passed, rows["hosts"]
     assert "arxiv.org" in rows["hosts"].detail, rows["hosts"]
     assert rows["sources"].detail == "2 sources retrieved", rows["sources"]
+
+
+# -- P1, the STE belt: contractions, Latin abbreviations, noun stacks --------
+
+
+def test_a_contraction_in_body_prose_fails():
+    """`don't` fails `ste_language`, and the detail names the sentence."""
+    body = "The writer doesn't skip a step [1]."
+    score = checks.check(body, ["https://a"])
+    assert "ste_language" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "ste_language")
+    assert "doesn't" in row.detail
+    assert "skip a step" in row.detail
+
+
+def test_a_latin_abbreviation_fails():
+    """`e.g.` fails, and a clean body still passes."""
+    dirty = "The writer names the actor, e.g. the host [1]."
+    score = checks.check(dirty, ["https://a"])
+    assert "ste_language" in score.signature(), score.report()
+
+    clean = "The writer names the actor, for example the host [1]."
+    score = checks.check(clean, ["https://a"])
+    assert "ste_language" not in score.signature(), score.report()
+
+
+def test_four_nouns_in_a_row_fail():
+    """`noun_stack` fires on a four-noun phrase."""
+    body = "A multi agent loop harness ships every seminar [1]."
+    score = checks.check(body, ["https://a"])
+    assert "noun_stack" in score.signature(), score.report()
+
+
+def test_may_on_an_unverified_claim_still_passes():
+    """STE-S9 stays off. A hedge on an unverified claim is not a procedure step."""
+    body = "The approach may reduce cost on some workloads [1]."
+    score = checks.check(body, ["https://a"])
+    assert score.passed, score.report()
+
+
+def test_a_contraction_inside_a_code_fence_passes():
+    """The mask works: a contraction inside a fenced code block is not prose."""
+    body = "A real point [1].\n\n```\nassert doesn't_exist == False\n```\n"
+    score = checks.check(body, ["https://a"])
+    assert "ste_language" not in score.signature(), score.report()
+
+
+def test_a_genitive_is_not_a_contraction():
+    """"the writer's card" is a possessive, not `it's`/`don't`."""
+    body = "The writer's card names the actor [1]."
+    score = checks.check(body, ["https://a"])
+    assert "ste_language" not in score.signature(), score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_ste_belt(tmp_path):
+    """The paper `task demo` writes carries no contraction, no Latin
+    abbreviation, and no four-noun stack. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    assert checks.ste_language_violations(body) == []
+    assert checks.noun_stacks(body) == []

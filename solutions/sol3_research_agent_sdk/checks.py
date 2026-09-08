@@ -105,6 +105,148 @@ SECOND_PERSON = re.compile(r"\b(you|your|yours)\b", re.I)
 RHETORICAL = re.compile(r"\?\s*$")
 STUB = re.compile(r"\bTODO\b|\[placeholder\]|lorem ipsum", re.I)
 
+# STE-S6, no contractions. `n't` covers do not/does not/etc; the pronoun list
+# covers `it's`, `that's`, `we're`, and the like without also matching a
+# genitive noun such as "the writer's card", which is not a contraction.
+CONTRACTION = re.compile(
+    r"\b[A-Za-z]+n't\b"
+    r"|\b(?:i|you|we|they|it|he|she|that|there|who|what|here|let|how|when|where|why)"
+    r"'(?:m|re|ve|ll|d|s)\b",
+    re.I,
+)
+# STE-S7, no Latin abbreviations. Write "for example", not "e.g."
+LATIN_ABBREV = re.compile(r"\b(?:e\.g\.|i\.e\.|etc\.)", re.I)
+# Split into sentence-shaped chunks without breaking on the two periods inside
+# "e.g."/"i.e."/"etc." themselves.
+SENTENCE_END = re.compile(r"(?<!e\.g\.)(?<!i\.e\.)(?<!etc\.)(?<=[.!?])\s+", re.I)
+REFERENCES_HEADING = re.compile(r"^#{1,6}\s+references?\s*$", re.I | re.M)
+
+# STE-S5, no noun stack longer than three. There is no part-of-speech tagger
+# in this codebase and this unit may not add one, so a token counts as a noun
+# candidate only when it is not one of these function words and does not carry
+# a verb or adverb ending. The list is short on purpose: articles,
+# prepositions, conjunctions, pronouns/determiners, auxiliaries, and the
+# common verbs and adverbs a briefing actually uses.
+STE_FUNCTION_WORDS = frozenset(
+    """
+    a an the
+    of in on at by for with about against between into through during before
+    after above below to from up down over under again further than once off
+    out across along among around behind beside beyond near toward towards
+    upon within without via per amid versus plus minus
+    and but or nor so yet because although though while if unless whether
+    since as
+    i you he she it we they this that these those who whom which what whose
+    when where why how whatever whoever whichever wherever whenever
+    someone something anyone anything everyone everything nothing each either
+    neither all any some such one two three four five six seven eight nine
+    ten first second third fourth fifth last next single multiple several
+    various many few much more most less least other another same own new old
+    whole entire additional its his her their our your my no not
+    be is are was were been being have has had do does did will would shall
+    should may might must can could
+    run runs use uses need needs want wants show shows name names hold holds
+    take takes give gives get gets know knows see sees say says call calls
+    make makes made
+    also only just still even already always never often sometimes here
+    there now then well however therefore thus very quite rather instead
+    hence otherwise nonetheless nevertheless regardless moreover furthermore
+    meanwhile besides namely indeed perhaps maybe given whereas whereby
+    thereby notwithstanding
+    """.split()
+)
+# A gerund/participle, an adverb, or a third-person-singular verb / plain
+# plural reads as a verb or an adverb, not a noun, often enough that excluding
+# the ending is cheaper than tagging the word. "raises" in "Creatine raises
+# phosphocreatine stores" is exactly this: a verb the suffix rule must reject
+# so the sentence does not read as a four-noun stack. A trailing double `s`,
+# `harness`, `process`, is left alone, because that `s` is not the plural or
+# verb marker.
+# ponytail: heuristic noun test, upgrade to a tagger if false positives appear
+STE_VERB_ADVERB_SUFFIX = re.compile(r"(?:ing|ed|ly)$|(?<!s)s$", re.I)
+STE_WORD_TOKEN = re.compile(r"[A-Za-z]+(?:-[A-Za-z]+)*")
+NOUN_STACK_LIMIT = 3
+
+
+def _mask_references(text: str) -> str:
+    """Blank the references section. A host name in a URL is not body prose."""
+    match = REFERENCES_HEADING.search(text)
+    if not match:
+        return text
+    return text[: match.start()] + " " * (len(text) - match.start())
+
+
+def _mask_for_ste(text: str) -> str:
+    """Code and references, gone. Everything else is body prose."""
+    return _mask_references(_mask_code(text))
+
+
+def _prose_sentences(text: str) -> list[str]:
+    """Sentence-shaped chunks of body prose. Skips headings, images, lists,
+    tables, quotes, and fences, the same exemptions `uncited_claims` already
+    grants, because none of those are a sentence a writer composed.
+    """
+    sentences: list[str] = []
+    for block in re.split(r"\n\s*\n", text):
+        block = block.strip()
+        if not block or block.startswith(("#", "!", "|", ">", "```", "-", "*")):
+            continue
+        if LIST_ITEM.match(block):
+            continue
+        for piece in SENTENCE_END.split(block):
+            piece = piece.strip()
+            if piece:
+                sentences.append(piece)
+    return sentences
+
+
+def ste_language_violations(body: str) -> list[str]:
+    """Sentences carrying a contraction or a Latin abbreviation.
+
+    STE-S6 and STE-S7. Unconditional: a clean sentence passes by construction.
+    """
+    masked = _mask_for_ste(body)
+    return [
+        sentence[:160]
+        for sentence in _prose_sentences(masked)
+        if CONTRACTION.search(sentence) or LATIN_ABBREV.search(sentence)
+    ]
+
+
+def _noun_candidate(word: str) -> bool:
+    return word.lower() not in STE_FUNCTION_WORDS and not STE_VERB_ADVERB_SUFFIX.search(word)
+
+
+NOUN_RUN_BREAK = re.compile(r"[,;:()]")
+
+
+def noun_stacks(body: str, limit: int = NOUN_STACK_LIMIT) -> list[str]:
+    """Runs of more than `limit` consecutive noun-candidate tokens.
+
+    STE-S5. A hyphenated token, `multi-agent`, is one word. A comma-separated
+    list, "the researcher, verifier, writer, and gate boundaries", is
+    enumeration, not a stack, so punctuation between two tokens also breaks
+    the run; "raises" already breaks it for being a verb, but nothing broke a
+    list, and the recorded fixture paper carries exactly that comma list.
+    """
+    masked = _mask_for_ste(body)
+    hits: list[str] = []
+    for sentence in _prose_sentences(masked):
+        run: list[str] = []
+        end = 0
+        for match in STE_WORD_TOKEN.finditer(sentence):
+            if NOUN_RUN_BREAK.search(sentence, end, match.start()):
+                run = []
+            end = match.end()
+            word = match.group(0)
+            if _noun_candidate(word):
+                run.append(word)
+                if len(run) == limit + 1:
+                    hits.append(" ".join(run))
+            else:
+                run = []
+    return hits
+
 
 @dataclass
 class Check:
@@ -645,6 +787,28 @@ def check(
     dashes = len(EM_DASH.findall(_mask_code(body)))
     checks.append(Check("style", dashes == 0, f"{dashes} em dashes"))
 
+    ste_hits = ste_language_violations(body)
+    checks.append(
+        Check(
+            "ste_language",
+            not ste_hits,
+            "no contractions or Latin abbreviations in body prose"
+            if not ste_hits
+            else f"contraction or e.g./i.e./etc. in: {ste_hits[0]!r}",
+        )
+    )
+
+    stacks = noun_stacks(body)
+    checks.append(
+        Check(
+            "noun_stack",
+            not stacks,
+            "no noun cluster longer than three"
+            if not stacks
+            else f"noun cluster: {stacks[0]!r}",
+        )
+    )
+
     if min_section_words:
         thin = sections_without_prose(body, min_section_words)
         checks.append(
@@ -1143,6 +1307,24 @@ def demo() -> int:
     assert "sourced" not in specific.signature(), specific.report()
     assert has_specifics('The "Model Context Protocol" landed.')
     assert not has_specifics("The mechanism is local.")
+
+    assert ste_language_violations("The writer does not skip a step.") == []
+    hit = ste_language_violations("The writer doesn't skip a step.")
+    assert hit and "doesn't" in hit[0]
+    assert ste_language_violations("For example, the writer names the actor.") == []
+    assert ste_language_violations("The writer names the actor, e.g. the host.")
+    assert ste_language_violations("`The writer doesn't skip a step.`") == [], "a code span is masked"
+    assert ste_language_violations("## References\n\nSee it's fine at example.com.") == [], (
+        "the references section is masked"
+    )
+    assert ste_language_violations("The writer's card names the actor.") == [], (
+        "a genitive is not a contraction"
+    )
+    assert noun_stacks("The orchestrator charges the budget before the writer runs.") == []
+    assert noun_stacks("A multi agent loop harness ships every seminar.")
+    assert noun_stacks("The independent researcher, verifier, writer, and gate boundaries appear.") == [], (
+        "a comma-separated list is enumeration, not a stack"
+    )
 
     print("checks: ok")
     return 0

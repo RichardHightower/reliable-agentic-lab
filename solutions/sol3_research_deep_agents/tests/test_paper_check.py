@@ -328,3 +328,83 @@ def test_assemble_gate_exempts_a_located_source_from_the_allowlist(monkeypatch):
     with pytest.raises(stages.GateFailed) as exc:
         stages.assemble_gate(LOCATED, ledger)
     assert "reference_hosts" in str(exc.value)
+
+
+# -- P1, the STE belt: contractions, Latin abbreviations, noun stacks --------
+
+
+def test_a_contraction_in_body_prose_fails():
+    """`don't` fails `ste_language`, and the detail names the sentence."""
+    body = GOOD.replace(
+        "A loop without an exit spends until someone notices. [1]",
+        "The loop doesn't exit until someone notices. [1]",
+    )
+    score = gate(body, URLS)
+    assert "ste_language" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "ste_language")
+    assert "doesn't" in row.detail
+    assert "exit until someone notices" in row.detail
+
+
+def test_a_latin_abbreviation_fails():
+    """`e.g.` fails, and a clean body still passes."""
+    dirty = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper measures two runtimes only, e.g. LangGraph. [2]",
+    )
+    assert "ste_language" in gate(dirty, URLS).signature()
+
+    clean = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper measures two runtimes only, for example LangGraph. [2]",
+    )
+    assert "ste_language" not in gate(clean, URLS).signature()
+
+
+def test_four_nouns_in_a_row_fail():
+    """`noun_stack` fires on a four-noun phrase."""
+    body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "A multi agent loop harness ships every seminar. [2]",
+    )
+    assert "noun_stack" in gate(body, URLS).signature()
+
+
+def test_may_on_an_unverified_claim_still_passes():
+    """STE-S9 stays off. A hedge on an unverified claim is not a procedure step."""
+    body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "The approach may reduce cost on some workloads. [2]",
+    )
+    assert gate(body, URLS).passed, gate(body, URLS).report()
+
+
+def test_a_contraction_inside_a_code_fence_passes():
+    """The mask works: a contraction inside a fenced code block is not prose."""
+    body = GOOD.replace(
+        "## Limitations",
+        "```\nassert doesnt_exist == False\n```\n\n## Limitations",
+    )
+    assert "ste_language" not in gate(body, URLS).signature(), gate(body, URLS).report()
+
+
+def test_a_genitive_is_not_a_contraction():
+    """"the writer's card" is a possessive, not `it's`/`don't`."""
+    body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "The writer's card names the actor. [2]",
+    )
+    assert "ste_language" not in gate(body, URLS).signature()
+
+
+def test_the_recorded_fixture_paper_passes_the_ste_belt(run_dir, stub_renderer):
+    """The paper `task paper` writes carries no contraction, no Latin
+    abbreviation, and no four-noun stack.
+    """
+    from conftest import build_run  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    assert run.run() == 0, "the recorded fixture must still assemble and pass its gate"
+    body = run.paper_path.read_text(encoding="utf-8")
+    assert paper_check.ste_language_violations(body) == []
+    assert paper_check.noun_stacks(body) == []
