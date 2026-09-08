@@ -784,3 +784,30 @@ def test_the_writer_prompt_names_key_questions_and_the_claim_number(work):
     assert "why does order matter" in prompt
     assert "Cite each claim by its `number` field" in prompt
     assert '"number": 3' in prompt
+
+
+# -- P7, the abstract is written last ---------------------------------------
+
+
+def test_the_abstract_turn_asks_for_a_hedge_and_the_written_body(work):
+    """The turn hands the writer the assembled body, and asks for the same
+    hedge words and overclaim ban the Python row checks."""
+    backend = Backend([result(output="An abstract.")])
+    t.SdkTurns(backend=backend, work_dir=work).write_abstract("## Section\n\nA finding. [1]")
+    prompt = backend.prompts[0][0]
+    assert "## Section\n\nA finding. [1]" in prompt
+    assert "single source" in prompt
+    assert "definitively" in prompt
+
+
+def test_the_offline_abstract_cites_nothing():
+    """The offline twin invents no claim, so it needs no hedge to check."""
+    turn = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
+    assert "[" not in turn.write_abstract("## Section\n\nA finding. [1]")
+
+
+def test_the_reviewer_card_carries_the_abstract_row():
+    """Both the model and Python grade the abstract against the body."""
+    folder = Path(__file__).resolve().parents[1]
+    card = (folder / "plugin" / "agents" / "research-judge.md").read_text(encoding="utf-8")
+    assert "abstract_matches_body" in card

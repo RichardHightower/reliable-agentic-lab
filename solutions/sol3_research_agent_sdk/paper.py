@@ -34,6 +34,7 @@ ends only when both agree, or when a budget does.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -1466,6 +1467,65 @@ def write_sections(run: Run) -> dict:
     return {"sections": written, "from_message": from_message, "retry_notes": bool(notes)}
 
 
+def _sections_sha(run: Run, planned: dict) -> str:
+    """The sha1 of every stamped section, concatenated in outline order.
+
+    Cheap enough to compute every cycle attempt; the guard `write_abstract`
+    reads it against is what keeps a stable body from spending a second turn.
+    """
+    out = run.file("sections")
+    parts = []
+    for section in planned["sections"]:
+        path = out / f"{section['id']}.md"
+        if path.exists():
+            parts.append(path.read_text(encoding="utf-8"))
+    return hashlib.sha1("\n\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def write_abstract(run: Run) -> dict:
+    """One writer turn, run once per stable body, that states only what the
+    body already states. `CYCLE` runs this every attempt; a sha guard skips
+    the turn when the body has not changed since the last one, the same
+    shape `diagram()`'s `sections_sha` guard uses. `assemble` reads what
+    this wrote, falling back to the outline's own thesis line when it never
+    ran or produced nothing. P7, #472.
+    """
+    planned = outlines.plan_view(approved_outline(run))
+    sha = _sections_sha(run, planned)
+    path = run.file("abstract.json")
+    existing = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+    if existing.get("sections_sha") == sha and existing.get("abstract"):
+        return {"written": False, "skipped": True}
+
+    out = run.file("sections")
+    parts = [
+        (out / f"{section['id']}.md").read_text(encoding="utf-8")
+        for section in planned["sections"]
+        if (out / f"{section['id']}.md").exists()
+    ]
+    body = "\n\n".join(parts)
+    if not body.strip():
+        return {"written": False, "skipped": True}
+    try:
+        text = run.turns.write_abstract(body, _ledger(run))
+    except (TurnFailed, Escalate) as exc:
+        # A budget spent on the last section already stamped every section
+        # that matters. `assemble` falls back to the outline's thesis line
+        # rather than losing the whole run over the one turn on top.
+        run.log(f"    abstract: the writer turn failed ({exc}). Falling back to the thesis line.")
+        return {"written": False, "skipped": False}
+    text = (text or "").strip()
+    if not text:
+        return {"written": False, "skipped": False}
+    run.write_json("abstract.json", {"abstract": text, "sections_sha": sha})
+    return {"written": True, "skipped": False}
+
+
 def assemble(run: Run) -> dict:
     """Stitch the sections, append the glossary, then the reference list.
 
@@ -1480,8 +1540,12 @@ def assemble(run: Run) -> dict:
     numbers = {c["id"]: c["number"] for c in usable if c.get("id") and c.get("number")}
 
     parts = [f"# {planned['title']}", ""]
-    if planned.get("abstract") or planned.get("thesis"):
-        parts += ["## Abstract", "", (planned.get("abstract") or planned.get("thesis") or "").strip(), ""]
+    # P7, #472. `write_abstract` writes this from the assembled body, after
+    # every section, so it is preferred over the outline's own thesis line,
+    # which was written before any section existed.
+    abstract_text = _written_abstract(run) or planned.get("abstract") or planned.get("thesis") or ""
+    if abstract_text:
+        parts += ["## Abstract", "", abstract_text.strip(), ""]
     flags: list[dict] = []
     glossary: dict[str, str] = {}
     used_diagrams: set[str] = set()
@@ -1656,6 +1720,18 @@ def corpus_for(run: Run) -> str:
     return "\n".join(parts)
 
 
+def _written_abstract(run: Run) -> str:
+    """The abstract `write_abstract` wrote, or empty when it never ran."""
+    path = run.file("abstract.json")
+    if not path.exists():
+        return ""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return str(payload.get("abstract") or "").strip()
+
+
 def _ledger(run: Run):
     path = run.file("paper_ledger.json")
     if not path.exists():
@@ -1802,6 +1878,7 @@ LINEAR = [
 
 CYCLE = [
     (5, "write", maybe_write),
+    (5, "abstract", write_abstract),
     (6, "assemble", assemble),
     (7, "check", check),
     (8, "review", review),

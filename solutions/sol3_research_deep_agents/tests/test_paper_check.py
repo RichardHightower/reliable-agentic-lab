@@ -40,13 +40,17 @@ def test_a_clean_paper_passes():
 def test_cli_uses_the_evidence_bibliography_when_sources_are_not_separate(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(paper_check, "MIN_WORDS", 0)
     monkeypatch.setattr(paper_check, "MIN_SECTION_WORDS", 5)
+    # This test is about the CLI reading a bibliography from `--evidence`, not
+    # about single-source status, so the claims are left `proposed`: calling
+    # `corroborate()` on a one-source claim would mark it single-source, and
+    # `GOOD`'s own abstract citation would then need a hedge it does not carry
+    # for this unrelated claim text. #472.
     ledger = evidence.Ledger(tmp_path / "evidence")
     for url in URLS:
         source = ledger.add_source(evidence.SourceDocument(title=url, url=url, subject="exits"))
-        claim = ledger.add_claim(
+        ledger.add_claim(
             evidence.Claim(text=f"Claim from {url}", subject="exits", source_ids=[source.id])
         )
-        evidence.corroborate(claim)
     ledger.write()
     paper = tmp_path / "paper.md"
     paper.write_text(GOOD, encoding="utf-8")
@@ -234,7 +238,12 @@ def test_the_signature_is_what_failed_not_how_it_was_worded():
 # -- the body --------------------------------------------------------------
 
 HOLLOW = (
-    "# Exit conditions\n\n## Abstract\n\ndone, then cost, then max turns. [1]\n\n## Introduction\n\n## Limitations\n\n"
+    # P7, #472: the abstract's citation needs a matching mention outside the
+    # abstract, or `abstract_matches_body` calls it orphaned. The introduction
+    # restates the same sentence rather than adding content the has_body test
+    # does not want; Limitations stays empty, so has_body still fires there.
+    "# Exit conditions\n\n## Abstract\n\ndone, then cost, then max turns. [1]\n\n"
+    "## Introduction\n\ndone, then cost, then max turns. [1]\n\n## Limitations\n\n"
     "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
 )
 
@@ -1003,4 +1012,106 @@ def test_the_recorded_fixture_paper_passes_policy_leak(run_dir, stub_renderer):
     )
     names = {c.name for c in score.checks}
     assert "policy_leak" in names
+
+
+# -- P7, the abstract is written last ---------------------------------------
+
+
+def _single_source_ledger(text: str, url: str = "https://a") -> evidence.Ledger:
+    ledger = evidence.Ledger("/nonexistent")
+    source = ledger.add_source(evidence.SourceDocument(title="One", url=url, subject="exits"))
+    claim = ledger.add_claim(evidence.Claim(text=text, subject="exits", source_ids=[source.id]))
+    evidence.corroborate(claim)
+    return ledger
+
+
+def test_an_unhedged_single_source_abstract_fails():
+    """A hedge-free sentence in the abstract, beside a `[n]` whose claim is
+    single-source, fails and names the sentence."""
+    ledger = _single_source_ledger("The loop halts before a person notices")
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices. [1]\n\n"
+        "## Introduction\n\nThe loop halts before a person notices, one trial supporting it. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = gate(body, urls=["https://a"], ledger=ledger)
+    assert "abstract_matches_body" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert "halts before a person notices" in row.detail
+
+
+def test_an_abstract_number_absent_from_the_body_fails():
+    """A citation the abstract uses, and no other section does, fails."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices [1]. It also cites [2].\n\n"
+        "## Introduction\n\nThe loop halts before a person notices [1].\n\n"
+        "## References\n\n1. https://a\n2. https://b\n"
+    )
+    score = gate(body, urls=["https://a", "https://b"])
+    assert "abstract_matches_body" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert "[2]" in row.detail
+
+
+def test_an_overclaim_in_the_abstract_fails():
+    """The fixed overclaim list, whatever the ledger says about the claim."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThis paper proves the loop halts before a person notices. [1]\n\n"
+        "## Introduction\n\nThe loop halts before a person notices. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = gate(body, urls=["https://a"])
+    assert "abstract_matches_body" in score.signature(), score.report()
+
+
+def test_the_introduction_first_paragraph_is_graded_too():
+    """The same row runs on the introduction's first paragraph, not only the
+    abstract."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices, one trial supporting it. [1]\n\n"
+        "## Introduction\n\nThis paper proves the loop halts before a person notices. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = gate(body, urls=["https://a"])
+    assert "abstract_matches_body" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert "introduction" in row.detail
+
+
+def test_a_body_with_no_abstract_heading_is_inert():
+    """The row runs on every check, and a snippet another row's test built
+    has no `## Abstract` heading and nothing to grade."""
+    body = "# Title\n\n## Introduction\n\nThis paper proves nothing yet. [1]\n\n## References\n\n1. https://a\n"
+    score = gate(body, urls=["https://a"])
+    assert "abstract_matches_body" not in score.signature(), score.report()
+
+
+def test_the_reviewer_card_carries_the_abstract_row():
+    """Both the model and Python grade the abstract against the body."""
+    from pathlib import Path  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    card = (folder / "skills" / "reviewer" / "SKILL.md").read_text(encoding="utf-8")
+    assert "abstract_matches_body" in card
+
+
+def test_the_recorded_fixture_paper_passes_abstract_matches_body(run_dir, stub_renderer):
+    """`task paper` still assembles with the abstract last, and it matches
+    the body it summarizes."""
+    from conftest import build_run  # noqa: PLC0415
+    import stages  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    assert run.run() == 0, "the recorded fixture must still assemble and pass its gate"
+    body = run.paper_path.read_text(encoding="utf-8")
+    score = stages.assemble_gate(
+        body, run.ledger, allowed_domains=run.allowed_domains, loop_doctrine=run.loop_doctrine
+    )
+    names = {c.name for c in score.checks}
+    assert "abstract_matches_body" in names
+    assert score.passed, score.report()
     assert score.passed, score.report()

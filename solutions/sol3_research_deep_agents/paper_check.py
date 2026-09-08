@@ -910,6 +910,111 @@ def contradicted_in_body(body: str, ledger: evidence.Ledger | None) -> list[str]
     return found
 
 
+# P7, #472. The abstract restates the body and may not say more than the body
+# says. `single_source_caveat` above grades any section a single-source claim's
+# own vocabulary matches; this row grades the abstract and the introduction's
+# first paragraph by citation number instead, because that is where a reader
+# meets the paper's claim before meeting its evidence.
+ABSTRACT_HEDGE = re.compile(r"single|one study|one trial|preliminary", re.I)
+ABSTRACT_OVERCLAIM = re.compile(r"proves|definitively|conclusively|establishes that", re.I)
+ABSTRACT_MARKER = re.compile(r"\[(\d+)\]")
+
+
+def _first_paragraph(text: str) -> str:
+    for block in re.split(r"\n\s*\n", text.strip()):
+        block = block.strip()
+        if block and not block.startswith(("#", "!", "|", ">", "```", "-", "*")):
+            return block
+    return ""
+
+
+_MARKER_ONLY = re.compile(r"^(?:\[\d+\]\s*)+$")
+
+
+def _cited_sentences(text: str) -> list[str]:
+    """`_prose_sentences`, with a trailing citation-only fragment folded back
+    into the sentence before it.
+
+    The writer cites after the period, `"...notices. [1]"`, so `SENTENCE_END`
+    splits the marker into a sentence of its own. Grading that fragment for a
+    hedge word finds nothing, because the hedge is one sentence back.
+    """
+    merged: list[str] = []
+    for sentence in _prose_sentences(text):
+        if _MARKER_ONLY.match(sentence) and merged:
+            merged[-1] = f"{merged[-1]} {sentence}"
+        else:
+            merged.append(sentence)
+    return merged
+
+
+def _single_source_numbers(body: str, ledger: evidence.Ledger | None) -> set[int]:
+    """Reference numbers backed by exactly one source.
+
+    `stages.numbering` already does this from the ledger, but `stages.py`
+    imports this module, so calling back would be a cycle. The rendered
+    reference list already carries the same number-to-url mapping, so this
+    reads it from `body` instead.
+    """
+    if ledger is None:
+        return set()
+    single_urls = set()
+    for claim in ledger.claims.values():
+        if claim.truth_state != evidence.SINGLE_SOURCE:
+            continue
+        for source_id in claim.source_ids:
+            source = ledger.sources.get(source_id)
+            if source is not None:
+                single_urls.add(source.url)
+    if not single_urls:
+        return set()
+    numbers = set()
+    for row in reference_rows(body):
+        match = re.match(r"\[(\d+)\]\s*(.*)", row)
+        if not match:
+            continue
+        urls = URL.findall(match.group(2))
+        if urls and urls[0].rstrip(".,;") in single_urls:
+            numbers.add(int(match.group(1)))
+    return numbers
+
+
+def abstract_matches_body(body: str, ledger: evidence.Ledger | None = None) -> list[str]:
+    """The abstract, and the introduction's first paragraph, state only what
+    the body states.
+
+    Inert with no `## Abstract` heading: nothing to grade. Otherwise
+    unconditional, because a clean excerpt passes every rule by construction.
+    Every graded sentence citing a single-source claim carries a hedge word,
+    and a fixed overclaim phrase never appears. The abstract carries one more
+    rule the introduction does not: it restates the body, so a number it
+    cites must appear in the body too. The introduction is the body; a number
+    appearing there for the first time is not a defect.
+    """
+    abstract = _section_text(body, "abstract")
+    if not abstract.strip():
+        return []
+    single_source = _single_source_numbers(body, ledger)
+    rest_of_body = body.replace(abstract, "", 1)
+    excerpts = [("abstract", abstract, True)]
+    intro_first = _first_paragraph(_section_text(body, "introduction"))
+    if intro_first:
+        excerpts.append(("introduction", intro_first, False))
+    issues: list[str] = []
+    for label, excerpt, check_numbers in excerpts:
+        for sentence in _cited_sentences(excerpt):
+            cited = {int(n) for n in ABSTRACT_MARKER.findall(sentence)}
+            if cited & single_source and not ABSTRACT_HEDGE.search(sentence):
+                issues.append(f"{label}: unhedged single-source claim: {sentence[:70]!r}")
+            if ABSTRACT_OVERCLAIM.search(sentence):
+                issues.append(f"{label}: overclaim in: {sentence[:70]!r}")
+        if check_numbers:
+            for number in {int(n) for n in ABSTRACT_MARKER.findall(excerpt)}:
+                if f"[{number}]" not in rest_of_body:
+                    issues.append(f"{label}: [{number}] does not appear in the body")
+    return issues
+
+
 def check(
     body: str,
     sources: list[str],
@@ -1054,6 +1159,19 @@ def check(
             "no heading is a pasted question"
             if not bad_headings
             else f"heading is a question: {bad_headings[0]!r}",
+        )
+    )
+
+    # Unconditional, and inert with no `## Abstract` heading: a snippet
+    # another row's test built has nothing to grade. #472.
+    abstract_mismatches = abstract_matches_body(body, ledger)
+    checks.append(
+        Check(
+            "abstract_matches_body",
+            not abstract_mismatches,
+            "the abstract and introduction match the body they summarize"
+            if not abstract_mismatches
+            else f"mismatch: {abstract_mismatches[:3]}",
         )
     )
 
@@ -1272,8 +1390,14 @@ def demo() -> None:
 
     # A paper of headings and a reference list satisfies every other gate,
     # because each of them checks content that is not there.
+    # P7, #472: the abstract's citation now needs a matching mention outside
+    # the abstract, or the new `abstract_matches_body` row calls it orphaned,
+    # which is not what this fixture measures. The introduction restates the
+    # same sentence rather than adding new content that would satisfy the
+    # gate on its own; `has_body` still fires, on the still-empty Limitations.
     hollow = (
-        "# Exit conditions\n\n## Abstract\n\ndone, then cost, then max turns. [1]\n\n## Introduction\n\n"
+        "# Exit conditions\n\n## Abstract\n\ndone, then cost, then max turns. [1]\n\n"
+        "## Introduction\n\ndone, then cost, then max turns. [1]\n\n"
         "## Limitations\n\n## References\n\n"
         "1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
     )
@@ -1356,6 +1480,38 @@ def demo() -> None:
     )
     score = gate(caveated, urls, ledger=ledger)
     assert "single_source_caveat" not in score.signature(), score.report()
+
+    # P7, #472. `good`'s abstract and its introduction both cite `[1]`, the
+    # same single-source claim, and neither sentence hedges it.
+    assert "abstract_matches_body" in gate(good, urls, ledger=ledger).signature()
+    hedged_everywhere = good.replace(
+        "A loop without an exit spends until someone notices. [1]",
+        "A loop without an exit spends until someone notices, on a single source. [1]",
+    ).replace(
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]",
+        "Three exits cover the observed cases: done, then cost, then max turns, on a single source. [1][2]",
+    )
+    score = gate(hedged_everywhere, urls, ledger=ledger)
+    assert "abstract_matches_body" not in score.signature(), score.report()
+
+    # A number the abstract cites but the body never states.
+    orphaned = good.replace(
+        "A loop without an exit spends until someone notices. [1]",
+        "A loop without an exit spends until someone notices. [1][9]",
+    )
+    assert "abstract_matches_body" in gate(orphaned, urls).signature()
+
+    # A fixed overclaim phrase, whatever the ledger says.
+    overclaimed = good.replace(
+        "A loop without an exit spends until someone notices. [1]",
+        "This paper proves a loop without an exit spends until someone notices. [1]",
+    )
+    assert "abstract_matches_body" in gate(overclaimed, urls).signature()
+
+    # No `## Abstract` heading: nothing to grade, so the row passes.
+    assert "abstract_matches_body" not in gate(
+        good.replace("## Abstract", "## Overview"), urls
+    ).signature()
 
     # A contradicted claim never reaches the paper.
     evidence.corroborate(claim, contradicted=True)

@@ -28,6 +28,7 @@ Score only what a script cannot.
 | `depth` | Every body section unpacks mechanism, alternative, and evidence limit. A section that only restates its bound claims fails. |
 | `repetition` | A later section does not restate an earlier one, or a ledger term, without adding a mechanism. |
 | `voice` | Engineering report register. No marketing, no metaphor, no second person. |
+| `abstract_matches_body` | The abstract, and the introduction's first paragraph, say only what the body says. A single-source claim there carries the same hedge the body carries. A number cited there appears in the body too. No sentence claims more certainty than the body does, even one Python's fixed overclaim list does not catch. |
 
 `depth` is the row that keeps this pipeline from shipping a cited brief and
 calling it a paper. Two short paragraphs that quote the claims are not enough,
