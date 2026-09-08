@@ -353,6 +353,15 @@ def test_a_long_question_needs_a_third_of_its_terms():
     three_terms = "## One\n\nThe retry ledger checks a stamp before an escalation [1].\n"
     assert outline_coverage_gaps(three_terms, outline2) == []
 
+    # The stop-list growth on its own, isolated from the third-scaling: a
+    # question padded with words the old twenty-word list missed (`which`,
+    # `were`, `not`, `when`, `was`) has more raw tokens than content terms,
+    # and the extra tokens must not count against the body.
+    padded_question = "Which claims were not corroborated when the budget was capped?"
+    outline3 = {"sections": [{"heading": "One", "key_questions": [padded_question]}]}
+    padded_body = "## One\n\nThe retry budget stayed capped for the whole run [1].\n"
+    assert outline_coverage_gaps(padded_body, outline3) == []
+
 
 def test_a_short_question_still_passes_on_two_terms():
     """#510. The floor of two survives the scaling: a two-term question

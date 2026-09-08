@@ -73,7 +73,15 @@ CAVEAT = re.compile(r"single source|one source|not corroborated|unconfirmed", re
 
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.M)
 IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-FENCE = re.compile(r"```(\w*)\n(.*?)```", re.S)
+# A judge on PR #529 found three fence shapes this pattern missed. Group 1 is
+# the delimiter run, backtick or tilde, backreferenced so a closer must use
+# the same character; group 2 is the info string, unrestricted so a trailing
+# space or a hyphenated language tag (`objective-c`) still opens a fence;
+# group 3 is the body. The closer is `\1` on its own line, or end of body
+# when no closer exists, so an unclosed fence masks to the end rather than
+# leaving its content, headings included, exposed as prose. Copied from the
+# SDK port, not imported.
+FENCE = re.compile(r"^[ \t]*([`~]{3,})([^\n]*)\n(.*?)(?:\n[ \t]*\1[ \t]*(?:\n|\Z)|\Z)", re.M | re.S)
 REFERENCE_ROW = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)[.)])\s+(.*\S)\s*$", re.M)
 URL = re.compile(r"https?://[^\s)\]<>\"']+")
 
@@ -868,7 +876,8 @@ def non_publication_figures(body: str) -> list[str]:
 def visible_source_syntax(body: str) -> list[str]:
     """Diagram source left in the paper. The figure is the artifact, not the code."""
     found = []
-    for language, block in FENCE.findall(body):
+    for _delimiter, language, block in FENCE.findall(body):
+        language = language.strip()
         if language.lower() in ("mermaid", "plantuml", "puml") or SOURCE_SYNTAX.search(block):
             found.append(language or block.strip().split("\n", 1)[0][:40])
     return found

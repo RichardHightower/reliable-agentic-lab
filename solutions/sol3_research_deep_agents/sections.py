@@ -28,10 +28,27 @@ RHETORICAL = re.compile(r"\?\s*$")
 # counts were reported by the MAST taxonomy paper?" as answered by a body
 # that shares only "paper" with it, because this list missed ordinary
 # function words: `was`, `were`, `which`, `when`, `has`, `not`, `also`,
-# `more`, `should`. `paper_check.STE_FUNCTION_WORDS` already is the
-# usual-English-function-word list this row needed; every word this set
-# used to name is already in it.
-STOP = paper_check.STE_FUNCTION_WORDS
+# `more`, `should`. `paper_check.STE_FUNCTION_WORDS` already names every
+# one of those.
+#
+# It also names `run`, `calls`, `names`, `uses`, and `holds`, the STE-S5
+# noun-stack row's own verb-suffix exceptions, not a question's function
+# words. This repo's own papers are about a loop that runs, a section that
+# calls a turn, a term a glossary names: a coverage row that stops those
+# words scores a question about them on almost nothing. A judge on PR #529
+# found exactly that on the SDK twin: "How many tool calls does a run use
+# before it holds?" fell to one content term. `_COVERAGE_VERB_EXCEPTIONS`
+# is that verb block, subtracted back out, so a domain verb stays a
+# content word here even though it is not one for the noun-stack row it
+# was written for. Copied from the SDK port, not imported.
+_COVERAGE_VERB_EXCEPTIONS = frozenset(
+    """
+    run runs use uses need needs want wants show shows name names hold holds
+    take takes give gives get gets know knows see sees say says call calls
+    make makes made
+    """.split()
+)
+STOP = paper_check.STE_FUNCTION_WORDS - _COVERAGE_VERB_EXCEPTIONS
 
 SLOT_BUDGETS = (
     ("register", 2500),

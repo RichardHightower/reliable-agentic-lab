@@ -102,7 +102,14 @@ MIN_WORDS = 2000
 MIN_SECTION_WORDS = 80
 PROSE_EXEMPT = {"references", "figures", "abstract"}
 SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
-FENCE = re.compile(r"```(\w*)\n(.*?)```", re.S)
+# A judge on PR #529 found three fence shapes this pattern missed. Group 1 is
+# the delimiter run, backtick or tilde, backreferenced so a closer must use
+# the same character; group 2 is the info string, unrestricted so a trailing
+# space or a hyphenated language tag (`objective-c`) still opens a fence;
+# group 3 is the body. The closer is `\1` on its own line, or end of body
+# when no closer exists, so an unclosed fence masks to the end rather than
+# leaving its content, headings included, exposed as prose.
+FENCE = re.compile(r"^[ \t]*([`~]{3,})([^\n]*)\n(.*?)(?:\n[ \t]*\1[ \t]*(?:\n|\Z)|\Z)", re.M | re.S)
 IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 EXIT_ORDER = re.compile(r"\bdone\b[\s\S]{0,240}?\bcost\b[\s\S]{0,240}?\bmax(?:imum)?\s+turns?\b", re.I)
 WHICHEVER_FIRST = re.compile(r"\bwhichever\s+(?:comes|fires)\s+first\b", re.I)
@@ -913,11 +920,27 @@ def last_prose_heading(body: str) -> str | None:
 # counts were reported by the MAST taxonomy paper?" as answered by a body
 # that shares only "paper" with it, because the twenty-word list here
 # missed ordinary function words: `was`, `were`, `which`, `when`, `has`,
-# `not`, `also`, `more`, `should`. `STE_FUNCTION_WORDS`, above, already is
-# the usual-English-function-word list this row needed; every word this
-# set used to name is already in it, so growing the stop list is reusing
-# that set rather than hand-picking more exceptions one probe at a time.
-COVERAGE_STOP = STE_FUNCTION_WORDS
+# `not`, `also`, `more`, `should`. `STE_FUNCTION_WORDS`, above, already
+# names every one of those.
+#
+# It also names `run`, `calls`, `names`, `uses`, and `holds`, the STE-S5
+# noun-stack row's own verb-suffix exceptions, not a question's function
+# words. This repo's own papers are about a loop that runs, a section that
+# calls a turn, a term a glossary names: a coverage row that stops those
+# words scores a question about them on almost nothing. A judge on PR #529
+# found exactly that: "How many tool calls does a run use before it
+# holds?" fell to one content term, `tool`, easier to satisfy than the old
+# rule's seven. `COVERAGE_VERB_EXCEPTIONS` is that verb block, subtracted
+# back out, so a domain verb stays a content word here even though it is
+# not one for the noun-stack row it was written for.
+COVERAGE_VERB_EXCEPTIONS = frozenset(
+    """
+    run runs use uses need needs want wants show shows name names hold holds
+    take takes give gives get gets know knows see sees say says call calls
+    make makes made
+    """.split()
+)
+COVERAGE_STOP = STE_FUNCTION_WORDS - COVERAGE_VERB_EXCEPTIONS
 
 
 def _coverage_terms(text: str) -> set[str]:
