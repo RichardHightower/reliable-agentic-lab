@@ -489,3 +489,19 @@ def test_sdk_turns_edit_whole_paper_prompt_carries_the_repeats_and_the_body():
     assert "As stated in" in prompt
     assert "## Discussion" in prompt and "## Conclusion" in prompt
     assert repeats[0]["section"] in prompt
+
+
+def test_methods_is_exempt_from_the_numeric_repeat_rule():
+    """#478. Methods restates run-record counts (sources retrieved, claims
+    verified) that legitimately recur in a body section's own numbers for
+    an unrelated reason. `caveat_once` must not read that as the same
+    finding stated twice."""
+    body = (
+        "# On a topic\n\n"
+        "## Methods\n\nSources admitted to the reference list: 75 percent of "
+        "those proposed.\n\n"
+        "## Discussion\n\nThe measured effect held in 75 percent of the trials "
+        "reviewed. [1]\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "caveat_once" not in score.signature(), score.report()

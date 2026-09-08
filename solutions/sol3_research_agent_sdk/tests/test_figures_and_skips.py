@@ -421,3 +421,37 @@ def test_a_back_reference_matches_the_whole_heading():
     )
     score = checks.check(body, ["https://a"])
     assert "caveat_once" in score.signature(), score.report()
+
+
+def test_skip_noted_resolves_the_section_by_id_through_the_outline_map():
+    """PR #534 judge follow-up: a skip's own `section` field is a section id
+    (`assemble`'s own shape), and no SDK id equals its heading text. With no
+    map, the id never matches `top_level_sections`' heading keys and the
+    lookup widens to the whole body, letting a note recorded under the
+    wrong section slip through. #478"""
+    body = (
+        "# T\n\n"
+        "## Why Loops Compound Errors\n\nA point about the loop [1].\n\n"
+        "## Elsewhere\n\ntoken-cost was not shown: no data.\n"
+    )
+    skipped = [
+        {"name": "token-cost", "section": "why-loops-compound-errors", "reason": "no data"}
+    ]
+    outline = {
+        "sections": [{"id": "why-loops-compound-errors", "heading": "Why Loops Compound Errors"}]
+    }
+    # With the id-to-heading map, the note is graded against its own owning
+    # section, which does not carry it, so the row fires.
+    mapped = checks.check(body, ["https://a"], skipped_figures=skipped, outline=outline)
+    assert "skip_noted" in mapped.signature(), mapped.report()
+    # Recorded under the section that actually carries the note, the row
+    # passes the same way.
+    same_section_body = (
+        "# T\n\n"
+        "## Why Loops Compound Errors\n\ntoken-cost was not shown: no data.\n\n"
+        "## Elsewhere\n\nA different point [1].\n"
+    )
+    passing = checks.check(
+        same_section_body, ["https://a"], skipped_figures=skipped, outline=outline
+    )
+    assert "skip_noted" not in passing.signature(), passing.report()

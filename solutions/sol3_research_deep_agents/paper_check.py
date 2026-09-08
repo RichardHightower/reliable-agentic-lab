@@ -43,6 +43,9 @@ Rows `check()` appends, past the three it reuses from `brief`:
     has_body       every section carries real prose, not a heading
     length         the paper clears the word floor
     charted        every plotted value is in the corpus and the caption cites
+    methods_present the Methods section, Python-written from the run record, is present
+    conclusion_present the Conclusion section, one writer turn from the body, is present
+    study_table    one Evidence summary row per human-study claim, placed after Methods
 
 Belt versus judge, matching the house style page's ownership table
 (https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style).
@@ -116,9 +119,17 @@ EXIT_TERMS = (re.compile(r"\bdone\b", re.I), re.compile(r"\bcost\b", re.I), re.c
 
 SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
 
+# Sections Python writes directly, never through a writer turn: Methods from
+# the run record, and the Evidence summary table from the ledger (#478).
+# Neither carries a citation of its own to demand and neither is prose a
+# length floor should measure. PR #535 judge revision, ruling (b) and F2: a
+# name-based exemption, the same mechanism the SDK twin uses, not an
+# incidental formatting rule. Copied from the SDK port, not imported.
+PYTHON_WRITTEN_SECTIONS = {"methods", "evidence summary"}
+
 # Sections that legitimately carry no prose. References is a generated list, and
 # a Figures appendix is images with their alt text.
-PROSE_EXEMPT = ("references", "figures")
+PROSE_EXEMPT = ("references", "figures") + tuple(PYTHON_WRITTEN_SECTIONS)
 
 # Copied from `sections.py`, where it already grades one section. No second
 # person anywhere in the paper, not just the section body.
@@ -234,13 +245,12 @@ QUOTED = re.compile(r'"([^"]{3,})"')
 # the shingle threshold below: "2.4 percent" once, then "2.4%" a paragraph
 # later, is one finding either way.
 #
-# Methods is exempt from this rule once P11 lands: it is Python-written from
+# Methods is exempt from this rule, P11, #478: it is Python-written from
 # the run's own ledger, so the same count it names (sources retrieved,
 # claims verified) legitimately recurs there in the same units a body
-# section reports for an unrelated reason. Not built yet; noted here so the
-# exemption is not lost when Methods is.
+# section reports for an unrelated reason.
 NUMERIC_FULL = re.compile(r"\b\d+(?:\.\d+)?\s*(?:%|percent)\b", re.I)
-CAVEAT_EXEMPT_SECTIONS = {"glossary", "references"}
+CAVEAT_EXEMPT_SECTIONS = {"glossary", "references"} | PYTHON_WRITTEN_SECTIONS
 # D2, #477. The whole-paper pass replaces a repeat with a short sentence
 # that points back to the section stating it first. That sentence is not
 # itself a repeat, even when the exact same short sentence appears in two
@@ -695,6 +705,38 @@ def _mask_section(text: str, name: str) -> str:
     return text
 
 
+def _mask_sections(text: str, names: set[str]) -> str:
+    """Blank every heading in `names`, one pass, in an order that cannot
+    matter. Copied from the SDK port, not imported.
+
+    Calling `_mask_section` once per name chains: it re-scans the string the
+    previous call already mutated, and a mask always eats the newline right
+    before the next heading (the mask ends exactly where that heading's `#`
+    starts). Two masked sections sitting back to back lose the line break
+    between them on the first call, so the second call's own `_headings`
+    scan never sees the second heading at all, only sometimes, whichever
+    name a set happened to iterate first. Spans are computed once, from the
+    untouched text, so this never depends on scanning a text a prior mask
+    already edited.
+    """
+    matches = _headings(text)
+    spans = []
+    for index, match in enumerate(matches):
+        if match.group(2).strip().lower() not in names:
+            continue
+        level = len(match.group(1))
+        end = len(text)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        spans.append((match.start(), end))
+    out = text
+    for start, end in spans:
+        out = out[:start] + " " * (end - start) + out[end:]
+    return out
+
+
 def glossary_terms(body: str) -> dict[str, str]:
     """The term-to-definition map assembly wrote into `## Glossary`.
 
@@ -948,7 +990,16 @@ def _strip_figure_notes(body: str) -> str:
 
 
 def word_count(body: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", _strip_figure_notes(body))))
+    """The whole-paper word count `length` grades against `MIN_WORDS`.
+
+    Blanks the same system-generated text `_strip_figure_notes` already
+    excludes, and now also `PYTHON_WRITTEN_SECTIONS`: Methods and the study
+    table are Python output, never a writer's prose, and crediting either
+    toward the floor is the same overclaim `_strip_figure_notes` already
+    names. PR #535 judge revision F5.
+    """
+    stripped = _mask_sections(_strip_figure_notes(body), PYTHON_WRITTEN_SECTIONS)
+    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", stripped)))
 
 
 def missing_sections(body: str, required=REQUIRED_SECTIONS) -> list[str]:
@@ -1594,6 +1645,53 @@ def caveat_once_violations(body: str) -> list[str]:
     return hits
 
 
+# Headings a plan inserts as structure, never a body's own evidence
+# section. PR #535 judge revision B1: `assemble_gate` is always called with
+# `outline=self.plan` (`paper.py`'s own `stage_assemble`), and `self.plan`'s
+# own sections always begin with `abstract` -- guaranteed by
+# `stages.normalize_plan` and by `stages.outline_gate`'s required set. "The
+# first evidence section" has to skip every structural heading explicitly,
+# not just take the first name `outline` lists.
+STRUCTURAL_HEADINGS = {"abstract", "introduction", "methods", "conclusion", "references"}
+
+# A markdown table's own separator row: only `|`, `-`, `:`, and whitespace.
+TABLE_SEPARATOR_ROW = re.compile(r"^\|[\s:|-]+\|$")
+
+
+def study_table_violations(body: str, human_studies: list, outline: dict | None) -> list[str]:
+    """The Evidence summary table exists, holds one row per human-study
+    claim, and sits after Methods and before the first evidence section.
+    #478. Called only when `human_studies` is non-empty.
+    """
+    sections = top_level_sections(body)
+    order = list(sections)
+    if "evidence summary" not in order:
+        return ["no Evidence summary table for a ledger holding a human-study claim"]
+    rows = [
+        line.strip()
+        for line in sections["evidence summary"].strip().splitlines()
+        if line.strip().startswith("|")
+    ]
+    # PR #535 judge revision F8: a fixed `rows[2:]` miscounted a table that
+    # lost its separator row, or that shares its section with an unrelated
+    # pipe-prefixed line. The header is the first row; every other row is
+    # data unless it is the separator itself.
+    data_rows = [row for row in rows[1:] if not TABLE_SEPARATOR_ROW.match(row)]
+    problems = []
+    if len(data_rows) != len(human_studies):
+        problems.append(f"{len(data_rows)} table rows for {len(human_studies)} human-study claims")
+    methods_at = order.index("methods") if "methods" in order else -1
+    table_at = order.index("evidence summary")
+    headings = [str(s.get("heading") or "").strip().lower() for s in (outline or {}).get("sections") or []]
+    first_section = next(
+        (h for h in headings if h in order and h not in STRUCTURAL_HEADINGS), None
+    )
+    first_at = order.index(first_section) if first_section else len(order)
+    if not (methods_at != -1 and methods_at < table_at < first_at):
+        problems.append("the table is not between Methods and the first evidence section")
+    return problems
+
+
 def check(
     body: str,
     sources: list[str],
@@ -1616,7 +1714,11 @@ def check(
     checks: list[Check] = []
 
     # The three brief.py already owns, reused rather than restated.
-    inner = brief.check(body, sources)
+    # `brief.uncited_claims` has no section name of its own to skip, unlike
+    # this file's own citation-shaped rows; PYTHON_WRITTEN_SECTIONS is
+    # masked out here so Methods and the study table never read as an
+    # uncited claim. PR #535 judge revision, ruling (b) and F2.
+    inner = brief.check(_mask_sections(body, PYTHON_WRITTEN_SECTIONS), sources)
     checks.extend(Check(c.name, c.passed, c.detail) for c in inner.checks)
 
     absent = missing_sections(body, required)
@@ -1867,6 +1969,46 @@ def check(
                 else f"glossary-only or search-host term: {exact_bad[:3]}",
             )
         )
+
+        # #478. A body with no top-level heading at all is not a paper, the
+        # same defence `next_step` above already gives.
+        sections_present = top_level_sections(body)
+        methods_missing = last_heading is not None and "methods" not in sections_present
+        checks.append(
+            Check(
+                "methods_present",
+                not methods_missing,
+                "the Methods section is present" if not methods_missing else "no Methods section",
+            )
+        )
+
+        conclusion_missing = last_heading is not None and "conclusion" not in sections_present
+        checks.append(
+            Check(
+                "conclusion_present",
+                not conclusion_missing,
+                "the Conclusion section is present"
+                if not conclusion_missing
+                else "no Conclusion section",
+            )
+        )
+
+        # Only when the ledger holds a human-study claim: a paper on a
+        # topic with none must not be told to grow a table for it.
+        human_studies = [
+            claim for claim in (ledger.claims.values() if ledger else []) if claim.usable and claim.study
+        ]
+        if human_studies:
+            table_bad = study_table_violations(body, human_studies, outline)
+            checks.append(
+                Check(
+                    "study_table",
+                    not table_bad,
+                    f"{len(human_studies)} human-study rows, correctly placed"
+                    if not table_bad
+                    else f"study table: {table_bad[0]}",
+                )
+            )
 
     rows = reference_rows(body)
     checks.append(

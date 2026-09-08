@@ -344,6 +344,12 @@
             "figures": []
           },
           {
+            "heading": "Methods",
+            "purpose": "generated",
+            "claim_ids": [],
+            "figures": []
+          },
+          {
             "heading": "Exit conditions",
             "purpose": "name the three exits and where each one is documented",
             "claim_ids": [
@@ -375,6 +381,12 @@
               "*exit-conditions*2",
               "*maker-checker*1"
             ],
+            "figures": []
+          },
+          {
+            "heading": "Conclusion",
+            "purpose": "restate the paper's own findings, from the body, with no new citation",
+            "claim_ids": [],
             "figures": []
           },
           {
@@ -411,6 +423,9 @@
     },
     "'Next step' section": {
       "text": "- Evaluate the three exits on a live ticket before adopting them elsewhere. [1]\n- Run the fixture with --backend fixture, then again against a live backend.\n- Compare this port against the sibling runtime on the same topic and budget.\n- Measure each section's word count before raising that section's target higher.\n- Try the offline demo first, then repeat the same run against a live backend.\n- Adopt the exit order only after a team reviews the evidence behind it.\n- Pilot the maker and checker split on one section before the whole paper.\n"
+    },
+    "'Conclusion' section": {
+      "text": "The evidence above supports a bounded loop and an independently verified checker, each finding resting on a single source. [1] A reference implementation orders its exits done, then cost, then max turns, and two other agent runtimes document a comparable turn or recursion limit under their own name. [1][2][3] A separate verification role, not the same actor that made the claim, caught what a single actor missed, though that observation also rests on one source. [4][5] Nothing here proves the order transfers to every host; it names what one implementation checked and in what sequence."
     }
   },
   "section_judge": {

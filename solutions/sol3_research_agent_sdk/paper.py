@@ -1743,24 +1743,24 @@ def _sections_sha(run: Run, planned: dict) -> str:
     return hashlib.sha1("\n\n".join(parts).encode("utf-8")).hexdigest()
 
 
-def write_abstract(run: Run) -> dict:
-    """One writer turn, run once per stable body, that states only what the
-    body already states. `CYCLE` runs this every attempt; a sha guard skips
-    the turn when the body has not changed since the last one, the same
-    shape `diagram()`'s `sections_sha` guard uses. `assemble` reads what
-    this wrote, falling back to the outline's own thesis line when it never
-    ran or produced nothing. P7, #472.
+def _write_summary_turn(run: Run, *, kind: str, filename: str, turn_name: str) -> dict:
+    """Shared shape behind `write_abstract` and `write_conclusion`: one
+    writer turn, run once per stable body, that states only what the body
+    already states. `CYCLE` runs both every attempt; a sha guard skips the
+    turn when the body has not changed since the last one, the same shape
+    `diagram()`'s `sections_sha` guard uses. P7, #472. P11 reuses this for
+    the conclusion turn, #478.
     """
     planned = outlines.plan_view(approved_outline(run))
     sha = _sections_sha(run, planned)
-    path = run.file("abstract.json")
+    path = run.file(filename)
     existing = {}
     if path.exists():
         try:
             existing = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             existing = {}
-    if existing.get("sections_sha") == sha and existing.get("abstract"):
+    if existing.get("sections_sha") == sha and existing.get(kind):
         return {"written": False, "skipped": True}
 
     out = run.file("sections")
@@ -1773,18 +1773,169 @@ def write_abstract(run: Run) -> dict:
     if not body.strip():
         return {"written": False, "skipped": True}
     try:
-        text = run.turns.write_abstract(body, _ledger(run))
+        text = getattr(run.turns, turn_name)(body, _ledger(run))
     except (TurnFailed, Escalate) as exc:
         # A budget spent on the last section already stamped every section
-        # that matters. `assemble` falls back to the outline's thesis line
-        # rather than losing the whole run over the one turn on top.
-        run.log(f"    abstract: the writer turn failed ({exc}). Falling back to the thesis line.")
+        # that matters. `assemble` falls back to a Python default rather
+        # than losing the whole run over the one turn on top.
+        run.log(f"    {kind}: the writer turn failed ({exc}).")
         return {"written": False, "skipped": False}
     text = (text or "").strip()
     if not text:
         return {"written": False, "skipped": False}
-    run.write_json("abstract.json", {"abstract": text, "sections_sha": sha})
+    run.write_json(filename, {kind: text, "sections_sha": sha})
     return {"written": True, "skipped": False}
+
+
+def write_abstract(run: Run) -> dict:
+    """`assemble` reads what this wrote, falling back to the outline's own
+    thesis line when it never ran or produced nothing. P7, #472.
+    """
+    return _write_summary_turn(run, kind="abstract", filename="abstract.json", turn_name="write_abstract")
+
+
+def write_conclusion(run: Run) -> dict:
+    """One writer turn after the body, from the body, with no new citation.
+    `assemble` reads what this wrote and places it before Next step. A run
+    that never produces one still assembles: `conclusion_present` then
+    names the gap the same way `complete` names a missing outline section.
+    #478
+    """
+    return _write_summary_turn(
+        run, kind="conclusion", filename="conclusion.json", turn_name="write_conclusion"
+    )
+
+
+def _methods_lines(run: Run, admitted_sources: int) -> list[str]:
+    """Methods, Python-written from the run record. No model turn. #478
+
+    Names the admitted hosts by design, which is why `checks.policy_leak`
+    and `checks.caveat_once` both exempt this section
+    (`_mask_for_policy`, `CAVEAT_EXEMPT_SECTIONS`).
+    """
+    allowlist = _load_json(run, "corpus/source_allowlist.json")
+    briefing = _load_json(run, "corpus/scout-briefing.json")
+    # source_allowlist.json is the librarian's own decision; the scout
+    # briefing (the E1 field seed) is the fallback for a run, or a phase
+    # test, that never reached that phase.
+    admitted = list(allowlist.get("admitted") or briefing.get("admitted") or [])
+    dropped = list(allowlist.get("dropped") or briefing.get("dropped") or [])
+    # PR #535 judge revision F4: "fields searched" names the topic's own
+    # research field (biomedical, software, ...), the scout's own
+    # classification and the input to `source_policy.seed_for_field`, not
+    # the outline's section headings.
+    field = str(briefing.get("field") or "").strip()
+    sources_payload = _load_json(run, "sources.json")
+    retrieved = len(sources_payload.get("sources") or [])
+    started = (run.state.started_at or "")[:10] or "an unrecorded date"
+
+    lines = [
+        f"This paper searched the {field} field for evidence, starting {started}."
+        if field
+        else f"This paper searched the topic for evidence, starting {started}, "
+        "before a field was classified.",
+        f"Admitted search hosts, decided once before any paid search ran: "
+        f"{', '.join(admitted)}. A host outside this list was not searched, and a "
+        "source from it never reached a claim."
+        if admitted
+        else "Admitted search hosts, decided once before any paid search ran: the "
+        "vendor documentation seed. No topic-specific host was proposed.",
+        # PR #535 judge revision B3: `admitted_sources` counts distinct
+        # sources the reference list actually carries (the caller's own
+        # `_numbered()` result), never a count of claims.
+        f"Sources retrieved during research: {retrieved}. Sources admitted to the "
+        f"reference list, after the same host and claim checks every finding in "
+        f"this paper passed: {admitted_sources}.",
+        # PR #535 judge revision F4: "this run spent N", not "of which N
+        # were spent", so the sentence never has to agree a verb with a
+        # count that might be exactly one.
+        f"The verification cap for this run allows a second opinion on up to "
+        f"{run.max_claims} claims. The follow-turn cap allows {run.max_follow} "
+        f"secondary claims a look at their own primary study; this run spent "
+        f"{run.follow_used}. The counter-evidence cap allows {run.max_counter} "
+        f"generalizing claims a search for a contrary finding; this run spent "
+        f"{run.counter_used}.",
+    ]
+    if dropped:
+        reasons = "; ".join(
+            f"{item.get('host')} ({item.get('why')})" for item in dropped[:5] if item.get("host")
+        )
+        lines.append(
+            f"Hosts excluded during admission, with the reason each was dropped: {reasons}."
+            if reasons
+            else "No proposed host was excluded during admission; every host cleared the wall."
+        )
+    else:
+        lines.append("No proposed host was excluded during admission; every host cleared the wall.")
+    return lines
+
+
+def _load_bearing_numbers(run: Run, planned: dict) -> set[int]:
+    """Reference numbers a body section's own text actually cites, read
+    straight from the section files, before assembly's cleanup pass runs.
+
+    A claim carrying a footnote number is not proof any section's prose
+    used it: `_numbered` assigns one to every usable claim regardless.
+    #478, PR #535 judge revision F7.
+    """
+    numbers: set[int] = set()
+    for section in planned["sections"]:
+        path = run.file("sections") / f"{section['id']}.md"
+        if path.exists():
+            numbers |= {int(n) for n in re.findall(r"\[(\d+)\]", path.read_text(encoding="utf-8"))}
+    return numbers
+
+
+def _study_rows(claims: list[dict], load_bearing: set[int]) -> list[dict]:
+    """Claims the paper actually cites (`number` set by `_numbered`, and
+    that number present in some body section's own text) that carry a
+    non-empty E3 `study` object. One row per claim, not deduped by study
+    identity: two claims about the same trial are two citations already,
+    the same way the reference list treats them. #478
+    """
+    return [
+        claim
+        for claim in claims
+        if claim.get("study") and claim.get("number") and claim["number"] in load_bearing
+    ]
+
+
+def _study_table_block(claims: list[dict], load_bearing: set[int]) -> str:
+    """The Evidence summary table, or "" when the ledger holds no
+    human-study claim. Python from the ledger, reading E3's `study` object
+    and E4's `evidence_tier`. #478
+    """
+    rows = _study_rows(claims, load_bearing)
+    if not rows:
+        return ""
+    lines = [
+        "## Evidence summary",
+        "",
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for claim in rows:
+        study = claim.get("study") or {}
+        participants = study.get("participants") or {}
+        n = participants.get("n")
+        population = str(participants.get("population") or "").strip()
+        if n and population:
+            who = f"{n} ({population})"
+        else:
+            who = str(n or population or "not reported")
+        duration = str(study.get("duration") or "not reported")
+        deficit = str(study.get("deficit") or "not reported")
+        training = study.get("training")
+        training_cell = "yes" if training is True else "no" if training is False else "not reported"
+        assay = str(study.get("assay") or "not reported")
+        result = str(study.get("result") or claim.get("text") or "not reported")
+        tier = str(claim.get("evidence_tier") or "other")
+        lines.append(
+            f"| {who} | {duration} | {deficit} | {training_cell} | {assay} | "
+            f"{result} [{claim['number']}] | {tier} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def assemble(run: Run) -> dict:
@@ -1848,7 +1999,45 @@ def assemble(run: Run) -> dict:
             glossary.setdefault(term, definition)
         abstract_text = _resolve_markers(abstract_text, numbers)
         parts += ["## Abstract", "", abstract_text.strip(), ""]
+    # #478. Methods is Python-written, right after the Abstract and before
+    # every outline section: it is not itself an outline section, so the
+    # loop below never has to skip it. The Evidence summary table (Python,
+    # from the ledger) sits immediately after it, when the run cites at
+    # least one human-study claim; otherwise Methods carries a one-line
+    # note instead of a table nobody could fill.
+    load_bearing = _load_bearing_numbers(run, planned)
+    methods_lines = _methods_lines(run, len(references))
+    table_block = _study_table_block(usable, load_bearing)
+    if not table_block:
+        methods_lines.append("No claim in this run carries a recorded human study.")
+    parts += ["## Methods", "", "\n\n".join(methods_lines), ""]
+    if table_block:
+        parts += [table_block, ""]
+    # #478. One writer turn after the body, from the body, with no new
+    # citation: the same cleanup pass the abstract gets. Built now, spliced
+    # in below right before the "Next step" section, the house convention
+    # for the paper's own last prose heading (P4): Conclusion sits second
+    # to last, never last, so `next_step` keeps grading Next step.
+    conclusion_text = _written_conclusion(run)
+    conclusion_parts: list[str] = []
+    if conclusion_text:
+        conclusion_text = checks.drop_owned_headings(conclusion_text)
+        conclusion_text, found = checks.take_flags(conclusion_text)
+        flags += [{"section": "conclusion", "flag": flag} for flag in found]
+        conclusion_text, term_hits = checks.take_terms(conclusion_text)
+        for term, definition in term_hits:
+            glossary.setdefault(term, definition)
+        conclusion_text = _resolve_markers(conclusion_text, numbers)
+        conclusion_parts = ["## Conclusion", "", conclusion_text.strip(), ""]
+    conclusion_placed = False
     for section in planned["sections"]:
+        if (
+            not conclusion_placed
+            and conclusion_parts
+            and str(section.get("heading") or "").strip().lower() == "next step"
+        ):
+            parts += conclusion_parts
+            conclusion_placed = True
         path = run.file("sections") / f"{section['id']}.md"
         if not path.exists():
             continue
@@ -1921,6 +2110,12 @@ def assemble(run: Run) -> dict:
         if id(skip) in noted_skips:
             continue
         parts += [f"> {skip['name']} was not shown: {skip['reason']}.", ""]
+    # #478. A run whose outline never carried a "Next step" heading at all
+    # (many phase tests, and any outline predating P4) never found the
+    # splice point above, so it lands here, still before Glossary and
+    # References.
+    if not conclusion_placed and conclusion_parts:
+        parts += conclusion_parts
     # No captured term means no section, not an empty one. Alphabetical, case
     # insensitive, so "Loop" and "loop" do not sort by accident of case.
     if glossary:
@@ -2106,6 +2301,20 @@ def _written_abstract(run: Run) -> str:
     return str(payload.get("abstract") or "").strip()
 
 
+def _written_conclusion(run: Run) -> str:
+    """The conclusion `write_conclusion` wrote, or empty when it never ran
+    or produced nothing. #478
+    """
+    path = run.file("conclusion.json")
+    if not path.exists():
+        return ""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return str(payload.get("conclusion") or "").strip()
+
+
 def _ledger(run: Run):
     path = run.file("paper_ledger.json")
     if not path.exists():
@@ -2195,8 +2404,8 @@ def review(run: Run) -> dict:
 
 def _persist_trim(run: Run, body: str) -> None:
     """Write the whole-paper pass's edit back to the sources `assemble`
-    reads: the section files, and the stamped abstract when the pass
-    touched it.
+    reads: the section files, and the stamped abstract and conclusion when
+    the pass touched either.
 
     `assemble` rebuilds `paper.md` from `sections/*.md` on every call,
     including the unrelated `edit_paper` flow pass that already runs after
@@ -2214,15 +2423,24 @@ def _persist_trim(run: Run, body: str) -> None:
         path = run.file("sections") / f"{section['id']}.md"
         if path.exists():
             path.write_text(block.strip() + "\n", encoding="utf-8")
+    sha = _sections_sha(run, planned)
     abstract_block = blocks.get("abstract")
     if abstract_block is not None and run.file("abstract.json").exists():
         # `write_abstract` skips its turn when `sections_sha` already
         # matches. Stamping the sha the just-updated sections now hash to
         # keeps that guard from discarding the trimmed abstract on the next
         # attempt and spending a turn to regenerate what is already fixed.
+        run.write_json("abstract.json", {"abstract": abstract_block.strip(), "sections_sha": sha})
+    # PR #535 judge revision B4: P11's Conclusion is a second stamped
+    # section the same way the abstract already is, and `_persist_trim`
+    # never registered it. A repeat the whole-paper pass cut out of the
+    # Conclusion returned on the next `assemble`, because that call rebuilt
+    # the Conclusion from an untouched `conclusion.json`. #477's own fix
+    # for the abstract, applied here.
+    conclusion_block = blocks.get("conclusion")
+    if conclusion_block is not None and run.file("conclusion.json").exists():
         run.write_json(
-            "abstract.json",
-            {"abstract": abstract_block.strip(), "sections_sha": _sections_sha(run, planned)},
+            "conclusion.json", {"conclusion": conclusion_block.strip(), "sections_sha": sha}
         )
 
 
@@ -2343,6 +2561,7 @@ LINEAR = [
 CYCLE = [
     (5, "write", maybe_write),
     (6, "abstract", write_abstract),
+    (6, "conclusion", write_conclusion),
     (7, "diagram", diagram),
     (8, "assemble", assemble),
     (9, "check", check),

@@ -109,6 +109,8 @@ def _section_word_range(heading: str, claim_count: int) -> str:
     name = heading.strip().lower()
     if name == "abstract":
         return "120 to 180"
+    if name == "conclusion":
+        return "120 to 250"
     if name == "limitations":
         return "150 to 250"
     if claim_count < 3:
@@ -2422,14 +2424,19 @@ class Paper:
         # P7, #472. The abstract restates the body, so it is written last, from
         # the sections already stamped. `sorted` is stable, so every other
         # section keeps the outline's own order; only "Abstract" moves to the
-        # end of the loop.
+        # end of the loop. #478: the conclusion restates the body the same
+        # way, so it joins the abstract at the end. `normalize_plan` already
+        # puts Abstract ahead of Conclusion in the outline's own order, and
+        # the stable sort keeps that order inside the moved group.
         ordered_sections = sorted(
             self.outline["sections"],
-            key=lambda item: item["heading"].strip().lower() == "abstract",
+            key=lambda item: item["heading"].strip().lower() in ("abstract", "conclusion"),
         )
         for section in ordered_sections:
             heading = section["heading"]
-            if heading.lower() == "references":
+            # Methods is Python-written at assemble time, never by the
+            # writer: it never reaches `close_section`. #478
+            if heading.lower() in ("references", "methods"):
                 continue
             # A section that already passed its gate is kept across a retry. The
             # retry exists to fix the section that failed, and rewriting the
@@ -2496,6 +2503,28 @@ class Paper:
                     "\"preliminary\" in the same sentence that cites it. Never write "
                     "\"proves\", \"definitively\", \"conclusively\", or \"establishes "
                     "that\" for a claim the body hedges.\n"
+                    f"Purpose: {section.get('purpose', '')}\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n"
+                    f"The paper body, already written:\n{written_body}\n\n"
+                )
+            elif heading.strip().lower() == "conclusion":
+                # #478. One writer turn after the body, from the body, with
+                # no new citation: `allowed` above already carries every
+                # numbered source the paper cites, and none the paper does
+                # not, so a marker outside that set is a stray citation the
+                # write gate rejects.
+                written_body = "\n\n".join(
+                    f"## {other}\n\n{text}" for other, text in self.written.items()
+                )
+                lead = (
+                    f"Write the {heading!r} section of {self.plan['title']!r}, from the "
+                    "body already written below. State only what that body states. Cite "
+                    "only a number the body already cites; introduce no new source and "
+                    "no new citation. Carry the same hedge it carries for a "
+                    "single-source claim: say \"single source\", \"one study\", \"one "
+                    "trial\", or \"preliminary\" in the same sentence that cites it. "
+                    "Never write \"proves\", \"definitively\", \"conclusively\", or "
+                    "\"establishes that\" for a claim the body hedges.\n"
                     f"Purpose: {section.get('purpose', '')}\n"
                     f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n"
                     f"The paper body, already written:\n{written_body}\n\n"
@@ -2694,6 +2723,86 @@ class Paper:
 
     # -- 8. assemble -------------------------------------------------------
 
+    def _methods_lines(self) -> list[str]:
+        """Methods, Python-written from the run record. No model turn. #478
+
+        Prose, the same shape the SDK twin renders, not a bulleted list. PR
+        #535 judge revision, ruling (b): the two ports may not differ in
+        the paper's shape for a section Python writes from the same record
+        in both. Named hosts and a citation-free process description are
+        why `policy_leak`, `caveat_once`, and `cited` all exempt this
+        section by name (`_mask_for_policy`, `CAVEAT_EXEMPT_SECTIONS`,
+        `PYTHON_WRITTEN_SECTIONS`), not by an incidental list-line rule.
+        """
+        allowlist_path = self.work_dir / "corpus" / "source_allowlist.json"
+        allowlist: dict = {}
+        if allowlist_path.exists():
+            try:
+                allowlist = json.loads(allowlist_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                allowlist = {}
+        briefing_path = self.work_dir / "corpus" / "scout-briefing.json"
+        briefing: dict = {}
+        if briefing_path.exists():
+            try:
+                briefing = json.loads(briefing_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                briefing = {}
+        # source_allowlist.json is the librarian's own decision; the scout
+        # briefing (the E1 field seed) is the fallback for a run, or a
+        # phase test, that never reached that stage.
+        admitted = list(allowlist.get("admitted") or briefing.get("admitted") or [])
+        dropped = list(allowlist.get("dropped") or briefing.get("dropped") or [])
+        # PR #535 judge revision F4: "fields searched" names the topic's
+        # own research field (biomedical, software, ...), the scout's own
+        # classification and the input to `source_policy.seed_for_field`,
+        # not the outline's section headings.
+        field = str(briefing.get("field") or "").strip()
+        retrieved = len(self.ledger.sources)
+        admitted_sources = len(self.ledger.bibliography())
+        started = (self.state.started_at or "")[:10] or "an unrecorded date"
+
+        lines = [
+            f"This paper searched the {field} field for evidence, starting {started}."
+            if field
+            else f"This paper searched the topic for evidence, starting {started}, "
+            "before a field was classified.",
+            f"Admitted search hosts, decided once before any paid search ran: "
+            f"{', '.join(admitted)}. A host outside this list was not searched, and "
+            "a source from it never reached a claim."
+            if admitted
+            else "Admitted search hosts, decided once before any paid search ran: "
+            "the vendor documentation seed. No topic-specific host was proposed.",
+            f"Sources retrieved during research: {retrieved}. Sources admitted to "
+            "the reference list, after the same host and claim checks every finding "
+            f"in this paper passed: {admitted_sources}.",
+            # PR #535 judge revision F4: "this run spent N", not "of which N
+            # were spent", so the sentence never has to agree a verb with a
+            # count that might be exactly one.
+            f"The verification cap for this run allows a second opinion on up to "
+            f"{self.max_verify} claims. The follow-turn cap allows {self.max_follow} "
+            f"secondary claims a look at their own primary study; this run spent "
+            f"{self.follow_used}. The counter-evidence cap allows {self.max_counter} "
+            f"generalizing claims a search for a contrary finding; this run spent "
+            f"{self.counter_used}.",
+        ]
+        if dropped:
+            reasons = "; ".join(
+                f"{item.get('host')} ({item.get('why')})" for item in dropped[:5] if item.get("host")
+            )
+            lines.append(
+                f"Hosts excluded during admission, with the reason each was dropped: {reasons}."
+                if reasons
+                else "No proposed host was excluded during admission; every host cleared the wall."
+            )
+        else:
+            lines.append(
+                "No proposed host was excluded during admission; every host cleared the wall."
+            )
+        if not any(claim.usable and claim.study for claim in self.ledger.claims.values()):
+            lines.append("No claim in this run carries a recorded human study.")
+        return lines
+
     def stage_assemble(self, extra: str = "") -> StageResult:
         self._need_written()
         # Recover old checkpoints as well as fresh writer replies.  A process
@@ -2705,6 +2814,11 @@ class Paper:
         if normalized != self.written:
             self.written = normalized
             self._save_sections()
+        # #478. Methods never reaches `stage_write` (it names hosts, no
+        # model turn), so it is injected here, right before assembly reads
+        # `self.written`. Recomputed every call: it derives only from
+        # already-persisted run state, so a retry costs nothing to redo.
+        self.written["Methods"] = "\n\n".join(self._methods_lines())
         skipped_figures = self._skipped_figures()
         body = stages.assemble(
             self.plan,
@@ -2958,7 +3072,10 @@ class Paper:
         return [
             heading
             for heading, body in self.written.items()
-            if heading.lower() != "references" and brief.uncited_claims(section_body(body, heading))
+            # Methods is Python-written, never a writer body to revise.
+            # #478
+            if heading.lower() not in ("references", "methods")
+            and brief.uncited_claims(section_body(body, heading))
         ]
 
     # -- 9. publish --------------------------------------------------------

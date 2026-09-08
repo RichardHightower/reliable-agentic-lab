@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import checks
 import diagrams
 import paper
 import pytest
@@ -1044,6 +1045,216 @@ def test_the_abstract_gets_the_same_cleanup_pass_as_a_section(work, turns, no_re
     abstract = body.split("## Abstract", 1)[1].split("##", 1)[0]
     assert f"[{cited['id']}]" not in abstract, "the finding id survived assembly"
     assert "[1]" in abstract
+
+
+# -- P11, methods, conclusion, and the study table --------------------------
+
+
+def test_methods_names_the_admitted_hosts(work, turns, no_renderer):
+    """Methods is Python-written from the run record and names the admitted
+    hosts by design, which is why `policy_leak` exempts it. #478"""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    (Path(work) / "corpus").mkdir(parents=True, exist_ok=True)
+    (Path(work) / "corpus" / "source_allowlist.json").write_text(
+        json.dumps({"admitted": ["docs.example-field.org"], "dropped": []}),
+        encoding="utf-8",
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    methods = body.split("## Methods", 1)[1].split("##", 1)[0]
+    assert "docs.example-field.org" in methods
+    assert not checks.policy_leak_violations(body, ("docs.example-field.org",))
+
+
+def _claim_with_study(claim_id, url, **study_fields):
+    study = {
+        "participants": {"n": study_fields["n"], "population": study_fields["population"]},
+        "duration": study_fields["duration"],
+        "deficit": study_fields["deficit"],
+        "training": study_fields["training"],
+        "assay": study_fields["assay"],
+        "result": study_fields["result"],
+    }
+    return {
+        "id": claim_id,
+        "text": study_fields["result"],
+        "source_url": url,
+        "quote": "",
+        "section": "s1",
+        "status": "verified",
+        "study": study,
+        "evidence_tier": study_fields["tier"],
+    }
+
+
+def _two_study_claims():
+    return [
+        _claim_with_study(
+            "s1-c1",
+            "https://pubmed.ncbi.nlm.nih.gov/one",
+            n=24,
+            population="older men",
+            duration="12 weeks",
+            deficit="500 kcal per day",
+            training=True,
+            assay="DXA",
+            result="preserved lean mass",
+            tier="primary_trial",
+        ),
+        _claim_with_study(
+            "s1-c2",
+            "https://pubmed.ncbi.nlm.nih.gov/two",
+            n=40,
+            population="postmenopausal women",
+            duration="8 weeks",
+            deficit="20 percent caloric restriction",
+            training=False,
+            assay="bioimpedance",
+            result="less lean mass loss",
+            tier="meta_analysis_or_systematic_review",
+        ),
+    ]
+
+
+def test_two_human_study_claims_render_a_two_row_table(work, turns, no_renderer):
+    """The study table is Python from the ledger: one row per human-study
+    claim, reading E3's `study` object and E4's `evidence_tier`. #478"""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    (Path(work) / "claims.json").write_text(
+        json.dumps({"claims": _two_study_claims()}), encoding="utf-8"
+    )
+    # #478, PR #535 judge revision F7: a study row only renders for a claim
+    # some body section's own text actually cites, so the section a real
+    # `write_sections` pass already wrote is given both markers here.
+    (Path(work) / "sections" / "s1.md").write_text(
+        "The trials support the finding. [1][2]\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    table = body.split("## Evidence summary", 1)[1].split("##", 1)[0]
+    rows = [line for line in table.strip().splitlines() if line.strip().startswith("|")]
+    data_rows = rows[2:]
+    assert len(data_rows) == 2, table
+    assert "24 (older men)" in table
+    assert "12 weeks" in table
+    assert "500 kcal per day" in table
+    assert "yes" in table
+    assert "DXA" in table
+    assert "preserved lean mass" in table
+    assert "primary_trial" in table
+    assert "40 (postmenopausal women)" in table
+    assert "meta_analysis_or_systematic_review" in table
+
+
+def test_the_table_sits_after_methods_and_before_the_first_evidence_section(work, turns, no_renderer):
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    (Path(work) / "claims.json").write_text(
+        json.dumps({"claims": _two_study_claims()}), encoding="utf-8"
+    )
+    # #478, PR #535 judge revision F7: a study row only renders for a claim
+    # some body section's own text actually cites, so the section a real
+    # `write_sections` pass already wrote is given both markers here.
+    (Path(work) / "sections" / "s1.md").write_text(
+        "The trials support the finding. [1][2]\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.index("## Methods") < body.index("## Evidence summary") < body.index("## The problem")
+
+
+def test_no_human_study_claim_leaves_a_note_under_methods_and_no_table(work, turns, no_renderer):
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert "## Evidence summary" not in body
+    methods = body.split("## Methods", 1)[1].split("##", 1)[0]
+    assert "No claim in this run carries a recorded human study." in methods
+
+
+def test_methods_prints_the_real_source_count_not_a_claim_count(work, turns, no_renderer):
+    """PR #535 judge revision B3: two claims citing the same source is one
+    admitted reference, not two."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    claims = [
+        {
+            "id": "s1-c1",
+            "text": "A fact.",
+            "source_url": "https://example.invalid/one",
+            "quote": "",
+            "section": "s1",
+            "status": "verified",
+        },
+        {
+            "id": "s1-c2",
+            "text": "A related fact.",
+            "source_url": "https://example.invalid/one",
+            "quote": "",
+            "section": "s1",
+            "status": "verified",
+        },
+    ]
+    (Path(work) / "claims.json").write_text(json.dumps({"claims": claims}), encoding="utf-8")
+    (Path(work) / "sections" / "s1.md").write_text(
+        "Two facts, one source. [1][1]\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    methods = body.split("## Methods", 1)[1].split("##", 1)[0]
+    assert (
+        "Sources admitted to the reference list, after the same host and claim "
+        "checks every finding in this paper passed: 1." in methods
+    ), methods
+
+
+def test_a_conclusion_repeat_is_repaired_and_survives_a_reassemble(work, turns, no_renderer):
+    """PR #535 judge revision B4. `_persist_trim` now stamps
+    `conclusion.json` beside `abstract.json`, so a repeat the whole-paper
+    pass cuts out of the Conclusion does not return on the next
+    `assemble`."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    section_text = (Path(work) / "sections" / "s1.md").read_text()
+    repeat = "A thing is true."
+    assert repeat in section_text, "the fixture claim text changed; pick a real repeat"
+    run.turns.write_conclusion = lambda body, ledger=None: f"{repeat} [1]"
+    paper.write_conclusion(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    repeats = checks.repeat_shingles(checks.top_level_sections(body))
+    assert repeats, "the fixture body must actually repeat, or this test proves nothing"
+
+    fixed = "As stated above, this point also holds here."
+    run.turns.edit_whole_paper = lambda body, repeats, figures=None: body.replace(
+        f"## Conclusion\n\n{repeat} [1]", f"## Conclusion\n\n{fixed} [1]", 1
+    )
+    result = paper.edit_whole_paper(run, repeats)
+    assert result == {"trimmed": True, "reverted": []}
+
+    stamped = json.loads((Path(work) / "conclusion.json").read_text())
+    assert fixed in stamped["conclusion"]
+
+    paper.assemble(run)
+    after = (Path(work) / "paper.md").read_text()
+    conclusion_section = after.split("## Conclusion", 1)[1].split("##", 1)[0]
+    assert repeat not in conclusion_section, "the untrimmed conclusion.json came back"
+    assert fixed in conclusion_section
 
 
 def test_a_stale_section_from_a_previous_plan_is_removed(work, turns, no_renderer):

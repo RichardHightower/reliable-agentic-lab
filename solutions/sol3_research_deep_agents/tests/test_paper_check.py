@@ -7,6 +7,29 @@ import paper_check
 import pytest
 
 URLS = ["https://docs.langchain.com/one", "https://docs.claude.com/two"]
+# #478. Named separately so a test can remove or edit just this block. The
+# concatenation below is byte-identical to the inline text it replaced.
+METHODS_BLOCK = (
+    "## Methods\n\n"
+    "This paper searched the exit conditions field for evidence, starting "
+    "2026-01-01.\n\n"
+    "Admitted search hosts, decided once before any paid search ran: "
+    "docs.langchain.com, docs.claude.com. A host outside this list was not "
+    "searched, and a source from it never reached a claim.\n\n"
+    "Sources retrieved during research: 2. Sources admitted to the reference "
+    "list, after the same host and claim checks every finding in this paper "
+    "passed: 2.\n\n"
+    "The verification cap for this run allows a second opinion on up to 24 "
+    "claims. The follow-turn cap allows 6 secondary claims a look at their own "
+    "primary study; this run spent 0. The counter-evidence cap allows 6 "
+    "generalizing claims a search for a contrary finding; this run spent 0.\n\n"
+    "No proposed host was excluded during admission; every host cleared the wall.\n\n"
+    "No claim in this run carries a recorded human study.\n\n"
+)
+CONCLUSION_BLOCK = (
+    "## Conclusion\n\nThe evidence above supports the three exits, with the runtime scope "
+    "noted as a limit. [1][2]\n\n"
+)
 GOOD = (
     "# Exit conditions\n\n"
     "## Abstract\n\nA loop without an exit spends until someone notices. [1]\n\n"
@@ -14,8 +37,10 @@ GOOD = (
     "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
     "Figure 1. A flowchart of the three exits.\n\n"
     "Figure 1 shows the order. [1]\n\n"
-    "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
-    "## Next step\n\n"
+    + METHODS_BLOCK
+    + "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
+    + CONCLUSION_BLOCK
+    + "## Next step\n\n"
     "- Evaluate the three exits on a live ticket before adopting them.\n"
     "- Run the fixture with --backend fixture, then again with a live backend.\n"
     "- Compare this port against the sibling runtime on the same topic.\n\n"
@@ -1289,3 +1314,223 @@ def test_the_recorded_fixture_paper_passes_abstract_matches_body(run_dir, stub_r
     names = {c.name for c in score.checks}
     assert "abstract_matches_body" in names
     assert score.passed, score.report()
+
+
+# -- P11, methods, conclusion, and the study table --------------------------
+
+
+def test_a_body_without_methods_fails():
+    body = GOOD.replace(METHODS_BLOCK, "")
+    score = gate(body, enforce_structure=True)
+    assert "methods_present" in score.signature(), score.report()
+
+
+def test_a_body_without_conclusion_fails():
+    body = GOOD.replace(CONCLUSION_BLOCK, "")
+    score = gate(body, enforce_structure=True)
+    assert "conclusion_present" in score.signature(), score.report()
+
+
+def test_a_clean_paper_passes_methods_and_conclusion_present():
+    score = gate(GOOD, enforce_structure=True)
+    assert "methods_present" not in score.signature(), score.report()
+    assert "conclusion_present" not in score.signature(), score.report()
+
+
+def _study_ledger_for_check(n=1):
+    led = evidence.Ledger("/nonexistent")
+    claims = []
+    for i in range(n):
+        src = led.add_source(
+            evidence.SourceDocument(
+                title=f"s{i}", url=f"https://pubmed.ncbi.nlm.nih.gov/{i}", subject="s1"
+            )
+        )
+        claims.append(
+            led.add_claim(
+                evidence.Claim(
+                    text=f"study {i}",
+                    subject="s1",
+                    source_ids=[src.id],
+                    study={"participants": {"n": 24}},
+                )
+            )
+        )
+    return led, claims
+
+
+_ONE_ROW_TABLE = (
+    METHODS_BLOCK.rstrip("\n")
+    + "\n\n"
+    + "## Evidence summary\n\n"
+    "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+    "| --- | --- | --- | --- | --- | --- | --- |\n"
+    "| 24 | not reported | not reported | not reported | not reported | "
+    "preserved lean mass [1] | other |\n\n"
+)
+
+
+def test_a_study_table_with_the_wrong_row_count_fails():
+    """`study_table` fires only when the ledger holds a human-study claim,
+    and checks that the table's own row count matches it. #478"""
+    body = GOOD.replace(METHODS_BLOCK, _ONE_ROW_TABLE)
+    led, _claims = _study_ledger_for_check(1)
+    score = gate(body, enforce_structure=True, ledger=led)
+    assert "study_table" not in score.signature(), score.report()
+
+    led2, _claims2 = _study_ledger_for_check(2)
+    understated = gate(body, enforce_structure=True, ledger=led2)
+    assert "study_table" in understated.signature(), understated.report()
+
+
+def test_a_study_table_before_methods_fails():
+    """The table must sit after Methods and before the first evidence
+    section, not merely exist somewhere on the page."""
+    led, _claims = _study_ledger_for_check(1)
+    misplaced = (
+        "# T\n\n"
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+        "## Abstract\n\nA point. [1]\n\n"
+        + METHODS_BLOCK
+        + "## Limitations\n\nA limit. [2]\n\n"
+        "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
+    )
+    score = paper_check.check(
+        misplaced,
+        URLS,
+        ledger=led,
+        enforce_structure=True,
+        outline={"sections": [{"heading": "Limitations"}]},
+    )
+    assert "study_table" in score.signature(), score.report()
+
+
+def test_a_correctly_placed_table_passes_with_a_real_normalized_plan():
+    """PR #535 judge revision B1: `assemble_gate` is handed `outline=self.plan`,
+    and a real `stages.normalize_plan` output always starts with Abstract
+    (`normalize_plan`'s own guarantee, and `outline_gate`'s required set).
+    The position check must still find the real first evidence section,
+    not stop at index 0."""
+    import stages  # noqa: PLC0415
+
+    plan = stages.normalize_plan(
+        {"questions": [], "sections": ["Abstract", "Introduction", "Limitations", "Next step"]}
+    )
+    assert plan["sections"][0]["heading"] == "Abstract"  # the exact trap B1 names
+    led, _claims = _study_ledger_for_check(1)
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+    )
+    body = GOOD.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = paper_check.check(body, URLS, ledger=led, enforce_structure=True, outline=plan)
+    assert "study_table" not in score.signature(), score.report()
+
+
+def test_a_conclusion_with_a_new_citation_fails():
+    """Conclusion is one writer turn from the body, with no new citation.
+    The existing citation rows already reject a reference number that is
+    not in the run's own registry, Conclusion included."""
+    body = GOOD.replace(
+        "The evidence above supports the three exits, with the runtime scope "
+        "noted as a limit. [1][2]",
+        "The evidence above supports the three exits, with the runtime scope "
+        "noted as a limit. [1][2][99]",
+    )
+    score = gate(body, enforce_structure=True)
+    assert "grounded" in score.signature(), score.report()
+
+
+def test_the_heading_order_is_frozen(run_dir, stub_renderer):
+    """Front matter, Abstract, Introduction, Methods, study table, body
+    sections, Conclusion, Next step, Glossary, References. On the assembled
+    recorded fixture: no human-study claim in this topic, so no table."""
+    import re  # noqa: PLC0415
+    from conftest import build_run  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    assert run.run() == 0, "the recorded fixture must still assemble and pass its gate"
+    body = run.paper_path.read_text(encoding="utf-8")
+    order = re.findall(r"^## (.+)$", body, re.M)
+    assert order[0] == "Abstract"
+    assert order[1] == "Introduction"
+    assert order[2] == "Methods"
+    methods_at = order.index("Methods")
+    conclusion_at = order.index("Conclusion")
+    next_step_at = order.index("Next step")
+    references_at = order.index("References")
+    assert methods_at < conclusion_at < next_step_at < references_at
+    assert "Evidence summary" not in order, "no human-study claim in this topic, no table"
+
+
+def test_next_step_still_grades_the_last_prose_heading(run_dir, stub_renderer):
+    """P4's `next_step` row grades the last prose heading before Glossary
+    and References. Inserting Conclusion ahead of it must not make
+    Conclusion read as the paper's own closing section."""
+    import json  # noqa: PLC0415
+    from conftest import build_run  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    assert run.run() == 0
+    body = run.paper_path.read_text(encoding="utf-8")
+    assert paper_check.last_prose_heading(body) == "Next step"
+    gates_report = json.loads((run.work_dir / "gates.json").read_text(encoding="utf-8"))
+    assert "next_step" not in gates_report["failures"]
+
+
+# -- F9, the plan's two cross-lane P11 tests --------------------------------
+
+
+def test_a_tiered_claim_renders_in_the_study_table():
+    """`source_policy.tier_for()` (E4) is the actual source of a study
+    row's Tier column, not a hand-picked string. Plan's cross-lane P11
+    test."""
+    import source_policy  # noqa: PLC0415
+
+    record = {"pubtype": ["Randomized Controlled Trial"]}
+    tier = source_policy.tier_for(record)
+    assert tier == "primary_trial"
+    led, _claims = _study_ledger_for_check(1)
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        f"| 24 | not reported | not reported | not reported | not reported | "
+        f"preserved lean mass [1] | {tier} |\n\n"
+    )
+    body = GOOD.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = gate(body, enforce_structure=True, ledger=led)
+    assert "study_table" not in score.signature(), score.report()
+    assert tier in body
+
+
+def test_a_counterweighed_section_still_passes_the_page_rows():
+    """The E5 counter-evidence pass grades one section; P11's methods,
+    conclusion, and study_table rows grade the whole page. Plan's
+    cross-lane P11 test: neither reads the other's own findings."""
+    import sections  # noqa: PLC0415
+
+    findings = [
+        {
+            "generalizing": True,
+            "counter": "hit",
+            "counterargument_to": "",
+        }
+    ]
+    section_score = sections.section_check(
+        "## Exit conditions\n\nThe mechanism always holds across every deployment. [1]\n",
+        section={"heading": "Exit conditions"},
+        findings=findings,
+    )
+    assert "counterweighed" not in section_score.signature(), section_score.report()
+
+    page_score = gate(GOOD, enforce_structure=True)
+    assert "methods_present" not in page_score.signature(), page_score.report()
+    assert "conclusion_present" not in page_score.signature(), page_score.report()
