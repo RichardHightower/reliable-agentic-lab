@@ -114,3 +114,62 @@ def test_cached_fetch_pays_for_a_url_once_per_work_directory(tmp_path, monkeypat
     metadata.cached_fetch(tmp_path, PUBMED_URL, FixtureBackend(), model_title="Kept")
     metadata.cached_fetch(tmp_path, PUBMED_URL, FixtureBackend(), model_title="Kept")
     assert calls == [PUBMED_URL], calls
+
+
+def test_a_truncated_read_degrades_to_the_model_title(monkeypatch):
+    import http.client
+
+    def _boom(_url):
+        raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setattr(metadata, "_get", _boom)
+    record = metadata.fetch_record(PUBMED_URL, LiveBackend(), model_title="Kept")
+    assert record["title"] == "Kept"
+    assert record["note"]
+
+
+def test_a_list_shaped_reply_degrades_to_the_model_title(monkeypatch):
+    """A provider reply shaped as a list where a dict is expected must not
+    raise `AttributeError` out of `fetch_record`."""
+
+    def fake_get(_url):
+        return b'{"result": [1, 2, 3]}'
+
+    monkeypatch.setattr(metadata, "_get", fake_get)
+    record = metadata.fetch_record(PUBMED_URL, LiveBackend(), model_title="Kept")
+    assert record["title"] == "Kept"
+    assert record["note"]
+
+
+def test_a_file_url_is_refused_and_never_opened(monkeypatch):
+    """The broad `except Exception` in `fetch_record` would also swallow a
+    `_get` call that merely raised, so this counts calls instead: a guard
+    that never ran would still leave this test green if it only checked for
+    a raised exception."""
+    calls = []
+    monkeypatch.setattr(metadata, "_get", lambda url: calls.append(url))
+
+    record = metadata.fetch_record("file:///tmp/probe.html", LiveBackend(), model_title="Kept")
+    assert record["title"] == "Kept"
+    assert "not an http(s) url" in record["note"], record
+    assert calls == [], "the transport must never be touched for a file:// url"
+
+    # The fixture path refuses it too, with no fixture lookup.
+    record = metadata.fetch_record("file:///tmp/probe.html", FixtureBackend(), model_title="Kept")
+    assert record["title"] == "Kept"
+    assert calls == []
+
+
+def test_a_pmc_id_resolves_from_either_host_form(monkeypatch):
+    def fake_get(_url):
+        return (
+            b'{"result": {"7654321": {"title": "A PMC Paper", '
+            b'"authors": [{"name": "A B"}], "pubdate": "2019", '
+            b'"fulljournalname": "PMC Journal"}}}'
+        )
+
+    monkeypatch.setattr(metadata, "_get", fake_get)
+    old_host = metadata.fetch_record("https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7654321/", LiveBackend())
+    new_host = metadata.fetch_record("https://pmc.ncbi.nlm.nih.gov/articles/PMC7654321/", LiveBackend())
+    assert old_host["title"] == "A PMC Paper"
+    assert new_host["title"] == "A PMC Paper"

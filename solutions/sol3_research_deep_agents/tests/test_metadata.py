@@ -100,3 +100,37 @@ def test_an_arxiv_id_and_a_doi_resolve_through_their_apis():
 def test_a_url_with_no_backend_information_keeps_the_model_title():
     record = metadata.fetch_record("", FixtureBackend(), model_title="Untouched")
     assert record["title"] == "Untouched"
+
+
+def test_a_file_url_is_refused_and_never_opened(monkeypatch):
+    """The broad `except Exception` in `fetch_record` would also swallow a
+    `_get` call that merely raised, so this counts calls instead: a guard
+    that never ran would still leave this test green if it only checked for
+    a raised exception."""
+    calls = []
+    monkeypatch.setattr(metadata, "_get", lambda url: calls.append(url))
+
+    record = metadata.fetch_record("file:///tmp/probe.html", LiveBackend(), model_title="Kept")
+    assert record["title"] == "Kept"
+    assert "not an http(s) url" in record["note"], record
+    assert calls == [], "the transport must never be touched for a file:// url"
+
+    # The fixture path refuses it too, with no fixture lookup.
+    record = metadata.fetch_record("file:///tmp/probe.html", FixtureBackend(), model_title="Kept")
+    assert record["title"] == "Kept"
+    assert calls == []
+
+
+def test_a_pmc_id_resolves_from_either_host_form(monkeypatch):
+    def fake_get(_url):
+        return (
+            b'{"result": {"7654321": {"title": "A PMC Paper", '
+            b'"authors": [{"name": "A B"}], "pubdate": "2019", '
+            b'"fulljournalname": "PMC Journal"}}}'
+        )
+
+    monkeypatch.setattr(metadata, "_get", fake_get)
+    old_host = metadata.fetch_record("https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7654321/", LiveBackend())
+    new_host = metadata.fetch_record("https://pmc.ncbi.nlm.nih.gov/articles/PMC7654321/", LiveBackend())
+    assert old_host["title"] == "A PMC Paper"
+    assert new_host["title"] == "A PMC Paper"

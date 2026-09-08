@@ -32,7 +32,9 @@ FIXTURE_DIR = HERE / "fixtures" / "metadata"
 TIMEOUT_S = 10.0
 
 _PUBMED = re.compile(r"pubmed\.ncbi\.nlm\.nih\.gov/(\d+)", re.I)
-_PMC = re.compile(r"ncbi\.nlm\.nih\.gov/pmc/articles/pmc(\d+)", re.I)
+# The old host (ncbi.nlm.nih.gov/pmc/articles/...) and the canonical one PMC
+# moved to (pmc.ncbi.nlm.nih.gov/articles/...) both still resolve.
+_PMC = re.compile(r"(?:ncbi\.nlm\.nih\.gov/pmc/articles|pmc\.ncbi\.nlm\.nih\.gov/articles)/pmc(\d+)", re.I)
 _ARXIV = re.compile(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5})", re.I)
 _DOI = re.compile(r"doi\.org/(10\.[^\s?#]+)", re.I)
 
@@ -191,9 +193,15 @@ def fetch_record(url: str, backend, *, model_title: str = "") -> dict:
     `title_mismatch: ...` message when a fetched title disagrees with
     `model_title` by more than a third of their tokens, or a fetch-failure
     message when the record could not be resolved. Never raises.
+
+    Only an `http://` or `https://` url is ever fetched. A `file://` url read
+    the caller's disk instead of a page; the scheme is checked here too, so no
+    caller can bypass it by skipping its own guard.
     """
     record = {"title": model_title, "authors": [], "year": "", "venue": "", "note": ""}
-    if not url:
+    if not url or not url.lower().startswith(("http://", "https://")):
+        if url:
+            record["note"] = f"metadata fetch: not an http(s) url: {url}"
         return record
     try:
         if _is_fixture(backend):

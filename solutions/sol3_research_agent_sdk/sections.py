@@ -198,8 +198,14 @@ def enrich_source_metadata(findings: list[dict], run) -> None:
     backend = run.turns.backend
     for finding in findings:
         source = finding.get("source") or {}
-        url = source.get("url_or_path") or ""
-        if source.get("kind") != "web" or not url:
+        url = str(source.get("url_or_path") or "")
+        # Not `kind == "web"`: `locate_cabinet_findings` relabels a matched
+        # cabinet source `kind = "corpus"` even once it carries a real public
+        # URL, and that source is just as fetchable as one the researcher
+        # found directly. The scheme is the actual gate: a corpus key or a
+        # `brain:` reference is never `http(s)://`, and `metadata.fetch_record`
+        # refuses anything else anyway, this check only saves the call.
+        if not url.lower().startswith(("http://", "https://")):
             continue
         fetched = metadata.cached_fetch(
             run.work_dir, url, backend, model_title=source.get("title") or ""

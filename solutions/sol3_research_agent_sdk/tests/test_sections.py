@@ -241,6 +241,41 @@ def test_enrich_source_metadata_replaces_the_title_from_the_record(tmp_path, mon
     assert findings[1]["source"]["title"] == "x"
 
 
+def test_enrich_source_metadata_fetches_a_located_corpus_source_with_a_public_url(tmp_path, monkeypatch):
+    """#470 follow-up: `locate_cabinet_findings` relabels a matched cabinet
+    source `kind = "corpus"` even once it carries a real public URL. That
+    source is just as fetchable as one the researcher found directly; the
+    scheme is the real gate, not the `kind` label."""
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        return {"title": "The Record's Actual Title", "authors": [], "year": "", "venue": "", "note": ""}
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    class FakeBackend:
+        name = "perplexity"
+
+    class FakeTurns:
+        backend = FakeBackend()
+
+    class FakeRun:
+        work_dir = tmp_path
+        turns = FakeTurns()
+
+    findings = [
+        {
+            "id": "s1-f1",
+            "source": {
+                "kind": "corpus",
+                "url_or_path": "https://public.example/paper",
+                "title": "The Model's Guess",
+            },
+        }
+    ]
+    sections.enrich_source_metadata(findings, FakeRun())
+    assert findings[0]["source"]["title"] == "The Record's Actual Title"
+
+
 def test_section_check_figures_grades_what_the_writer_was_handed():
     """`diagram` runs after `sections`, so the first pass hands the writer none.
 
