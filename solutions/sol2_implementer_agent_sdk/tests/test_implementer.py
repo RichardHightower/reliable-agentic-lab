@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -65,6 +66,11 @@ state: ready
 
 - (AC-1) greet() returns hello
 """
+
+NEEDS_TASK = pytest.mark.skipif(
+    shutil.which("task") is None,
+    reason="needs the task CLI, absent on the bare CI runner",
+)
 
 REAL_TEST_TASKFILE = """\
 version: '3'
@@ -761,6 +767,7 @@ def test_happy_path_writes_the_three_claim_receipt(tmp_path, monkeypatch):
 # -- A4 (#431). Isolated git worktree -----------------------------------
 
 
+@NEEDS_TASK
 def test_worktree_runs_the_real_suite_and_parses_junit(tmp_path):
     """No monkeypatch: contract.run("test") against a fresh worktree proves
     the .venv bootstrap actually works, because the worktree's own linked
@@ -937,6 +944,7 @@ def test_leftover_worktree_directory_raises_contract_error(tmp_path):
         implementer._worktree(repo, "T001")
 
 
+@NEEDS_TASK
 def test_uncommitted_ticket_and_never_committed_loop_yml_reach_the_worktree(tmp_path):
     """The enhancer's ticket edit is often uncommitted, and a target repo's
     own .loop.yml may never be tracked at all. Both still have to reach the
@@ -1018,6 +1026,7 @@ def test_a_symlink_at_the_worktree_path_is_refused(tmp_path):
     assert (repo / "app" / "untracked.txt").exists()
 
 
+@NEEDS_TASK
 def test_a_symlink_to_another_tickets_worktree_is_refused(tmp_path):
     """Same guard, a different target: the symlink points at a real,
     registered worktree that just is not this ticket's."""
@@ -1056,3 +1065,31 @@ def test_nested_non_git_target_raises_contract_error_and_creates_no_worktree(tmp
         implementer.run(repo=nested, ticket_id="T001", doer=doers.NoneBackend())
 
     assert not any(p.name.endswith(".worktrees") for p in tmp_path.rglob("*") if p.is_dir())
+
+
+def test_worktree_plumbing_without_the_task_binary(tmp_path):
+    """CI's bare `folders` job installs pytest only (no `task` CLI). This is
+    the one test that proves the worktree setup itself -- bootstrap, ticket
+    copy, .loop.yml, Taskfile -- without ever shelling to `task`: a
+    gitignored .venv in the source repo sends _bootstrap down the symlink
+    branch, never the `task setup` fallback, and this must run in CI."""
+    repo = _git_repo(tmp_path / "repo")
+    (repo / ".gitignore").write_text(".venv/\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "gitignore .venv"], cwd=repo, check=True, capture_output=True
+    )
+    (repo / ".venv").mkdir()
+    (repo / ".venv" / "marker.txt").write_text("fake venv\n", encoding="utf-8")
+
+    worktree = implementer._worktree(repo, "T001")
+
+    assert (worktree / ".venv").is_symlink()
+    assert (worktree / ".venv" / "marker.txt").read_text(encoding="utf-8") == "fake venv\n"
+    assert (worktree / "tickets" / "T001.md").read_text(encoding="utf-8") == TICKET
+    assert (worktree / ".loop.yml").read_text(encoding="utf-8") == LOOP_YML
+    assert (worktree / "Taskfile.yml").read_text(encoding="utf-8") == TASKFILE
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=repo, text=True, capture_output=True, check=True
+    )
+    assert status.stdout == ""
