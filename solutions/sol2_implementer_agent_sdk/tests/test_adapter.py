@@ -7,7 +7,9 @@ import subprocess
 from pathlib import Path
 
 import adapter
+import contract as contract_mod
 import harness
+import implementer
 import pytest
 import steps
 from conftest import FakeResultMessage
@@ -309,8 +311,46 @@ def test_planner_sdk_with_doer_sdk_invokes_the_planner_graph(fake_sdk, contract,
     `implementer-planner`."""
     module = fake_sdk([FakeResultMessage(result='{"ok": true}')])
 
-    backend = harness.backend(contract)
+    backend = harness.backend(contract, "T001")
     result = backend.plan(repo=repo, prompt="write the plan")
 
     assert result.ok
     assert list(module.last_options.agents) == ["implementer-planner"]
+
+
+# -- #543: the live doer works where implementer.run reads its writes back --
+
+
+def test_a_live_backends_write_lands_in_the_worktree_not_the_clone(tmp_path, fake_sdk):
+    """#543. `implementer.run` executes every phase in `<repo>.worktrees/<ticket>`.
+    `harness.backend` used to build `ClaudeAgentOptions(cwd=...)` and the
+    scope hook rooted at the `--repo` clone instead, so a live doer's writes
+    landed where the red gate never looks, and the run reported "wrote
+    nothing" for work it actually did."""
+    clone_root = tmp_path / "clone"
+    clone_root.mkdir()
+    clone = git_repo(clone_root)
+    worktree = implementer._worktree_path(clone, "T001")
+    worktree.mkdir(parents=True)
+    git_repo(worktree)  # a plain repo stands in for what `_worktree` itself
+    # would have checked out from the clone's HEAD; this test is only about
+    # where a write lands, not about worktree creation, which is tested
+    # elsewhere.
+
+    module = fake_sdk()
+
+    async def query(*, prompt, options):
+        target = Path(options.cwd) / "tests" / "test_due.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("def test_due(): assert False\n", encoding="utf-8")
+        yield FakeResultMessage(result="wrote a test", total_cost_usd=0.01)
+
+    module.query = query
+    contract_obj = contract_mod.Contract(clone)
+    backend_obj = harness.backend(contract_obj, "T001")
+
+    result = backend_obj.run(repo=worktree, prompt="write a test", allow=["tests/**"])
+
+    assert result.wrote == ["tests/test_due.py"]
+    assert (worktree / "tests" / "test_due.py").exists()
+    assert not (clone / "tests" / "test_due.py").exists()
