@@ -95,15 +95,24 @@ def main(argv: list[str] | None = None) -> int:
     doer = args.doer
     if doer == "deep":
         doer = backend(contract)
-    trace = implementer.run(
-        repo=args.repo, ticket_id=args.ticket, doer=doer, budget=args.budget, cleanup=args.cleanup
-    )
+    try:
+        trace = implementer.run(
+            repo=args.repo,
+            ticket_id=args.ticket,
+            doer=doer,
+            budget=args.budget,
+            cleanup=args.cleanup,
+        )
+    except ContractError as exc:
+        print(f"error: {exc}")
+        return 1
+
     print(trace.get("rubric", ""))
     print()
     print(f"gate: {trace['gate']}")
     print(f"reason: {trace['reason']}")
     implementer._print_worktree_status(trace)
-    return 0 if trace["gate"] == "pass" else 1
+    return 0 if trace["gate"] == "pass" else 2
 
 
 if __name__ == "__main__":

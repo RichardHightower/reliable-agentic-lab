@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -1126,3 +1127,150 @@ def test_worktree_plumbing_without_the_task_binary(tmp_path):
         ["git", "status", "--porcelain"], cwd=repo, text=True, capture_output=True, check=True
     )
     assert status.stdout == ""
+
+
+# -- A5 (#432 #434). state.json and exit codes 0, 2, 1 --------------------
+
+
+def test_state_json_has_five_keys_and_runs_increments(tmp_path, monkeypatch):
+    """Fields the Module 4 slides already name. `runs` accumulates across two
+    runs of the same ticket, which reuse the same worktree."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+
+    first = implementer.run(repo=repo, ticket_id="T001", doer=doers.NoneBackend(), budget=1)
+    state_path = Path(first["repo"]) / ".harness" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert set(state) == {"runs", "last_gate", "last_reason", "last_run_at", "loop"}
+    assert state["runs"] == 1
+    assert state["last_gate"] == "escalate"
+    assert state["loop"] == "implementer"
+
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+    implementer.run(repo=repo, ticket_id="T001", doer=doers.NoneBackend(), budget=1)
+    state2 = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state2["runs"] == 2
+
+
+def test_corrupt_state_json_exits_before_any_work(tmp_path, monkeypatch):
+    """#432. A truncated state.json is never a fresh start: it raises before
+    the baseline test runs, and the backend is never called."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+    first = implementer.run(repo=repo, ticket_id="T001", doer=doers.NoneBackend(), budget=1)
+    state_path = Path(first["repo"]) / ".harness" / "state.json"
+    state_path.write_text('{"runs": 1, "last_g', encoding="utf-8")
+
+    def _no_baseline(self, task: str, timeout: int = 900) -> RunResult:
+        # Bootstrap's own `task setup` call (implementer.py's `_bootstrap`)
+        # still has to succeed; only the baseline `task test` is forbidden.
+        if task == "test":
+            raise AssertionError("no baseline test run may happen once state.json is corrupt")
+        return RunResult(task=task, exit_code=0, output="", junit=SuiteReport(), coverage=CoverageReport())
+
+    monkeypatch.setattr(contract_mod.Contract, "run", _no_baseline)
+    monkeypatch.setattr(implementer.Contract, "run", _no_baseline)
+    backend = ScriptedBackend([])
+
+    with pytest.raises(implementer.ContractError, match="corrupt"):
+        implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1)
+
+    assert backend.calls == 0
+
+
+def test_doer_none_on_t001_exits_2_with_red_gate_reason(tmp_path, monkeypatch, capsys):
+    """#434, offline verification. --doer none writes nothing, so the red
+    gate never sees a new failing test and the run escalates."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+
+    exit_code = implementer.main(
+        ["--repo", str(repo), "--ticket", "T001", "--doer", "none", "--budget", "1"]
+    )
+
+    assert exit_code == 2
+    out = capsys.readouterr().out
+    assert "gate: escalate" in out
+    assert "red gate: no new test was observed failing" in out
+
+
+def test_doer_reference_happy_path_exits_0(tmp_path, monkeypatch, capsys):
+    """#434. --doer reference is the classroom demo, no model and no key. A
+    clean run of it passes the rubric and exits 0."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    (repo / "tests" / "test_greet.py").write_text(
+        "def test_ac1():\n    assert False\n", encoding="utf-8"
+    )
+    (repo / "app" / "greet.py").write_text(
+        "def greet():\n    return 'hello'\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "tests/test_greet.py", "app/greet.py"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "known good answer"], cwd=repo, check=True, capture_output=True
+    )
+    subprocess.run(["git", "branch", "known-good"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "reset", "--hard", "HEAD~1"], cwd=repo, check=True, capture_output=True
+    )
+
+    exit_code = implementer.main(
+        ["--repo", str(repo), "--ticket", "T001", "--doer", "reference", "--budget", "1"]
+    )
+
+    assert exit_code == 0
+    assert "gate: pass" in capsys.readouterr().out
+
+
+def test_contract_error_exits_1_with_one_line_and_no_traceback(tmp_path, capsys):
+    """#434. A ContractError -- here, a non-git target from A4 -- prints one
+    line and returns 1. It must never surface as a traceback."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "Taskfile.yml").write_text(TASKFILE, encoding="utf-8")
+    (plain / ".loop.yml").write_text(LOOP_YML, encoding="utf-8")
+    (plain / "tickets").mkdir()
+
+    exit_code = implementer.main(["--repo", str(plain), "--ticket", "T001", "--doer", "none"])
+
+    assert exit_code == 1
+    out = capsys.readouterr().out.strip()
+    assert out.count("\n") == 0
+    assert "not a git repository" in out
+
+
+def test_test_phase_money_exhaustion_keeps_the_money_reason(tmp_path, monkeypatch):
+    """Folded finding, judge of PR #490. `gates.decide` can name the money
+    budget from inside the test-phase retry loop too. The `else` branch used
+    to overwrite that reason with the red-gate wording; it must not."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+
+    class BrokeBackend(ScriptedBackend):
+        def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+            result = super().run(repo=repo, prompt=prompt, allow=allow)
+            result.usd = 2.0  # LOOP_YML's whole budget, spent on the first turn
+            return result
+
+    backend = BrokeBackend([])
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=3, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert trace["reason"] == "the money budget is spent"
+    assert backend.calls == 1
+    state_path = Path(trace["repo"]) / ".harness" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["last_reason"] == "the money budget is spent"
