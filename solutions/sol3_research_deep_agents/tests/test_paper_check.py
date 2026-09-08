@@ -1041,6 +1041,35 @@ def test_an_unhedged_single_source_abstract_fails():
     assert "halts before a person notices" in row.detail
 
 
+def test_a_number_shared_by_a_corroborated_claim_is_not_forced_to_hedge():
+    """Two claims can share one reference number. A single-source claim on
+    it must not force a hedge onto a sentence citing the other, corroborated
+    claim on the same number."""
+    ledger = evidence.Ledger("/nonexistent")
+    src = ledger.add_source(evidence.SourceDocument(title="One", url="https://a", subject="exits"))
+    src2 = ledger.add_source(evidence.SourceDocument(title="Two", url="https://b", subject="exits"))
+    single_claim = ledger.add_claim(
+        evidence.Claim(text="The loop halts before a person notices", subject="exits", source_ids=[src.id])
+    )
+    evidence.corroborate(single_claim)
+    corroborated_claim = ledger.add_claim(
+        evidence.Claim(
+            text="A checker catches errors the maker cannot",
+            subject="exits",
+            source_ids=[src.id, src2.id],
+        )
+    )
+    evidence.corroborate(corroborated_claim)
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices. [1]\n\n"
+        "## Introduction\n\nThe loop halts before a person notices. [1]\n\n"
+        "## References\n\n1. https://a\n2. https://b\n"
+    )
+    score = gate(body, urls=["https://a", "https://b"], ledger=ledger)
+    assert "abstract_matches_body" not in score.signature(), score.report()
+
+
 def test_an_abstract_number_absent_from_the_body_fails():
     """A citation the abstract uses, and no other section does, fails."""
     body = (
@@ -1067,6 +1096,18 @@ def test_an_overclaim_in_the_abstract_fails():
     assert "abstract_matches_body" in score.signature(), score.report()
 
 
+def test_improves_is_not_an_overclaim():
+    """`ABSTRACT_OVERCLAIM` matches whole words: `improves` is not `proves`."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nCreatine improves lean mass. [1]\n\n"
+        "## Introduction\n\nCreatine improves lean mass, on a single source. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = gate(body, urls=["https://a"])
+    assert "abstract_matches_body" not in score.signature(), score.report()
+
+
 def test_the_introduction_first_paragraph_is_graded_too():
     """The same row runs on the introduction's first paragraph, not only the
     abstract."""
@@ -1084,10 +1125,14 @@ def test_the_introduction_first_paragraph_is_graded_too():
 
 def test_a_body_with_no_abstract_heading_is_inert():
     """The row runs on every check, and a snippet another row's test built
-    has no `## Abstract` heading and nothing to grade."""
+    has no `## Abstract` heading and nothing to grade. `signature()` only
+    ever lists failing rows, so absence there is not proof the row ran;
+    check the row itself, on a body that would fail the overclaim rule if
+    it were graded."""
     body = "# Title\n\n## Introduction\n\nThis paper proves nothing yet. [1]\n\n## References\n\n1. https://a\n"
     score = gate(body, urls=["https://a"])
-    assert "abstract_matches_body" not in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert row.passed, row.detail
 
 
 def test_the_reviewer_card_carries_the_abstract_row():
@@ -1113,5 +1158,4 @@ def test_the_recorded_fixture_paper_passes_abstract_matches_body(run_dir, stub_r
     )
     names = {c.name for c in score.checks}
     assert "abstract_matches_body" in names
-    assert score.passed, score.report()
     assert score.passed, score.report()

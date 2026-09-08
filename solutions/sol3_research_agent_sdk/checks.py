@@ -935,7 +935,7 @@ def question_headings(body: str, outline: dict | None) -> list[str]:
 # must also appear in the body: the abstract restates the body, so a claim
 # only the abstract makes was never checked against the body it summarizes.
 ABSTRACT_HEDGE = re.compile(r"single|one study|one trial|preliminary", re.I)
-ABSTRACT_OVERCLAIM = re.compile(r"proves|definitively|conclusively|establishes that", re.I)
+ABSTRACT_OVERCLAIM = re.compile(r"\b(?:proves|definitively|conclusively|establishes that)\b", re.I)
 _MARKER_ONLY = re.compile(r"^(?:\[\d+\]\s*)+$")
 
 
@@ -965,31 +965,39 @@ def _first_paragraph(text: str) -> str:
 
 
 def _single_source_numbers(claims: list[dict] | None) -> set[int]:
-    """Reference numbers backed by exactly one source.
+    """Reference numbers backed by exactly one source, decided per claim.
 
     This port has no formal corroboration count yet (#471, #473 land it). A
     claim the independent verifier confirmed from a second, distinct URL is
     treated as not single source; every other numbered claim is, because
-    nothing else in this port's ledger distinguishes them.
+    nothing else in this port's ledger distinguishes them. Two claims can
+    share one number: flagging it whenever any claim on it is single-source
+    forced a hedge onto a sentence citing the other, corroborated claim.
+    A number counts as single-source only when every claim on it does.
     """
-    numbers: set[int] = set()
+    by_number: dict[int, list[bool]] = {}
     for claim in claims or []:
         number = claim.get("number")
         if not number:
             continue
         source = str(claim.get("source_url") or "").strip()
         verifier = str(claim.get("verifier_url") or "").strip()
-        if not verifier or verifier == source:
-            numbers.add(int(number))
-    return numbers
+        single = not verifier or verifier == source
+        by_number.setdefault(int(number), []).append(single)
+    return {number for number, flags in by_number.items() if all(flags)}
 
 
 def abstract_matches_body(body: str, claims: list[dict] | None = None) -> list[str]:
     """The abstract, and the introduction's first paragraph, state only what
     the body states.
 
-    Inert with no `## Abstract` heading: nothing to grade. Otherwise
-    unconditional, because a clean excerpt passes every rule by construction.
+    Inert with no `## Abstract` heading: nothing to grade. Otherwise the row
+    itself is unconditional: it always runs, and the overclaim and
+    number-in-body rules need no claim data. The hedge rule alone needs
+    `claims` to know which numbers are single-source; `paper.check` passes
+    the run's claims on every call, so that rule runs live in production
+    too, not only when a caller happens to supply the list.
+
     Every graded sentence citing a single-source claim carries a hedge word,
     and a fixed overclaim phrase never appears. The abstract carries one more
     rule the introduction does not: a number it cites must appear in the

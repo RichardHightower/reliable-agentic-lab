@@ -786,6 +786,25 @@ def test_assemble_prefers_the_written_abstract_over_the_thesis_line(work, turns,
     assert "An abstract." not in body
 
 
+def test_the_abstract_gets_the_same_cleanup_pass_as_a_section(work, turns, no_renderer):
+    """A finding-id marker in the abstract resolves to its reference number,
+    the same way `_resolve_markers` already treats a section body: the
+    abstract runs through the same cleanup, not a verbatim insert."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    cited = next(c for c in claims if c.get("source_url"))
+    run.turns.write_abstract = lambda body, ledger=None: f"The result holds [{cited['id']}]."
+    paper.write_abstract(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    abstract = body.split("## Abstract", 1)[1].split("##", 1)[0]
+    assert f"[{cited['id']}]" not in abstract, "the finding id survived assembly"
+    assert "[1]" in abstract
+
+
 def test_a_stale_section_from_a_previous_plan_is_removed(work, turns, no_renderer):
     run = make_run(work, turns())
     paper.prior_art(run)

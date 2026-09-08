@@ -1540,15 +1540,25 @@ def assemble(run: Run) -> dict:
     numbers = {c["id"]: c["number"] for c in usable if c.get("id") and c.get("number")}
 
     parts = [f"# {planned['title']}", ""]
-    # P7, #472. `write_abstract` writes this from the assembled body, after
-    # every section, so it is preferred over the outline's own thesis line,
-    # which was written before any section existed.
-    abstract_text = _written_abstract(run) or planned.get("abstract") or planned.get("thesis") or ""
-    if abstract_text:
-        parts += ["## Abstract", "", abstract_text.strip(), ""]
     flags: list[dict] = []
     glossary: dict[str, str] = {}
     used_diagrams: set[str] = set()
+    # P7, #472. `write_abstract` writes this from the assembled body, after
+    # every section, so it is preferred over the outline's own thesis line,
+    # which was written before any section existed. It is not a section
+    # file, but it is model output, so it gets the same cleanup pass every
+    # section gets: a stray heading dropped, a flag and a TERM marker taken,
+    # and a finding-id marker resolved to its reference number.
+    abstract_text = _written_abstract(run) or planned.get("abstract") or planned.get("thesis") or ""
+    if abstract_text:
+        abstract_text = checks.drop_owned_headings(abstract_text)
+        abstract_text, found = checks.take_flags(abstract_text)
+        flags += [{"section": "abstract", "flag": flag} for flag in found]
+        abstract_text, term_hits = checks.take_terms(abstract_text)
+        for term, definition in term_hits:
+            glossary.setdefault(term, definition)
+        abstract_text = _resolve_markers(abstract_text, numbers)
+        parts += ["## Abstract", "", abstract_text.strip(), ""]
     for section in planned["sections"]:
         path = run.file("sections") / f"{section['id']}.md"
         if not path.exists():
@@ -1786,7 +1796,10 @@ def check(run: Run) -> dict:
         min_section_words=checks.MIN_SECTION_WORDS if run.enforce_research_policy else 0,
         ledger=_ledger(run) if run.enforce_research_policy else None,
         gaps=_coverage_gaps(run) if run.enforce_research_policy else None,
-        claims=claims if run.enforce_research_policy else None,
+        # abstract_matches_body is unconditional and needs claims to grade its
+        # hedge rule; every other claims-gated row already tolerates a claims
+        # list outside enforce_research_policy, so this is not new exposure.
+        claims=claims,
         charts=_rendered_charts(run),
         diagrams=_rendered_diagrams(run),
     )

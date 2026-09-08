@@ -916,7 +916,7 @@ def contradicted_in_body(body: str, ledger: evidence.Ledger | None) -> list[str]
 # first paragraph by citation number instead, because that is where a reader
 # meets the paper's claim before meeting its evidence.
 ABSTRACT_HEDGE = re.compile(r"single|one study|one trial|preliminary", re.I)
-ABSTRACT_OVERCLAIM = re.compile(r"proves|definitively|conclusively|establishes that", re.I)
+ABSTRACT_OVERCLAIM = re.compile(r"\b(?:proves|definitively|conclusively|establishes that)\b", re.I)
 ABSTRACT_MARKER = re.compile(r"\[(\d+)\]")
 
 
@@ -949,32 +949,36 @@ def _cited_sentences(text: str) -> list[str]:
 
 
 def _single_source_numbers(body: str, ledger: evidence.Ledger | None) -> set[int]:
-    """Reference numbers backed by exactly one source.
+    """Reference numbers backed by exactly one source, decided per claim.
 
-    `stages.numbering` already does this from the ledger, but `stages.py`
-    imports this module, so calling back would be a cycle. The rendered
-    reference list already carries the same number-to-url mapping, so this
-    reads it from `body` instead.
+    `stages.numbering` already maps url to number from the ledger, but
+    `stages.py` imports this module, so calling back would be a cycle. The
+    rendered reference list already carries the same mapping, so this reads
+    it from `body` instead.
+
+    A url can back more than one claim: one single-source, one corroborated
+    by a second url. Flagging the number whenever any claim on that url is
+    single-source forced a hedge onto a sentence citing the corroborated
+    claim too. A number counts as single-source only when every claim
+    citing its url is.
     """
     if ledger is None:
         return set()
-    single_urls = set()
+    claims_by_url: dict[str, list[evidence.Claim]] = {}
     for claim in ledger.claims.values():
-        if claim.truth_state != evidence.SINGLE_SOURCE:
-            continue
         for source_id in claim.source_ids:
             source = ledger.sources.get(source_id)
             if source is not None:
-                single_urls.add(source.url)
-    if not single_urls:
-        return set()
+                claims_by_url.setdefault(source.url, []).append(claim)
     numbers = set()
     for row in reference_rows(body):
         match = re.match(r"\[(\d+)\]\s*(.*)", row)
         if not match:
             continue
         urls = URL.findall(match.group(2))
-        if urls and urls[0].rstrip(".,;") in single_urls:
+        url = urls[0].rstrip(".,;") if urls else ""
+        claims = claims_by_url.get(url)
+        if claims and all(c.truth_state == evidence.SINGLE_SOURCE for c in claims):
             numbers.add(int(match.group(1)))
     return numbers
 
