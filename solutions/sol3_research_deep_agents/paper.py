@@ -56,6 +56,34 @@ OUTLINE_JUDGE_ROUNDS = int(os.environ.get("SOL3_OUTLINE_JUDGE_ROUNDS", "14"))
 
 DONE, COST, MAX_TURNS = "done", "cost", "max turns"
 
+# Backoff before a retried model call, in seconds. A module-level `_sleep`
+# (rather than `time.sleep` inline) is what lets a test replace the wait with
+# a no-op instead of actually pausing three times.
+RETRY_WAITS_S: tuple[float, ...] = (5.0, 15.0, 45.0)
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _transient_provider_errors() -> tuple[type[BaseException], ...]:
+    """Exception classes for a dropped connection or a rate limit.
+
+    Imported lazily, the same way `roles.py` imports `langchain_anthropic`:
+    the fixture runner needs neither package installed, and importing here
+    keeps a missing SDK from failing at module load. `anthropic.APIConnectionError`
+    and `anthropic.RateLimitError` are the base classes LangChain's Anthropic
+    wrapper (`AnthropicConnectionError`, `AnthropicTimeoutError`,
+    `AnthropicRateLimitError`) subclasses, so catching the two bases catches
+    the wrapped forms too. A gate failure, `BudgetSpent`, and a schema error
+    are never in this tuple.
+    """
+    try:
+        import anthropic  # noqa: PLC0415
+    except ImportError:
+        return ()
+    return (anthropic.APIConnectionError, anthropic.RateLimitError)
+
 
 def _section_word_range(heading: str, claim_count: int) -> str:
     """How long a section should be. The Saturday brief is already short."""
@@ -551,16 +579,33 @@ class Paper:
                 f"of the ${self.max_usd:.2f} cap"
             )
         started = time.monotonic()
+        transient_errors = _transient_provider_errors()
+        retries = 0
         with _heartbeat(role, self.state.current_stage, started, self.quiet):
-            reply = self.runner.ask(role, prompt)
+            while True:
+                try:
+                    reply = self.runner.ask(role, prompt)
+                    break
+                except transient_errors as exc:
+                    if retries >= len(RETRY_WAITS_S):
+                        raise
+                    wait = RETRY_WAITS_S[retries]
+                    retries += 1
+                    self.say(
+                        f"  {role:<10} transient error, retry {retries}/{len(RETRY_WAITS_S)} "
+                        f"after {wait:.0f}s: {exc}"
+                    )
+                    _sleep(wait)
         elapsed = time.monotonic() - started
 
         self.state.spend(reply.usd)
         self._worst[role] = max(self._worst.get(role, 0.0), reply.usd)
-        self._record_turn(role, reply, elapsed, len(prompt))
+        self._record_turn(role, reply, elapsed, len(prompt), retries=retries)
         return reply
 
-    def _record_turn(self, role: str, reply: Reply, elapsed: float, prompt_chars: int) -> None:
+    def _record_turn(
+        self, role: str, reply: Reply, elapsed: float, prompt_chars: int, *, retries: int = 0
+    ) -> None:
         """Checkpoint one call: the state file and the append-only turn log.
 
         Saving on the stage boundary was not enough. A stage that makes six
@@ -579,6 +624,7 @@ class Paper:
             "total_usd": round(self.state.total_cost_usd, 6),
             "input_tokens": reply.input_tokens,
             "output_tokens": reply.output_tokens,
+            "retries": retries,
         }
         self.state.current_role = role
         self.state.last_turn = row

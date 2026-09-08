@@ -1488,3 +1488,147 @@ def test_the_locator_turn_runs_under_a_one_call_ceiling_that_is_always_lifted(
         1 for event in budget.events if event[0] == "end"
     )
     assert budget.inner._tool_limit is None, "the ceiling outlived the turn"
+
+
+# -- a transient provider error at the model-call boundary (#409) ----------
+
+
+class TransientThenFixture(paper.FixtureRunner):
+    """Fails one role's first N calls with a transient error, then answers
+    from the recorded fixture as usual."""
+
+    def __init__(self, path, role, make_error, fail_times):
+        super().__init__(path)
+        self.role = role
+        self.make_error = make_error
+        self.fail_times = fail_times
+        self.failed = 0
+
+    def ask(self, role, prompt):
+        if role == self.role and self.failed < self.fail_times:
+            self.failed += 1
+            raise self.make_error()
+        return super().ask(role, prompt)
+
+
+def _connection_error():
+    import anthropic  # noqa: PLC0415
+    import httpx2  # noqa: PLC0415
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.APIConnectionError(request=request)
+
+
+def _rate_limit_error():
+    import anthropic  # noqa: PLC0415
+    import httpx2  # noqa: PLC0415
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(
+        429,
+        request=request,
+        json={"error": {"type": "rate_limit_error", "message": "slow down"}},
+    )
+    return anthropic.RateLimitError(
+        "slow down", response=response, body={"error": {"type": "rate_limit_error"}}
+    )
+
+
+def test_a_transient_error_twice_then_an_answer_completes_the_turn(
+    run_dir, stub_renderer, monkeypatch, capsys
+):
+    """#409: two dropped connections, then a normal reply. Both retries are
+    logged, the turn row carries them, the budget is charged once, and the
+    stage attempt count stays at one."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    waits: list[float] = []
+    monkeypatch.setattr(paper, "_sleep", waits.append)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _connection_error, 2)
+    run = build_run(run_dir, runner=runner)
+    run.quiet = False
+
+    assert run.run() == 0
+    assert waits == [5.0, 15.0]
+
+    log = capsys.readouterr().out
+    assert log.count("retry 1/3") == 1
+    assert log.count("retry 2/3") == 1
+
+    rows = [
+        json.loads(line)
+        for line in (Path(run_dir) / ".harness" / "turns.jsonl").read_text().splitlines()
+    ]
+    planner_rows = [row for row in rows if row["role"] == "planner"]
+    assert len(planner_rows) == 1, "the budget is charged once, not once per attempt"
+    assert planner_rows[0]["retries"] == 2
+
+    assert run.state.attempts("plan") == 1, "a retry must not spend a stage attempt"
+
+
+def test_a_transient_error_four_times_raises_the_original_exception(
+    run_dir, stub_renderer, monkeypatch
+):
+    """#409: a fourth failure is not swallowed. The exception escapes."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+    import anthropic  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _connection_error, 4)
+    run = build_run(run_dir, runner=runner)
+
+    with pytest.raises(anthropic.APIConnectionError):
+        run.run()
+    assert runner.failed == 4, "every attempt must actually have been made"
+
+
+def test_a_rate_limit_error_is_also_retried(run_dir, stub_renderer, monkeypatch):
+    """The ticket names two transient shapes. Both take the same path."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _rate_limit_error, 1)
+    run = build_run(run_dir, runner=runner)
+
+    assert run.run() == 0
+    assert run.state.attempts("plan") == 1
+
+
+def test_a_non_transient_error_is_not_retried(run_dir, stub_renderer, monkeypatch):
+    """A gate failure, a budget failure, or a plain bug is not a dropped
+    connection. It must escape the first time, with no backoff sleep."""
+    waited: list[float] = []
+    monkeypatch.setattr(paper, "_sleep", waited.append)
+
+    class Runner(paper.FixtureRunner):
+        def ask(self, role, prompt):
+            if role == "planner":
+                raise ValueError("not a transient error")
+            return super().ask(role, prompt)
+
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    run = build_run(run_dir, runner=Runner(FIXTURES / "replies.json"))
+    with pytest.raises(ValueError):
+        run._ask("planner", "prompt")
+    assert waited == [], "a non-transient error must not sleep or retry"
+
+
+def test_the_backoff_sequence_is_five_fifteen_forty_five(run_dir, stub_renderer, monkeypatch):
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    waits: list[float] = []
+    monkeypatch.setattr(paper, "_sleep", waits.append)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _connection_error, 3)
+    run = build_run(run_dir, runner=runner)
+    run._ask("planner", "Write plan.json for this topic.")
+
+    assert waits == [5.0, 15.0, 45.0]

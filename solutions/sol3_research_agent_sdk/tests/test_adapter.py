@@ -221,3 +221,187 @@ def test_a_missing_cost_field_is_not_a_free_turn(fake_sdk, work):
     reported = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
     assert reported.cost_reported is True
     assert reported.usd == 0.0
+
+
+# -- a transient provider error at the model-call boundary (#409) -----------
+
+
+def test_a_transient_connection_error_twice_then_an_answer_completes_the_turn(
+    fake_sdk, work, monkeypatch
+):
+    """A dropped CLI connection twice, then a normal reply. Both retries are
+    logged and the turn carries their count."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise module.CLIConnectionError("dropped")
+        yield FakeResultMessage(result="the answer", total_cost_usd=0.10)
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.output == "the answer"
+    assert result.retries == 2
+    assert waits == [5.0, 15.0]
+    assert calls["n"] == 3
+
+
+def test_each_retry_is_logged_with_its_wait(fake_sdk, work, monkeypatch, capsys):
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise module.CLIConnectionError("dropped")
+        yield FakeResultMessage(result="ok")
+
+    module.query = query
+    monkeypatch.setattr(adapter, "_sleep", lambda seconds: None)
+
+    adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[], role="writer")
+    err = capsys.readouterr().err
+    assert "role=writer" in err
+    assert "retry 1/3" in err and "after 5s" in err
+    assert "retry 2/3" in err and "after 15s" in err
+
+
+def test_the_backoff_sequence_is_five_fifteen_forty_five(fake_sdk, work, monkeypatch):
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise module.CLIConnectionError("dropped")
+        yield FakeResultMessage(result="ok", total_cost_usd=0.01)
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    assert result.ok
+    assert result.retries == 3
+    assert waits == [5.0, 15.0, 45.0]
+
+
+def test_a_transient_error_four_times_ends_the_turn_gracefully(fake_sdk, work, monkeypatch):
+    """A fourth failure is not retried a fourth time. It is not silently
+    dropped either: it surfaces as this port's ordinary graceful turn
+    failure (the same path any other backend exception already takes), which
+    the caller retries at the unit level, not by resending the same request."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise module.CLIConnectionError("dropped")
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert "dropped" in result.output
+    assert calls["n"] == 4, "every attempt must actually have been made"
+    assert waits == [5.0, 15.0, 45.0]
+
+
+def test_a_plain_bug_is_not_retried(fake_sdk, work, monkeypatch):
+    """A non-transient exception must escape on the first raise, with no
+    backoff sleep, the same way a gate failure would."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise ValueError("not a transient error")
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert calls["n"] == 1, "a non-transient error must not be retried"
+    assert waits == []
+
+
+def test_a_missing_cli_is_not_retried(fake_sdk, work, monkeypatch):
+    """`CLINotFoundError` is a `CLIConnectionError`, but a permanent one: no
+    installed binary is not fixed by resending the same request."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise module.CLINotFoundError("not found")
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert calls["n"] == 1
+    assert waits == []
+
+
+def test_a_max_turns_result_error_is_not_retried(fake_sdk, work, monkeypatch):
+    """A `ResultError` for `error_max_turns` is a legitimate stop, not a
+    dropped connection or a rate limit."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise module.ResultError("too many turns", terminal_reason="error_max_turns")
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert calls["n"] == 1
+    assert waits == []
+
+
+def test_an_api_error_result_is_retried(fake_sdk, work, monkeypatch):
+    """A `ResultError` for `api_error` is the CLI reporting a live provider
+    failure (overloaded, rate limited, or a dropped connection) mid-run."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise module.ResultError("rate limited", terminal_reason="api_error")
+        yield FakeResultMessage(result="ok")
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.retries == 1
+    assert waits == [5.0]

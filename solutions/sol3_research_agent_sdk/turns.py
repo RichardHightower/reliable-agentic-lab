@@ -346,6 +346,7 @@ class SdkTurns(Turns):
                 output_tokens=getattr(result, "output_tokens", 0),
                 stop_reason=result.stop_reason,
                 ok=result.ok,
+                retries=getattr(result, "retries", 0),
             )
         # A runtime ceiling is not a failed turn. Retrying it spends the rest of
         # the budget rediscovering the same ceiling.
