@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import diagrams
+import evidence
 import pytest
 
 SIMPLE = 'flowchart LR\n  A["Plan"] --> B["Search"]\n  B --> C{"Grounded?"}\n'
@@ -354,6 +355,10 @@ def test_matching_accepted_hash_reuses_the_plugin_png(monkeypatch, tmp_path):
 # -- #476: a label must agree with the section's claims -----------------------
 
 
+def _claim(text, truth_state=evidence.CORROBORATED):
+    return evidence.Claim(text=text, subject="t", truth_state=truth_state)
+
+
 def test_label_direction_reads_the_three_outcome_buckets():
     assert diagrams.label_direction("Reported strength increase") == "gain"
     assert diagrams.label_direction("True fat-free loss") == "loss"
@@ -361,22 +366,50 @@ def test_label_direction_reads_the_three_outcome_buckets():
     assert diagrams.label_direction("Corrected comparison") is None
 
 
+def test_label_direction_inverts_on_negation():
+    """#476 F1. "Did not prevent lean mass loss" is a loss claim, not a
+    preservation claim; the bare word list reads `prevent` the wrong way."""
+    assert diagrams.label_direction("Creatine did not prevent lean mass loss") == "loss"
+    assert diagrams.label_direction("The trial found no strength gain") == "loss"
+    assert diagrams.label_direction("Fails to increase strength") == "loss"
+    assert diagrams.label_direction("Without a fat-free mass gain") == "loss"
+    assert diagrams.label_direction("Strength gain, not measured directly") == "gain"
+
+
 def test_a_label_that_contradicts_the_section_claims_fails():
     labels = ["Lean mass preservation", "Search"]
-    claims = ["The trial could not distinguish water retention from tissue."]
+    claims = [_claim("The trial could not distinguish water retention from tissue.")]
     assert diagrams.figure_claims(labels, claims) == ["Lean mass preservation"]
 
 
 def test_a_single_source_label_needs_the_word_reported():
+    """#476 B4: read from `truth_state`, not a text-count proxy."""
     labels = ["True fat-free gain", "Reported fat-free gain"]
-    claims = ["One small trial reported a fat-free mass gain."]
+    claims = [_claim("One small trial reported a fat-free mass gain.", evidence.SINGLE_SOURCE)]
     assert diagrams.figure_claims(labels, claims) == ["True fat-free gain"]
 
 
-def test_two_claims_backing_a_direction_need_no_hedge():
+def test_a_corroborated_claim_backing_a_direction_needs_no_hedge():
     labels = ["Lean mass gain"]
-    claims = ["One trial found a lean mass gain.", "A second trial also found a gain."]
+    claims = [
+        _claim("One trial found a lean mass gain.", evidence.SINGLE_SOURCE),
+        _claim("A second, corroborated trial also found a gain.", evidence.CORROBORATED),
+    ]
     assert diagrams.figure_claims(labels, claims) == []
+
+
+def test_an_outcome_label_with_no_claims_fails():
+    """#476 F3: absence of claims is not support."""
+    assert diagrams.figure_claims(["Lean mass gain"], []) == ["Lean mass gain"]
+
+
+def test_node_labels_matches_the_sdk_ports_node_labels_on_arrows_and_ids():
+    """A label after an arrow (`Start --> Gain[Fat-free mass]`) must not glue
+    to the preceding `-->` or read as the node id `Gain`. Same fixture as the
+    Agent SDK port's `node_labels` test; the two parsers must agree. #476 B1
+    """
+    source = "flowchart LR\n  Start --> Gain[Fat-free mass]\n  Gain --> End[End]\n"
+    assert diagrams.inventory(source, "mermaid").labels == ["Fat-free mass", "End"]
 
 
 def test_main_returns_two_for_a_missing_backend(monkeypatch, tmp_path):

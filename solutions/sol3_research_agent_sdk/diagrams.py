@@ -67,6 +67,12 @@ class Figure:
     source: str = ""
     attempts: int = 0
     misses: list[str] = field(default_factory=list)
+    # #476 B2: durable. `attempts` here is this call's count; `diagram()`
+    # adds whatever budget an earlier commissioning already spent, so the
+    # record on disk carries the figure's lifetime total. `dropped` is set
+    # only by a `figure_claims` exhaustion, never by a render failure, so
+    # `diagram()` can tell "gave up on the claims" from "no image backend".
+    dropped: bool = False
 
     @property
     def rendered(self) -> bool:
@@ -80,6 +86,7 @@ class Figure:
             "path": self.path,
             "attempts": self.attempts,
             "misses": self.misses,
+            "dropped": self.dropped,
         }
 
 
@@ -231,12 +238,19 @@ def judge(source: Path, png: Path) -> dict:
 
 # -- #476: a label must agree with the section's claims -----------------------
 
-# Mermaid: `A["Label"]`, `A(Label)`, `A{Label}`, `A>Label]`. PlantUML: a
-# quoted or bare name after a node keyword. Good enough to grade a label's
-# words; not a full grammar for either language.
+# Copied from the Deep Agents port's `diagrams.inventory()` label extraction,
+# never imported: two standalone folders. The node id must sit immediately
+# (mod whitespace) before the bracket; a bare `>` inside an edge arrow
+# (`-->`) has no preceding `\w+` there, so it cannot start a match. An
+# earlier cut of this parser dropped that leading group, and the bare `>`
+# alternative then matched the `>` inside `-->` and won the leftmost-match
+# race, gluing a label after an arrow to the node id before it
+# (`Gain[Fat-free mass` on `Start --> Gain[Fat-free mass]`).
 MERMAID_NODE = re.compile(
-    r'(?:\[\s*"?(.*?)"?\s*\]|\(\s*"?(.*?)"?\s*\)|\{\s*"?(.*?)"?\s*\}|>\s*"?(.*?)"?\s*\])'
+    r'(\w+)\s*(?:\[\s*"?(.*?)"?\s*\]|\(\s*"?(.*?)"?\s*\)|\{\s*"?(.*?)"?\s*\}|>\s*"?(.*?)"?\s*\])'
 )
+MERMAID_PARTICIPANT = re.compile(r"^\s*participant\s+(\w+)(?:\s+as\s+([^\n]+))?", re.M | re.I)
+MERMAID_STATE_EDGE = re.compile(r"^\s*(\w+|\[\*\])\s*-->\s*(\w+|\[\*\])", re.M)
 PUML_NODE = re.compile(
     r'^\s*(?:participant|actor|component|class|node|rectangle|database|queue|state|usecase)\s+'
     r'(?:"([^"]+)"|(\w+))',
@@ -267,6 +281,13 @@ _DIRECTION_OF = {
     "prevents": "preservation",
 }
 
+# #476 F1. "Creatine did not prevent lean mass loss" reads `prevent` as
+# preservation-direction on the bare word list, and the sentence actually
+# says loss happened. Checked only in the text before the outcome word: a
+# negation after it belongs to a different clause.
+NEGATION_WORD = re.compile(r"\b(no|not|without|fails to)\b", re.I)
+_INVERT_DIRECTION = {"gain": "loss", "loss": "gain", "preservation": "loss"}
+
 
 def label_direction(label: str) -> str | None:
     """Which outcome direction a label or a claim's text asserts, or `None`.
@@ -274,23 +295,50 @@ def label_direction(label: str) -> str | None:
     First outcome word wins. A label naming two directions in one clause is
     rare, and untangling it is the caption's job, not this gate's.
     """
-    match = OUTCOME_WORD.search(label or "")
-    return _DIRECTION_OF[match.group(1).lower()] if match else None
+    text = label or ""
+    match = OUTCOME_WORD.search(text)
+    if not match:
+        return None
+    direction = _DIRECTION_OF[match.group(1).lower()]
+    if NEGATION_WORD.search(text[: match.start()]):
+        return _INVERT_DIRECTION.get(direction, direction)
+    return direction
 
 
 def node_labels(source: str, language: str = "mermaid") -> list[str]:
-    """The node labels a diagram source names, for `figure_claims` to grade."""
-    labels: list[str] = []
+    """The node labels a diagram source names, for `figure_claims` to grade.
+
+    Mirrors the Deep Agents port's `diagrams.inventory()` label extraction
+    exactly, so the two ports read the same source the same way. Copied, not
+    imported: two standalone folders. #476
+    """
+    source = source or ""
     if language == "plantuml":
-        for match in PUML_NODE.finditer(source or ""):
+        labels: list[str] = []
+        for match in PUML_NODE.finditer(source):
             label = (match.group(1) or match.group(2) or "").strip()
-            if label:
+            if label and label not in labels:
                 labels.append(label)
         return labels
-    for match in MERMAID_NODE.finditer(source or ""):
-        label = next((group for group in match.groups() if group), "").strip().replace("\\n", " ")
-        if label:
-            labels.append(label)
+    first = source.strip().split("\n", 1)[0]
+    diagram_type = first.split()[0] if first else "flowchart"
+    labels = []
+    if diagram_type.lower() == "sequencediagram":
+        for match in MERMAID_PARTICIPANT.finditer(source):
+            label = (match.group(2) or match.group(1)).strip()
+            if label and label not in labels:
+                labels.append(label)
+    elif diagram_type.lower().startswith("statediagram"):
+        for match in MERMAID_STATE_EDGE.finditer(source):
+            for label in match.groups():
+                if label != "[*]" and label not in labels:
+                    labels.append(label)
+    else:
+        for match in MERMAID_NODE.finditer(source):
+            text = next((group for group in match.groups()[1:] if group), "")
+            label = (text or match.group(1)).strip().strip("[]").replace("\\n", " ")
+            if label and label not in labels:
+                labels.append(label)
     return labels
 
 
@@ -337,10 +385,13 @@ def draw(  # noqa: PLR0913  (every one of these is a distinct render input)
     """Draw one figure, simplifying on every judged miss.
 
     `claims` grounds the diagrammer in what this section's ledger entries
-    actually assert, and is graded against every rendered attempt by
-    `figure_claims`. `None` or `[]` (no claims known for this section, the
-    path every caller took before #476) skips that grading rather than
-    failing every outcome-shaped label against zero support.
+    actually assert, and every rendered attempt is graded against it by
+    `figure_claims`, `claims` empty included: a section with no claims
+    supports no outcome, so an outcome-shaped label still fails. #476 F3.
+
+    `max_attempts` is the budget this call may spend, not a fresh three
+    every time: `diagram()` passes what remains of a figure's lifetime cap
+    after an earlier commissioning already spent some. #476 B2.
     """
     figure = Figure(name=name, section=section)
     out_dir = Path(out_dir)
@@ -373,7 +424,7 @@ def draw(  # noqa: PLR0913  (every one of these is a distinct render input)
 
         verdict = judge(source_path, png)
         if verdict.get("pass"):
-            mismatches = figure_claims(node_labels(figure.source, language), claims) if claims else []
+            mismatches = figure_claims(node_labels(figure.source, language), claims)
             if not mismatches:
                 figure.path = str(png.relative_to(out_dir.parent))
                 figure.misses = []
@@ -388,10 +439,15 @@ def draw(  # noqa: PLR0913  (every one of these is a distinct render input)
         feedback = "; ".join(figure.misses)
 
     if claim_mismatch:
-        # Three mismatches. The figure is dropped: no orphan image file, and
-        # an empty `path` keeps assembly from placing a dangling reference.
+        # The budget for this call is spent on a claims mismatch every time.
+        # No orphan image file, and an empty `path` keeps assembly from
+        # placing a dangling reference. `dropped` tells `diagram()` this was
+        # a claims exhaustion, not a render failure, so its durable count
+        # stays spent even once the record's `path` is empty for another
+        # reason too (no image backend, for one).
         png.unlink(missing_ok=True)
         figure.path = ""
+        figure.dropped = True
         return figure
 
     # Out of attempts on rendering alone. Keep the last image and record what

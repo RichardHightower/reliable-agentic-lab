@@ -2005,6 +2005,15 @@ class Paper:
         `diagrams.json`: re-commissioning on every write retry is not
         acceptable at a diagram's price, so a matching sha skips straight to
         the already-rendered figures.
+
+        The guard is coarse (one hash for every section, not one per
+        figure), but the attempt budget is durable per figure regardless:
+        `diagrams.json` carries each figure's lifetime `attempts` and
+        `dropped` state, and a sections_sha change does not buy an
+        already-dropped figure a fresh three. #476 B2. A figure whose own
+        source still renders keeps redrawing on a real content change, the
+        same as before; only a figure that already exhausted its budget
+        stays untouched.
         """
         self._need_written()
         planned = self.plan.get("diagrams") or []
@@ -2045,8 +2054,20 @@ class Paper:
         self.diagram_src.mkdir(parents=True, exist_ok=True)
         usd = 0.0
         dropped: set[str] = set()
+        previous = {f.get("name"): f for f in (recorded.get("figures") or [])}
+        records: dict[str, dict] = dict(previous)
         for figure in planned:
             name = evidence.slug(figure["name"])
+            prior = previous.get(name) or {}
+            spent = int(prior.get("attempts") or 0)
+            if prior.get("dropped") and spent >= diagrams.MAX_LABEL_ATTEMPTS:
+                # #476 B2: this figure already spent its lifetime attempt
+                # budget on an earlier commissioning. A section changing
+                # elsewhere in the paper must not buy it a fresh three;
+                # durable means durable. No source, no ask, no image.
+                dropped.add(name)
+                continue
+            remaining = diagrams.MAX_LABEL_ATTEMPTS - spent
             suffix = ".mmd" if figure["kind"] == "mermaid" else ".puml"
             target = self.diagram_src / f"{name}{suffix}"
             # Same rule as the writer: a source that already rendered is kept.
@@ -2065,14 +2086,15 @@ class Paper:
                 if ordered_exits
                 else ""
             )
-            claim_texts = [claim.text for claim in self._claims_for_figure(figure["name"])]
+            claims = self._claims_for_figure(figure["name"])
+            claim_texts = [claim.text for claim in claims]
             grounding = (
                 "\nClaims this section may draw on:\n" + "\n".join(f"- {t}" for t in claim_texts)
                 if claim_texts
                 else ""
             )
             mismatch_note = ""
-            for attempt in range(1, diagrams.MAX_LABEL_ATTEMPTS + 1):
+            for attempt in range(1, remaining + 1):
                 # Clear any prior draft before asking: a redraw must land, not
                 # be skipped because the last attempt's file is still there.
                 # A live subagent then writes its own fresh file with its own
@@ -2094,19 +2116,24 @@ class Paper:
                 # checkpoint.
                 if not target.exists():
                     target.write_text(_strip_fence(reply.text), encoding="utf-8")
-                if not claim_texts:
-                    break
+                # #476 F3: absence of claims is not support, so this always
+                # runs, `claims` empty included.
                 inv = diagrams.inventory(target.read_text(encoding="utf-8"), diagrams.kind_of(target))
-                mismatches = diagrams.figure_claims(inv.labels, claim_texts)
+                mismatches = diagrams.figure_claims(inv.labels, claims)
                 if not mismatches:
+                    records[name] = {"name": name, "attempts": spent + attempt, "dropped": False}
                     break
-                if attempt == diagrams.MAX_LABEL_ATTEMPTS:
-                    # #476: three mismatches, then the figure is dropped. No
-                    # source, no image, no dangling reference in the paper.
+                if attempt == remaining:
+                    # #476 B2/B3: budget exhausted. The figure is dropped:
+                    # no source, no image, no dangling reference in the
+                    # paper, and it stays dropped through a later section
+                    # change instead of a later successful redraw landing
+                    # it as an orphan under a generated Figures heading.
                     target.unlink(missing_ok=True)
                     dropped.add(name)
                     self._drop_figure_reference(figure["name"])
                     self.say(f"    note: {name} dropped, labels never matched the section's claims")
+                    records[name] = {"name": name, "attempts": spent + attempt, "dropped": True}
                     break
                 mismatch_note = (
                     "\n\nThe last draft's labels do not match this section's claims: "
@@ -2147,10 +2174,21 @@ class Paper:
         stages.diagram_gate(self.figures, complaints, survivors)
         for complaint in complaints:
             self.say(f"    note: {complaint}")
+        figure_records = [
+            records[evidence.slug(f["name"])]
+            for f in planned
+            if evidence.slug(f["name"]) in records
+        ]
         guard_path.write_text(
-            json.dumps({"figures": len(self.figures), "sections_sha": sections_sha}, indent=2) + "\n",
+            json.dumps({"figures": figure_records, "sections_sha": sections_sha}, indent=2) + "\n",
             encoding="utf-8",
         )
+        # #476 F4: this stage is done. A complaint that did not trip
+        # `diagram_gate` above must not leave `_redraw` non-empty for a
+        # later, unrelated `stage_diagram` call to misread as "mid-retry",
+        # which would skip both the stale-source wipe and every figure
+        # whose source is still on disk, claims gate included.
+        self._redraw = set()
         accepted = sum(1 for figure in self.figures if figure.best is not None)
         return StageResult(
             "diagram",

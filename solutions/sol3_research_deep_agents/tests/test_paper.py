@@ -991,6 +991,61 @@ def test_a_third_mismatch_drops_the_figure_and_the_image(offline, run_dir, stub_
     assert "three-exits" not in body, "no dangling reference to the dropped figure"
 
 
+def test_the_attempt_budget_is_durable_across_a_changed_section(offline, run_dir, stub_renderer):
+    """#476 B2: a figure that can never pass does not get a fresh three
+    every time an unrelated write retry changes the sections hash. Three
+    attempts, ever, is the figure's lifetime budget for the run. B3 falls
+    out of this: a durably-dropped figure never redraws, so it can never
+    land as a later orphan under a generated Figures heading."""
+    _run_up_to_write(offline)
+    inner = offline.runner
+
+    class MismatchedDiagrammer:
+        name = "fixture"
+
+        def __init__(self, inner):
+            self.inner = inner
+            self.calls = 0
+
+        def ask(self, role, prompt):
+            if role != "diagrammer" or "three-exits" not in prompt:
+                return self.inner.ask(role, prompt)
+            self.calls += 1
+            return paper.Reply(text='flowchart LR\n  A["Lean mass preservation"]\n')
+
+    fake = MismatchedDiagrammer(inner)
+    offline.runner = fake
+    result = offline.stage_diagram()
+    assert fake.calls == diagrams_mod.MAX_LABEL_ATTEMPTS
+    assert result.artifacts["dropped"] == ["three-exits"]
+
+    heading = next(iter(offline.written))
+    offline.written[heading] += "\nA second section rewrite, unrelated to the figure."
+    offline._save_sections()
+    result = offline.stage_diagram()
+
+    assert fake.calls == diagrams_mod.MAX_LABEL_ATTEMPTS, (
+        "an already-exhausted figure must not spend on a two-write-cycle change"
+    )
+    assert result.artifacts["dropped"] == ["three-exits"]
+    assert not (run_dir / "diagrams" / "three-exits.mmd").exists()
+
+    body = stages.assemble(
+        offline.plan, offline.outline, offline.written, offline.figures, offline.ledger
+    )
+    assert "three-exits" not in body
+
+
+def test_redraw_state_does_not_leak_into_a_later_call(offline, run_dir, stub_renderer):
+    """#476 F4: `_redraw` must not survive a successful commission into a
+    later, unrelated `stage_diagram` call, or that call wrongly reads it as
+    still mid-retry and skips both the stale-source wipe and every figure
+    whose source is on disk."""
+    _run_up_to_write(offline)
+    offline.stage_diagram()
+    assert offline._redraw == set()
+
+
 def test_a_second_write_attempt_does_not_recommission_a_figure(offline, run_dir, stub_renderer):
     """#476's `sections_sha` guard: one diagrammer turn across two calls to
     `stage_diagram`, when the written sections have not changed between them."""

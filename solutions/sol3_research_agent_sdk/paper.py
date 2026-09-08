@@ -1145,23 +1145,40 @@ def diagram(run: Run) -> dict:
     otherwise redraw every figure on every write retry. A matching sha means
     no section changed since the figures on disk were drawn, so this returns
     without spending a diagrammer turn.
+
+    The guard is coarse, one hash for every section, not one per figure, but
+    the attempt budget is durable per figure regardless: `diagrams.json`
+    carries each figure's lifetime `attempts`, and a sections_sha change does
+    not buy a figure a fresh three. #476 B2. A figure already at
+    `diagrams.MAX_ATTEMPTS` is carried forward unchanged, spending nothing.
     """
     drafted = approved_outline(run)
     sections_sha = _diagram_sections_sha(run)
     existing = run.file("diagrams.json")
+    recorded: dict = {}
     if existing.exists():
         try:
             recorded = json.loads(existing.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             recorded = {}
-        if recorded.get("sections_sha") == sections_sha:
-            figures = recorded.get("figures") or []
-            drawn = [f for f in figures if f.get("path")]
-            return {"figures": len(figures), "rendered": len(drawn), "skipped": "unchanged sections"}
+    if recorded.get("sections_sha") == sections_sha:
+        figures = recorded.get("figures") or []
+        drawn = [f for f in figures if f.get("path")]
+        return {"figures": len(figures), "rendered": len(drawn), "skipped": "unchanged sections"}
 
+    previous = {f.get("name"): f for f in (recorded.get("figures") or [])}
     figures = []
     for spec in outlines.diagrams(drafted):
         section_id = spec.get("section", "")
+        prior = previous.get(spec["name"]) or {}
+        spent = int(prior.get("attempts") or 0)
+        remaining = diagrams.MAX_ATTEMPTS - spent
+        if remaining <= 0:
+            # #476 B2: this figure already spent its lifetime attempt budget
+            # in an earlier commissioning. A section changing elsewhere in
+            # the paper must not buy it a fresh three; durable means durable.
+            figures.append(prior)
+            continue
         figure = diagrams.draw(
             run.turns,
             name=spec["name"],
@@ -1171,10 +1188,20 @@ def diagram(run: Run) -> dict:
             out_dir=run.file("diagrams"),
             theme=run.theme,
             claims=_claims_for_section(run, section_id),
+            max_attempts=remaining,
         )
-        figures.append(figure.to_dict())
-    run.write_json("diagrams.json", {"figures": figures, "sections_sha": sections_sha})
-    drawn = [f for f in figures if f["path"]]
+        record = figure.to_dict()
+        record["attempts"] = spent + record["attempts"]
+        figures.append(record)
+    # #476 F2: only record `sections_sha` when the renderer actually ran.
+    # `available()` False gives every figure an empty path with nothing
+    # attempted; recording the sha anyway would freeze that at zero figures
+    # until a section changes, even after the renderer is installed.
+    payload = {"figures": figures}
+    if diagrams.available():
+        payload["sections_sha"] = sections_sha
+    run.write_json("diagrams.json", payload)
+    drawn = [f for f in figures if f.get("path")]
     return {"figures": len(figures), "rendered": len(drawn)}
 
 

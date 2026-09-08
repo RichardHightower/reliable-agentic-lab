@@ -85,6 +85,26 @@ def test_label_direction_reads_the_three_outcome_buckets():
     assert diagrams.label_direction("A reported strength increase") == "gain"
 
 
+def test_label_direction_inverts_on_negation():
+    """#476 F1. "Did not prevent lean mass loss" is a loss claim, not a
+    preservation claim; the bare word list reads `prevent` the wrong way."""
+    assert diagrams.label_direction("Creatine did not prevent lean mass loss") == "loss"
+    assert diagrams.label_direction("The trial found no strength gain") == "loss"
+    assert diagrams.label_direction("Fails to increase strength") == "loss"
+    assert diagrams.label_direction("Without a fat-free mass gain") == "loss"
+    # A negation after the outcome word belongs to a different clause.
+    assert diagrams.label_direction("Strength gain, not measured directly") == "gain"
+
+
+def test_node_labels_matches_the_deep_agents_ports_inventory_on_arrows_and_ids():
+    """A label after an arrow (`Start --> Gain[Fat-free mass]`) must not glue
+    to the preceding `-->` or read as the node id `Gain`. Same fixture as the
+    Deep Agents port's `inventory()` test; the two parsers must agree. #476 B1
+    """
+    source = "flowchart LR\n  Start --> Gain[Fat-free mass]\n  Gain --> End[End]\n"
+    assert diagrams.node_labels(source) == ["Fat-free mass", "End"]
+
+
 def test_a_label_that_contradicts_the_section_claims_fails():
     labels = ["Lean mass preservation", "Search"]
     claims = ["The trial could not distinguish water retention from tissue."]
@@ -143,10 +163,25 @@ def test_a_changed_claim_recommissions_a_previously_dropped_label(renderer, tmp_
     assert figure.path == "diagrams/f_imagen.png"
 
 
-def test_no_claims_known_skips_the_gate(renderer, tmp_path):
-    """A caller with nothing bound yet (legacy call sites) is not penalized."""
+def test_an_outcome_label_with_no_supporting_claims_fails(renderer, tmp_path):
+    """#476 F3: absence of claims is not support. A caller with nothing
+    bound yet does not get a pass, it gets the same drop a real mismatch
+    does."""
     renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
     drawer = Drawer(source='flowchart LR\n  A["Lean mass preservation"]')
+    figure = diagrams.draw(
+        drawer, name="f", concept="c", section="s", topic="t", out_dir=tmp_path / "diagrams"
+    )
+    assert not figure.rendered
+    assert figure.dropped
+    assert figure.attempts == diagrams.MAX_ATTEMPTS
+
+
+def test_a_structural_label_with_no_outcome_word_needs_no_claims(renderer, tmp_path):
+    """Absence of claims only sinks a label that asserts an outcome. A plain
+    process label (`Plan`, `Search`, ...) has no direction to grade."""
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer(source='flowchart LR\n  A["Plan"] --> B["Search"]')
     figure = diagrams.draw(
         drawer, name="f", concept="c", section="s", topic="t", out_dir=tmp_path / "diagrams"
     )

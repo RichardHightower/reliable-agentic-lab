@@ -26,6 +26,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import evidence
+
 HERE = Path(__file__).resolve().parent
 RENDERER = HERE / ".cache" / "imagen-diagrams"
 SCRIPTS = RENDERER / "skills" / "imagen-diagrams" / "scripts"
@@ -200,39 +202,60 @@ _DIRECTION_OF = {
 }
 
 
+# #476 F1. "Creatine did not prevent lean mass loss" reads `prevent` as
+# preservation-direction on the bare word list, and the sentence actually
+# says loss happened. Checked only in the text before the outcome word: a
+# negation after it belongs to a different clause.
+NEGATION_WORD = re.compile(r"\b(no|not|without|fails to)\b", re.I)
+_INVERT_DIRECTION = {"gain": "loss", "loss": "gain", "preservation": "loss"}
+
+
 def label_direction(label: str) -> str | None:
     """Which outcome direction a label or a claim's text asserts, or `None`.
 
     First outcome word wins. A label naming two directions in one clause is
     rare, and untangling it is the caption's job, not this gate's.
     """
-    match = OUTCOME_WORD.search(label or "")
-    return _DIRECTION_OF[match.group(1).lower()] if match else None
+    text = label or ""
+    match = OUTCOME_WORD.search(text)
+    if not match:
+        return None
+    direction = _DIRECTION_OF[match.group(1).lower()]
+    if NEGATION_WORD.search(text[: match.start()]):
+        return _INVERT_DIRECTION.get(direction, direction)
+    return direction
 
 
-def figure_claims(labels: list[str], claims: list[str]) -> list[str]:
+def figure_claims(labels: list[str], claims: list) -> list[str]:
     """Node labels no claim in `claims` backs, direction by direction.
 
+    `claims` are `evidence.Claim` objects, not raw text: the single-source
+    rule reads `truth_state`, the field this port already tracks, not a
+    text-count proxy. #476 B4.
+
     A label whose direction (gain, loss, or preservation) no claim in this
-    section asserts fails outright. When exactly one claim backs a
-    direction -- this section's sole support for it -- the label must say
-    "reported"; stated plainly, it reads as a settled fact only one source
-    made.
+    section asserts fails outright. When every claim backing a direction is
+    `evidence.SINGLE_SOURCE` -- this section's only support for it, however
+    many claims restate it -- the label must say "reported"; stated
+    plainly, it reads as a settled fact only one source made. A direction
+    with at least one claim past single-source needs no hedge.
     """
-    supports: dict[str, int] = {}
-    for text in claims:
-        direction = label_direction(text)
+    supports: dict[str, list] = {}
+    for claim in claims:
+        direction = label_direction(getattr(claim, "text", "") or "")
         if direction:
-            supports[direction] = supports.get(direction, 0) + 1
+            supports.setdefault(direction, []).append(claim)
     mismatches = []
     for label in labels:
         direction = label_direction(label)
         if direction is None:
             continue
-        count = supports.get(direction, 0)
-        if count == 0:
+        backers = supports.get(direction) or []
+        if not backers:
             mismatches.append(label)
-        elif count == 1 and "reported" not in label.lower():
+            continue
+        single_source = all(getattr(c, "truth_state", None) == evidence.SINGLE_SOURCE for c in backers)
+        if single_source and "reported" not in label.lower():
             mismatches.append(label)
     return mismatches
 
@@ -502,17 +525,25 @@ def demo() -> None:
     # #476: a node label must agree with the section's claims.
     assert label_direction("Lean mass preservation") == "preservation"
     assert label_direction("Corrected comparison") is None
+    assert label_direction("Creatine did not prevent lean mass loss") == "loss", "F1: negation"
+
+    def claim(text, truth_state=evidence.CORROBORATED):
+        return evidence.Claim(text=text, subject="demo", truth_state=truth_state)
+
     mismatch = figure_claims(
         ["Lean mass preservation"],
-        ["The trial could not distinguish water retention from tissue."],
+        [claim("The trial could not distinguish water retention from tissue.")],
     )
     assert mismatch == ["Lean mass preservation"]
     assert figure_claims(
-        ["Reported fat-free gain"], ["One small trial reported a fat-free mass gain."]
+        ["Reported fat-free gain"],
+        [claim("One small trial reported a fat-free mass gain.", evidence.SINGLE_SOURCE)],
     ) == []
     assert figure_claims(
-        ["Fat-free gain"], ["One small trial reported a fat-free mass gain."]
-    ) == ["Fat-free gain"], "a sole-support claim needs the word reported"
+        ["Fat-free gain"],
+        [claim("One small trial reported a fat-free mass gain.", evidence.SINGLE_SOURCE)],
+    ) == ["Fat-free gain"], "B4: a single-source claim needs the word reported"
+    assert figure_claims(["Fat-free gain"], []) == ["Fat-free gain"], "F3: absence is not support"
 
 
 def main(argv: list[str] | None = None) -> int:
