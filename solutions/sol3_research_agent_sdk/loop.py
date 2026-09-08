@@ -315,6 +315,7 @@ def main(argv: list[str] | None = None) -> int:
         enforce_loop_doctrine=args.enforce_loop_doctrine,
         require_next_step=True,
         require_evidence_requirements=True,
+        require_introduction=True,
         brain=brains[0] if brains else None,
         brains=brains,
         corpus_subjects=subjects,

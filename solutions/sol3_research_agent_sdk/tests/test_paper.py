@@ -324,6 +324,67 @@ def test_assembly_writes_the_section_heading_the_writer_left_out(work, turns, no
     assert "\n## A sub-point\n" not in body
 
 
+def test_assemble_inserts_a_python_written_introduction_when_the_outline_has_none(
+    work, turns, no_renderer
+):
+    """#538. The default outline here is headed "The problem", not
+    "Introduction": `outline.validate`'s `require_introduction` is off by
+    default, the same as `require_next_step`, so this outline draws no
+    error. `assemble` still inserts one, the way it inserts Methods: no
+    model turn, right after the Abstract and before Methods."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+
+
+def test_assemble_places_a_written_introduction_before_methods(work, turns, no_renderer):
+    """#538. An outline whose first section is headed "Introduction" gets
+    its own written file placed there, not the Python-written stub: the
+    section-writing loop already wrote it like any other section."""
+
+    class WithIntro(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            # Split the one section's word budget in two rather than
+            # copying it, so the total still sums to `word_target_total`
+            # within `validate`'s 10% slack.
+            half = drafted["sections"][0]["word_target"] // 2
+            drafted["sections"][0]["word_target"] -= half
+            drafted["sections"].insert(
+                0,
+                {
+                    "id": "intro",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": half,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, WithIntro())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    intro_path = Path(work) / "sections" / "intro.md"
+    intro_path.write_text("Written introduction text [1].\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "Written introduction text" in introduction, introduction
+    assert body.count("## Introduction") == 1
+
+
 def test_a_term_marker_is_harvested_and_stripped(work, turns, no_renderer):
     """The writer's `TERM` marker never reaches the reader, and its term
     reaches the glossary assembly writes."""
