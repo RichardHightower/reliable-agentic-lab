@@ -38,6 +38,7 @@ import evidence
 import gates
 import locate
 import outline as outlines
+import paper_check
 import research
 import sections
 import source_policy
@@ -95,6 +96,25 @@ def _section_word_range(heading: str, claim_count: int) -> str:
     if claim_count < 3:
         return "400 to 800"
     return "700 to 1200"
+
+
+def _strip_policy_leak(text: str, allowed_domains) -> str:
+    """Scrub the run's admitted hosts and the harness's retrieval language out
+    of feedback text before it reaches the writer. #452 #465 #412.
+
+    A reviewer's own note, or the Python report a `policy_leak` gate failure
+    writes, can name the offending host or phrase while explaining what to
+    fix. The writer never sees the allowlist, only the instruction to stop
+    naming a source host.
+    """
+    if not text:
+        return text
+    scrubbed = text
+    for host in tuple(source_policy.SEED_ALLOWLIST) + tuple(allowed_domains or ()):
+        host = str(host).strip()
+        if host:
+            scrubbed = re.sub(re.escape(host), "an admitted source", scrubbed, flags=re.IGNORECASE)
+    return paper_check.POLICY_LEAK_PHRASE.sub("the source policy", scrubbed)
 
 
 def section_body(text: str, heading: str) -> str:
@@ -1794,6 +1814,10 @@ class Paper:
 
     def stage_write(self, extra: str = "") -> StageResult:
         self._need_outline()
+        # #452 #465 #412. `extra` carries a prior attempt's gate failure text
+        # on a retry, and the writer must not see an admitted host or the
+        # harness's own retrieval language in it either.
+        extra = _strip_policy_leak(extra, self.allowed_domains)
         # `write` can be interrupted between sections. Load its artifact before
         # deciding what remains so a resumed process preserves every accepted
         # section instead of spending another turn to replace it.
@@ -1899,6 +1923,10 @@ class Paper:
         the defect, the writer revises bounded prose, and the reviewer grades
         the new text on the next attempt.
         """
+        # #452 #465 #412. `feedback` is the reviewer's own free text, and a
+        # reviewer that names the run's search host or its retrieval boundary
+        # while explaining a defect must not hand that name to the writer.
+        feedback = _strip_policy_leak(feedback, self.allowed_domains)
         self._need_written()
         index, _ = stages.numbering(self.ledger)
         # These two rubric rows apply across a draft. A reviewer may name a

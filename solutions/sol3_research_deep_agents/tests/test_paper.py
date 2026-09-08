@@ -486,6 +486,63 @@ def test_a_review_retry_sends_failed_rows_to_the_writer(offline, monkeypatch):
     assert calls["revise"] and "names_tradeoff" in calls["revise"][0]
 
 
+def test_strip_policy_leak_scrubs_a_host_and_a_retrieval_phrase():
+    """#452 #465 #412: a reviewer's own note, or Python's `policy_leak`
+    report, can name the offending host or phrase while explaining what to
+    fix. The writer must not see either."""
+    note = "policy_leak: search host or retrieval narration in: 'hosted on arxiv.org'"
+    scrubbed = paper._strip_policy_leak(note, ("arxiv.org",))
+    assert "arxiv.org" not in scrubbed
+    assert paper._strip_policy_leak("no host here", ("arxiv.org",)) == "no host here"
+
+    phrase_note = "Section s1 still names its preprint search."
+    assert "preprint search" not in paper._strip_policy_leak(phrase_note, ())
+
+
+def test_the_retry_feedback_names_no_allowlist_host(offline):
+    """A reviewer's own note can quote a `policy_leak` failure's host back at
+    the writer while explaining what to fix. #452 #465 #412: `stage_revise`
+    must not repeat it in the message it sends the writer."""
+    offline.run()
+    heading = next(iter(offline.written))
+    prompts: list[tuple[str, str]] = []
+    original_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        prompts.append((role, prompt))
+        return original_ask(role, prompt)
+
+    offline.runner.ask = spy
+    offline.stage_revise(
+        "The section still names docs.langchain.com; remove that mention.",
+        targets=[heading],
+    )
+    writer_prompts = [prompt for role, prompt in prompts if role == "writer"]
+    assert writer_prompts
+    assert "docs.langchain.com" not in writer_prompts[0], writer_prompts[0]
+
+
+def test_the_write_retry_extra_names_no_allowlist_host(offline):
+    """`stage_write`'s own retry `extra` gets the same guard `stage_revise`
+    applies to its feedback, so a future caller cannot reopen the leak.
+    #452 #465 #412."""
+    offline.run()
+    heading = next(iter(offline.written))
+    del offline.written[heading]
+    prompts: list[tuple[str, str]] = []
+    original_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        prompts.append((role, prompt))
+        return original_ask(role, prompt)
+
+    offline.runner.ask = spy
+    offline.stage_write("The prior attempt named docs.langchain.com; remove it.")
+    writer_prompts = [prompt for role, prompt in prompts if role == "writer"]
+    assert writer_prompts
+    assert "docs.langchain.com" not in writer_prompts[0], writer_prompts[0]
+
+
 # -- #411: the review stall rule gets a progress escape ---------------------
 
 

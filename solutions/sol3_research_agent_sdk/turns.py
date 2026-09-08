@@ -197,6 +197,20 @@ def bind_exit_doctrine(plan: dict, *, enforce_loop_doctrine: bool = True) -> dic
     return plan
 
 
+# P6, #452 #465 #412. A claim dict also carries `source_url` and `quote`, the
+# exact host and text the librarian retrieved. A live paper handed that to the
+# writer verbatim, and the writer restated the host and the retrieval outcome
+# instead of the subject: "no arxiv.org source was found" appeared forty-two
+# times in one creatine paper. The writer needs the number it cites by, the
+# text it unpacks, and the status that changes how it is worded. Nothing else.
+WRITER_CLAIM_FIELDS = ("id", "number", "text", "status")
+
+
+def _writer_claims(claims: list[dict]) -> list[dict]:
+    """Only the fields the writer's delegation message may carry."""
+    return [{key: claim[key] for key in WRITER_CLAIM_FIELDS if key in claim} for claim in claims]
+
+
 @dataclass
 class Turns:
     """What a runtime must be able to do."""
@@ -613,7 +627,7 @@ class SdkTurns(Turns):
         # whether the answer's words overlap the question, so the
         # instruction asks for an answer, not a copy.
         question_lines = "\n".join(f"- {checks.question_text(item)}" for item in questions)
-        payload = json.dumps({"claims": claims, "figures": figures}, indent=2)
+        payload = json.dumps({"claims": _writer_claims(claims), "figures": figures}, indent=2)
         target = path or f"sections/{section['id']}.md"
         result = self._ask(
             "research-writer",
@@ -724,7 +738,7 @@ class SdkTurns(Turns):
             f"{questions or '(none)'}\n"
             "Cite each claim by its `number` field, like [3]. Do not cite the id. "
             "Use only the claims below, and add no facts that are not in them:\n"
-            f"{json.dumps(claims or [], indent=2)}"
+            f"{json.dumps(_writer_claims(claims or []), indent=2)}"
         )
         result = self._ask(
             "research-writer",

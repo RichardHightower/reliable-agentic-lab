@@ -359,6 +359,48 @@ def test_the_writer_contract_drops_the_exact_string_rule(work):
     assert "exact string" not in write_prompt
     assert "as that string" not in write_prompt
 
+
+def test_the_writer_message_names_no_allowlist_host(work):
+    """#452 #465 #412: a claim also carries `source_url` and `quote`, the
+    exact host and text the librarian retrieved. A live paper handed that to
+    the writer verbatim and the writer restated it, forty-two times in one
+    creatine paper. The delegation message may carry only the number a claim
+    cites by, its text, and its status."""
+    section = {
+        "id": "s1",
+        "heading": "The problem",
+        "key_questions": ["what stops the loop"],
+        "word_target": 200,
+    }
+    claims = [
+        {
+            "id": "s1-f1",
+            "text": "Creatine reduces lean mass loss during bed rest.",
+            "source_url": "https://arxiv.org/abs/2401.00001",
+            "quote": "no study was hosted on arxiv.org for this mechanism",
+            "question_id": "q1",
+            "section": "s1",
+            "status": "verified",
+            "number": 1,
+        }
+    ]
+    write_backend = Backend([result(output="a section")])
+    t.SdkTurns(backend=write_backend, work_dir=work).write(
+        section, claims, [], "", path="sections/s1.md"
+    )
+    write_prompt = write_backend.prompts[0][0]
+    assert "arxiv.org" not in write_prompt, write_prompt
+    assert "source_url" not in write_prompt, write_prompt
+    assert "quote" not in write_prompt, write_prompt
+
+    edit_backend = Backend([result(output="an edited section")])
+    t.SdkTurns(backend=edit_backend, work_dir=work).edit_section(
+        section, "old body", {"failed_rows": ["cited"]}, claims=claims
+    )
+    edit_prompt = edit_backend.prompts[0][0]
+    assert "arxiv.org" not in edit_prompt, edit_prompt
+    assert "source_url" not in edit_prompt, edit_prompt
+
     edit_backend = Backend([result(output="an edited section")])
     t.SdkTurns(backend=edit_backend, work_dir=work).edit_section(
         section, "old body", {"failed_rows": ["coverage"]}

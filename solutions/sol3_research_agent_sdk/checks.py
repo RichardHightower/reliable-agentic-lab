@@ -17,6 +17,7 @@ what needs judgement.
     gaps_stated   a coverage gap is named in Limitations
     charted       every plotted value is in the corpus and the caption cites
     question_heading a heading pastes a question instead of answering it
+    policy_leak   the body names a search host or narrates the run's own retrieval boundary
 
 `complete` looks redundant and is not. Without it a paper with no body at all
 passes every other row: the abstract is exempt from `cited`, the reference list
@@ -341,6 +342,52 @@ def marketing_violations(body: str) -> list[str]:
     """
     masked = _mask_for_ste(body)
     return [sentence[:160] for sentence in _prose_sentences(masked) if MARKETING_VERB.search(sentence)]
+
+
+# P6, the paper does not narrate the harness. #452 #465 #412: the finished
+# creatine paper named arxiv.org 42 times and spent whole paragraphs saying no
+# preprint was found. A reader of a sports-nutrition paper does not care which
+# index a search was scoped to.
+POLICY_LEAK_PHRASES = (
+    "preprint search",
+    "search scope",
+    "no study was hosted on",
+)
+POLICY_LEAK_PHRASE = re.compile(
+    "|".join(re.escape(phrase) for phrase in POLICY_LEAK_PHRASES), re.I
+)
+
+
+def _mask_for_policy(text: str) -> str:
+    """Code, a URL, References, and Methods, gone. Methods is where #478
+    names the admitted hosts by design; nothing else in the body may.
+    """
+    return _mask_section(_mask_for_ste(text), "methods")
+
+
+def policy_leak_violations(body: str, allowed_domains=None) -> list[str]:
+    """Sentences that narrate the harness's own source policy instead of the
+    subject: a search host name, or one of the three retrieval phrases.
+
+    Unconditional: a clean sentence passes by construction. Methods and
+    References are exempt; every other section is graded.
+    """
+    masked = _mask_for_policy(body)
+    hosts = [
+        str(host).strip()
+        for host in (tuple(source_policy.SEED_ALLOWLIST) + tuple(allowed_domains or ()))
+        if str(host).strip()
+    ]
+    host_pattern = (
+        re.compile(r"\b(?:" + "|".join(re.escape(host) for host in hosts) + r")\b", re.I)
+        if hosts
+        else None
+    )
+    hits = []
+    for sentence in _prose_sentences(masked):
+        if POLICY_LEAK_PHRASE.search(sentence) or (host_pattern and host_pattern.search(sentence)):
+            hits.append(sentence[:160])
+    return hits
 
 
 # P4, the next-step section may use imperative CTA steps, but it may not sell.
@@ -855,23 +902,28 @@ def question_headings(body: str, outline: dict | None) -> list[str]:
 
     A heading that ends in a question mark reads as a slide prompt, not a
     finding. A heading that repeats an outline key question verbatim is the
-    same defect with the question mark trimmed off. #385: coverage cannot
+    same defect with the closing punctuation changed. #385: coverage cannot
     require the answer in the body and also accept the question as the
     heading; this row closes the second half.
+
+    The question and the heading both drop trailing `?.:;!` before the
+    comparison. A judge on PR #508 found the P5 version stripped only a
+    trailing `?`, so a key question the writer re-punctuated with a period
+    or a colon as a heading still matched the wanted set and slipped past.
     """
     wanted = set()
     for section in (outline or {}).get("sections") or []:
         for item in section.get("key_questions") or []:
-            text = question_text(item).strip().lower()
+            text = question_text(item).strip().lower().rstrip("?.:;!").strip()
             if text:
                 wanted.add(text)
-                wanted.add(text.rstrip("?").strip())
     bad = []
     for match in SECTION_HEADING.finditer(body):
         if len(match.group(1)) not in (2, 3):
             continue
         heading = match.group(2).strip()
-        if heading.endswith("?") or heading.lower() in wanted:
+        stripped = heading.lower().rstrip("?.:;!").strip()
+        if heading.endswith("?") or stripped in wanted:
             bad.append(heading)
     return bad
 
@@ -1198,6 +1250,17 @@ def check(
             "no marketing verb in body prose"
             if not marketing_hits
             else f"marketing verb in: {marketing_hits[0]!r}",
+        )
+    )
+
+    leak_hits = policy_leak_violations(body, allowed_domains)
+    checks.append(
+        Check(
+            "policy_leak",
+            not leak_hits,
+            "the body names no search host and narrates no retrieval boundary"
+            if not leak_hits
+            else f"search host or retrieval narration in: {leak_hits[0]!r}",
         )
     )
 
