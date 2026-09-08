@@ -199,6 +199,232 @@ def test_guideline_cited_skips_a_non_numeric_number_rather_than_raising():
     assert "guideline_cited" not in score.signature()
 
 
+_LEDGER_TITLE = "Position Stand on Creatine Supplementation and Lean Mass"
+
+
+def _safety_section(**kwargs):
+    kwargs.setdefault("heading", "Dosing and safety")
+    kwargs.setdefault("key_questions", ["does creatine preserve lean mass safely"])
+    return kwargs
+
+
+def test_a_guideline_retrieved_elsewhere_must_be_cited_by_the_safety_section():
+    """#517: `guideline_cited` grades the whole run's ledger, not only this
+    section's own findings. A position stand retrieved for another section
+    (the introduction, say) that is on this section's own topic still has
+    to be cited here."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/xyz123",
+            "title": _LEDGER_TITLE,
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 7,
+        }
+    ]
+    missing = sections.section_check(
+        "A claim about the safe dose that never names the position stand.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" in missing.signature()
+    detail = next(c.detail for c in missing.checks if c.name == "guideline_cited")
+    assert _LEDGER_TITLE in detail
+    assert "[7]" in detail
+
+
+def test_the_same_section_citing_it_passes():
+    """#517: citing the ledger guideline's own reference number passes the
+    row, and the number is never flagged dangling either -- the row that
+    requires the citation and the row that would call it ungrounded agree.
+
+    `findings` carries an unrelated numbered finding, [1], so `grounded`'s
+    own `numbers` set is not empty on its own -- the same shape a real
+    section has -- and its "and numbers" short-circuit does not hide a
+    reverted ledger widening for [7]."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/xyz123",
+            "title": _LEDGER_TITLE,
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 7,
+        }
+    ]
+    score = sections.section_check(
+        "A claim about the safe dose, per the position stand [7] and a trial [1].",
+        section=section,
+        findings=[{"id": "s1-f1", "number": 1, "evidence_tier": "primary_trial"}],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+    assert not any(c.name == "grounded" and not c.passed for c in score.checks)
+
+
+def test_an_off_topic_guideline_is_not_required():
+    """#517: on topic means at least two shared content terms, not one. A
+    ledger guideline sharing only "dose" with the section's key question is
+    not required."""
+    section = _safety_section(key_questions=["what dose of creatine is safe"])
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/other",
+            "title": "Position Stand on Recovery Dose Protocols",
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 3,
+        }
+    ]
+    score = sections.section_check(
+        "A claim about the safe dose that never names the other guideline.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
+def test_a_position_stand_about_an_unrelated_field_is_off_topic():
+    """#517 follow-up 1: the tier's own naming words (position, stand,
+    guideline, consensus, statement, practice, clinical) do not count
+    toward the two-term overlap. A key question that literally names the
+    tier, "what does the position stand say", shares "position" and
+    "stand" with any title beginning "Position Stand on ...", whatever
+    that title is actually about; those two words must not be enough."""
+    section = _safety_section(
+        key_questions=["what does the position stand say about training load"]
+    )
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/unrelated",
+            "title": "Position Stand on Vitamin D and Bone Density",
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 9,
+        }
+    ]
+    score = sections.section_check(
+        "A claim about training load that never cites the unrelated guideline.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
+def test_a_ledger_with_no_guideline_passes():
+    """#517: a ledger holding no `position_stand_or_guideline` source at
+    all passes, the same as no ledger."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/primary",
+            "title": "A Randomized Trial of Creatine Dosing and Lean Mass",
+            "abstract": "",
+            "tier": "primary_trial",
+            "number": 2,
+        }
+    ]
+    score = sections.section_check(
+        "A claim about the safe dose.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
+def test_the_safety_brief_lists_the_ledger_guidelines():
+    """#517: `guideline_brief` names each on-topic ledger guideline a
+    safety or dosing section has not already cited, with its reference
+    number, and widens `allowed` to include it so `write_gate` never calls
+    that citation stray."""
+    import evidence
+
+    ledger = evidence.Ledger("/nonexistent")
+    source = ledger.add_source(
+        evidence.SourceDocument(
+            title=_LEDGER_TITLE,
+            url="https://doi.org/10.1000/xyz123",
+            subject="s",
+            tier="position_stand_or_guideline",
+        )
+    )
+    ledger.add_claim(
+        evidence.Claim(text="Creatine preserves lean mass.", subject="s", source_ids=[source.id])
+    )
+    index = {source.id: 7}
+    section = _safety_section()
+
+    note, allowed = sections.guideline_brief(ledger, section, "", index, [])
+    assert _LEDGER_TITLE in note
+    assert "[7]" in note
+    assert allowed == [7]
+
+    # Already allowed -- this section's own claim already bound to it --
+    # so there is nothing new to say.
+    note, allowed = sections.guideline_brief(ledger, section, "", index, [7])
+    assert note == ""
+    assert allowed == [7]
+
+
+def test_guideline_ledger_sources_reads_the_whole_ledger():
+    """#517: gathers every `position_stand_or_guideline`-tier source across
+    the whole ledger, not only one already cited by a claim -- one with no
+    reference number yet carries `number: 0` rather than being dropped."""
+    import evidence
+
+    ledger = evidence.Ledger("/nonexistent")
+    cited = ledger.add_source(
+        evidence.SourceDocument(
+            title=_LEDGER_TITLE,
+            url="https://doi.org/10.1000/xyz123",
+            subject="s",
+            tier="position_stand_or_guideline",
+        )
+    )
+    uncited = ledger.add_source(
+        evidence.SourceDocument(
+            title="A Guideline Nobody Cites Yet",
+            url="https://doi.org/10.1000/uncited",
+            subject="s",
+            tier="position_stand_or_guideline",
+        )
+    )
+    ledger.add_source(
+        evidence.SourceDocument(
+            title="A Trial", url="https://a.example/trial", subject="s", tier="primary_trial"
+        )
+    )
+    found = sections.guideline_ledger_sources(ledger, {cited.id: 5})
+    by_url = {source["url"]: source for source in found}
+    assert set(by_url) == {cited.url, uncited.url}
+    assert by_url[cited.url]["number"] == 5
+    assert by_url[uncited.url]["number"] == 0
+
+
+def test_widening_allowed_is_a_no_op_when_no_guideline_is_required():
+    """#517 follow-up 7: `guideline_brief` widens `allowed` before
+    `stages.write_gate` sees it. When no ledger guideline is on topic, the
+    widening must be a true no-op: a section that cites only its own
+    findings still passes `write_gate`, and `no_citation` is never armed
+    by a widening that added nothing."""
+    import evidence  # noqa: PLC0415
+    import stages  # noqa: PLC0415
+
+    ledger = evidence.Ledger("/nonexistent")
+    section = {"heading": "Background", "key_questions": ["what is the mechanism"]}
+
+    note, allowed = sections.guideline_brief(ledger, section, "", {}, [2])
+    assert note == ""
+    assert allowed == [2]
+
+    stages.write_gate("Background", "A finding about the mechanism [2]. " + ("word " * 80), allowed)
+
+
 def test_findings_from_claims_carries_the_tier_from_the_ledger():
     """#473: `evidence_tier` on the finding survives from the ledger's
     `SourceDocument`, which is what wires `guideline_cited` to a real run."""

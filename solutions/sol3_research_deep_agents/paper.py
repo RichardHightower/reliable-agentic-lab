@@ -35,6 +35,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import brief
 import diagrams
 import evidence
 import gates
@@ -2449,7 +2450,15 @@ class Paper:
                     if sid in index
                 }
             )
+            # #517. Every on-topic guideline the ledger already holds from
+            # another section's research, named for the writer and added to
+            # `allowed` so citing it here is never read as a stray citation.
+            guideline_note, allowed = sections.guideline_brief(
+                self.ledger, section, self.topic, index, allowed
+            )
             briefs = "\n".join(stages.claim_brief(self.ledger, cid, index) for cid in claim_ids)
+            if guideline_note:
+                briefs = f"{briefs}\n{guideline_note}" if briefs else guideline_note
             word_range = _section_word_range(heading, len(claim_ids))
             # #475, judge revision on #520: a question graded and still
             # short after its one shot travels as a named gap, not a run
@@ -2527,6 +2536,15 @@ class Paper:
                     body, encoding="utf-8"
                 )
             body = stages.drop_uncited_prose(body)
+            # `assemble` strips em dashes deterministically; `style` is a hard
+            # row since #517 follow-up 2, so a writer's em dash must not cost
+            # this section an attempt over something `assemble` would have
+            # fixed silently anyway. Same normalization, applied here first.
+            # This loop skips a heading already in `self.written` (above), so
+            # it never runs on the text `stage_trim` (#464, after `write` in
+            # `STAGE_ORDER`) has already added a figure mention to; nothing
+            # here can undo a mention `trim` persisted.
+            body = brief.strip_em_dashes(body)
             # Store first, then gate. A failure drops this section only, so the
             # retry re-asks for it and leaves its neighbours alone.
             stages.write_gate(heading, body, allowed)
@@ -2599,7 +2617,15 @@ class Paper:
                     if source_id in index
                 }
             )
+            # #517. Same widening `stage_write` applies, so a revise pass can
+            # still add a ledger guideline's citation without `write_gate`
+            # calling it stray.
+            guideline_note, allowed = sections.guideline_brief(
+                self.ledger, section, self.topic, index, allowed
+            )
             briefs = "\n".join(stages.claim_brief(self.ledger, claim_id, index) for claim_id in claim_ids)
+            if guideline_note:
+                briefs = f"{briefs}\n{guideline_note}" if briefs else guideline_note
             word_range = _section_word_range(heading, len(claim_ids))
             earlier = []
             for prior_heading, prior_body in self.written.items():
@@ -2633,6 +2659,14 @@ class Paper:
             usd += reply.usd
             body = section_body(reply.text, heading)
             body = stages.drop_uncited_prose(body)
+            # See `stage_write`'s own call: `style` is hard, `assemble` is not
+            # the first reader to see this text any more. This stage replaces
+            # `self.written[heading]` outright from a fresh reply, so a
+            # figure mention `stage_trim` added to the text being replaced is
+            # already gone before this line runs; stripping em dashes from
+            # the new text does not do that, it only means the new text was
+            # never going to carry the old mention either way. #517
+            body = brief.strip_em_dashes(body)
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body
             self._save_sections()
