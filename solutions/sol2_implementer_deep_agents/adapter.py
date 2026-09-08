@@ -216,17 +216,33 @@ def _describe_exc(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _usage_callback():
-    """#543. A callback that sums `usage_metadata` off every completed LLM
-    call, so a `GraphRecursionError` (raised only after some number of model
-    turns already ran) still reports what those turns cost, instead of
+class DeepAgentsBudgetExceeded(RuntimeError):
+    """#549. Raised by the usage callback when a call's running cost passes
+    its own per-call cap. This is the Deep Agents twin of the SDK port's
+    `asyncio.wait_for` timeout on its per-query ceiling: the only other
+    bound on one call was `recursion_limit`, a turn count, not a dollar
+    figure, and the ticket's own live run spent $4.56 against a $3.00 cap
+    before that structural ceiling ever fired.
+    """
+
+
+def _usage_callback(max_call_usd: float | None = None):
+    """#543, #549. A callback that sums `usage_metadata` off every completed
+    LLM call, so a `GraphRecursionError` (raised only after some number of
+    model turns already ran) still reports what those turns cost, instead of
     losing them along with the exception. `agent.invoke()` returns no state
     on a raise, so `last_usd`, which reads the returned state, never gets
     the chance.
 
-    Imported lazily and never let to raise: this module has to stay
-    importable, and this handler safe to attach, with no `deepagents` or
-    `langchain_core` installed, the same as every offline test already runs.
+    `max_call_usd`, when given, turns the same running total into a stop
+    condition: once a completed turn's cost pushes it over the cap, the
+    callback raises `DeepAgentsBudgetExceeded` naming the spend so far, the
+    same job the SDK's per-query `asyncio.wait_for` timeout does mid-turn.
+
+    Imported lazily and never let to raise for a parsing failure: this
+    module has to stay importable, and this handler safe to attach, with no
+    `deepagents` or `langchain_core` installed, the same as every offline
+    test already runs. The budget check is the one deliberate exception.
     """
     try:
         from langchain_core.callbacks import BaseCallbackHandler  # noqa: PLC0415
@@ -248,9 +264,15 @@ def _usage_callback():
                             self.total_usd += _usage_usd(usage)
                             self.saw_usage = True
             except Exception:
-                # A telemetry side channel must never crash the run it is
-                # only supposed to be watching.
-                pass
+                # A telemetry side channel must never crash the run for a
+                # parsing failure; only the deliberate budget check below
+                # may raise.
+                return
+            if max_call_usd is not None and self.total_usd > max_call_usd:
+                raise DeepAgentsBudgetExceeded(
+                    f"budget_exhausted: spent ${self.total_usd:.4f} against a "
+                    f"${max_call_usd:.2f} per-call cap"
+                )
 
     return UsageCallback()
 
@@ -279,6 +301,7 @@ class DeepAgentsBackend(Backend):
         phase_agents=None,
         judge_agent=None,
         recursion_limit: int | None = None,
+        max_call_usd: float | None = None,
     ):
         if agent is None and not phase_agents:
             raise ValueError("provide an agent or one agent for each implementation phase")
@@ -286,6 +309,10 @@ class DeepAgentsBackend(Backend):
         self.phase_agents = phase_agents
         self.judge_agent = judge_agent
         self.recursion_limit = recursion_limit
+        # #549. The per-call dollar cutoff, mirroring the SDK port's
+        # per-query ceiling. None means no cutoff, the behavior before
+        # this ticket.
+        self.max_call_usd = max_call_usd
 
     def _agent_for(self, allow: list[str]):
         """Choose the graph whose cast matches the driver's current phase."""
@@ -312,7 +339,7 @@ class DeepAgentsBackend(Backend):
         # fires per completed model turn, well before a `GraphRecursionError`
         # (which only fires after some number of turns already ran) reaches
         # this method at all.
-        usage = _usage_callback()
+        usage = _usage_callback(self.max_call_usd)
         try:
             before = _changed_files(repo)
             payload = {"messages": [{"role": "user", "content": prompt}]}
@@ -350,7 +377,7 @@ class DeepAgentsBackend(Backend):
         agent = self.judge_agent
         if agent is None:
             return super().judge(repo=repo, prompt=prompt)
-        usage = _usage_callback()
+        usage = _usage_callback(self.max_call_usd)
         try:
             payload = {"messages": [{"role": "user", "content": prompt}]}
             config = _invoke_config(self.recursion_limit, usage)

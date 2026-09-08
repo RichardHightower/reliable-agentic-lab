@@ -354,3 +354,27 @@ def test_a_live_backends_write_lands_in_the_worktree_not_the_clone(tmp_path, fak
     assert result.wrote == ["tests/test_due.py"]
     assert (worktree / "tests" / "test_due.py").exists()
     assert not (clone / "tests" / "test_due.py").exists()
+
+
+def test_no_backend_from_harness_backend_roots_at_the_clone(tmp_path):
+    """#549. Every write tool a live doer receives (`ClaudeAgentOptions.cwd`
+    plus the scope hook it roots `scope_hook` at) must derive from
+    `implementer._worktree_path`, never `contract.repo`, for every phase
+    `harness.backend` builds, not just the test implementer #543 follow-up
+    already pinned."""
+    clone_root = tmp_path / "clone"
+    clone_root.mkdir()
+    clone = git_repo(clone_root)
+    worktree = implementer._worktree_path(clone, "T001")
+
+    contract_obj = contract_mod.Contract(clone)
+    backend_obj = harness.backend(contract_obj, "T001")
+
+    checked = 0
+    for name in ("test", "code", "judge_backend", "planner"):
+        sub = getattr(backend_obj, name)
+        assert sub.options.cwd == str(worktree), f"{name} did not root at the worktree"
+        assert sub.options.cwd != str(clone.resolve()), f"{name} rooted at contract.repo"
+        checked += 1
+
+    assert checked == 4

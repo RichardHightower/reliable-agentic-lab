@@ -366,6 +366,77 @@ def test_a_recursion_failure_after_reported_usage_returns_the_spend_not_none(tmp
     assert "RuntimeError" in result.output
 
 
+@NEEDS_LANGCHAIN
+def test_a_call_that_passes_its_dollar_cap_stops_with_budget_exhausted(tmp_path):
+    """#549. The Deep Agents twin of the SDK port's per-query
+    `asyncio.wait_for` timeout: a call that keeps spending past its own cap
+    stops mid-call and reports the spend so far, named `budget_exhausted`,
+    instead of running all the way to the recursion limit. A live run spent
+    $4.56 against a $3.00 cap before that structural ceiling ever fired."""
+
+    class FakeMessage:
+        def __init__(self, usage_metadata):
+            self.usage_metadata = usage_metadata
+
+    class FakeGeneration:
+        def __init__(self, message):
+            self.message = message
+
+    class FakeLLMResult:
+        def __init__(self, usage_metadata):
+            self.generations = [[FakeGeneration(FakeMessage(usage_metadata))]]
+
+    class MultiTurnAgent:
+        """Reports usage turn by turn, the way a real graph's callback
+        fires once per completed model call, not once per invoke()."""
+
+        def invoke(self, payload, config=None):
+            callbacks = (config or {}).get("callbacks", [])
+            for cost in (0.5, 0.6):
+                for callback in callbacks:
+                    callback.on_llm_end(FakeLLMResult({"total_cost": cost}))
+            return {"messages": [{"role": "assistant", "content": "should not get here"}]}
+
+    result = adapter.DeepAgentsBackend(MultiTurnAgent(), max_call_usd=1.0).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+
+    assert not result.ok
+    assert result.usd == 1.1
+    assert "budget_exhausted" in result.output
+
+
+@NEEDS_LANGCHAIN
+def test_a_call_under_its_dollar_cap_answers_normally(tmp_path):
+    """The cutoff must not fire early. A call that never crosses its cap
+    answers the way it always did."""
+
+    class FakeMessage:
+        def __init__(self, usage_metadata):
+            self.usage_metadata = usage_metadata
+
+    class FakeGeneration:
+        def __init__(self, message):
+            self.message = message
+
+    class FakeLLMResult:
+        def __init__(self, usage_metadata):
+            self.generations = [[FakeGeneration(FakeMessage(usage_metadata))]]
+
+    class OneTurnAgent:
+        def invoke(self, payload, config=None):
+            for callback in (config or {}).get("callbacks", []):
+                callback.on_llm_end(FakeLLMResult({"total_cost": 0.4}))
+            return {"messages": [{"role": "assistant", "content": "done"}]}
+
+    result = adapter.DeepAgentsBackend(OneTurnAgent(), max_call_usd=1.0).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+
+    assert result.ok
+    assert result.output == "done"
+
+
 def test_a_judge_that_raises_reports_usd_as_none(tmp_path):
     result = adapter.DeepAgentsBackend(
         FakeAgent(), judge_agent=RaisingAgent(RuntimeError("judge boom"))

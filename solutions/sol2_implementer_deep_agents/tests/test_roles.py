@@ -60,6 +60,64 @@ def test_test_implementer_writes_tests(contract, target_repo, fake_langchain):
     assert (target_repo / "tests" / "test_due.py").read_text() == "ok"
 
 
+def test_subagents_for_writes_at_cwd_not_the_clone(contract, target_repo, fake_langchain):
+    """#543 follow-up. `subagents_for` derived its own `repo` from
+    `contract.repo` independently of `build_agent`'s `cwd` fix, so the
+    subagent write tools -- the ones the test and code implementer actually
+    call, not the orchestrator's `FilesystemBackend` -- kept writing into
+    the `--repo` clone regardless. A live run proved it: an untracked,
+    model-authored test file landed in the clone with this gap still open,
+    the exact defect #543 set out to fix."""
+    worktree = target_repo / "elsewhere"
+    (worktree / "tests").mkdir(parents=True)
+
+    tester = _by_name(roles.subagents_for(contract, cwd=worktree))["test-implementer"]
+    write = tester["tools"][1]
+
+    assert write("tests/test_due.py", "ok") == "wrote tests/test_due.py"
+    assert (worktree / "tests" / "test_due.py").read_text() == "ok"
+    assert not (target_repo / "tests" / "test_due.py").exists()
+
+
+def _probe_path(pattern: str) -> str:
+    """A concrete, writable path inside a glob-shaped write_allow entry."""
+    if pattern.endswith("/**"):
+        return f"{pattern[:-3]}/probe.txt"
+    return pattern
+
+
+def test_no_write_tool_a_live_doer_receives_roots_at_the_clone(
+    contract, target_repo, fake_langchain
+):
+    """#549. Every write tool a live doer can call must root at
+    `cwd` (in production, `implementer._worktree_path`), never at
+    `contract.repo` (the `--repo` clone), for every writing role, not just
+    the test implementer #543 follow-up already pinned."""
+    worktree = target_repo / "elsewhere"
+    worktree.mkdir()
+    cast = roleplan.plan(contract, "implementer")
+
+    checked = 0
+    for spec in roles.subagents_for(contract, cwd=worktree):
+        role = cast[spec["name"].replace("-", "_")]
+        if not role.can_write or not role.allow:
+            continue
+        write = spec["tools"][1]
+        probe = _probe_path(role.allow[0])
+
+        write(probe, "x")
+
+        assert (worktree / probe).exists(), f"{role.name} did not write at cwd"
+        assert not (target_repo / probe).exists(), f"{role.name} wrote at contract.repo"
+        checked += 1
+
+    # test-implementer, code-implementer, and planner are the three writing
+    # roles in this cast; a count below that means the loop above silently
+    # skipped one of them, which would let a regression in just one role
+    # pass unnoticed.
+    assert checked == 3
+
+
 def test_no_implementer_role_holds_bash(contract):
     """A shell is a wider hole than any of the three write tools it would
     replace. `subagents_for` never reads `role.tools` to build a runtime tool
