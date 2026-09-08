@@ -144,11 +144,27 @@ def test_build_agent_fences_the_harness(contract, fake_langchain, fake_deepagent
 # declares real fields, the second re-runs the layer-3 fence against the
 # real classes instead of the fake's stand-ins. Both skip, not fail, when
 # `deepagents` is not installed -- `task test-setup` installs pytest only,
-# and `.github/workflows/tests.yml:41` runs that CI leg, so CI never reaches
+# and `.github/workflows/tests.yml:45` runs that CI leg, so CI never reaches
 # either test's body. The fake-path tests above are what CI enforces, and a
 # skip here is never mistaken for them having passed: this file also carries
 # `test_build_agent_fences_the_harness`, which runs and asserts for real in
 # every environment, `deepagents` installed or not.
+
+
+@pytest.fixture
+def _deepagents_installed():
+    """Import the real `deepagents` package before any fixture in this file
+    replaces `sys.modules["langchain"]`.
+
+    `deepagents` imports `langchain.agents` at import time. `fake_langchain`
+    swaps in a bare stand-in package with no `agents` submodule, so
+    importing `deepagents` for the first time after that swap raises
+    ImportError and this reports a skip that is not really about `deepagents`
+    being absent. Requesting this fixture ahead of `fake_langchain` in a
+    test's parameter list imports and caches the real module first, so the
+    later swap cannot touch it.
+    """
+    return pytest.importorskip("deepagents")
 
 
 def _declared_fields(cls, fallback: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -225,13 +241,17 @@ def _patch_create_deep_agent(monkeypatch: pytest.MonkeyPatch) -> dict:
     return seen
 
 
-def test_the_real_types_keep_the_fence(contract, fake_langchain, monkeypatch):
+def test_the_real_types_keep_the_fence(_deepagents_installed, contract, fake_langchain, monkeypatch):
     """`test_build_agent_fences_the_harness`, re-run against the installed
     `deepagents` classes instead of `conftest`'s stand-ins: general-purpose
     off, `write_file` and `execute` excluded on the parent, the judge holds
     only `read_file`, and a role's deny rule still precedes its allow rule.
+
+    `_deepagents_installed` sits ahead of `fake_langchain` in this parameter
+    list on purpose: `deepagents` must be imported for real before
+    `fake_langchain` replaces `sys.modules["langchain"]`, or the import
+    fails and this test reports a skip that proves nothing.
     """
-    pytest.importorskip("deepagents")
     seen = _patch_create_deep_agent(monkeypatch)
 
     roles.build_agent(contract)
