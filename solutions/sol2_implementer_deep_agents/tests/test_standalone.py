@@ -95,3 +95,41 @@ def test_main_maps_gate_to_exit_code(monkeypatch, target_repo):
 
     monkeypatch.setattr(implementer, "run", fake_crash)
     assert harness.main(["--repo", str(target_repo), "--doer", "none"]) == 1
+
+
+def test_nonexistent_repo_without_table_only_exits_1_with_one_line(tmp_path, capsys):
+    """Folded finding, judge of PR #497 (A5). `Contract(args.repo)` used to
+    be a bare `raise` when `--table-only` was absent, so a nonexistent
+    `--repo` printed a traceback instead of the one line `implementer.main`
+    already prints for the same error."""
+    import harness
+
+    missing = tmp_path / "does-not-exist"
+
+    exit_code = harness.main(["--repo", str(missing)])
+
+    assert exit_code == 1
+    out = capsys.readouterr().out.strip()
+    assert out.count("\n") == 0
+    assert "does not exist" in out
+
+
+def test_resume_flag_reaches_implementer_run(monkeypatch, target_repo):
+    """A6 (#433). harness.py's own --resume flag is not dropped on the way
+    to implementer.run; the worktree and state.json mechanics are
+    implementer.py's, proven in tests/test_implementer.py."""
+    import harness
+    import implementer
+
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"rubric": "", "gate": "pass", "reason": "ok"}
+
+    monkeypatch.setattr(implementer, "run", fake_run)
+
+    exit_code = harness.main(["--repo", str(target_repo), "--doer", "none", "--resume"])
+
+    assert captured.get("resume") is True
+    assert exit_code == 0

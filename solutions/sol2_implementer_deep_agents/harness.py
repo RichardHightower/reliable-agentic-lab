@@ -78,13 +78,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--cleanup", action="store_true", help="remove the worktree after the run"
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="re-enter the last killed run from its own state.json, instead of starting over.",
+    )
     args = parser.parse_args(argv)
 
     try:
         contract = Contract(args.repo)
-    except ContractError:
+    except ContractError as exc:
+        # Folded finding, judge of PR #497 (A5). This used to bare `raise`,
+        # which meant `harness.py --repo <nonexistent>` printed a traceback
+        # instead of the one line `implementer.main` already prints for the
+        # same error.
         if not args.table_only:
-            raise
+            print(f"error: {exc}")
+            return 1
         print(f"# no target repo at {args.repo}. Showing the declared scopes.")
         contract = None
 
@@ -102,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             doer=doer,
             budget=args.budget,
             cleanup=args.cleanup,
+            resume=args.resume,
         )
     except ContractError as exc:
         print(f"error: {exc}")
