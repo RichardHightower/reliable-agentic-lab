@@ -116,9 +116,15 @@ def test_a_hedged_loss_does_not_back_a_gain_label():
     """#476 N1: a negated loss is a preservation claim, not a gain claim.
     `_INVERT_DIRECTION` used to send it the other way, so "there was no
     loss of lean mass" backed a bare "Lean mass gain" label, the overclaim
-    this ticket exists to stop."""
+    this ticket exists to stop. Two claims, so a reverted map (which counts
+    both as "gain") clears the single-source "reported" hedge and the
+    mismatch would go unnoticed with only one.
+    """
     labels = ["Lean mass gain"]
-    claims = ["There was no loss of lean mass."]
+    claims = [
+        "There was no loss of lean mass in the treatment arm.",
+        "There was no loss of lean mass in the control arm either.",
+    ]
     assert diagrams.figure_claims(labels, claims) == ["Lean mass gain"]
 
 
