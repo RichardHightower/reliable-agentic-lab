@@ -1867,6 +1867,69 @@ def review(run: Run) -> dict:
     return verdict
 
 
+def _persist_trim(run: Run, body: str) -> None:
+    """Write the whole-paper pass's edit back to the sources `assemble`
+    reads: the section files, and the stamped abstract when the pass
+    touched it.
+
+    `assemble` rebuilds `paper.md` from `sections/*.md` on every call,
+    including the unrelated `edit_paper` flow pass that already runs after
+    the first green check. Editing only `paper.md` left the trim standing
+    until the next thing that happened to call `assemble`, which silently
+    rebuilt the untrimmed body from disk and undid it. #477.
+    """
+    planned = outlines.plan_view(approved_outline(run))
+    blocks = checks.top_level_sections(body)
+    for section in planned["sections"]:
+        heading = str(section.get("heading") or "").strip().lower()
+        block = blocks.get(heading)
+        if block is None:
+            continue
+        path = run.file("sections") / f"{section['id']}.md"
+        if path.exists():
+            path.write_text(block.strip() + "\n", encoding="utf-8")
+    abstract_block = blocks.get("abstract")
+    if abstract_block is not None and run.file("abstract.json").exists():
+        # `write_abstract` skips its turn when `sections_sha` already
+        # matches. Stamping the sha the just-updated sections now hash to
+        # keeps that guard from discarding the trimmed abstract on the next
+        # attempt and spending a turn to regenerate what is already fixed.
+        run.write_json(
+            "abstract.json",
+            {"abstract": abstract_block.strip(), "sections_sha": _sections_sha(run, planned)},
+        )
+
+
+def edit_whole_paper(run: Run, repeats: list[dict], figures: list | None = None) -> dict:
+    """The P9 whole-paper pass: one writer turn sees the assembled body and
+    every `caveat_once` repeat, and cuts each one. Add no facts.
+
+    Reads the assembled body, because the repeat is a cross-section defect
+    assembly already stitched together, but the edit is persisted back to
+    the section files and the stamped abstract (`_persist_trim`), not only
+    to `paper.md`, so a later `assemble` reproduces it instead of rebuilding
+    the untrimmed body from disk. `new_claims` still has the last word: a
+    specific the evidence never retrieved reverts the whole edit. `figures`
+    is P10's parameter, unused until that unit lands. #477.
+    """
+    path = run.file("paper.md")
+    before = path.read_text(encoding="utf-8")
+    if hasattr(run.turns, "edit_whole_paper"):
+        after = run.turns.edit_whole_paper(before, repeats, figures or [])
+    else:
+        after = before
+    after = (after or before).strip()
+    if not after:
+        return {"trimmed": False, "reverted": []}
+    novel = checks.new_claims(before, after)
+    evidence = corpus_for(run)
+    invented = [token for token in novel if token.lower() not in evidence.lower()]
+    if invented:
+        return {"trimmed": False, "reverted": invented}
+    _persist_trim(run, after)
+    return {"trimmed": True, "reverted": []}
+
+
 def edit_paper(run: Run) -> dict:
     """One flow-only pass after the first green check. Add no facts.
 
@@ -2047,6 +2110,31 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
             run.state.mark(name, "running")
             run.state.save(work)
             meta = phase(run)
+            if name == "check" and "caveat_once" in (meta.get("signature") or []):
+                # D1, #477. Python caught a repeat, so a per-section retry
+                # cannot fix it: no writer turn sees more than one section.
+                # One whole-paper pass runs here, then `check` runs again,
+                # so the reviewer next in `CYCLE` never sees a body that
+                # still fails this row. At most once per attempt, every
+                # attempt, not once per run: a later attempt's own write can
+                # reintroduce a repeat the earlier pass already cleared, and
+                # only this attempt's own check result decides whether the
+                # pass is needed again.
+                repeats = checks.repeat_shingles(
+                    checks.top_level_sections(run.file("paper.md").read_text(encoding="utf-8"))
+                )
+                trim_before = run.state.total_usd
+                trim_meta = edit_whole_paper(run, repeats)
+                run.state.mark("trim", "complete", usd=round(run.state.total_usd - trim_before, 4), **trim_meta)
+                run.state.save(work)
+                run.log(f"  6b trim     {trim_meta}")
+                before = run.state.total_usd
+                if trim_meta.get("trimmed"):
+                    # The pass persisted to the section files, so reassemble
+                    # from them rather than trust the writer's copy of the
+                    # whole body verbatim.
+                    assemble(run)
+                meta = check(run)
             run.state.mark(name, "complete", usd=round(run.state.total_usd - before, 4))
             run.state.save(work)
             run.log(f"  {number} {name:<10} {meta if name != 'check' else meta['signature']}")

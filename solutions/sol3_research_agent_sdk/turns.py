@@ -349,6 +349,10 @@ class Turns:
         """Flow and transitions only. Add no facts."""
         return body
 
+    def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
+        """P9's whole-paper pass. Default: hand the body back unchanged."""
+        return body
+
 
 @dataclass
 class SdkTurns(Turns):
@@ -820,6 +824,30 @@ class SdkTurns(Turns):
             f"result to {target} and also return it as your final message.\n\n"
             f"Current body:\n{whole(body)}",
             allow=[target],
+        )
+        return result.output or ""
+
+    def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
+        """P9. One turn sees the whole body, because the defect is a repeat
+        across sections and no single-section turn can see it.
+        """
+        result = self._ask(
+            "research-writer",
+            "This is the whole-paper pass. Each entry below names a sentence "
+            "and the other sections that restate it. Keep the first "
+            "statement, in full, with its numbers and units, exactly where "
+            "it already is. Replace every later restatement with one "
+            "sentence of twelve words or fewer that opens with one of these "
+            "four phrases and names the section where the finding first "
+            "appears: \"As stated in\", \"As noted in\", \"As shown in\", or "
+            "\"See\". For example: \"As stated in the Approach, this finding "
+            "also applies here.\" Do not simply delete a repeat; a reader "
+            "needs the pointer, and a paragraph must never end up as only a "
+            "citation marker with no sentence. Add no facts. Keep every "
+            "heading and every figure line exactly as it is. Return the "
+            "whole edited body.\n\n"
+            f"Repeats:\n{json.dumps(repeats, indent=2)[:6000]}\n\n"
+            f"The paper body, already assembled:\n{whole(body)}",
         )
         return result.output or ""
 
@@ -1333,6 +1361,39 @@ class OfflineTurns(Turns):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(body, encoding="utf-8")
         return body
+
+    def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
+        """No model, so no paraphrase either: replace the repeat named by
+        each match, in the one section it names, with a back reference to
+        the section that stated it first. The canonical statement is never
+        touched, because this only ever edits the match's own section slice
+        of the body, never the source section's, and never searches the
+        rest of the document: a short sentence a match names can coincide
+        with text elsewhere that has nothing to do with this repeat.
+
+        The reference opens with "As stated in", one of the four cues
+        `checks.BACK_REFERENCE_CUES` exempts from the row it clears, so
+        pointing several sections at the same source never becomes a new
+        repeat of the pointer itself.
+        """
+        for item in repeats:
+            source = item["section"]
+            for match in item.get("matches") or []:
+                sentence = match.get("sentence") or ""
+                target = match["section"]
+                if not sentence:
+                    continue
+                span = checks.top_level_section_spans(body).get(target)
+                if span is None:
+                    continue
+                start, end = span
+                segment = body[start:end]
+                if sentence not in segment:
+                    continue
+                reference = f"As stated in {source}, this point also holds here."
+                segment = segment.replace(sentence, reference, 1)
+                body = body[:start] + segment + body[end:]
+        return re.sub(r"\n{3,}", "\n\n", body)
 
     def review(self, paper: str, report: str, ledger=None) -> dict:
         """Agree with the deterministic report and add nothing.

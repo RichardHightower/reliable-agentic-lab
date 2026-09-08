@@ -2157,6 +2157,98 @@ class Paper:
             summary=f"{len(body.split())} words, every hard gate green",
         )
 
+    # -- 7b. trim ------------------------------------------------------------
+
+    def stage_trim(self, extra: str = "") -> StageResult:
+        """The P9 whole-paper pass. Runs once, between write and review, so
+        `stage_review` (the reviewer the creatine run's `no_filler`
+        complaint named) never grades a draft that restates the same
+        finding across sections. Operates on `self.written` directly:
+        assembly has not run yet, so there is no `paper.md` to read.
+
+        Add no facts; `new_claims` reverts the whole edit if it invents a
+        specific the evidence never retrieved, the same defence the SDK
+        port's `edit_whole_paper` gives its own body. Never raises: a
+        repeat this pass cannot clear is still Python's business at
+        `stage_assemble`'s gate, not a reason to fail this stage.
+        """
+        self._need_written()
+        by_lower = {heading.lower(): heading for heading in self.written}
+        sections = {lowered: self.written[heading] for lowered, heading in by_lower.items()}
+        repeats = paper_check.repeat_shingles(sections)
+        if not repeats:
+            return StageResult("trim", summary="no repeat")
+
+        before = dict(self.written)
+        if self.runner.name == "fixture":
+            # A canned reply is keyed by a phrase in the prompt; a
+            # whole-paper prompt has no fixed heading to key on. No model,
+            # so no paraphrase either: replace the repeat named by each
+            # match, in the one section it names, with a back reference.
+            # `self.written` is already split per section, so the edit
+            # touches only that section's own string, never the rest of
+            # the draft.
+            usd = 0.0
+            for item in repeats:
+                source = by_lower.get(item["section"], item["section"])
+                for match in item.get("matches") or []:
+                    sentence = match.get("sentence") or ""
+                    target_heading = by_lower.get(match["section"])
+                    if not sentence or target_heading is None:
+                        continue
+                    text = self.written[target_heading]
+                    if sentence not in text:
+                        continue
+                    reference = f"As stated in {source}, this point also holds here."
+                    self.written[target_heading] = text.replace(sentence, reference, 1)
+        else:
+            draft = "\n\n".join(f"## {head}\n\n{body}" for head, body in self.written.items())
+            reply = self._ask(
+                "writer",
+                "This is the whole-paper pass. Each entry below names a "
+                "sentence and the other sections that restate it. Keep the "
+                "first statement, in full, with its numbers and units, "
+                "exactly where it already is. Replace every later "
+                "restatement with one sentence of twelve words or fewer "
+                "that opens with one of these four phrases and names the "
+                "section where the finding first appears: \"As stated in\", "
+                "\"As noted in\", \"As shown in\", or \"See\". Do not "
+                "simply delete a repeat; a reader needs the pointer, and a "
+                "paragraph must never end up as only a citation marker "
+                "with no sentence. Add no facts. Keep every heading and "
+                "every figure line exactly as it is. Return the whole "
+                "edited body.\n\n"
+                f"Repeats:\n{json.dumps(repeats, indent=2)}\n\n"
+                f"The paper body:\n{draft}",
+            )
+            usd = reply.usd
+            edited = (reply.text or "").strip()
+            if edited:
+                blocks = paper_check.top_level_sections(edited)
+                for lowered, heading in by_lower.items():
+                    if lowered in blocks:
+                        self.written[heading] = blocks[lowered].strip()
+
+        before_blob = "\n\n".join(before.values())
+        after_blob = "\n\n".join(self.written.values())
+        evidence_blob = "\n".join(
+            [claim.text for claim in self.ledger.claims.values()]
+            + [f"{src.title} {src.url} {src.text}" for src in self.ledger.bibliography()]
+        )
+        novel = paper_check.new_claims(before_blob, after_blob)
+        invented = [token for token in novel if token.lower() not in evidence_blob.lower()]
+        if invented:
+            self.written = before
+            return StageResult(
+                "trim", usd=usd, artifacts={"trimmed": False, "reverted": invented},
+                summary="reverted: an invented specific",
+            )
+        self._save_sections()
+        return StageResult(
+            "trim", usd=usd, artifacts={"trimmed": True, "reverted": []},
+            summary=f"{len(repeats)} repeats cut",
+        )
+
     def _uncited_section_headings(self) -> list[str]:
         """Return exactly the writer bodies that the citation gate rejects."""
         import brief  # noqa: PLC0415
