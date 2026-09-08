@@ -2540,6 +2540,10 @@ class Paper:
             # row since #517 follow-up 2, so a writer's em dash must not cost
             # this section an attempt over something `assemble` would have
             # fixed silently anyway. Same normalization, applied here first.
+            # This loop skips a heading already in `self.written` (above), so
+            # it never runs on the text `stage_trim` (#464, after `write` in
+            # `STAGE_ORDER`) has already added a figure mention to; nothing
+            # here can undo a mention `trim` persisted.
             body = brief.strip_em_dashes(body)
             # Store first, then gate. A failure drops this section only, so the
             # retry re-asks for it and leaves its neighbours alone.
@@ -2656,7 +2660,12 @@ class Paper:
             body = section_body(reply.text, heading)
             body = stages.drop_uncited_prose(body)
             # See `stage_write`'s own call: `style` is hard, `assemble` is not
-            # the first reader to see this text any more.
+            # the first reader to see this text any more. This stage replaces
+            # `self.written[heading]` outright from a fresh reply, so a
+            # figure mention `stage_trim` added to the text being replaced is
+            # already gone before this line runs; stripping em dashes from
+            # the new text does not do that, it only means the new text was
+            # never going to carry the old mention either way. #517
             body = brief.strip_em_dashes(body)
             stages.write_gate(heading, body, allowed)
             self.written[heading] = body

@@ -1138,6 +1138,11 @@ def test_an_em_dash_is_normalized_before_the_section_is_graded(offline, run_dir,
     assert "style" not in score["signature"]
 
     offline.stage_diagram()
+    # #464/#534: `trim` sits between `diagram` and `review` in `STAGE_ORDER`
+    # and is where a figure's in-text mention is actually added; `assemble`
+    # now hard-fails a figure `trim` never got to mention. Skipping it here
+    # left the fixture's two figures unmentioned and failed `figure_referenced`.
+    offline.stage_trim()
     offline.stage_review()
     offline.stage_assemble()
     assembled = offline.paper_path.read_text(encoding="utf-8")
