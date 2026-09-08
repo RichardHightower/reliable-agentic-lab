@@ -160,3 +160,102 @@ def test_the_check_module_docstring_lists_belt_rows_against_judge_rows():
     assert judge_rows, "no judge rows found in reviewer/SKILL.md"
     missing_judge = sorted(row for row in judge_rows if row not in doc)
     assert not missing_judge, f"docstring omits judge row(s): {missing_judge}"
+
+
+# -- P13, docs cite rows and constants that exist ----------------------------
+
+# One level above this port, next to the other three take-home folders. A
+# copy of this folder alone has no sibling `slides/`, so the one test below
+# that reads it skips rather than fails outside the monorepo checkout.
+FEATURE_MAP = ROOT.parent.parent / "slides" / "FEATURE-MAP.md"
+
+# A bare backticked name, `like_this`, never `a/path.py` or `--a-flag`: the
+# dot, the slash, and the dash all fall outside this pattern, so a filename
+# or a CLI flag quoted for readability is never mistaken for a row name.
+_BARE_IDENTIFIER = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
+
+# A name that only appears inside a comment or a docstring is not a row
+# definition, so it must not satisfy the check below. `evidence_requirements_met`
+# is a genuine row (`stages.py`'s `GateFailed` reason), but an earlier version
+# of this test passed only because the name also sat in a `sections.py`
+# docstring; deleting that docstring line left a true docs claim green. #467
+# Regex, not `tokenize`: a `#` inside a string literal could still be
+# swallowed. ponytail: upgrade to `tokenize` if that ever produces a false
+# negative.
+_DOCSTRING = re.compile(r'("""|\'\'\')[\s\S]*?\1')
+_COMMENT = re.compile(r"#.*")
+
+
+def _code_only(src: str) -> str:
+    return _COMMENT.sub("", _DOCSTRING.sub("", src))
+
+
+def _row_haystack() -> str:
+    src = (ROOT / "paper_check.py").read_text(encoding="utf-8")
+    src += (ROOT / "sections.py").read_text(encoding="utf-8")
+    src += (ROOT / "stages.py").read_text(encoding="utf-8")
+    src += (ROOT / "source_policy.py").read_text(encoding="utf-8")
+    return _code_only(src)
+
+
+def _unknown_names(cited: set[str], haystack: str) -> list[str]:
+    return sorted(name for name in cited if not re.search(rf"\b{re.escape(name)}\b", haystack))
+
+
+# SPEC.md, DESIGN_DOC.md, and AGENTS.md all carry one house-style section,
+# cited from the same check module and the same source_policy.py.
+# DESIGN_DOC.md numbers its copy of the heading; the others do not. #467
+# #480.
+STYLE_DOCS = ("SPEC.md", "DESIGN_DOC.md", "AGENTS.md")
+STYLE_SECTION = re.compile(r"^## (?:\d+\.\s*)?House style and the evidence contract\n", re.M)
+
+
+def _style_section_text(text: str, label: str) -> str:
+    match = STYLE_SECTION.search(text)
+    assert match, f"{label} has no House style and the evidence contract section"
+    return text[match.end() :].split("\n## ", 1)[0]
+
+
+def test_feature_map_module_three_names_the_style():
+    """#467: a reader of Module 3 finds house style, glossary, and CTA named,
+    not only a citation row, and every backticked name there is a real row
+    or constant, not drift. This port's half of the judge's fake-row check;
+    the Agent SDK copy carries the other half."""
+    if not FEATURE_MAP.is_file():
+        pytest.skip("slides/FEATURE-MAP.md sits one level above a standalone copy")
+    text = FEATURE_MAP.read_text(encoding="utf-8")
+    module_three = "\n".join(line for line in text.splitlines() if "| 3 |" in line)
+    assert "house style" in module_three.lower(), module_three
+    assert "glossary" in module_three.lower(), module_three
+    assert "cta" in module_three.lower(), module_three
+    assert STYLE_URL in text
+
+    tail = text.split("Module 4 is the same graph with nobody at the keyboard.", 1)[-1]
+    cited = set(_BARE_IDENTIFIER.findall(module_three + "\n" + tail))
+    assert cited, "FEATURE-MAP Module 3 names no row or constant to verify"
+    unknown = _unknown_names(cited, _row_haystack())
+    assert not unknown, (
+        f"FEATURE-MAP names {unknown}, absent from paper_check.py/sections.py/"
+        "stages.py/source_policy.py"
+    )
+
+
+@pytest.mark.parametrize("name", STYLE_DOCS)
+def test_both_specs_name_the_evidence_contract(name):
+    """#480: SPEC.md, DESIGN_DOC.md, and AGENTS.md name only rows and
+    constants that `paper_check.py`, `sections.py`, `stages.py`, and
+    `source_policy.py` actually define, a comment or a docstring mention
+    excluded. The Agent SDK copy runs the same check against its own three
+    files."""
+    haystack = _row_haystack()
+
+    text = (ROOT / name).read_text(encoding="utf-8")
+    assert STYLE_URL in text
+    section = _style_section_text(text, name)
+    cited = set(_BARE_IDENTIFIER.findall(section))
+    assert cited, f"{name} names no row or constant to verify"
+    unknown = _unknown_names(cited, haystack)
+    assert not unknown, (
+        f"{name} names {unknown}, absent from paper_check.py/sections.py/"
+        "stages.py/source_policy.py"
+    )

@@ -190,9 +190,22 @@ def _rooted_patterns(patterns) -> list[str]:
     return [pattern if pattern.startswith("/") else "/" + pattern for pattern in patterns]
 
 
-def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
-    """One Deep Agents subagent per role in this loop's cast, with its own tools."""
-    repo = Path(contract.repo)
+def subagents_for(
+    contract, loop: str = DEFAULT_LOOP, *, cwd: Path | str | None = None
+) -> list[dict]:
+    """One Deep Agents subagent per role in this loop's cast, with its own tools.
+
+    #543 follow-up. This is where a subagent's actual write and read tools
+    are built (`scoped_write_tool`, `read_tool`), independently of the
+    orchestrator's own `FilesystemBackend` in `build_agent`. `build_agent`'s
+    `cwd` fix routed the orchestrator's backend and its `run_tests` tool at
+    the worktree; it never reached here, so the test and code implementer
+    subagents -- the two roles that actually call a write tool -- kept
+    writing into `contract.repo` (the `--repo` clone) regardless. A live
+    run proved it: an untracked, model-authored test file landed in the
+    clone with this gap still open, the same defect #543 set out to fix.
+    """
+    repo = Path(cwd).resolve() if cwd is not None else Path(contract.repo).resolve()
     reader = read_tool(repo)
     out = []
     for role in plan(contract, loop).values():
@@ -263,7 +276,11 @@ def build_agent(
             general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
         ),
     )
-    specs = subagents_for(contract, loop)
+    # #543 follow-up. `repo` above is already the resolved `cwd` when one
+    # was given; this is the same worktree-vs-clone fix `subagents_for`
+    # itself now needs, threaded through rather than repeating the
+    # `cwd or contract.repo` choice a second time.
+    specs = subagents_for(contract, loop, cwd=repo)
     if subagent_names is not None:
         available = {spec["name"] for spec in specs}
         unknown = subagent_names - available
