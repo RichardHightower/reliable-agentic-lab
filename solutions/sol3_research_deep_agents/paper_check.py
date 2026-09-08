@@ -24,6 +24,7 @@ Rows `check()` appends, past the three it reuses from `brief`:
     person         no second person, no first-person tour
     marketing      no banned marketing verb in body prose
     policy_leak    the body names no search host and narrates no retrieval boundary
+    caveat_once    a caveat sentence or a numeric finding repeats across sections
     question_heading a heading pastes a question instead of answering it
     abstract_matches_body the abstract and introduction match the body they summarize
     next_step      the last prose heading is a next-step section, not a bare Conclusion
