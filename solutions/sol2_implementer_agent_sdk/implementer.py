@@ -56,23 +56,40 @@ def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
 
 
 HARNESS_DIR = ".harness/"
+_STATE_FILE = HARNESS_DIR + "state.json"
+_LAST_TRACE_FILE = HARNESS_DIR + "last-implementer.json"
+
+# The loop's own named outputs, never a role's. Not "everything under
+# .harness/": that used to admit any file a doer chose to plant there,
+# including an overwrite of state.json or the receipt themselves. Judge of
+# PR #500 reproduced both: a doer scoped to tests/** writing
+# .harness/planted.py with no violation, and a doer overwriting
+# .harness/state.json with forged red_ids and preexisting that survived
+# _finish's merge and were trusted by the next --resume.
+_LOOP_OUTPUTS = frozenset({steps.STEPS_FILE, _STATE_FILE, _LAST_TRACE_FILE, receipt.RECEIPT})
 
 
 def _is_loop_bookkeeping(path: str) -> bool:
-    """`steps.jsonl` and everything under `.harness/` are this loop's own
+    """`steps.jsonl` and this loop's own three `.harness/` files are its own
     output, never a role's. Excluded everywhere `rubric.changed_files` feeds
     `preexisting`, `after_test_phase`, or the code phase's own `changed`
     list.
 
-    A6 (#433) is what surfaces this: `_write_checkpoint` writes
-    `.harness/state.json` mid-run, before the test phase's red gate is even
-    decided, so a later `rubric.changed_files` scan in the same run would
-    otherwise see it as an untracked file with no role's scope covering it,
-    and `write_scope` would fail every run that reaches the code loop. A5's
-    own `.harness` writes never hit this, because they only ever ran once,
-    at the very end, after the last scan had already happened.
+    A6 (#433) is what surfaces the need for this at all: `_write_checkpoint`
+    writes `.harness/state.json` mid-run, before the test phase's red gate
+    is even decided, so a later `rubric.changed_files` scan in the same run
+    would otherwise see it as an untracked file with no role's scope
+    covering it, and `write_scope` would fail every run that reaches the
+    code loop. A5's own `.harness` writes never hit this, because they only
+    ever ran once, at the very end, after the last scan had already
+    happened.
+
+    The set is exactly these four names, not the whole directory: anything
+    else under `.harness/` -- a doer planting a file, or overwriting one of
+    these four itself -- is still a write this loop did not make, and stays
+    visible to `write_scope` and the checkpoint's own read-then-merge.
     """
-    return path == steps.STEPS_FILE or path.startswith(HARNESS_DIR)
+    return path in _LOOP_OUTPUTS
 
 
 def plan_for(target_ticket: tickets.Ticket) -> steps.Plan:
@@ -329,7 +346,15 @@ def _worktree(repo: Path, ticket_id: str, *, resume: bool = False) -> Path:
             raise ContractError(f"git worktree add failed for {path}: {added.stderr.strip()}")
 
     _bootstrap(repo, path)
-    _copy_ticket(repo, path, ticket_id)
+    if not resume:
+        # A6 (#433) fold-in. A resume's worktree already holds the ticket the
+        # killed run used. Re-copying it would pull in any enhancer edit made
+        # between the kill and the resume, and that edit would then show up
+        # as an untracked diff to `tickets/<id>.md` -- a path neither the
+        # test nor code implementer's scope covers, so it would read as a
+        # scope violation for a file this loop never asked either role to
+        # touch.
+        _copy_ticket(repo, path, ticket_id)
     return path
 
 
@@ -423,7 +448,10 @@ def run(  # noqa: PLR0915
     phase entirely when the stored `phase` says it already went green,
     restoring `preexisting`, the test phase's own files, and `red_ids` from
     the checkpoint rather than recomputing them from a worktree `--resume`
-    left dirty on purpose.
+    left dirty on purpose. `_worktree` also skips re-copying the ticket on a
+    resume: the worktree already holds the ticket the killed run used, and
+    an enhancer edit made between the kill and the resume would otherwise
+    show up as an untracked diff to a path neither role's scope covers.
     """
     contract = Contract(repo)
     contract.validate()
@@ -762,7 +790,7 @@ def _mark_proven(plan: steps.Plan, passing: set[str], repo: Path) -> steps.Plan:
 _STATE_FIELD_TYPES: dict[str, type | tuple[type, ...]] = {
     "runs": int,
     "last_gate": str,
-    "last_reason": str,
+    "last_reason": (str, type(None)),
     "last_run_at": (int, float),
     "loop": str,
     "phase": str,

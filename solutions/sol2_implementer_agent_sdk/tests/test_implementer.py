@@ -1099,8 +1099,8 @@ def test_worktree_plumbing_without_the_task_binary(tmp_path):
 # -- A5 (#432 #434). state.json and exit codes 0, 2, 1 --------------------
 
 
-def test_state_json_has_nine_keys_and_runs_increments(tmp_path, monkeypatch):
-    """Fields the Module 4 slides already name, plus the four A6 (#433) adds
+def test_state_json_has_ten_keys_and_runs_increments(tmp_path, monkeypatch):
+    """Fields the Module 4 slides already name, plus the five A6 (#433) adds
     for --resume. `runs` accumulates across two runs of the same ticket,
     which reuse the same worktree."""
     repo = _git_repo(tmp_path / "repo")
@@ -1266,6 +1266,59 @@ class RecordingScriptedBackend(ScriptedBackend):
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
         self.allows.append(list(allow))
         return super().run(repo=repo, prompt=prompt, allow=allow)
+
+
+def test_a_planted_file_under_harness_is_a_scope_violation(tmp_path, monkeypatch):
+    """Judge's blocker on PR #500. The loop's own bookkeeping exclusion is
+    exactly four named files (steps.jsonl, state.json, last-implementer.json,
+    receipt.json), not the whole .harness/ directory. A doer planting
+    anything else there is still a write outside its declared scope."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+
+    backend = ScriptedBackend([[(".harness/planted.py", "pwned = True\n")]])
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=3, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert any(".harness/planted.py" in v for v in trace["scope_violations"])
+
+
+def test_a_forged_state_json_overwrite_is_overwritten_back_by_the_loop(tmp_path, monkeypatch):
+    """Judge's blocker on PR #500, second half. state.json is one of the
+    loop's own named outputs, so a doer overwriting it mid-test-phase is not
+    itself flagged as a scope violation. The smallest correct rule: the
+    loop's own next checkpoint always wins, because it reads the file back
+    and only ever sets the five keys it manages to values it just computed
+    itself, never the doer's. A forged phase/red_ids/preexisting/
+    test_phase_files/test_phase_attempts never survives past that write."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    _patch_runs(
+        monkeypatch,
+        [_run(passed=(health,)), _run(passed=(health,)), _run(passed=(health,))],
+    )
+    forged = json.dumps(
+        {
+            "phase": "code",
+            "red_ids": ["evil"],
+            "preexisting": ["haha"],
+            "test_phase_files": ["nope"],
+            "test_phase_attempts": 999,
+        }
+    )
+    backend = ScriptedBackend([[(".harness/state.json", forged)], []])
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=2, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    state = json.loads(
+        (Path(trace["repo"]) / ".harness" / "state.json").read_text(encoding="utf-8")
+    )
+    assert state["test_phase_attempts"] == 2
+    assert state["red_ids"] == []
+    assert state["preexisting"] == []
+    assert state["phase"] == "test"
 
 
 def test_resume_after_a_killed_code_phase_reenters_the_code_loop(tmp_path, monkeypatch):
@@ -1516,3 +1569,53 @@ def test_state_json_with_a_string_runs_is_corrupt(tmp_path, monkeypatch):
 
     with pytest.raises(implementer.ContractError, match="corrupt"):
         implementer.run(repo=repo, ticket_id="T001", doer=doers.NoneBackend(), budget=1)
+
+
+def test_resume_does_not_recopy_an_edited_ticket(tmp_path, monkeypatch):
+    """Judge's blocker on PR #500. A resume must not re-copy the ticket: an
+    enhancer edit made in the source repo between the kill and the resume
+    must not reach the worktree, or it would show up as an untracked diff
+    to tickets/T001.md, a path neither role's scope covers."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health,), failed=(new_test,)),
+        ],
+    )
+    first_backend = ScriptedBackend(
+        [[("tests/test_greet.py", "def test_ac1():\n    assert False\n")], []]
+    )
+    first = implementer.run(
+        repo=repo, ticket_id="T001", doer=first_backend, budget=1, write_trace=True
+    )
+    assert first["gate"] == "escalate"
+    worktree = Path(first["repo"])
+    ticket_before_resume = (worktree / "tickets" / "T001.md").read_text(encoding="utf-8")
+
+    # The enhancer edits the source repo's ticket, uncommitted, while the
+    # killed run's worktree sits untouched.
+    (repo / "tickets" / "T001.md").write_text(
+        ticket_before_resume.replace("hello", "hello, edited after the kill"),
+        encoding="utf-8",
+    )
+
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    second_backend = ScriptedBackend([[("app/greet.py", "def greet():\n    return 'hello'\n")]])
+    second = implementer.run(
+        repo=repo, ticket_id="T001", doer=second_backend, budget=2, resume=True, write_trace=True,
+    )
+
+    assert second["gate"] == "pass"
+    assert (worktree / "tickets" / "T001.md").read_text(encoding="utf-8") == ticket_before_resume
+    assert not any("tickets/" in v for v in second.get("scope_violations", []))
