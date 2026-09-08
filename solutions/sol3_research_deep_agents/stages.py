@@ -1463,6 +1463,23 @@ def assemble(
     figure_number = 0
     skips = list(skipped_figures or [])
     noted_skips: set[int] = set()
+    # #464 B1. A rendered figure no planned section names can never receive
+    # an in-text mention: the whole-paper pass only edits a planned
+    # section's own text. That figure is a named skip, not an orphan
+    # `## Figures` block the pass cannot write into. Attributed to the
+    # first planned section, or "methods" when the outline has none.
+    all_names = {
+        name for section in outline.get("sections", []) for name in (section.get("figures") or [])
+    }
+    sections_list = outline.get("sections", [])
+    fallback_section = (
+        str(sections_list[0].get("id") or sections_list[0].get("heading") or "")
+        if sections_list
+        else "methods"
+    )
+    for name, figure in by_name.items():
+        if name not in all_names:
+            skips.append({"name": figure.name, "section": fallback_section, "reason": "no owning section"})
 
     parts = [f"# {plan.get('title', 'Untitled')}", ""]
     for section in outline.get("sections", []):
@@ -1488,8 +1505,12 @@ def assemble(
                 continue
             rel = f"charts/{Path(chart['path']).name}"
             caption = chart.get("caption") or chart.get("name") or rel
+            # #464 B2. The number is spent for every placed figure, whether
+            # this call writes the image line fresh or the line already
+            # sits in `body` from a persisted trim: a slot the counter
+            # does not charge is a slot the next figure duplicates.
+            figure_number += 1
             if rel not in (body or ""):
-                figure_number += 1
                 parts.append(f"![{caption}]({rel})")
                 parts.append("")
                 parts.append(f"Figure {figure_number}. {caption}")
@@ -1510,17 +1531,6 @@ def assemble(
                 continue
             noted_skips.add(id(skip))
             parts.append(f"> {skip['name']} was not shown: {skip['reason']}.")
-            parts.append("")
-
-    # A rendered figure the outline never placed still belongs in the paper. It
-    # cost a render, and dropping it silently hides that the outline drifted.
-    orphans = [f for name, f in by_name.items() if name not in used_figures]
-    if orphans:
-        parts.append("## Figures")
-        parts.append("")
-        for figure in orphans:
-            figure_number += 1
-            parts.append(figure_block(figure, figure_number))
             parts.append("")
 
     # A skip with no owning section (an empty `section`, or one that never

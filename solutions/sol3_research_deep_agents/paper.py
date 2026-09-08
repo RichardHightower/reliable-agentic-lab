@@ -2752,15 +2752,30 @@ class Paper:
             charts=self._loaded_charts(),
         )
         figures_for_trim = paper_check.placed_figures(preview)
+        # #464 F5. Every figure already exists from the second attempt on,
+        # so gating on "any figure at all" spent a writer turn on every
+        # single attempt even when every figure was already named. Gate on
+        # the figures that still need a sentence.
+        unmentioned = [
+            figure
+            for figure in figures_for_trim
+            if figure.get("section")
+            and by_lower.get(figure["section"])
+            and not paper_check.mentions_figure(self.written[by_lower[figure["section"]]], figure["number"])
+        ]
         # #531. A "Figure N" mention with no figure behind it can survive in
         # `self.written` alone even with nothing else to do this attempt: a
         # figure an earlier pass pointed a section at, that this attempt's
         # own commissioning then dropped. Still worth the pass, to clean it.
+        # #464 F5: a valid mention is not dangling, or this never idles.
+        valid_numbers = {f["number"] for f in figures_for_trim if f.get("number")}
         dangling = any(
-            paper_check.FIGURE_MENTION.search(text) for text in self.written.values()
+            int(n) not in valid_numbers
+            for text in self.written.values()
+            for n in paper_check.FIGURE_MENTION.findall(text)
         )
 
-        if not repeats and not figures_for_trim and not dangling:
+        if not repeats and not unmentioned and not dangling:
             return StageResult("trim", summary="no repeat, no figure")
 
         before = dict(self.written)
@@ -2796,9 +2811,10 @@ class Paper:
                 number = figure.get("number")
                 if not heading or not number:
                     continue
-                mention = f"Figure {number}"
                 text = self.written[heading]
-                if mention in text:
+                # Word-bounded, so "Figure 1" is not satisfied by a
+                # "Figure 12" mention already in the prose. #464 F1.
+                if paper_check.mentions_figure(text, number):
                     continue
                 sentence = _figure_mention_sentence(number, figure.get("caption") or "")
                 self.written[heading] = f"{text.rstrip()} {sentence}"
@@ -2851,7 +2867,6 @@ class Paper:
         # this attempt's own commissioning then dropped -- is stripped the
         # same pass. #514, #531.
         real_headings = frozenset(h.lower() for h in self.written)
-        valid_numbers = {f["number"] for f in figures_for_trim if f.get("number")}
         for heading in self.written:
             text = paper_check.collapse_repeated_back_references(
                 self.written[heading], real_headings

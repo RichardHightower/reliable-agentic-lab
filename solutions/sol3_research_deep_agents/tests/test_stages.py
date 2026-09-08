@@ -6,6 +6,7 @@ import json
 
 import evidence
 import paper
+import paper_check
 import pytest
 import stages
 import state
@@ -2258,14 +2259,20 @@ def test_assemble_places_a_figure_under_its_section():
     assert body.index("A diagram of loop") < body.index("## References")
 
 
-def test_a_rendered_figure_the_outline_forgot_is_still_placed():
-    """It cost a render. Dropping it silently hides that the outline drifted."""
+def test_a_rendered_figure_the_outline_forgot_becomes_a_named_skip():
+    """#464 B1. A figure no planned section names can never receive the
+    whole-paper pass's in-text mention: the old orphan `## Figures` block
+    is gone, and the figure is a named skip instead, not silence and not
+    an image `figure_referenced` can never clear."""
     led, claims = ledger_with()
     body = stages.assemble(
         plan(), outline(claims[0].id), {"Introduction": "A fact. [1]"}, [Figure("orphan")], led
     )
-    assert "## Figures" in body
-    assert "A diagram of orphan" in body
+    assert "## Figures" not in body
+    assert "A diagram of orphan" not in body
+    assert "orphan" in body
+    assert "no owning section" in body
+    assert not paper_check.placed_figures(body)
 
 
 def test_a_term_marker_is_harvested_and_stripped():

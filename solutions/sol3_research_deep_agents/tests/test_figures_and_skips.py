@@ -293,3 +293,113 @@ def test_an_old_bare_name_skip_list_still_loads(run_dir):
     assert run._skipped_charts() == [
         {"name": "token-cost-multipliers", "section": "", "reason": "no data"}
     ]
+
+
+# -- PR #534 judge follow-ups ------------------------------------------
+
+
+def test_captioned_fails_a_duplicate_figure_number():
+    body = (
+        "# T\n\n## Discussion\n\nA point [1].\n\n"
+        "![a](figures/a_imagen.png)\n\nFigure 1. a\n\n"
+        "## Limitations\n\nA different point [1].\n\n"
+        "![b](figures/b_imagen.png)\n\nFigure 1. b\n"
+    )
+    score = paper_check.check(body, ["https://a"])
+    assert "captioned" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "captioned")
+    assert "not contiguous" in row.detail
+
+
+def test_figure_referenced_mention_is_word_bounded():
+    body = (
+        "# T\n\n## Discussion\n\nSee Figure 12 for context. [1]\n\n"
+        "![a](figures/a_imagen.png)\n\nFigure 1. a\n"
+    )
+    score = paper_check.check(body, ["https://a"])
+    assert "figure_referenced" in score.signature(), score.report()
+
+
+def test_drop_dangling_figure_mentions_preserves_a_same_block_figure_line():
+    """#464 F2. The same block-flattening defect item (d) fixed elsewhere:
+    dropping a dangling sentence must not sweep a same-block image line
+    into the join.
+    """
+    body = (
+        "# T\n\n## Discussion\n\nA point about the loop. Figure 3 shows this.\n"
+        "![fig](figures/fig_imagen.png)\n"
+    )
+    result = paper_check.drop_dangling_figure_mentions(body, valid_numbers=set())
+    discussion = paper_check.top_level_sections(result)["discussion"]
+    lines = [line for line in discussion.splitlines() if line.strip()]
+    assert lines[-1] == "![fig](figures/fig_imagen.png)"
+    assert "Figure 3" not in discussion
+
+
+def test_skip_noted_grades_the_reason_and_the_section():
+    body = (
+        "# T\n\n## Discussion\n\nA point [1].\n\n> token-cost was not shown: no data.\n\n"
+        "## Limitations\n\nA different point [1].\n"
+    )
+    score = paper_check.check(
+        body,
+        ["https://a"],
+        skipped_figures=[{"name": "token-cost", "section": "discussion", "reason": "a different reason"}],
+    )
+    assert "skip_noted" in score.signature(), score.report()
+    score = paper_check.check(
+        body,
+        ["https://a"],
+        skipped_figures=[{"name": "token-cost", "section": "limitations", "reason": "no data"}],
+    )
+    assert "skip_noted" in score.signature(), score.report()
+
+
+def test_a_caption_and_a_skip_note_do_not_count_toward_length_or_has_body():
+    # "T" and "Discussion" are the only two words that are not inside a
+    # caption or a skip note: the title and the section heading.
+    body = (
+        "# T\n\n## Discussion\n\nFigure 1. A description of the loop with plenty of words in it.\n\n"
+        "> a-chart was not shown: no data.\n"
+    )
+    assert paper_check.word_count(body) == 2
+    assert paper_check.sections_without_prose(body, min_words=1) == ["Discussion (0 words)"]
+
+
+def test_a_back_reference_matches_the_whole_heading():
+    """#464 F6. A substring match let a short heading ("AB") claim the
+    exemption from inside an unrelated longer word ("Cable"): a sentence
+    naming "Cable Routing", not a real heading, still repeats.
+    """
+    caveat = "This exact same specific finding restates fully across sections."
+    body = (
+        "# On a topic\n\n"
+        "## AB\n\nAn unrelated finding here. [1]\n\n"
+        f"## Limitations\n\nAs stated in Cable Routing, {caveat} [1]\n\n"
+        f"## Conclusion\n\nAs stated in Cable Routing, {caveat} [1]\n"
+    )
+    score = paper_check.check(body, ["https://a"])
+    assert "caveat_once" in score.signature(), score.report()
+
+
+def test_stage_trim_spends_no_turn_when_every_figure_is_already_named(run_dir):
+    """#464 F5. Once every placed figure is already named and there is no
+    repeat and no dangling mention, the pass has no work: it must not
+    spend a writer turn on every attempt regardless.
+    """
+
+    class Boom:
+        name = "deep_agents"
+
+        def ask(self, role, prompt):
+            raise AssertionError("nothing to do; the model must not be asked")
+
+    sections = [{"id": "discussion", "heading": "Discussion", "figures": ["fig"]}]
+    run = _paper(run_dir, Boom(), sections)
+    run.written = {"Discussion": "A point about the loop. Figure 1 shows the loop. [1]"}
+    run.figures = [StubFigure("fig", alt="A diagram of the loop")]
+
+    result = run.stage_trim()
+    assert result.summary == "no repeat, no figure"
+    assert result.artifacts == {}
+    assert result.usd == 0.0
