@@ -923,10 +923,15 @@ class OfflineTurns(Turns):
     ) -> dict:
         budget = budget or {}
         words = int(budget.get("words") or MAX_WORDS)
-        # Three sections, last one is limitations. Word targets sum exactly.
-        first = words // 3
-        second = words // 3
-        third = words - first - second
+        # Four sections, last one is the next step. The CTA is a fixed-size
+        # close regardless of topic, so it takes a small target off the top
+        # and the three body sections split what remains. Word targets still
+        # sum exactly to `words`, which is what `validate` checks.
+        next_step_target = max(100, words // 20)
+        remaining = max(words - next_step_target, 0)
+        first = remaining // 3
+        second = remaining // 3
+        third = remaining - first - second
         sections = [
             {
                 "id": "problem",
@@ -1010,6 +1015,24 @@ class OfflineTurns(Turns):
                 "word_target": third,
                 "figures": [],
                 "depends_on": ["approach"],
+            },
+            {
+                "id": "next-step",
+                "heading": "Next step",
+                "objective": "Tell a colleague what to do with this design before adopting it.",
+                "abstract": (
+                    "A colleague evaluates the three exits on a live ticket before "
+                    "adopting them elsewhere."
+                ),
+                "key_questions": [
+                    "What should a colleague do with these findings?",
+                    "How does a colleague evaluate the design on a live case?",
+                ],
+                "claims_to_support": [],
+                "required_evidence": [],
+                "word_target": next_step_target,
+                "figures": [],
+                "depends_on": ["limits"],
             },
         ]
         return {
@@ -1163,6 +1186,26 @@ class OfflineTurns(Turns):
                     f"shows, and what disappears if that component is missing. {marker}".strip(),
                     "",
                 ]
+        if section.get("heading", "").strip().lower() == "next step":
+            # P4. A fixed, deterministic CTA close: imperative steps, no
+            # `develop_claim` prose, and no marketing. Coverage is already
+            # satisfied above, by the per-question lines every section gets;
+            # a claim the fallback research pass bound to this section (the
+            # fixture backend always returns its nearest match, never a
+            # miss) is not unpacked here, because a CTA is an instruction,
+            # not a finding. `_fit_word_target` is skipped too: its band
+            # would pad by repeating one step past the point of reading as a
+            # next step, or truncate the list mid-bullet.
+            lines += [
+                "- Evaluate the three exits on a live ticket before adopting them elsewhere.",
+                "- Run the fixture with --backend fixture, then again with a live backend.",
+                "- Compare this port against the sibling runtime on the same topic and budget.",
+                "- Measure each section's word count before raising that section's target higher.",
+                "- Try the offline demo first, then repeat the same run against a live backend.",
+                "- Adopt the exit order only after a team reviews the evidence behind it.",
+                "",
+            ]
+            return "\n".join(lines)
         for claim in claims:
             marker = f"[{claim['number']}]" if claim.get("number") else ""
             lines += develop_claim(claim["text"], marker, claim.get("status") or "verified")

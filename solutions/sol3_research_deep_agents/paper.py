@@ -1016,7 +1016,7 @@ class Paper:
         if not isinstance(edited, dict):
             return None, usd
         errors = outlines.validate(
-            edited, word_target_total=edited.get("word_target_total") or 2000
+            edited, word_target_total=edited.get("word_target_total") or 2000, require_next_step=True
         )
         if errors:
             self.say(f"  outline editor edit rejected: {errors[0]}")
@@ -1039,7 +1039,9 @@ class Paper:
             drafted = json.loads(dest.read_text(encoding="utf-8"))
         else:
             drafted = outlines.outline_from_plan(self.plan)
-        errors = outlines.validate(drafted, word_target_total=drafted.get("word_target_total") or 2000)
+        errors = outlines.validate(
+            drafted, word_target_total=drafted.get("word_target_total") or 2000, require_next_step=True
+        )
         if errors:
             raise GateFailed(outlines.retry_note(errors), ("outline",))
         dest.write_text(json.dumps(drafted, indent=2) + "\n", encoding="utf-8")

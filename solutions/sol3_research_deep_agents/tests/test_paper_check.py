@@ -13,6 +13,10 @@ GOOD = (
     "## Introduction\n\nThree exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
     "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
     "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
+    "## Next step\n\n"
+    "- Evaluate the three exits on a live ticket before adopting them.\n"
+    "- Run the fixture with --backend fixture, then again with a live backend.\n"
+    "- Compare this port against the sibling runtime on the same topic.\n\n"
     "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
 )
 
@@ -621,16 +625,25 @@ def test_a_term_used_only_inside_inline_code_still_fails_glossary_exact():
 
 
 def test_structural_rows_are_off_by_default():
-    """`enforce_structure` defaults false, so a body carrying both glossary
-    defects passes when the caller does not opt in, and an existing narrow
-    snippet's assertions are unchanged."""
+    """`enforce_structure` defaults false, so a body carrying glossary
+    defects, a bare-Conclusion close, and a selling CTA passes when the
+    caller does not opt in, and an existing narrow snippet's assertions are
+    unchanged."""
     body = GOOD.replace(
         "## References",
         "## Glossary\n\n**widget.** A term the body never uses.\n\n## References",
+    ).replace(
+        "## Next step\n\n"
+        "- Evaluate the three exits on a live ticket before adopting them.\n"
+        "- Run the fixture with --backend fixture, then again with a live backend.\n"
+        "- Compare this port against the sibling runtime on the same topic.\n\n",
+        "## Conclusion\n\n- Unlock the platform for every team today. [2]\n\n",
     )
     off = gate(body)
     assert "glossary_complete" not in off.signature()
     assert "glossary_exact" not in off.signature()
+    assert "next_step" not in off.signature()
+    assert "cta_language" not in off.signature()
     assert gate(GOOD, URLS).passed
 
 
@@ -661,4 +674,77 @@ def test_the_recorded_fixture_paper_passes_the_glossary_rows(run_dir, stub_rende
     names = {c.name for c in score.checks}
     assert "glossary_complete" in names
     assert "glossary_exact" in names
+    assert score.passed, score.report()
+
+
+# -- P4, the next-step section --------------------------------------------
+
+
+def test_a_conclusion_heading_with_no_next_step_verb_fails():
+    """`next_step` fires when the last prose heading is a bare Conclusion."""
+    body = GOOD.replace(
+        "## Next step\n\n"
+        "- Evaluate the three exits on a live ticket before adopting them.\n"
+        "- Run the fixture with --backend fixture, then again with a live backend.\n"
+        "- Compare this port against the sibling runtime on the same topic.\n\n",
+        "## Conclusion\n\nThis paper reviewed the same three exits again. [2]\n\n",
+    )
+    score = gate(body, enforce_structure=True)
+    assert "next_step" in score.signature(), score.report()
+
+
+def test_unlock_in_the_next_step_section_fails():
+    """`cta_language` is scoped to the next-step section. `unlock` in a body
+    section is the unconditional `marketing` row's business, not this one."""
+    body = GOOD.replace(
+        "- Evaluate the three exits on a live ticket before adopting them.\n",
+        "- Unlock the platform for every team.\n",
+    )
+    score = gate(body, enforce_structure=True)
+    assert "cta_language" in score.signature(), score.report()
+
+    elsewhere = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper does not unlock every runtime. [2]",
+    )
+    scored = gate(elsewhere, enforce_structure=True)
+    assert "marketing" in scored.signature(), scored.report()
+    assert "cta_language" not in scored.signature(), scored.report()
+
+
+def test_evaluate_x_on_a_live_ticket_passes():
+    """The house style's own allowed CTA shape passes both new rows."""
+    score = gate(GOOD, enforce_structure=True)
+    assert "next_step" not in score.signature(), score.report()
+    assert "cta_language" not in score.signature(), score.report()
+
+
+def test_a_step_over_twenty_words_fails():
+    """Each step in the next-step section is 20 words or fewer."""
+    long_step = "- " + " ".join(["evaluate"] * 21) + ".\n"
+    body = GOOD.replace(
+        "- Evaluate the three exits on a live ticket before adopting them.\n", long_step
+    )
+    score = gate(body, enforce_structure=True)
+    assert "cta_language" in score.signature(), score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_next_step_rows(run_dir, stub_renderer):
+    """After the fixture repair, `task paper` assembles a paper whose last
+    prose section is the next step, and `next_step`/`cta_language` both pass
+    under `assemble_gate`'s own `enforce_structure=True`."""
+    import stages  # noqa: PLC0415
+    from conftest import build_run  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    assert run.run() == 0, "the recorded fixture must still assemble and pass its gate"
+    body = run.paper_path.read_text(encoding="utf-8")
+    assert body.index("## Next step") < body.index("## References")
+    assert "Evaluate the three exits on a live ticket" in body, "the recorded CTA steps"
+    score = stages.assemble_gate(
+        body, run.ledger, allowed_domains=run.allowed_domains, loop_doctrine=run.loop_doctrine
+    )
+    names = {c.name for c in score.checks}
+    assert "next_step" in names
+    assert "cta_language" in names
     assert score.passed, score.report()

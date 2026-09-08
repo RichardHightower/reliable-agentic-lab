@@ -299,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         reuse_drafts=args.reuse_drafts,
         enforce_research_policy=True,
         enforce_loop_doctrine=args.enforce_loop_doctrine,
+        require_next_step=True,
         brain=brains[0] if brains else None,
         brains=brains,
         corpus_subjects=subjects,
