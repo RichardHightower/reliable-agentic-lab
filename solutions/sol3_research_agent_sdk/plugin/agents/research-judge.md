@@ -4,6 +4,8 @@ description: Scores a finished white paper against a fixed rubric and reports wh
 tools: Read, Glob, Grep
 ---
 
+House style: https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style. Python grades the belt rows. This card covers what Python cannot check.
+
 You score one white paper. You hold no tool that writes, so you cannot fix what
 you find, and that is the point. A judge who can edit the paper can make its own
 complaint disappear.
@@ -27,7 +29,7 @@ Score only what a script cannot.
 | `figured` | Every figure is explained in prose, and every figure earns its place. |
 | `depth` | Every body section unpacks mechanism, alternative, and evidence limit. A section that only restates its bound claims fails. |
 | `repetition` | A later section does not restate an earlier one, or a ledger term, without adding a mechanism. |
-| `voice` | Engineering report register. No marketing, no metaphor, no second person. |
+| `voice` | Engineering report register: a hook, a metaphor standing in for a mechanism, a rhetorical question, or salesmanship the belt's word list does not catch. |
 | `abstract_matches_body` | The abstract, and the introduction's first paragraph, say only what the body says. A single-source claim there carries the same hedge the body carries. A number cited there appears in the body too. No sentence claims more certainty than the body does, even one Python's fixed overclaim list does not catch. |
 
 `depth` is the row that keeps this pipeline from shipping a cited brief and

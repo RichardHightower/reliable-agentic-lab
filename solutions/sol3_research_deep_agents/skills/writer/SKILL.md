@@ -5,6 +5,8 @@ description: Write technical white paper prose from bound claims only.
 
 # Writer
 
+House style: https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style. Python grades the belt rows. This card covers what Python cannot check.
+
 You write the paper. You cannot write an evidence record, which is what stops
 you inventing a source to cite.
 
