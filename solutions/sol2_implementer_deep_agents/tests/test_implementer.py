@@ -1027,3 +1027,65 @@ def test_cleanup_flag_removes_the_worktree_and_prints_the_path_without_it(
     out2 = capsys.readouterr().out
     assert f"worktree removed: {worktree_path}" in out2
     assert not worktree_path.exists()
+
+
+def test_a_symlink_at_the_worktree_path_is_refused(tmp_path):
+    """Judge's blocker on PR #495. A symlink at <repo>.worktrees/<ticket>
+    used to pass the registration guard whenever it pointed at any
+    registered worktree, and reset --hard / clean -fd then ran through it.
+    is_symlink() is checked before anything else, so this never gets there:
+    the source repo's uncommitted edit and untracked file both survive."""
+    repo = _git_repo(tmp_path / "repo")
+    (repo / "app" / "health.py").write_text("ok = True  # uncommitted edit\n", encoding="utf-8")
+    (repo / "app" / "untracked.txt").write_text("keep me\n", encoding="utf-8")
+
+    resolved_repo = repo.resolve()
+    worktrees_dir = resolved_repo.parent / f"{resolved_repo.name}.worktrees"
+    worktrees_dir.mkdir(parents=True, exist_ok=True)
+    (worktrees_dir / "T001").symlink_to(resolved_repo)
+
+    with pytest.raises(implementer.ContractError, match="refusing to use it as a worktree path"):
+        implementer.run(repo=repo, ticket_id="T001", doer=doers.NoneBackend())
+
+    assert "uncommitted edit" in (repo / "app" / "health.py").read_text(encoding="utf-8")
+    assert (repo / "app" / "untracked.txt").exists()
+
+
+def test_a_symlink_to_another_tickets_worktree_is_refused(tmp_path):
+    """Same guard, a different target: the symlink points at a real,
+    registered worktree that just is not this ticket's."""
+    repo = _git_repo(tmp_path / "repo")
+    other_worktree = implementer._worktree(repo, "T002")
+
+    resolved_repo = repo.resolve()
+    worktrees_dir = resolved_repo.parent / f"{resolved_repo.name}.worktrees"
+    (worktrees_dir / "T001").symlink_to(other_worktree)
+
+    with pytest.raises(implementer.ContractError, match="refusing to use it as a worktree path"):
+        implementer._worktree(repo, "T001")
+
+
+def test_nested_non_git_target_raises_contract_error_and_creates_no_worktree(tmp_path):
+    """implementer.py used to detect "not a git repository" only by
+    `git worktree list`'s exit code, which succeeds for a plain directory
+    nested inside any git repo and names the outer repo, so a worktree of
+    the outer repo got created before _bootstrap ever failed."""
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    subprocess.run(["git", "init"], cwd=outer, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "lab@example.com"], cwd=outer, check=True)
+    subprocess.run(["git", "config", "user.name", "lab"], cwd=outer, check=True)
+    (outer / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=outer, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=outer, check=True, capture_output=True)
+
+    nested = outer / "nested"
+    nested.mkdir()
+    (nested / "Taskfile.yml").write_text(TASKFILE, encoding="utf-8")
+    (nested / ".loop.yml").write_text(LOOP_YML, encoding="utf-8")
+    (nested / "tickets").mkdir()
+
+    with pytest.raises(implementer.ContractError, match="not a git repository"):
+        implementer.run(repo=nested, ticket_id="T001", doer=doers.NoneBackend())
+
+    assert not any(p.name.endswith(".worktrees") for p in tmp_path.rglob("*") if p.is_dir())

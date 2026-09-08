@@ -205,9 +205,32 @@ def _worktree(repo: Path, ticket_id: str) -> Path:
     path; that determinism is what a future `--resume` (A6) needs. A path
     that exists but is not a registered worktree is a leftover, and
     `git worktree add` never runs on top of one.
+
+    Two things are refused before anything else runs, because either one
+    would let `reset --hard` / `clean -fd` land somewhere other than this
+    literal sibling path: a symlink at the worktree path (it would resolve
+    into whatever registered worktree it points at -- the source repo
+    itself, or another ticket's worktree, and both have been reproduced),
+    and a target repo that is a plain directory nested inside some other
+    git repo (`git worktree list` then exits 0 and names the outer repo).
     """
     repo = Path(repo).resolve()
     path = repo.parent / f"{repo.name}.worktrees" / ticket_id
+
+    if path.is_symlink():
+        raise ContractError(f"{path} is a symlink; refusing to use it as a worktree path")
+
+    toplevel = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--show-toplevel"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if toplevel.returncode != 0 or Path(toplevel.stdout.strip()).resolve() != repo:
+        raise ContractError(
+            "the target repo is not a git repository; the implementer isolates "
+            "every run in a worktree"
+        )
 
     listing = subprocess.run(
         ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
@@ -215,19 +238,16 @@ def _worktree(repo: Path, ticket_id: str) -> Path:
         capture_output=True,
         check=False,
     )
-    if listing.returncode != 0:
-        raise ContractError(
-            "the target repo is not a git repository; the implementer isolates "
-            "every run in a worktree"
-        )
     registered = {
         Path(line[len("worktree ") :]).resolve()
         for line in listing.stdout.splitlines()
         if line.startswith("worktree ")
     }
 
+    path.parent.mkdir(parents=True, exist_ok=True)
+
     if path.exists():
-        if path.resolve() not in registered:
+        if path.resolve() != path or path.resolve() not in registered:
             raise ContractError(
                 f"{path} exists but is not a registered git worktree of {repo}. "
                 "Remove it by hand, or run a different --ticket."
@@ -243,7 +263,6 @@ def _worktree(repo: Path, ticket_id: str) -> Path:
         if harness_dir.exists():
             shutil.rmtree(harness_dir)
     else:
-        path.parent.mkdir(parents=True, exist_ok=True)
         branch = f"implementer/{ticket_id}"
         added = subprocess.run(
             ["git", "-C", str(repo), "worktree", "add", "-B", branch, str(path), "HEAD"],
@@ -336,10 +355,12 @@ def run(  # noqa: PLR0915
     order, so the file reads as the sequence it enforces. Hiding half of them
     behind helpers would satisfy a linter and cost the reader the loop.
 
-    Everything after the ticket read runs inside an isolated git worktree,
-    never the caller's repo (`_worktree`). `repo` names the source; `target`
-    is rebound to the worktree once it exists, and everything the loop
-    writes -- steps.jsonl, .harness, the receipt -- lands there.
+    Every step in this function runs inside an isolated git worktree, never
+    the caller's repo (`_worktree`). `repo` names the source; `_worktree`
+    creates or reuses a worktree for it, copying the source repo's current
+    ticket and `.loop.yml` in first. `target` is bound to that worktree, so
+    the ticket read and everything after it -- steps.jsonl, .harness, the
+    receipt -- happen there, not against the source.
     """
     contract = Contract(repo)
     contract.validate()
