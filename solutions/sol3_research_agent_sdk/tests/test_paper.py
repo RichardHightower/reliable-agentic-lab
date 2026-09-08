@@ -31,6 +31,19 @@ def test_section_instruction_uses_the_outline_word_target():
     assert "fix the thing" in paper._section_instruction({"word_target": 400}, "fix the thing")
 
 
+def test_strip_policy_leak_scrubs_a_host_and_a_retrieval_phrase():
+    """#452 #465 #412: a judge's own note, or Python's `policy_leak` report,
+    can name the offending host or phrase while explaining what to fix. The
+    writer must not see either."""
+    note = "policy_leak: search host or retrieval narration in: 'hosted on arxiv.org'"
+    scrubbed = paper._strip_policy_leak(note, ("arxiv.org",))
+    assert "arxiv.org" not in scrubbed
+    assert paper._strip_policy_leak("no host here", ("arxiv.org",)) == "no host here"
+
+    phrase_note = "Section s1 still names its preprint search."
+    assert "preprint search" not in paper._strip_policy_leak(phrase_note, ())
+
+
 @pytest.fixture
 def no_renderer(monkeypatch):
     """A run must survive a machine with no diagram renderer."""
@@ -437,6 +450,34 @@ def test_the_retry_hands_the_writer_only_the_current_issues(work, turns, no_rend
     assert "words of section body" in notes[0]
     assert "fix the thing" in notes[1]
     assert "FINAL ATTEMPT" in notes[1], "the last attempt narrows the ask"
+
+
+def test_the_retry_note_names_no_allowlist_host(work, turns, no_renderer):
+    """A judge's own note can quote a `policy_leak` failure's host back at
+    the writer while explaining what to fix. #452 #465 #412: the retry note
+    the next write attempt receives must not repeat it."""
+    recorder = turns(done=False)
+    run = make_run(work, recorder, max_iterations=2)
+
+    class Noisy(type(recorder)):
+        def review(self, paper_body, report):
+            self.asked.append(("review", report))
+            return {
+                "done": False,
+                "summary": "",
+                "issues": [
+                    {
+                        "severity": "major",
+                        "section": "s1",
+                        "description": "remove the mention of docs.langchain.com",
+                    }
+                ],
+            }
+
+    run.turns = Noisy(done=False)
+    paper.run_paper(run)
+    notes = [args[2] for args in run.turns.asked if args[0] == "write"]
+    assert "docs.langchain.com" not in notes[1], notes[1]
 
 
 # -- resume -----------------------------------------------------------------

@@ -762,6 +762,32 @@ def test_a_raw_key_question_as_a_heading_fails():
     assert "What stops the loop from running forever?" in row.detail
 
 
+def test_a_repunctuated_key_question_as_a_heading_still_fails():
+    """PR #508 judge follow-up: the old version stripped only a trailing
+    `?` from the wanted set, so a writer that closed the pasted question
+    with a period or a colon instead slipped past `question_heading`."""
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    period = (
+        "## One\n\n"
+        "### What stops the loop from running forever.\n\n"
+        "A rubric computed in code, not left to the model, stops it [1].\n"
+    )
+    colon = (
+        "## One\n\n"
+        "### What stops the loop from running forever:\n\n"
+        "A rubric computed in code, not left to the model, stops it [1].\n"
+    )
+    assert "question_heading" in checks.check(period, ["https://a"], outline=outline).signature()
+    assert "question_heading" in checks.check(colon, ["https://a"], outline=outline).signature()
+
+
 def test_a_heading_ending_in_a_question_mark_fails():
     """The row is unconditional: a heading ending in `?` fails with no
     outline handed to `check` at all."""
@@ -856,4 +882,121 @@ def test_the_recorded_fixture_paper_passes_question_heading(tmp_path):
     names = {row["name"] for row in report["checks"]}
     assert "question_heading" in names
     assert report["passed"], report
-    assert report["passed"], report
+
+
+# -- P6, the paper does not narrate the harness --------------------------------
+
+
+def test_the_creatine_sentence_fails_policy_leak():
+    """The exact sentence from #412. The finished creatine paper spent whole
+    paragraphs reporting that no preprint was found, and this is the one the
+    ticket quotes. `arxiv.org` was the host admitted for that run, the same
+    way a biomedical librarian would admit it today."""
+    body = (
+        "A point about creatine [1].\n\n"
+        "No study identified for this mechanism was hosted on arxiv.org.\n"
+    )
+    score = checks.check(body, ["https://a"], allowed_domains=("arxiv.org",))
+    assert "policy_leak" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "policy_leak")
+    assert "arxiv.org" in row.detail
+
+
+def test_an_allowlist_host_in_body_prose_fails():
+    """A host from the run's allowlist in a body section fails. The same
+    host in Methods or References passes: #478 fills Methods with the
+    admitted-host list by design, and References is the citation list."""
+    host = "example-journal.org"
+    body_hit = f"The team searched {host} for evidence [1].\n"
+    assert "policy_leak" in checks.check(body_hit, ["https://a"], allowed_domains=(host,)).signature()
+
+    methods_ok = (
+        "A point [1].\n\n"
+        f"## Methods\n\nThe run searched {host} for evidence.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "policy_leak" not in checks.check(methods_ok, ["https://a"], allowed_domains=(host,)).signature()
+
+    references_ok = f"A point [1].\n\n## References\n\n1. https://{host}/x\n"
+    assert (
+        "policy_leak"
+        not in checks.check(references_ok, [f"https://{host}/x"], allowed_domains=(host,)).signature()
+    )
+
+
+def test_methods_may_name_admitted_hosts():
+    """The Methods exemption, on its own: #478 writes Methods from the run
+    record, and it names the admitted hosts by design."""
+    host = "example-journal.org"
+    body = (
+        "A point [1].\n\n"
+        f"## Methods\n\nSources were retrieved from {host} and {host}/archive.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], allowed_domains=(host,))
+    assert "policy_leak" not in score.signature(), score.report()
+
+
+def test_the_references_section_may_name_hosts():
+    """The References exemption, on its own: the reference list is where a
+    host name belongs."""
+    host = "example-journal.org"
+    body = f"A point [1].\n\n## References\n\n1. https://{host}/paper\n"
+    score = checks.check(body, [f"https://{host}/paper"], allowed_domains=(host,))
+    assert "policy_leak" not in score.signature(), score.report()
+
+
+def test_the_three_phrases_fail():
+    """The three retrieval phrases #412 names, each in an otherwise ordinary
+    sentence."""
+    sentences = {
+        "preprint search": "The preprint search turned up nothing usable here [1].",
+        "search scope": "The search scope excluded several relevant databases [1].",
+        "no study was hosted on": "No study was hosted on a site this run could reach [1].",
+    }
+    for phrase, body in sentences.items():
+        score = checks.check(body, ["https://a"])
+        assert "policy_leak" in score.signature(), (phrase, score.report())
+
+
+def test_a_paper_that_never_names_a_host_passes():
+    """A clean paper, with no search host and no retrieval language, passes
+    by construction."""
+    body = (
+        "Creatine reduces lean mass loss during immobilization [1].\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "policy_leak" not in checks.check(body, ["https://a"]).signature()
+
+
+def test_the_writer_message_names_no_allowlist_host_belt():
+    """`policy_leak` is the belt behind the stripped delegation message
+    (`tests/test_research_and_turns.py`). This is the Python-side row that
+    still catches a leak if the strip is ever bypassed."""
+    body = "The result came from arxiv.org, which this run searched [1].\n"
+    assert "policy_leak" in checks.check(body, ["https://a"], allowed_domains=("arxiv.org",)).signature()
+
+
+def test_the_recorded_fixture_paper_passes_policy_leak(tmp_path):
+    """The paper `task demo` writes names no search host and narrates no
+    retrieval boundary. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`."""
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    hits = checks.policy_leak_violations(body)
+    assert hits == [], hits

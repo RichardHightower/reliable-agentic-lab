@@ -112,6 +112,25 @@ def _section_instruction(section: dict, notes: str = "") -> str:
     return length_note
 
 
+def _strip_policy_leak(text: str, allowed_domains) -> str:
+    """Scrub the run's admitted hosts and the harness's retrieval language out
+    of a retry note before it reaches the writer. #452 #465 #412.
+
+    `notes` is built from the judge's own issue descriptions, and a judge that
+    read a `policy_leak` failure can quote the offending host or phrase back
+    while explaining what to fix. The writer never sees the allowlist, only
+    the instruction to stop naming a source host.
+    """
+    if not text:
+        return text
+    scrubbed = text
+    for host in tuple(source_policy.SEED_ALLOWLIST) + tuple(allowed_domains or ()):
+        host = str(host).strip()
+        if host:
+            scrubbed = re.sub(re.escape(host), "an admitted source", scrubbed, flags=re.IGNORECASE)
+    return checks.POLICY_LEAK_PHRASE.sub("the source policy", scrubbed)
+
+
 class RunFailed(RuntimeError):
     """A person has to look at this. The run stopped."""
 
@@ -1390,6 +1409,7 @@ def write_sections(run: Run) -> dict:
                 ),
                 [f"{i.get('section') or 'paper'}: {i['description']}" for i in blocking],
             )
+            notes = _strip_policy_leak(notes, run.allowed_domains)
 
     out = run.file("sections")
     out.mkdir(parents=True, exist_ok=True)

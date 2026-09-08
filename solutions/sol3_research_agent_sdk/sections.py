@@ -824,7 +824,7 @@ def run_section(run, section: dict) -> dict:
     except Exception:
         pass
 
-    from paper import _section_instruction  # noqa: PLC0415
+    from paper import _section_instruction, _strip_policy_leak  # noqa: PLC0415
 
     previous_sig: tuple[str, ...] | None = None
     previous_gaps: dict[str, float] = {}
@@ -843,6 +843,10 @@ def run_section(run, section: dict) -> dict:
             retry_note = last_score.report()
         if last_verdict.get("failed_rows"):
             retry_note = (retry_note + "\n" + " ".join(last_verdict.get("notes") or [])).strip()
+        # #452 #465 #412. A `cited` failure quotes the offending sentence into
+        # `report()`, host and all, and a judge's own notes can repeat one
+        # back too. Neither may reach the writer's next attempt.
+        retry_note = _strip_policy_leak(retry_note, run.allowed_domains)
         slots, cuts = assemble_context(
             outline=approved,
             ledger=ledger,
@@ -882,7 +886,7 @@ def run_section(run, section: dict) -> dict:
                     existing,
                     edit_verdict,
                     relative,
-                    note=last_score.report() if last_score else "",
+                    note=_strip_policy_leak(last_score.report(), run.allowed_domains) if last_score else "",
                     claims=bound,
                 )
             else:
