@@ -881,6 +881,123 @@ def test_a_clean_paper_passes_question_heading():
     assert "question_heading" not in gate(GOOD, URLS).signature()
 
 
+def test_a_heading_inside_a_fence_is_not_a_heading():
+    """#509. A `##` line inside a fenced code block is not paper structure,
+    in every row that scans headings: `question_headings`,
+    `last_prose_heading`, `has_body` (`sections_without_prose`), and
+    `top_level_sections`, the boundary helper others build on. The same
+    line outside the fence still fails `question_heading`.
+    """
+    fenced = (
+        "## Real heading\n\n"
+        "Real prose describes a heading question with a rubric here today [1].\n\n"
+        "## Another heading\n\n"
+        "More real prose closes the section out today [1].\n\n"
+        "```markdown\n"
+        "## Is this a heading?\n"
+        "more fence text\n"
+        "```\n"
+    )
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+
+    assert paper_check.question_headings(fenced, outline) == []
+    assert set(paper_check.top_level_sections(fenced)) == {"real heading", "another heading"}
+    # The fence sits after "Another heading", so a heading scan that reads
+    # it unmasked would report the fenced line as the paper's last section,
+    # not "Another heading".
+    assert paper_check.last_prose_heading(fenced) == "Another heading"
+    assert paper_check.sections_without_prose(fenced, 5) == []
+
+    unfenced = (
+        "## Real heading\n\n"
+        "Real prose describes a heading question with a rubric here today [1].\n\n"
+        "## Is this a heading?\n\n"
+        "more fence text\n\n"
+        "## Another heading\n\n"
+        "More real prose closes the section out today [1].\n"
+    )
+    assert "Is this a heading?" in paper_check.question_headings(unfenced, outline)
+
+
+def test_a_fenced_heading_does_not_satisfy_the_sections_row():
+    """#509. A fenced markdown example naming a required heading must not
+    let `sections` (`missing_sections`) believe that section is present.
+    """
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nSummary text here today. [1]\n\n"
+        "```markdown\n"
+        "## Introduction\n"
+        "example only\n"
+        "```\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert paper_check.missing_sections(body, ("abstract", "introduction", "references")) == ["introduction"]
+
+
+def test_a_fence_opener_with_trailing_whitespace_still_closes():
+    """#529 judge finding 2. `` ``` `` followed by a space is still a valid
+    opener; the old pattern required the newline right after the backticks
+    and silently paired with the next fence instead, hiding everything
+    between as masked code, including a real heading.
+    """
+    body = (
+        "``` \ncode\n```\n\n"
+        "## Real heading\n\nprose [1].\n\n"
+        "```python\nx = 1\n```\n"
+    )
+    assert paper_check.missing_sections(body, ("real heading",)) == []
+
+
+def test_a_tilde_fence_masks_like_a_backtick_fence():
+    """#529 judge finding 3. A tilde fence is still a fence."""
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "~~~markdown\n## Is this a heading?\nmore fence text\n~~~\n"
+    )
+    assert paper_check.question_headings(body, outline) == []
+
+
+def test_a_hyphenated_info_string_still_opens_a_fence():
+    """#529 judge finding 3. An info string is not restricted to `\\w*`."""
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```objective-c\n## Is this a heading?\nmore fence text\n```\n"
+    )
+    assert paper_check.question_headings(body, outline) == []
+
+
+def test_an_unclosed_fence_masks_to_the_end_of_the_body():
+    """#529 judge finding 3. No closer means nothing after the opener is
+    prose either; the alternative, leaving it unmasked, reads a heading
+    inside an unterminated snippet as real structure.
+    """
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```markdown\n## Is this a heading?\nmore fence text\n"
+    )
+    assert paper_check.question_headings(body, outline) == []
+
+
+def test_a_heading_right_after_a_closing_fence_is_still_seen():
+    """#529 judge regression: the closer's trailing `(?:\\n|\\Z)` used to
+    consume the newline after `` ``` ``, so a heading on the very next
+    line, with no blank line between, lost its own leading newline to the
+    masked span and vanished from every row that scans headings.
+    """
+    body = (
+        "## Abstract\n\nsummary [1].\n\n"
+        "```python\nx = 1\n```\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert paper_check.missing_sections(body, ("abstract", "references")) == []
+    assert "references" in paper_check.top_level_sections(body)
+    assert paper_check.last_prose_heading(body) == "Abstract"
+
+
 def test_the_recorded_fixture_paper_passes_question_heading(run_dir, stub_renderer):
     """`task paper` assembles a paper with no heading that pastes a
     question, under `assemble_gate`'s own production call."""
