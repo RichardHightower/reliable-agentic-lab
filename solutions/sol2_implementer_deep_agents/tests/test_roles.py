@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gates
 import implementer
+import pytest
 import roleplan
 import roles
 
@@ -40,6 +41,36 @@ def test_test_implementer_writes_tests(contract, target_repo, fake_langchain):
     write = tester["tools"][1]
     assert write("tests/test_due.py", "ok") == "wrote tests/test_due.py"
     assert (target_repo / "tests" / "test_due.py").read_text() == "ok"
+
+
+def test_no_implementer_role_holds_bash(contract):
+    """A shell is a wider hole than any of the three write tools it would
+    replace. `subagents_for` never reads `role.tools` to build a runtime tool
+    list, so this pins the declared table the SPEC and `task table` show."""
+    cast = roleplan.plan(contract, "implementer")
+    assert [name for name, role in cast.items() if "Bash" in role.tools] == []
+
+
+def test_a_reader_override_that_grants_a_write_tool_raises(monkeypatch):
+    monkeypatch.setitem(roleplan.OVERRIDES, ("implementer", "judge"), {"tools": ("Read", "Write")})
+    with pytest.raises(ValueError) as exc_info:
+        roleplan.plan(None, "implementer")
+    assert "judge" in str(exc_info.value)
+
+
+def test_the_judge_tools_are_the_read_set(contract):
+    judge = roleplan.plan(contract, "implementer")["judge"]
+    assert judge.tools == ("Read", "Glob", "Grep")
+
+
+def test_the_table_still_says_the_judge_writes_no(contract):
+    """`roleplan.table` is what `task table` prints."""
+    line = next(
+        line
+        for line in roleplan.table(roleplan.plan(contract, "implementer")).splitlines()
+        if line.startswith("judge")
+    )
+    assert line.split()[1] == "no"
 
 
 def test_red_gate_needs_new_failing_ids():
