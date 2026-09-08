@@ -70,7 +70,8 @@ def _sleep(seconds: float) -> None:
 
 
 def _transient_provider_errors() -> tuple[type[BaseException], ...]:
-    """Exception classes for a dropped connection or a rate limit.
+    """Exception classes for a dropped connection, a rate limit, or an
+    overloaded or failing provider.
 
     Imported lazily, the same way `roles.py` imports `langchain_anthropic`:
     the fixture runner needs neither package installed, and importing here
@@ -78,14 +79,28 @@ def _transient_provider_errors() -> tuple[type[BaseException], ...]:
     and `anthropic.RateLimitError` are the base classes LangChain's Anthropic
     wrapper (`AnthropicConnectionError`, `AnthropicTimeoutError`,
     `AnthropicRateLimitError`) subclasses, so catching the two bases catches
-    the wrapped forms too. A gate failure, `BudgetSpent`, and a schema error
-    are never in this tuple.
+    the wrapped forms too.
+
+    #482: `anthropic.OverloadedError` (HTTP 529, the most common transient
+    Anthropic failure in practice) and `anthropic.InternalServerError` (a
+    5xx) are `APIStatusError`s, not `APIConnectionError`s, so the pair above
+    missed them. LangChain's `AnthropicOverloadedError` subclasses
+    `anthropic.OverloadedError` and `AnthropicAPIError` subclasses
+    `anthropic.InternalServerError`, so catching the two Anthropic bases
+    catches LangChain's wrapped forms too, the same way the pair above
+    already does. A gate failure, `BudgetSpent`, and a schema error are
+    never in this tuple.
     """
     try:
         import anthropic  # noqa: PLC0415
     except ImportError:
         return ()
-    return (anthropic.APIConnectionError, anthropic.RateLimitError)
+    return (
+        anthropic.APIConnectionError,
+        anthropic.RateLimitError,
+        anthropic.OverloadedError,
+        anthropic.InternalServerError,
+    )
 
 
 def _section_word_range(heading: str, claim_count: int) -> str:
@@ -688,6 +703,15 @@ class Paper:
                         f"after {wait:.0f}s: {exc}"
                     )
                     _sleep(wait)
+                    # #482: the caller may have opened a request window
+                    # around this whole `_ask` call (`begin_request`, one
+                    # tool call and its provider calls). The first attempt
+                    # can spend that window before it drops, and a retry
+                    # that reuses the spent window hits `BudgetExceeded` on
+                    # its own search instead of trying again. Re-arm the
+                    # window with its own limits so the retried attempt
+                    # gets its budget back; a no-op when no window is open.
+                    self.budget.reset_request()
         elapsed = time.monotonic() - started
 
         self.state.spend(reply.usd)
@@ -2178,6 +2202,46 @@ class Paper:
             self.plan.get("title") or self.topic,
             theme_name=self.theme,
         )
+        # #514: a live backend call failing for one figure, once the
+        # renderer already reported itself available, must not sink the
+        # whole run. `stages.render_figures` marks such a complaint with
+        # `BACKEND_FAILURE_MARK`; pull those figures out before the gate
+        # ever sees them as "missing," the same way a claims-mismatch drop
+        # already does, and name the backend's own error in `records`.
+        backend_failed: dict[str, str] = {}
+        for complaint in complaints:
+            if stages.BACKEND_FAILURE_MARK in complaint:
+                name = Path(complaint.split(":", 1)[0]).stem
+                backend_failed[name] = complaint.split(stages.BACKEND_FAILURE_MARK, 1)[1]
+        if backend_failed:
+            complaints = [c for c in complaints if stages.BACKEND_FAILURE_MARK not in c]
+            for name, reason in backend_failed.items():
+                dropped.add(name)
+                prior_attempts = records.get(name, {}).get("attempts", 0)
+                # A backend failure is not a label failure. `dropped: True`
+                # here would make the durable budget check above (`spent =
+                # attempts if dropped else 0`) treat a figure that already
+                # earned its labels as permanently disqualified once
+                # `attempts` reaches `MAX_LABEL_ATTEMPTS`, for a cause its
+                # labels had nothing to do with; the Agent SDK does not
+                # have this problem, it leaves `dropped` false on the same
+                # path. Keep `dropped` false and `attempts` exactly what
+                # the label loop already earned, so a later commissioning
+                # gets its full label budget back once the backend
+                # recovers.
+                records[name] = {
+                    "name": name,
+                    "attempts": prior_attempts,
+                    "dropped": False,
+                    "reason": f"{stages.BACKEND_FAILURE_MARK}{reason}",
+                }
+                self.say(f"    note: {name} skipped, {stages.BACKEND_FAILURE_MARK}{reason}")
+                figure_spec = next(
+                    (f for f in survivors if evidence.slug(f["name"]) == name), None
+                )
+                if figure_spec:
+                    self._drop_figure_reference(figure_spec["name"])
+            survivors = [f for f in survivors if evidence.slug(f["name"]) not in backend_failed]
         self._redraw = {Path(c.split(":", 1)[0]).stem for c in complaints}
         stages.diagram_gate(self.figures, complaints, survivors)
         for complaint in complaints:
@@ -2198,12 +2262,18 @@ class Paper:
         # whose source is still on disk, claims gate included.
         self._redraw = set()
         accepted = sum(1 for figure in self.figures if figure.best is not None)
+        claims_dropped = len(dropped) - len(backend_failed)
         return StageResult(
             "diagram",
             usd=usd,
             artifacts={"figures": len(self.figures), "accepted": accepted, "dropped": sorted(dropped)},
             summary=f"{accepted} judged imagen-diagrams PNGs"
-            + (f", {len(dropped)} dropped for a claims mismatch" if dropped else ""),
+            + (f", {claims_dropped} dropped for a claims mismatch" if claims_dropped else "")
+            + (
+                f", {len(backend_failed)} skipped, image backend unavailable"
+                if backend_failed
+                else ""
+            ),
         )
 
     def _section_for_figure(self, figure_name: str) -> dict | None:

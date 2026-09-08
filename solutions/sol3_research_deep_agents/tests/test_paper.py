@@ -1290,6 +1290,100 @@ def test_a_missing_image_backend_is_never_retried(run_dir, no_renderer):
     assert run.state.attempts("diagram") == 1
 
 
+# -- #514: the offline lane never depends on a live image call -------------
+
+
+def test_the_recorded_fixture_tests_never_touch_the_renderer(offline, run_dir, monkeypatch):
+    """`diagrams.render` patched to blow up if it is ever invoked, and the
+    recorded fixture pipeline still passes end to end. `stub_renderer`
+    replaces `stages.render_figures` entirely; this proves it never falls
+    through to the real renderer underneath."""
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("the offline lane must never call the renderer")
+
+    monkeypatch.setattr(diagrams_mod, "render", boom)
+    assert offline.run() == 0
+    assert (run_dir / "whitepaper.md").exists()
+
+
+def test_a_failing_image_backend_becomes_a_named_skip(run_dir, monkeypatch):
+    """#514: `available()` already said yes; a live call failing for one
+    figure must not crash the run. That figure is skipped this
+    commissioning, named with the backend's own error, and the paper
+    still completes. `dropped` in the persisted record stays false, a
+    backend failure is not a label failure (#482 follow-up)."""
+    from conftest import build_run, stub_figure  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    _run_up_to_write(run)
+
+    monkeypatch.setattr(diagrams_mod, "available", lambda: True)
+
+    def flaky_render(src, out_dir, **_kwargs):
+        if src.stem == "three-exits":
+            prompt = Path(out_dir) / f"{src.stem}_imagen.prompt.txt"
+            prompt.parent.mkdir(parents=True, exist_ok=True)
+            prompt.write_text("plugin-built prompt", encoding="utf-8")
+            raise diagrams_mod.ImageBackendUnavailable(prompt, "503 from the backend")
+        return stub_figure(src.stem, Path(out_dir))
+
+    monkeypatch.setattr(diagrams_mod, "render", flaky_render)
+
+    result = run.stage_diagram()
+    assert "three-exits" in result.artifacts["dropped"]
+
+    recorded = json.loads((run_dir / "diagrams.json").read_text())["figures"]
+    entry = next(f for f in recorded if f["name"] == "three-exits")
+    assert entry["dropped"] is False
+    assert "503 from the backend" in entry["reason"]
+
+
+def test_a_backend_skip_never_sets_dropped_and_keeps_its_earned_attempts(run_dir, monkeypatch):
+    """#482 follow-up: the durable budget check (`spent = attempts if
+    dropped else 0`) would permanently disqualify a figure that already
+    earned its labels if a backend skip ever set `dropped`. A live call
+    failing must leave `dropped` false and the label-matching attempt
+    count exactly what it was before the backend was even asked."""
+    from conftest import build_run, stub_figure  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    _run_up_to_write(run)
+
+    monkeypatch.setattr(diagrams_mod, "available", lambda: True)
+
+    def flaky_render(src, out_dir, **_kwargs):
+        if src.stem == "three-exits":
+            prompt = Path(out_dir) / f"{src.stem}_imagen.prompt.txt"
+            prompt.parent.mkdir(parents=True, exist_ok=True)
+            prompt.write_text("plugin-built prompt", encoding="utf-8")
+            raise diagrams_mod.ImageBackendUnavailable(prompt, "still overloaded")
+        return stub_figure(src.stem, Path(out_dir))
+
+    monkeypatch.setattr(diagrams_mod, "render", flaky_render)
+
+    run.stage_diagram()
+    before = json.loads((run_dir / "diagrams.json").read_text())["figures"]
+    entry_before = next(f for f in before if f["name"] == "three-exits")
+    assert entry_before["dropped"] is False
+    spent_before = entry_before["attempts"]
+
+    # A real second commissioning, not the unchanged-sections shortcut:
+    # change a section body so `_sections_sha` differs and the wipe-on-
+    # change step redrafts every source, the same backend failure again.
+    # A durable `dropped` from the first call would refuse this figure
+    # outright once `attempts` reached the label-attempt cap; it must not,
+    # and the figure's earned attempts must land on the same number, not
+    # grow just because the backend failed twice.
+    heading = next(iter(run.written))
+    run.written[heading] = run.written[heading] + " Rewritten for this test.\n"
+    run.stage_diagram()
+    after = json.loads((run_dir / "diagrams.json").read_text())["figures"]
+    entry_after = next(f for f in after if f["name"] == "three-exits")
+    assert entry_after["dropped"] is False
+    assert entry_after["attempts"] == spent_before
+
+
 def test_sections_written_before_a_stop_survive(run_dir, stub_renderer):
     """A stage that persists only on success makes a mid-stage stop cost the
     whole stage again, which is the opposite of what a cost cap is for."""
@@ -2166,3 +2260,78 @@ def test_the_backoff_sequence_is_five_fifteen_forty_five(run_dir, stub_renderer,
     run._ask("planner", "Write plan.json for this topic.")
 
     assert waits == [5.0, 15.0, 45.0]
+
+
+# -- the retry asymmetry from #409 (#482) -----------------------------------
+
+
+def _overloaded_error():
+    import anthropic  # noqa: PLC0415
+    import httpx2  # noqa: PLC0415
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(
+        529,
+        request=request,
+        json={"error": {"type": "overloaded_error", "message": "overloaded"}},
+    )
+    return anthropic.OverloadedError(
+        "overloaded", response=response, body={"error": {"type": "overloaded_error"}}
+    )
+
+
+def test_a_529_is_retried(run_dir, stub_renderer, monkeypatch):
+    """#482: HTTP 529 (overloaded) is the most common transient Anthropic
+    failure in practice, and `langchain_anthropic`'s `AnthropicOverloadedError`
+    is an `APIStatusError`, not an `APIConnectionError`, so the pre-#482
+    tuple missed it."""
+    pytest.importorskip("anthropic")
+    # `_overloaded_error` builds a fake response through `httpx2`, the name
+    # this machine's `anthropic` 1.4.0 vendors its `httpx` dependency
+    # under. A different `anthropic` build could name it `httpx` instead;
+    # skip cleanly rather than let that import error read as a failure.
+    pytest.importorskip("httpx2")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _overloaded_error, 2)
+    run = build_run(run_dir, runner=runner)
+
+    assert run.run() == 0
+    assert run.state.attempts("plan") == 1
+
+
+def test_a_retry_gets_a_fresh_request_window(run_dir, stub_renderer, monkeypatch):
+    """#482: `begin_request` opens a window around `_ask` (one tool call,
+    a few provider calls inside it). The first attempt can spend that
+    window's one tool call and then drop with a transient error; a retry
+    that reuses the spent window hits `BudgetExceeded` on its own search
+    and degrades to "NO ANSWER. request search budget spent" instead of
+    actually searching again. `_ask`'s retry loop must re-arm the window
+    so the retried researcher turn still gets its search."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+    calls = {"n": 0}
+
+    class Runner(paper.FixtureRunner):
+        def ask(self, role, prompt):
+            if role == "researcher":
+                calls["n"] += 1
+                run.budget.reserve_tool()
+                if calls["n"] == 1:
+                    raise _connection_error()
+            return super().ask(role, prompt)
+
+    run = build_run(run_dir, runner=Runner(FIXTURES / "replies.json"))
+    run.budget.begin_request(max_calls=1, max_provider_calls=3)
+    try:
+        run._ask(
+            "researcher",
+            "What happens when a graph has no explicit exit condition",
+        )
+    finally:
+        run.budget.end_request()
+    assert calls["n"] == 2, "the retry must actually run its search, not skip straight to BudgetExceeded"

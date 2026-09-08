@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 import checks
+import diagrams
 import gates
+import pytest
+
+
+@pytest.fixture
+def no_renderer(monkeypatch):
+    """A recorded-fixture run must never depend on a live image call. #514"""
+    monkeypatch.setattr(diagrams, "available", lambda: False)
 
 
 def test_the_self_checks_run(capsys):
@@ -596,7 +604,7 @@ def test_a_genitive_is_not_a_contraction():
     assert "ste_language" not in score.signature(), score.report()
 
 
-def test_the_recorded_fixture_paper_passes_the_ste_belt(tmp_path):
+def test_the_recorded_fixture_paper_passes_the_ste_belt(tmp_path, no_renderer):
     """The paper `task demo` writes carries no contraction, no Latin
     abbreviation, and no four-noun stack. Same command as the Taskfile:
     `--backend fixture --fresh --brain tests/fixtures/brain`.
@@ -632,7 +640,7 @@ def test_the_recorded_fixture_paper_passes_the_ste_belt(tmp_path):
 PINNED_COUNTER_CLAIM_ID = "approach-f2"
 
 
-def test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass(tmp_path):
+def test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass(tmp_path, no_renderer):
     """#474 follow-up F7: the counter-evidence pass runs for real against
     the recorded fixture, offline, no network. No claim's text in this
     fixture matches the `GENERALIZING` regex, so the candidate this run
@@ -737,7 +745,7 @@ def test_a_marketing_word_inside_code_or_a_url_passes():
     assert "marketing" not in score.signature(), score.report()
 
 
-def test_the_recorded_fixture_paper_passes_the_person_and_marketing_rows(tmp_path):
+def test_the_recorded_fixture_paper_passes_the_person_and_marketing_rows(tmp_path, no_renderer):
     """The paper `task demo` writes carries no second person, no first person
     tour, and none of the six marketing verbs. Same command as the Taskfile:
     `--backend fixture --fresh --brain tests/fixtures/brain`.
@@ -890,7 +898,7 @@ def test_no_terms_means_no_glossary_and_both_rows_pass():
     assert score.passed, score.report()
 
 
-def test_the_recorded_fixture_paper_passes_the_glossary_rows(tmp_path):
+def test_the_recorded_fixture_paper_passes_the_glossary_rows(tmp_path, no_renderer):
     """The paper `task demo` writes carries no leftover TERM marker and no
     glossary section, since the recorded writer never marks a term. Both rows
     still run, under the harness's own `enforce_research_policy=True`, and
@@ -1023,7 +1031,7 @@ def test_a_body_with_no_heading_passes_next_step_by_construction():
     assert "next_step" not in score.signature(), score.report()
 
 
-def test_the_recorded_fixture_paper_passes_the_next_step_rows(tmp_path):
+def test_the_recorded_fixture_paper_passes_the_next_step_rows(tmp_path, no_renderer):
     """After the fixture repair, `task demo` assembles a paper whose last
     prose section is the next step, and `next_step`/`cta_language` both pass
     under the harness's own `require_next_step=True`/`enforce_structure=True`.
@@ -1174,7 +1182,7 @@ def test_coverage_still_fails_a_paper_section_that_never_answers_the_question():
     assert gaps and "One" in gaps[0]
 
 
-def test_the_recorded_fixture_paper_passes_question_heading(tmp_path):
+def test_the_recorded_fixture_paper_passes_question_heading(tmp_path, no_renderer):
     """The paper `task demo` writes has no heading that pastes a key
     question, under the harness's own outline. Same command as the
     Taskfile: `--backend fixture --fresh --brain tests/fixtures/brain`."""
@@ -1294,7 +1302,7 @@ def test_the_writer_message_names_no_allowlist_host_belt():
     assert "policy_leak" in checks.check(body, ["https://a"], allowed_domains=("arxiv.org",)).signature()
 
 
-def test_the_recorded_fixture_paper_passes_policy_leak(tmp_path):
+def test_the_recorded_fixture_paper_passes_policy_leak(tmp_path, no_renderer):
     """The paper `task demo` writes names no search host and narrates no
     retrieval boundary. Same command as the Taskfile:
     `--backend fixture --fresh --brain tests/fixtures/brain`."""
@@ -1421,7 +1429,7 @@ def test_a_body_with_no_abstract_heading_is_inert():
     assert row.passed, row.detail
 
 
-def test_the_recorded_fixture_paper_passes_abstract_matches_body(tmp_path):
+def test_the_recorded_fixture_paper_passes_abstract_matches_body(tmp_path, no_renderer):
     """The paper `task demo` writes assembles with the abstract last, and it
     matches the body it summarizes. Same command as the Taskfile:
     `--backend fixture --fresh --brain tests/fixtures/brain`."""
@@ -1446,3 +1454,76 @@ def test_the_recorded_fixture_paper_passes_abstract_matches_body(tmp_path):
     names = {row["name"] for row in report["checks"]}
     assert "abstract_matches_body" in names
     assert report["passed"], report
+
+
+# -- #514: the offline lane never depends on a live image call ---------------
+
+
+def test_the_recorded_fixture_tests_never_touch_the_renderer(tmp_path, monkeypatch):
+    """`available()` says no, and a renderer patched to blow up if it is ever
+    called still lets the recorded fixture pipeline pass. A file-exists
+    check that reported available on a machine with keys set is exactly how
+    `task demo` used to reach a live backend from a suite that promises no
+    network."""
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("the offline lane must never call the renderer")
+
+    monkeypatch.setattr(diagrams, "available", lambda: False)
+    monkeypatch.setattr(diagrams, "render", boom)
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0
+    assert (work / "paper.md").exists()
+
+
+def test_a_failing_image_backend_becomes_a_named_skip(tmp_path, monkeypatch):
+    """#514: a renderer that reports itself available and then raises on the
+    live call must not crash `task demo`. The paper still assembles, with
+    the figure skipped and the skip named."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    def flaky_render(source, topic, out_dir, theme=diagrams.DEFAULT_THEME):
+        prompt = Path(out_dir) / f"{Path(source).stem}_imagen.prompt.txt"
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("plugin-built prompt", encoding="utf-8")
+        raise diagrams.ImageBackendUnavailable(prompt)
+
+    monkeypatch.setattr(diagrams, "available", lambda: True)
+    monkeypatch.setattr(diagrams, "render", flaky_render)
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "a live backend failure must degrade, not crash, the run"
+    assert (work / "paper.md").exists()
+    recorded = json.loads((work / "diagrams.json").read_text(encoding="utf-8"))
+    skipped = [f for f in recorded["figures"] if not f["path"]]
+    assert skipped, "no figure was recorded as skipped"
+    assert any(
+        "image backend unavailable" in m for f in skipped for m in f["misses"]
+    ), skipped
