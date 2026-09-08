@@ -118,6 +118,42 @@ def test_a_short_question_still_passes_on_two_terms():
     assert _coverage_row(both_terms).passed
 
 
+def test_a_question_worded_around_domain_verbs_keeps_its_content_terms():
+    """#529 judge finding 4. `paper_check.STE_FUNCTION_WORDS` stops `run`,
+    `calls`, `uses`, and `holds` for the noun-stack row; a coverage row
+    that inherited the same list scored this question on one leftover
+    term, `tool`, easier to satisfy than the old rule's two of seven.
+    """
+    question = "How many tool calls does a run use before it holds?"
+    assert len(sections._terms(question)) >= 4
+
+
+def test_a_fifteen_term_question_needs_a_third_not_two():
+    """#529 judge finding 5. The recorded fixtures top out at six content
+    terms per question, so the new threshold never actually raises the bar
+    there. This question, built for the test, has fifteen: two incidental
+    matches is not a third of them, and five is.
+    """
+    question = (
+        "Which trace counts, retry ledger entries, stale approval stamps, "
+        "escalation boundaries, and resumed verifier turns does the "
+        "harness report?"
+    )
+    section = {"heading": "One", "key_questions": [question]}
+
+    two_terms = sections.section_check(
+        "The dashboard shows a trace and files a report each night [1].", section=section
+    )
+    assert not _coverage_row(two_terms).passed
+
+    five_terms = sections.section_check(
+        "The dashboard shows a trace and files a report each night. "
+        "The ledger records stale stamps at each escalation [1].",
+        section=section,
+    )
+    assert _coverage_row(five_terms).passed
+
+
 def test_a_safety_section_without_a_position_stand_fails():
     """#473: a safety, dosing, or protocol section must cite every
     position-stand or guideline source it was handed. A section with no such

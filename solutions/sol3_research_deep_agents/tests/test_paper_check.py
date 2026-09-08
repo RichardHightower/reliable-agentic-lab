@@ -935,6 +935,53 @@ def test_a_fenced_heading_does_not_satisfy_the_sections_row():
     assert paper_check.missing_sections(body, ("abstract", "introduction", "references")) == ["introduction"]
 
 
+def test_a_fence_opener_with_trailing_whitespace_still_closes():
+    """#529 judge finding 2. `` ``` `` followed by a space is still a valid
+    opener; the old pattern required the newline right after the backticks
+    and silently paired with the next fence instead, hiding everything
+    between as masked code, including a real heading.
+    """
+    body = (
+        "``` \ncode\n```\n\n"
+        "## Real heading\n\nprose [1].\n\n"
+        "```python\nx = 1\n```\n"
+    )
+    assert paper_check.missing_sections(body, ("real heading",)) == []
+
+
+def test_a_tilde_fence_masks_like_a_backtick_fence():
+    """#529 judge finding 3. A tilde fence is still a fence."""
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "~~~markdown\n## Is this a heading?\nmore fence text\n~~~\n"
+    )
+    assert paper_check.question_headings(body, outline) == []
+
+
+def test_a_hyphenated_info_string_still_opens_a_fence():
+    """#529 judge finding 3. An info string is not restricted to `\\w*`."""
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```objective-c\n## Is this a heading?\nmore fence text\n```\n"
+    )
+    assert paper_check.question_headings(body, outline) == []
+
+
+def test_an_unclosed_fence_masks_to_the_end_of_the_body():
+    """#529 judge finding 3. No closer means nothing after the opener is
+    prose either; the alternative, leaving it unmasked, reads a heading
+    inside an unterminated snippet as real structure.
+    """
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```markdown\n## Is this a heading?\nmore fence text\n"
+    )
+    assert paper_check.question_headings(body, outline) == []
+
+
 def test_the_recorded_fixture_paper_passes_question_heading(run_dir, stub_renderer):
     """`task paper` assembles a paper with no heading that pastes a
     question, under `assemble_gate`'s own production call."""

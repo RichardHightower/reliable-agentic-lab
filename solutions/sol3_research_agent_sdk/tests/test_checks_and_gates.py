@@ -380,6 +380,99 @@ def test_a_short_question_still_passes_on_two_terms():
     assert outline_coverage_gaps(both_terms, outline) == []
 
 
+def test_a_fence_opener_with_trailing_whitespace_still_closes():
+    """#529 judge finding 2. `` ``` `` followed by a space is still a valid
+    opener; the old pattern required the newline right after the backticks
+    and silently paired with the next fence instead, hiding everything
+    between as masked code, including a real heading.
+    """
+    from checks import missing_sections  # noqa: PLC0415
+
+    body = (
+        "``` \ncode\n```\n\n"
+        "## Real heading\n\nprose [1].\n\n"
+        "```python\nx = 1\n```\n"
+    )
+    assert missing_sections(body, ["Real heading"]) == []
+
+
+def test_a_tilde_fence_masks_like_a_backtick_fence():
+    """#529 judge finding 3. A tilde fence is still a fence."""
+    from checks import question_headings  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "~~~markdown\n## Is this a heading?\nmore fence text\n~~~\n"
+    )
+    assert question_headings(body, outline) == []
+
+
+def test_a_hyphenated_info_string_still_opens_a_fence():
+    """#529 judge finding 3. An info string is not restricted to `\\w*`."""
+    from checks import question_headings  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```objective-c\n## Is this a heading?\nmore fence text\n```\n"
+    )
+    assert question_headings(body, outline) == []
+
+
+def test_an_unclosed_fence_masks_to_the_end_of_the_body():
+    """#529 judge finding 3. No closer means nothing after the opener is
+    prose either; the alternative, leaving it unmasked, reads a heading
+    inside an unterminated snippet as real structure.
+    """
+    from checks import question_headings  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```markdown\n## Is this a heading?\nmore fence text\n"
+    )
+    assert question_headings(body, outline) == []
+
+
+def test_a_question_worded_around_domain_verbs_keeps_its_content_terms():
+    """#529 judge finding 4. `STE_FUNCTION_WORDS` stops `run`, `calls`,
+    `uses`, and `holds` for the noun-stack row; a coverage row that
+    inherited the same list scored this question on one leftover term,
+    `tool`, easier to satisfy than the old rule's two of seven.
+    """
+    from checks import _coverage_terms  # noqa: PLC0415
+
+    question = "How many tool calls does a run use before it holds?"
+    assert len(_coverage_terms(question)) >= 4
+
+
+def test_a_fifteen_term_question_needs_a_third_not_two():
+    """#529 judge finding 5. The recorded fixtures top out at six content
+    terms per question, so the new threshold never actually raises the bar
+    there. This question, built for the test, has fifteen: two incidental
+    matches is not a third of them, and five is.
+    """
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    question = (
+        "Which trace counts, retry ledger entries, stale approval stamps, "
+        "escalation boundaries, and resumed verifier turns does the "
+        "harness report?"
+    )
+    outline = {"sections": [{"heading": "One", "key_questions": [question]}]}
+
+    two_terms = "## One\n\nThe dashboard shows a trace and files a report each night [1].\n"
+    gaps = outline_coverage_gaps(two_terms, outline)
+    assert gaps and question in gaps[0], gaps
+
+    five_terms = (
+        "## One\n\nThe dashboard shows a trace and files a report each night. "
+        "The ledger records stale stamps at each escalation [1].\n"
+    )
+    assert outline_coverage_gaps(five_terms, outline) == []
+
+
 def test_the_hosts_row_grades_only_the_references_the_caller_hands_it():
     """A located cabinet source is a public copy of a paper the brain held.
 
