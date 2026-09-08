@@ -255,6 +255,47 @@ def test_happy_path_passes_the_rubric(tmp_path, monkeypatch):
     assert "tests/test_greet.py" in trace["test_phase"]["files"]
 
 
+def test_test_phase_prompt_carries_the_plan_steps(tmp_path, monkeypatch):
+    """A2 (#435). The test implementer sees its own plan steps. The code
+    implementer still does not see a test step."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+
+    class Recording(ScriptedBackend):
+        def __init__(self, script):
+            super().__init__(script)
+            self.prompts: list[str] = []
+
+        def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+            self.prompts.append(prompt)
+            return super().run(repo=repo, prompt=prompt, allow=allow)
+
+    backend = Recording(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    assert trace["gate"] == "pass"
+    test_prompt, code_prompt = backend.prompts[0], backend.prompts[1]
+    assert "S1T" in test_prompt
+    assert "Write a test that fails until this holds" in test_prompt
+    assert "a test covering AC-1 exists and fails before any code" in test_prompt
+    assert "T001 greet" in test_prompt
+    assert "S1T" not in code_prompt
+
+
 def test_code_phase_cannot_hide_a_test_write(tmp_path, monkeypatch):
     repo = _git_repo(tmp_path / "repo")
     health = "tests/test_health.py::test_health"

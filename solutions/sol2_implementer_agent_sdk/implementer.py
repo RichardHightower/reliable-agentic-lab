@@ -150,6 +150,22 @@ def _ask_judge(
     return done, payload, float(getattr(result, "usd", 0.0) or 0.0)
 
 
+def _test_prompt(ticket: tickets.Ticket, plan: steps.Plan) -> str:
+    """The ticket, plus every step the test phase owns.
+
+    Every plan step where `role == "test_implementer"`, with its id, action,
+    and validation, so the test implementer can see what the planner asked
+    for instead of guessing at coverage. `_code_prompt` stays as it was: the
+    code implementer never sees a test step.
+    """
+    body = ticket.for_prompt()
+    test_steps = plan.for_role("test_implementer")
+    if not test_steps:
+        return body
+    lines = "\n".join(f"- {step.id}: {step.action} ({step.validation})" for step in test_steps)
+    return f"{body}\n\nPlan steps for this phase:\n{lines}"
+
+
 def _code_prompt(
     ticket: tickets.Ticket,
     decision: gates.Decision | None,
@@ -223,7 +239,7 @@ def run(  # noqa: PLR0915
     # Step 3. Tests first. The test implementer owns tests/ and nothing else.
     tester = cast["test_implementer"]
     test_result = backend.run(
-        repo=target, prompt=the_ticket.for_prompt(), allow=list(tester.scope.allow)
+        repo=target, prompt=_test_prompt(the_ticket, plan), allow=list(tester.scope.allow)
     )
     boss.spend(test_result.usd)
     after_tests = contract.run("test")
