@@ -382,6 +382,12 @@ GUIDELINE_TITLE = re.compile(
     r"\b(position stand|consensus statement|practice guideline|clinical guideline)\b", re.IGNORECASE
 )
 
+# #475. The vocabulary a planner's `evidence_requirements.study_types` may
+# name: `TIERS`'s own values, plus `other`, the untiered default `tier_for`
+# returns. One source of truth for the outliner's schema and `validate`'s
+# check alike, so a new tier added to `TIERS` never has to be repeated here.
+STUDY_TYPES: tuple[str, ...] = tuple(sorted(set(TIERS.values()) | {"other"}))
+
 
 def tier_for(record: dict) -> str:
     """The source's tier, from its own record. No model.

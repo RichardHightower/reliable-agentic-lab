@@ -89,6 +89,7 @@ def run_paper(args) -> int:
         require_approval=args.approve,
         resume=args.resume,
         loop_doctrine=args.loop_doctrine,
+        require_evidence_requirements=True,
     )
     try:
         return run.run()

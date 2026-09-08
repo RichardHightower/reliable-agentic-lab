@@ -231,7 +231,7 @@ class Turns:
     def source_allowlist(self, topic: str, headings: list, prior_art: str = "") -> dict:
         raise NotImplementedError
 
-    def scout(self, topic: str) -> dict:
+    def scout(self, topic: str, note: str = "") -> dict:
         """A map of the field, not research. Override to call a model."""
         return {"headings": [], "domains": [], "titles": []}
 
@@ -527,8 +527,12 @@ class SdkTurns(Turns):
             SOURCE_ALLOWLIST_SCHEMA,
         )
 
-    def scout(self, topic: str) -> dict:
-        """One cheap map of the field when the cabinet missed. Not research."""
+    def scout(self, topic: str, note: str = "") -> dict:
+        """One cheap map of the field when the cabinet missed. Not research.
+
+        `note`, when given, is #475's one retry: a scout that named headings
+        but no flagship titles is asked again, the missing field named.
+        """
         return self._json(
             "research-researcher",
             "Map the field for a white paper. This is a briefing, not research. "
@@ -543,7 +547,7 @@ class SdkTurns(Turns):
             "research field). Name the hosts that field actually publishes "
             "in. Prefer .gov, .edu, .int, peer-reviewed publishers, and "
             "official documentation. Not blogs, not encyclopedias, not cable "
-            "news.",
+            f"news.\n{note}",
             SCOUT_SCHEMA,
         )
 
@@ -1063,6 +1067,25 @@ class OfflineTurns(Turns):
     def outline(
         self, topic: str, prior_art: str, budget: dict | None = None, note: str = "", brief: str = ""
     ) -> dict:
+        # #475. This is a software paper about the harness itself, not a
+        # clinical one: `other` is the honest tier for a doc page or a
+        # vendor repository, the same default `source_policy.tier_for`
+        # gives any record with no PubMed, arXiv, or Crossref match.
+        # `recency_years: 0` -- no window: the fixture's own placeholder
+        # sources carry no publication year, and #520's follow-up 2 makes
+        # a yearless source fail a window that is actually set.
+        def q(text: str) -> dict:
+            return {
+                "text": text,
+                "kind": "fact",
+                "evidence_requirements": {
+                    "study_types": ["other"],
+                    "min_count": 1,
+                    "recency_years": 0,
+                    "populations": [],
+                },
+            }
+
         budget = budget or {}
         words = int(budget.get("words") or MAX_WORDS)
         # Four sections, last one is the next step. The CTA is a fixed-size
@@ -1087,8 +1110,8 @@ class OfflineTurns(Turns):
                     "judgment. This section names that failure and the reader who pays for it."
                 ),
                 "key_questions": [
-                    EXIT_DOCTRINE_QUESTION,
-                    "What failure mode does a production loop have to prevent?",
+                    q(EXIT_DOCTRINE_QUESTION),
+                    q("What failure mode does a production loop have to prevent?"),
                 ],
                 "claims_to_support": [
                     "A reliable loop computes done from a rubric in code.",
@@ -1109,8 +1132,8 @@ class OfflineTurns(Turns):
                     "deterministic gate separate evidence from prose."
                 ),
                 "key_questions": [
-                    "What is the common mistake when research and writing share a context?",
-                    "How does this pipeline separate research from writing?",
+                    q("What is the common mistake when research and writing share a context?"),
+                    q("How does this pipeline separate research from writing?"),
                 ],
                 "claims_to_support": [
                     "The researcher cannot write the paper.",
@@ -1145,8 +1168,8 @@ class OfflineTurns(Turns):
                     "does not invent a source when retrieval is empty."
                 ),
                 "key_questions": [
-                    "How does verification work under a finite budget?",
-                    "Where does this pipeline refuse to guess?",
+                    q("How does verification work under a finite budget?"),
+                    q("Where does this pipeline refuse to guess?"),
                 ],
                 "claims_to_support": [
                     "Unverified claims are stated qualitatively or dropped.",
@@ -1167,8 +1190,8 @@ class OfflineTurns(Turns):
                     "adopting them elsewhere."
                 ),
                 "key_questions": [
-                    "What should a colleague do with these findings?",
-                    "How does a colleague evaluate the design on a live case?",
+                    q("What should a colleague do with these findings?"),
+                    q("How does a colleague evaluate the design on a live case?"),
                 ],
                 "claims_to_support": [],
                 "required_evidence": [],
