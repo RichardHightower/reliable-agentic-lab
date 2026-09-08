@@ -30,6 +30,30 @@ cannot refute a citation that was never published. Asking a model "is this real"
 gets you a confident yes. The only thing that catches a fabricated reference is
 checking its identifier against the corpus that was actually retrieved.
 
+Rows `check()` added later, still Python's, still no vote for the model:
+
+    sources       at least one source was retrieved
+    hosts         every graded reference host is on the allowlist
+    doctrine      the loop-doctrine exit order and the figure order agree
+    figure_assets every diagram is a judged publication asset, not a sketch
+    outline_coverage every approved section and key question is on the page
+    abstract_matches_body the abstract and introduction match the body they summarize
+    ste_language  no contraction, no e.g./i.e./etc. in body prose
+    noun_stack    no noun cluster longer than three (advisory)
+    person        no second person, no first-person tour
+    marketing     no banned marketing verb in body prose
+    next_step     the last prose heading is a next-step section, not a bare Conclusion
+    cta_language  the next-step section sells nothing and every step stays short
+    glossary_complete every first-use term reached the glossary
+    glossary_exact every glossary entry is a term the body actually uses
+
+Belt versus judge, matching the house style page's ownership table
+(https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style).
+Python grades every row above. `research-judge.md` grades what Python cannot:
+defined, structured, evidenced, limited, figured, depth, repetition, voice,
+and abstract_matches_body, where Python catches only the fixed overclaim list
+and the judge catches the rest.
+
     python3 checks.py --demo
 """
 

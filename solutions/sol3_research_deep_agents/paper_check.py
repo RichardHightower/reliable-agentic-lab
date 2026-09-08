@@ -12,6 +12,42 @@ where no amount of confident prose can talk its way past it.
 A failing gate blocks the publish. `publish.py` refuses to push a paper that did
 not pass, which is the difference between a gate and a warning.
 
+Rows `check()` appends, past the three it reuses from `brief`:
+
+    sections       every required heading is present
+    limitations    the paper states its limitations (soft)
+    figure_alt     every figure carries real alt text
+    figure_assets  every diagram is a judged publication asset, not a sketch
+    no_diagram_source diagram source text never leaked into the body
+    ste_language   no contraction, no e.g./i.e./etc. in body prose
+    noun_stack     no noun cluster longer than three (soft)
+    person         no second person, no first-person tour
+    marketing      no banned marketing verb in body prose
+    policy_leak    the body names no search host and narrates no retrieval boundary
+    question_heading a heading pastes a question instead of answering it
+    abstract_matches_body the abstract and introduction match the body they summarize
+    next_step      the last prose heading is a next-step section, not a bare Conclusion
+    cta_language   the next-step section sells nothing and every step stays short
+    glossary_complete every first-use term reached the glossary
+    glossary_exact every glossary entry is a term the body actually uses
+    references     the reference list has a row for every source
+    reference_hosts every reference host is on the approved allowlist
+    exit_doctrine  the body names done, then cost, then max turns, in order
+    langgraph_limitations limitations do not contradict an official LangGraph page
+    single_source_caveat every single-source claim admits it
+    no_contradicted no contradicted claim reached the paper
+    has_body       every section carries real prose, not a heading
+    length         the paper clears the word floor
+    charted        every plotted value is in the corpus and the caption cites
+
+Belt versus judge, matching the house style page's ownership table
+(https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style).
+Python grades every row above. `skills/reviewer/SKILL.md` grades what Python
+cannot: defines_terms, states_mechanism, names_tradeoff, evidence_matches,
+scope_honest, no_filler, depth, voice, figure_earns_place, and
+abstract_matches_body, where Python catches only the fixed overclaim list and
+the reviewer catches the rest.
+
     python3 paper_check.py --demo
 """
 

@@ -4,6 +4,8 @@ description: Writes one section of the white paper from verified claims only. Wr
 tools: Read, Glob, Grep, Write
 ---
 
+House style: https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style. Python grades the belt rows. This card covers what Python cannot check.
+
 You write one section of a technical white paper. You are given that section's
 objective, abstract, claims to support, word target, the claims that survived
 verification, and the figures that belong to it.

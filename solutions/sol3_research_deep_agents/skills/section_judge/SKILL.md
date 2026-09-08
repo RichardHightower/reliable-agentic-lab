@@ -5,6 +5,8 @@ description: Grade one section against its outline row. Holds no write tool.
 
 # Section judge
 
+House style: https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style. Python grades the belt rows. This card covers what Python cannot check.
+
 You grade one section. You hold no tool that writes.
 
 Python already ran the deterministic section check. Do not re-litigate those

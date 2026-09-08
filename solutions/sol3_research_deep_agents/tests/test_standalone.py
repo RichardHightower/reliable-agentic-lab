@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
 FORBIDDEN = r"^from loops|^import loops|^from solutions|^import solutions|from \.\."
+
+SKILLS = ROOT / "skills"
+
+# One house style, published once. Cards cite it rather than each keeping its
+# own copy of the rules. #453 #466.
+STYLE_URL = "https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style"
 
 
 def test_no_shared_engine_imports():
@@ -88,3 +97,66 @@ def test_the_writer_card_teaches_the_term_marker():
     the TERM marker syntax, once."""
     body = (ROOT / "skills" / "writer" / "SKILL.md").read_text(encoding="utf-8")
     assert body.count("TERM:") == 1
+
+
+# -- P8, cards cite the house style page -------------------------------------
+
+
+def test_both_writer_cards_cite_the_style_page():
+    """#453 #466: the writer follows one house style, published once on the
+    wiki. This port's half of the pair; the SDK card carries the other half
+    of the same test."""
+    card = (SKILLS / "writer" / "SKILL.md").read_text(encoding="utf-8")
+    assert STYLE_URL in card
+
+
+@pytest.mark.parametrize("name", ["reviewer", "section_judge", "outline_judge"])
+def test_every_judge_card_cites_the_style_page(name):
+    """The reviewer, the section judge, and the outline judge all grade
+    against the page named here, not a private copy of the rules."""
+    card = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
+    assert STYLE_URL in card
+
+
+def test_the_voice_row_does_not_repeat_a_python_row():
+    """`voice` stops re-reporting a row Python already fails: a contraction,
+    a Latin abbreviation, second person, a marketing verb, a policy leak, or
+    an em dash. Naming one again duplicates a mechanical check."""
+    card = (SKILLS / "reviewer" / "SKILL.md").read_text(encoding="utf-8")
+    match = re.search(r"^\|\s*`voice`\s*\|(.*)\|\s*$", card, re.M)
+    assert match, "no `voice` row in reviewer/SKILL.md"
+    row = match.group(1).lower()
+    banned = (
+        "contraction",
+        "latin abbreviation",
+        "e.g.",
+        "i.e.",
+        "etc.",
+        "second person",
+        "marketing",
+        "policy leak",
+        "em dash",
+    )
+    hits = [term for term in banned if term in row]
+    assert not hits, f"voice row repeats a Python row: {hits}"
+
+
+def test_the_check_module_docstring_lists_belt_rows_against_judge_rows():
+    """`paper_check.__doc__` names every row `check()` appends and every row
+    `skills/reviewer/SKILL.md` grades, matching the house style page's
+    ownership table."""
+    import paper_check  # noqa: PLC0415
+
+    src = Path(paper_check.__file__).read_text(encoding="utf-8")
+    body = src.split("def check(", 1)[1].split("\ndef _ledger_blob(", 1)[0]
+    belt_rows = set(re.findall(r'Check\(\s*"([a-zA-Z_]\w*)"', body))
+    assert belt_rows, "no Check(\"name\" calls found in paper_check.check()"
+    doc = paper_check.__doc__ or ""
+    missing_belt = sorted(row for row in belt_rows if row not in doc)
+    assert not missing_belt, f"docstring omits belt row(s): {missing_belt}"
+
+    card = (SKILLS / "reviewer" / "SKILL.md").read_text(encoding="utf-8")
+    judge_rows = set(re.findall(r"^\|\s*`(\w+)`\s*\|", card, re.M))
+    assert judge_rows, "no judge rows found in reviewer/SKILL.md"
+    missing_judge = sorted(row for row in judge_rows if row not in doc)
+    assert not missing_judge, f"docstring omits judge row(s): {missing_judge}"
