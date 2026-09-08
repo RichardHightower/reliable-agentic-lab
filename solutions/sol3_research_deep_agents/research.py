@@ -126,6 +126,22 @@ class Budget:
             self._tool_limit = None
             self._tool_calls = 0
 
+    def reset_request(self) -> None:
+        """Re-arm the open request window with its own limits, unchanged.
+
+        #482: a retried attempt at the same request must get its own tool
+        and provider-call budget, not inherit whatever the first attempt
+        already spent. `Paper._ask`'s retry loop calls this between
+        attempts, so a drop after the first attempt's tool call still lets
+        the retry search, instead of the retried turn hitting
+        `BudgetExceeded` on a window the first attempt already spent.
+        `begin_request` was never called for this retry, only for the
+        request as a whole, so the limits stay put; only the counts reset.
+        """
+        with self._lock:
+            self._request_calls = 0
+            self._tool_calls = 0
+
     def reserve_tool(self) -> None:
         """Spend one role-visible tool invocation before it reaches a backend."""
         with self._lock:

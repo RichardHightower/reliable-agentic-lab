@@ -70,15 +70,31 @@ def _transient_provider_errors() -> tuple[type[BaseException], ...]:
     return (CLIConnectionError, ResultError)
 
 
+# #482: a 4xx other than these two is a permanent failure (a bad key, a
+# malformed request, a forbidden model), not a dropped connection. Retrying
+# it spends 65 seconds and four attempts reaching the same rejection.
+# `request_timeout` (408) and `rate_limit_error` (429) are the two 4xx
+# shapes that a retry can plausibly outlive.
+_RETRYABLE_4XX = {408, 429}
+
+
 def _is_transient(exc: BaseException) -> bool:
-    """A dropped CLI connection, or a live provider error the CLI reported.
+    """A dropped CLI connection, or a live provider error worth retrying.
 
     `CLINotFoundError` (the CLI is not installed) is a permanent setup
     problem, not a dropped connection; retrying it just spends 65 seconds
     reaching the same failure. `ResultError` carries every terminal reason the
     CLI can end a run with, and only `api_error` (a provider failure mid-run,
-    e.g. overloaded or rate limited) is transient; `error_max_turns` and its
-    siblings are ordinary, legitimate stops.
+    e.g. overloaded, rate limited, or a dropped connection) is a candidate;
+    `error_max_turns` and its siblings are ordinary, legitimate stops.
+
+    Within `api_error`, `api_error_status` narrows further. A 4xx other than
+    408 or 429 is the provider rejecting the request itself (a bad key
+    fails with 401, for one); no amount of retrying fixes that, and burning
+    the full backoff before the run finally fails is confusing and wastes
+    the run's iteration budget. A 5xx, a 429, a 408, or no status at all
+    (the CLI reported `api_error` without one, e.g. a timeout) stays
+    transient.
     """
     try:
         from claude_agent_sdk import CLINotFoundError, ResultError  # noqa: PLC0415
@@ -87,7 +103,12 @@ def _is_transient(exc: BaseException) -> bool:
     if isinstance(exc, CLINotFoundError):
         return False
     if isinstance(exc, ResultError):
-        return exc.terminal_reason == "api_error"
+        if exc.terminal_reason != "api_error":
+            return False
+        status = getattr(exc, "api_error_status", None)
+        if status is not None and 400 <= status < 500 and status not in _RETRYABLE_4XX:
+            return False
+        return True
     return True
 
 
