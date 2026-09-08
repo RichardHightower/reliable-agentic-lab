@@ -151,8 +151,14 @@ class AgentSdkBackend(Backend):
                         if text:
                             result_text = text
                         if cost is not None:
-                            usd = cost
-                            progress["usd"] = cost
+                            # #539, follow-up 6. `total_cost_usd` is
+                            # cumulative, so a later message should never
+                            # report less than an earlier one; `max` is the
+                            # guard against a stray 0.0 overwriting a real
+                            # cost already seen, the same shape as the
+                            # `_bookkeep` guard in `e2e_t001.py`.
+                            usd = cost if usd is None else max(usd, cost)
+                            progress["usd"] = usd
                         if parsed is not None:
                             structured = parsed
                         if error is True:

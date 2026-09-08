@@ -15,11 +15,15 @@ import roles as deep
 from contract import Contract, ContractError
 
 LOOP = "implementer"
-# #539. Left at 16 rather than raised: a `GraphRecursionError` now names
-# itself and this number in the escalate reason (`adapter._describe_exc`),
-# so a run that genuinely needs more turns says so instead of reading as an
-# honest empty reply. Raise this if a live T001 code phase keeps naming it.
-LIVE_RECURSION_LIMIT = 16
+# #539, ruling on PR #540. LangGraph counts super-steps, not model turns: a
+# deepagents ReAct graph spends roughly two per turn before its own todo and
+# filesystem middleware take their own, so the old 16 was only six to eight
+# usable turns against the SDK twin's `DEFAULT_MAX_TURNS = 12`
+# (load_agents.py). Twice that, plus slack, keeps the two ports comparable
+# for the same T001 phase. A `GraphRecursionError` still names itself and
+# this number in the escalate reason (`adapter._describe_exc`) as the
+# backstop, not the plan.
+LIVE_RECURSION_LIMIT = 32
 
 
 def cast(contract):

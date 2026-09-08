@@ -214,6 +214,16 @@ def test_phase_backend_sets_the_documented_recursion_limit(tmp_path):
     assert agent.calls[0][1] == {"recursion_limit": 16}
 
 
+def test_the_live_recursion_limit_gives_room_for_a_t001_code_phase():
+    """#539, ruling on PR #540. LangGraph counts super-steps, roughly two
+    per model turn before deepagents' own middleware take their own, so 16
+    was six to eight usable turns against the SDK twin's 12-turn budget.
+    Pinned here so a future edit has to mean it, not drift back down."""
+    import harness  # noqa: PLC0415
+
+    assert harness.LIVE_RECURSION_LIMIT >= 32
+
+
 def test_the_judge_graph_is_the_one_that_answers(tmp_path):
     writer = FakeAgent("wrote it")
     judge = FakeAgent('{"done": true, "why": "the diff matches"}')
@@ -246,6 +256,24 @@ def test_the_backend_reports_what_the_run_cost(tmp_path):
     assert result.ok
     assert result.usd == 1.25
     assert result.output == "wrote it"
+
+
+def test_the_backend_keeps_the_raw_message_log(tmp_path):
+    """#539, follow-up 3. Only the SDK port populated `raw_output`; a failed
+    Deep Agents run's `.harness/` had nothing of the turn to cite."""
+    result = adapter.DeepAgentsBackend(FakeAgent("wrote it", usd=1.25)).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert "wrote it" in result.raw_output
+    assert "assistant" in result.raw_output
+
+
+def test_the_judge_keeps_the_raw_message_log(tmp_path):
+    judge = FakeAgent('{"done": true, "why": "the diff matches"}')
+    result = adapter.DeepAgentsBackend(FakeAgent(), judge_agent=judge).judge(
+        repo=tmp_path, prompt="grade this"
+    )
+    assert "the diff matches" in result.raw_output
 
 
 # -- #539: a raised backend never claims a silent 0.0 -----------------------

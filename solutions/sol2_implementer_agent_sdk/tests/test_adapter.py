@@ -224,6 +224,19 @@ def test_a_message_with_no_cost_field_reports_usd_as_none_not_zero(fake_sdk, tar
     assert result.usd is None
 
 
+def test_a_later_zero_cost_message_does_not_erase_an_earlier_real_cost(fake_sdk, target):
+    """#539, follow-up 6. `total_cost_usd` is cumulative; a stray 0.0 in a
+    later message must not overwrite a real cost a message already reported."""
+    fake_sdk(
+        [
+            FakeResultMessage(result="progress", total_cost_usd=0.50, subtype="partial"),
+            FakeResultMessage(result="done", total_cost_usd=0.0),
+        ]
+    )
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+    assert result.usd == 0.50
+
+
 def test_a_backend_that_raises_after_spending_reports_the_spend(fake_sdk, target, monkeypatch):
     """A crash after the query answered must not erase what it already cost."""
     fake_sdk([FakeResultMessage(result="x", total_cost_usd=0.77)])

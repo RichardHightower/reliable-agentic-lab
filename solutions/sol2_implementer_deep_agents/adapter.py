@@ -150,6 +150,20 @@ def last_ai_text(result) -> str:
     return _content_text(_content_of(messages[-1]))
 
 
+def _raw_messages(result) -> str:
+    """Every message this turn produced, as diagnostics, never as the answer.
+
+    #539. This is the proof a failed run's `.harness/` should keep; the SDK
+    port's `adapter._raw_event` does the same job for its own event stream,
+    and only this port's `DoerResult.raw_output` was left empty.
+    """
+    parts = []
+    for message in _messages(result) or []:
+        role = _role_of(message) or "message"
+        parts.append(f"## {role}\n\n{message!r}\n")
+    return "\n".join(parts)
+
+
 def _usage_usd(usage: dict) -> float:
     """One message's cost. Vendor dollars first, then priced tokens."""
     for key in ("total_cost", "total_cost_usd", "cost"):
@@ -254,7 +268,12 @@ class DeepAgentsBackend(Backend):
             after = _changed_files(repo)
             scope = WriteScope(allow=allow)
             wrote = sorted(path for path in (after - before) if scope.permits(path))
-            return DoerResult(wrote=wrote, output=last_ai_text(result), usd=last_usd(result))
+            return DoerResult(
+                wrote=wrote,
+                output=last_ai_text(result),
+                usd=last_usd(result),
+                raw_output=_raw_messages(result),
+            )
         # Same contract every offline Backend keeps: never raise, report it.
         except Exception as exc:
             # #539. `agent.invoke()` is one synchronous call: a raise means it
@@ -279,7 +298,9 @@ class DeepAgentsBackend(Backend):
                 result = agent.invoke(payload, config={"recursion_limit": self.recursion_limit})
             else:
                 result = agent.invoke(payload)
-            return DoerResult(output=last_ai_text(result), usd=last_usd(result))
+            return DoerResult(
+                output=last_ai_text(result), usd=last_usd(result), raw_output=_raw_messages(result)
+            )
         except Exception as exc:
             return DoerResult(
                 ok=False, usd=None, output=f"deep_agents judge failed: {_describe_exc(exc)}"

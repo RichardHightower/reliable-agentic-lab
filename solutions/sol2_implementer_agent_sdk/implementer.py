@@ -838,7 +838,21 @@ def run(  # noqa: PLR0915
             )
             if decision.stop:
                 trace["gate"] = gates.ESCALATE
-                # A stop here is either a stable failure, the money budget,
+                # #539, judge of PR #540. Checked first, before the stop
+                # reason below: a backend that never answered (a timed-out
+                # query, a raised exception) always writes an empty
+                # signature, so two such attempts look identical to
+                # `gates.decide` and it returns `repeat_failure=True` before
+                # this branch ever saw the backend's own words. At the
+                # shipped `iterations: 3` a live loop reaches attempt 2
+                # before it stops, so this is the path a real run takes, not
+                # an edge case. Reordering below it would make the whole
+                # #539 fix unreachable there.
+                if not test_result.ok:
+                    trace["reason"] = (
+                        f"the test implementer backend did not answer: {test_result.output}"
+                    )
+                # A stop here is otherwise a stable failure, the money budget,
                 # or the iteration budget. The first two name a real reason
                 # worth keeping (the money one is a fold-in fix from A5:
                 # `decide` already says "the money budget is spent", and
@@ -850,13 +864,8 @@ def run(  # noqa: PLR0915
                 # bug in the trace rather than what actually happened -- two
                 # turns that wrote nothing at all. Only a plain
                 # iteration-budget exhaustion falls through to the red-gate
-                # wording. #539: a backend that never answered (a timed-out
-                # query, a raised exception) is not the same event as one
-                # that answered with a passing test, and gets the backend's
-                # own words instead of the generic red-gate line, so the
-                # trace does not read as an honest miss when it was a
-                # failure to run at all.
-                if decision.repeat_failure:
+                # wording.
+                elif decision.repeat_failure:
                     trace["reason"] = (
                         decision.reason
                         if signature
@@ -864,10 +873,6 @@ def run(  # noqa: PLR0915
                     )
                 elif boss.usd_left <= 0:
                     trace["reason"] = decision.reason
-                elif not test_result.ok:
-                    trace["reason"] = (
-                        f"the test implementer backend did not answer: {test_result.output}"
-                    )
                 else:
                     trace["reason"] = (
                         "red gate: no new test was observed failing. A test that passes before "
@@ -1006,6 +1011,13 @@ def run(  # noqa: PLR0915
                 "gate": decision.gate,
                 "reason": decision.reason,
                 "judge_done": judge_done,
+                # #539, follow-up 2. The test phase already names the
+                # backend's own words and whether it answered; the code
+                # phase carried none of that, so a `GraphRecursionError` or
+                # a query timeout here read as an honest empty turn.
+                "ok": code_result.ok,
+                "output": code_result.output,
+                "usd": code_result.usd,
             }
         )
         trace["rubric"] = score.report()
@@ -1017,7 +1029,14 @@ def run(  # noqa: PLR0915
         last_failed_tests = sorted(test_run.junit.failed_ids)
 
     trace["gate"] = decision.gate
-    trace["reason"] = decision.reason
+    # #539, follow-up 2. The same priority as the test phase: a backend that
+    # never answered names itself instead of the rubric's generic wording,
+    # which on a code-phase failure to run at all is otherwise indistinguishable
+    # from an honest, converging miss.
+    if decision.gate != gates.PASS and not code_result.ok:
+        trace["reason"] = f"the code implementer backend did not answer: {code_result.output}"
+    else:
+        trace["reason"] = decision.reason
     trace["plan"] = plan.summary()
     # Sticky code-phase violations reach the trace here, even on an
     # eventual "pass": as long as `code_scope_violations` is non-empty the
@@ -1170,6 +1189,10 @@ def _finish(
     if boss is not None:
         trace["spent_usd"] = boss.spent_usd
         trace["budget_usd"] = boss.budget_usd
+        # #539, follow-up 7. `spent_usd` alone reads as a total; a nonzero
+        # count here says it is a floor instead, because at least one turn's
+        # cost was never reported.
+        trace["unknown_spend_turns"] = boss.unknown_spend_turns
     if write_trace:
         out = contract.repo / ".harness"
         out.mkdir(parents=True, exist_ok=True)

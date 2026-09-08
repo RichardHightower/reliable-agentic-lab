@@ -321,6 +321,37 @@ def test_a_timed_out_call_reports_usd_as_none_not_zero(tmp_path):
     assert wrapper.query_failed
 
 
+def test_a_budget_exhausted_call_reports_a_known_zero_not_unknown(tmp_path):
+    """#539, follow-up 4. This call never reaches the backend, so its cost
+    is known to be exactly zero, not unreported. Reporting a known zero as
+    `usd=None` would be the mirror of the defect this ticket exists to fix."""
+    wrapper = e2e_t001.AgentSdkE2EBackend(TimedOutBackend(), max_total_usd=0.0)
+
+    result = wrapper.run(repo=tmp_path, prompt="p", allow=["tests/**"])
+
+    assert result.usd == 0.0
+    assert wrapper.calls[0].usd == 0.0
+    assert wrapper.calls[0].stop_reason == "cost budget spent"
+
+
+def test_a_negative_reported_cost_does_not_walk_spent_usd_backwards(tmp_path):
+    """#539, follow-up 5. The SDK has never emitted a negative cost, but the
+    old `float(... or 0.0)` line carried a `max(usd, 0.0)` clamp that the
+    `None`-preserving rewrite dropped."""
+
+    class NegativeCostBackend:
+        def run(self, *, repo: Path, prompt: str, allow: list[str]):
+            return SimpleNamespace(
+                wrote=[], output="x", usd=-1.0, ok=True, stop_reason=None, raw_output=""
+            )
+
+    wrapper = e2e_t001.AgentSdkE2EBackend(NegativeCostBackend())
+
+    wrapper.run(repo=tmp_path, prompt="p", allow=["tests/**"])
+
+    assert wrapper.spent_usd == 0.0
+
+
 def test_the_summary_reports_the_cap_it_applied_and_keeps_the_raw_event_log(
     tmp_path, monkeypatch
 ):

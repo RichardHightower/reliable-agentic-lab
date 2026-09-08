@@ -98,7 +98,12 @@ class AgentSdkE2EBackend(doers.Backend):
         """
         raw_usd = getattr(result, "usd", None)
         usd = None if raw_usd is None else float(raw_usd)
-        self.spent_usd += usd if usd is not None else 0.0
+        # #539, follow-up 5. The SDK has never emitted a negative cost, but a
+        # bare `+=` would let one walk `spent_usd` backwards and loosen the
+        # `max_total_usd` gate above; `max(usd, 0.0)` is the guard the old
+        # `float(... or 0.0)` line carried before this ticket's rewrite.
+        if usd is not None:
+            self.spent_usd += max(usd, 0.0)
         self.calls.append(
             Call(
                 phase=phase,
@@ -115,12 +120,16 @@ class AgentSdkE2EBackend(doers.Backend):
     def run(self, *, repo: Path, prompt: str, allow: list[str]):
         phase, agent = _phase(allow)
         if self.spent_usd >= self.max_total_usd:
+            # #539, follow-up 4. This call never reaches the backend, so its
+            # cost is known to be exactly zero, not unknown. `usd=None` here
+            # would be the mirror of the defect this ticket exists to fix:
+            # reporting a known number as unreported.
             result = doers.DoerResult(
                 ok=False,
-                usd=None,
+                usd=0.0,
                 output=f"Agent SDK E2E budget exhausted at ${self.spent_usd:.2f}",
             )
-            self.calls.append(Call(phase, agent, [], None, False, "cost budget spent"))
+            self.calls.append(Call(phase, agent, [], 0.0, False, "cost budget spent"))
             return result
 
         instruction = f"Delegate only to {agent}. {prompt}" if agent else prompt
