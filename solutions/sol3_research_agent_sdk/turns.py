@@ -265,6 +265,12 @@ class Turns:
     ) -> str:
         raise NotImplementedError
 
+    def write_abstract(self, body: str, ledger=None) -> str:
+        """One turn, after every section is written, that states only what
+        the assembled body already states. P7, #472.
+        """
+        raise NotImplementedError
+
     def review(self, paper: str, report: str, ledger=None) -> dict:
         raise NotImplementedError
 
@@ -650,6 +656,29 @@ class SdkTurns(Turns):
             "and its cost, then the limit of the evidence. Do not invent facts.\n\n"
             f"Use only these claims and figures:\n{payload}\n\n{notes}\n\n{GROUNDING}",
             allow=[target],
+        )
+        return result.output or ""
+
+    def write_abstract(self, body: str, ledger=None) -> str:
+        """One turn, after every section is stamped, that states only what
+        the assembled body already states. P7, #472.
+        """
+        payload = ""
+        if ledger:
+            payload = "\nThe paper ledger:\n" + json.dumps(ledger, indent=2)[:6000]
+        result = self._ask(
+            "research-writer",
+            "Write the paper's abstract, last, from the body already written "
+            "below. State only what that body states, and carry the same "
+            "hedge it carries for a single-source claim: say \"single "
+            "source\", \"one study\", \"one trial\", or \"preliminary\" in "
+            "the same sentence that cites it. Never write \"proves\", "
+            "\"definitively\", \"conclusively\", or \"establishes that\" for "
+            "a claim the body hedges. Cite by number, like [3], resolved "
+            "against the same claims the body already cites. Do not invent a "
+            "fact the body does not already state. Return the abstract text "
+            "only, no heading.\n\n"
+            f"The paper body, already written:\n{whole(body)}\n{payload}",
         )
         return result.output or ""
 
@@ -1241,6 +1270,12 @@ class OfflineTurns(Turns):
         if target:
             lines = _fit_word_target(lines, target)
         return "\n".join(lines)
+
+    def write_abstract(self, body: str, ledger=None) -> str:
+        """No model, so no new claim to check. A summary that cites nothing
+        needs no hedge and cannot overclaim.
+        """
+        return "This paper summarizes the sections that follow, from the sources verified in the run."
 
     def judge_section(self, section: dict, body: str, findings: list, note: str = "") -> dict:
         return {"passed": True, "failed_rows": [], "notes": []}

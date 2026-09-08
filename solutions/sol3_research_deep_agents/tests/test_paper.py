@@ -463,6 +463,24 @@ def test_a_retry_keeps_the_sections_that_passed(offline, run_dir):
     assert offline.state.total_calls == calls
 
 
+def test_the_abstract_turn_runs_after_the_last_section(offline):
+    """P7, #472. `stage_write` reorders its loop so every bound section is
+    stamped before the abstract restates them."""
+    prompts: list[str] = []
+    original_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        if role == "writer":
+            prompts.append(prompt)
+        return original_ask(role, prompt)
+
+    offline.runner.ask = spy
+    assert offline.run() == 0
+    assert prompts, "the writer never ran"
+    assert "'Abstract' section" in prompts[-1]
+    assert all("'Abstract' section" not in p for p in prompts[:-1])
+
+
 def test_a_review_retry_sends_failed_rows_to_the_writer(offline, monkeypatch):
     offline.run()
     offline.state.mark_failed("review", "rerun")

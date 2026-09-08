@@ -1830,7 +1830,15 @@ class Paper:
                 self.written = json.loads(path.read_text(encoding="utf-8"))
         index, _ = stages.numbering(self.ledger)
         usd = 0.0
-        for section in self.outline["sections"]:
+        # P7, #472. The abstract restates the body, so it is written last, from
+        # the sections already stamped. `sorted` is stable, so every other
+        # section keeps the outline's own order; only "Abstract" moves to the
+        # end of the loop.
+        ordered_sections = sorted(
+            self.outline["sections"],
+            key=lambda item: item["heading"].strip().lower() == "abstract",
+        )
+        for section in ordered_sections:
             heading = section["heading"]
             if heading.lower() == "references":
                 continue
@@ -1855,11 +1863,34 @@ class Paper:
             )
             briefs = "\n".join(stages.claim_brief(self.ledger, cid, index) for cid in claim_ids)
             word_range = _section_word_range(heading, len(claim_ids))
+            if heading.strip().lower() == "abstract":
+                # Every other section is already stamped by the time this
+                # runs. The writer may state only what that body states, and
+                # must carry the same hedge the body carries.
+                written_body = "\n\n".join(
+                    f"## {other}\n\n{text}" for other, text in self.written.items()
+                )
+                lead = (
+                    f"Write the {heading!r} section of {self.plan['title']!r}, last, "
+                    "from the body already written below. State only what that body "
+                    "states, and carry the same hedge it carries for a single-source "
+                    "claim: say \"single source\", \"one study\", \"one trial\", or "
+                    "\"preliminary\" in the same sentence that cites it. Never write "
+                    "\"proves\", \"definitively\", \"conclusively\", or \"establishes "
+                    "that\" for a claim the body hedges.\n"
+                    f"Purpose: {section.get('purpose', '')}\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n\n"
+                    f"The paper body, already written:\n{written_body}\n\n"
+                )
+            else:
+                lead = (
+                    f"Write the {heading!r} section of {self.plan['title']!r}.\n"
+                    f"Purpose: {section.get('purpose', '')}\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n\n"
+                )
             reply = self._ask(
                 "writer",
-                f"Write the {heading!r} section of {self.plan['title']!r}.\n"
-                f"Purpose: {section.get('purpose', '')}\n"
-                f"Audience: {self.plan['audience']}\n{extra}\n\n"
+                f"{lead}"
                 f"Use only these claims and their citation markers:\n{briefs}\n\n"
                 f"Return {word_range} words of section body as markdown. No heading "
                 "line, the assembler adds it. No references section. Unpack every "
@@ -1937,10 +1968,10 @@ class Paper:
         # named section creates an oscillating review loop. Rewrite every
         # substantive body once, rather than guessing which mechanism it will
         # mention next.
-        # The abstract appears first, so it cannot introduce a term that its
-        # body section defines later. Limitations is already a caveat-only
-        # section, but every other section, including the abstract, needs the
-        # same global terminology and citation repair.
+        # P7, #472: `stage_write` now stamps the abstract last, so it is the
+        # one section already checked against the finished body. It still
+        # needs the same global terminology and citation repair as every
+        # other section here. Limitations is already a caveat-only section.
         if targets is None:
             targets = [heading for heading in self.written if heading.lower() != "limitations"]
 

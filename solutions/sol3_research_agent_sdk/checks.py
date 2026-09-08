@@ -928,6 +928,107 @@ def question_headings(body: str, outline: dict | None) -> list[str]:
     return bad
 
 
+# P7, #472. The abstract restates the body and may not say more than the body
+# says. It runs on the abstract and on the introduction's first paragraph. A
+# sentence citing a single-source claim needs a hedge word in that sentence,
+# a fixed overclaim phrase never appears, and a number the abstract cites
+# must also appear in the body: the abstract restates the body, so a claim
+# only the abstract makes was never checked against the body it summarizes.
+ABSTRACT_HEDGE = re.compile(r"single|one study|one trial|preliminary", re.I)
+ABSTRACT_OVERCLAIM = re.compile(r"\b(?:proves|definitively|conclusively|establishes that)\b", re.I)
+_MARKER_ONLY = re.compile(r"^(?:\[\d+\]\s*)+$")
+
+
+def _cited_sentences(text: str) -> list[str]:
+    """`_prose_sentences`, with a trailing citation-only fragment folded back
+    into the sentence before it.
+
+    The writer cites after the period, `"...notices. [1]"`, so `SENTENCE_END`
+    splits the marker into a sentence of its own. Grading that fragment for a
+    hedge word finds nothing, because the hedge is one sentence back.
+    """
+    merged: list[str] = []
+    for sentence in _prose_sentences(text):
+        if _MARKER_ONLY.match(sentence) and merged:
+            merged[-1] = f"{merged[-1]} {sentence}"
+        else:
+            merged.append(sentence)
+    return merged
+
+
+def _first_paragraph(text: str) -> str:
+    for block in re.split(r"\n\s*\n", text.strip()):
+        block = block.strip()
+        if block and not block.startswith(("#", "!", "|", ">", "```", "-", "*")):
+            return block
+    return ""
+
+
+def _single_source_numbers(claims: list[dict] | None) -> set[int]:
+    """Reference numbers backed by exactly one source, decided per claim.
+
+    This port has no formal corroboration count yet (#471, #473 land it). A
+    claim the independent verifier confirmed from a second, distinct URL is
+    treated as not single source; every other numbered claim is, because
+    nothing else in this port's ledger distinguishes them. Two claims can
+    share one number: flagging it whenever any claim on it is single-source
+    forced a hedge onto a sentence citing the other, corroborated claim.
+    A number counts as single-source only when every claim on it does.
+    """
+    by_number: dict[int, list[bool]] = {}
+    for claim in claims or []:
+        number = claim.get("number")
+        if not number:
+            continue
+        source = str(claim.get("source_url") or "").strip()
+        verifier = str(claim.get("verifier_url") or "").strip()
+        single = not verifier or verifier == source
+        by_number.setdefault(int(number), []).append(single)
+    return {number for number, flags in by_number.items() if all(flags)}
+
+
+def abstract_matches_body(body: str, claims: list[dict] | None = None) -> list[str]:
+    """The abstract, and the introduction's first paragraph, state only what
+    the body states.
+
+    Inert with no `## Abstract` heading: nothing to grade. Otherwise the row
+    itself is unconditional: it always runs, and the overclaim and
+    number-in-body rules need no claim data. The hedge rule alone needs
+    `claims` to know which numbers are single-source; `paper.check` passes
+    the run's claims on every call, so that rule runs live in production
+    too, not only when a caller happens to supply the list.
+
+    Every graded sentence citing a single-source claim carries a hedge word,
+    and a fixed overclaim phrase never appears. The abstract carries one more
+    rule the introduction does not: a number it cites must appear in the
+    body too. The introduction is the body; a number appearing there for the
+    first time is not a defect.
+    """
+    sections = section_bodies(body)
+    abstract = sections.get("abstract", "")
+    if not abstract.strip():
+        return []
+    single_source = _single_source_numbers(claims)
+    rest_of_body = body.replace(abstract, "", 1)
+    excerpts = [("abstract", abstract, True)]
+    intro_first = _first_paragraph(sections.get("introduction", ""))
+    if intro_first:
+        excerpts.append(("introduction", intro_first, False))
+    issues: list[str] = []
+    for label, excerpt, check_numbers in excerpts:
+        for sentence in _cited_sentences(excerpt):
+            cited = {int(n) for n in CITATION.findall(sentence)}
+            if cited & single_source and not ABSTRACT_HEDGE.search(sentence):
+                issues.append(f"{label}: unhedged single-source claim: {sentence[:70]!r}")
+            if ABSTRACT_OVERCLAIM.search(sentence):
+                issues.append(f"{label}: overclaim in: {sentence[:70]!r}")
+        if check_numbers:
+            for number in {int(n) for n in CITATION.findall(excerpt)}:
+                if f"[{number}]" not in rest_of_body:
+                    issues.append(f"{label}: [{number}] does not appear in the body")
+    return issues
+
+
 def missing_sections(body: str, headings: list[str]) -> list[str]:
     """Sections the plan named that are not in the paper.
 
@@ -1145,6 +1246,19 @@ def check(
             "no heading is a pasted question"
             if not bad_headings
             else f"heading is a question: {bad_headings[0]!r}",
+        )
+    )
+
+    # Unconditional, and inert with no `## Abstract` heading: a snippet
+    # another row's test built has nothing to grade. #472.
+    abstract_mismatches = abstract_matches_body(body, claims)
+    checks.append(
+        Check(
+            "abstract_matches_body",
+            not abstract_mismatches,
+            "the abstract and introduction match the body they summarize"
+            if not abstract_mismatches
+            else f"mismatch: {abstract_mismatches[:3]}",
         )
     )
 

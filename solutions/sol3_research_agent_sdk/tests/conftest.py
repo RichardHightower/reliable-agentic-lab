@@ -280,6 +280,10 @@ class RecordingTurns:
             target.write_text(body, encoding="utf-8")
         return body
 
+    def write_abstract(self, body, ledger=None):
+        self.asked.append(("write_abstract", len(body)))
+        return "A recorded abstract."
+
     def review(self, paper, report):
         self.asked.append(("review", report))
         return {"done": self.done, "summary": "ok", "issues": []}

@@ -795,6 +795,62 @@ def test_a_writer_that_only_answered_still_produces_a_section(work, turns, no_re
     assert run.state.phases["write"]["status"] == "complete"
 
 
+def test_the_abstract_turn_runs_after_the_last_section(work, turns, no_renderer):
+    """P7, #472. The abstract is written from the assembled body, so its
+    turn cannot run until every section is stamped."""
+    recorder = turns()
+    run = make_run(work, recorder)
+    paper.run_paper(run)
+    calls = [args[0] for args in recorder.asked if args[0] in ("write", "write_abstract")]
+    assert calls, "the writer never ran"
+    assert calls[-1] == "write_abstract"
+    assert calls.count("write") >= 1
+
+
+def test_the_abstract_turn_is_not_repeated_when_the_body_is_unchanged(work, turns, no_renderer):
+    """One extra writer turn per run, not one per retry attempt."""
+    recorder = turns()
+    run = make_run(work, recorder)
+    paper.run_paper(run)
+    abstract_calls = [args for args in recorder.asked if args[0] == "write_abstract"]
+    assert len(abstract_calls) == 1
+    paper.write_abstract(run)
+    assert [args for args in recorder.asked if args[0] == "write_abstract"] == abstract_calls, (
+        "an unchanged body spent a second turn"
+    )
+
+
+def test_assemble_prefers_the_written_abstract_over_the_thesis_line(work, turns, no_renderer):
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.write_abstract(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert "A recorded abstract." in body
+    assert "An abstract." not in body
+
+
+def test_the_abstract_gets_the_same_cleanup_pass_as_a_section(work, turns, no_renderer):
+    """A finding-id marker in the abstract resolves to its reference number,
+    the same way `_resolve_markers` already treats a section body: the
+    abstract runs through the same cleanup, not a verbatim insert."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    cited = next(c for c in claims if c.get("source_url"))
+    run.turns.write_abstract = lambda body, ledger=None: f"The result holds [{cited['id']}]."
+    paper.write_abstract(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    abstract = body.split("## Abstract", 1)[1].split("##", 1)[0]
+    assert f"[{cited['id']}]" not in abstract, "the finding id survived assembly"
+    assert "[1]" in abstract
+
+
 def test_a_stale_section_from_a_previous_plan_is_removed(work, turns, no_renderer):
     run = make_run(work, turns())
     paper.prior_art(run)

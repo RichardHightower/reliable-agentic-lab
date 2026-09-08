@@ -1000,3 +1000,132 @@ def test_the_recorded_fixture_paper_passes_policy_leak(tmp_path):
     body = (work / "paper.md").read_text(encoding="utf-8")
     hits = checks.policy_leak_violations(body)
     assert hits == [], hits
+
+
+# -- P7, the abstract is written last -------------------------------------
+
+
+def test_an_unhedged_single_source_abstract_fails():
+    """A hedge-free sentence in the abstract, beside a `[n]` whose claim is
+    single-source, fails and names the sentence."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices. [1]\n\n"
+        "## Introduction\n\nThe loop halts before a person notices, one trial supporting it. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    claims = [{"number": 1, "source_url": "https://a", "verifier_url": ""}]
+    score = checks.check(body, ["https://a"], claims=claims)
+    assert "abstract_matches_body" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert "halts before a person notices" in row.detail
+
+
+def test_a_number_shared_by_a_corroborated_claim_is_not_forced_to_hedge():
+    """Two claims can share one reference number. A single-source claim on
+    it must not force a hedge onto a sentence citing the other, corroborated
+    claim on the same number."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices. [1]\n\n"
+        "## Introduction\n\nThe loop halts before a person notices. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    claims = [
+        {"number": 1, "source_url": "https://a", "verifier_url": ""},
+        {"number": 1, "source_url": "https://a", "verifier_url": "https://b"},
+    ]
+    score = checks.check(body, ["https://a"], claims=claims)
+    assert "abstract_matches_body" not in score.signature(), score.report()
+
+
+def test_an_abstract_number_absent_from_the_body_fails():
+    """A citation the abstract uses, and no other section does, fails."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices [1]. It also cites [2].\n\n"
+        "## Introduction\n\nThe loop halts before a person notices [1].\n\n"
+        "## References\n\n1. https://a\n2. https://b\n"
+    )
+    score = checks.check(body, ["https://a", "https://b"])
+    assert "abstract_matches_body" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert "[2]" in row.detail
+
+
+def test_an_overclaim_in_the_abstract_fails():
+    """The fixed overclaim list, whatever the ledger says about the claim."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThis paper proves the loop halts before a person notices. [1]\n\n"
+        "## Introduction\n\nThe loop halts before a person notices. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "abstract_matches_body" in score.signature(), score.report()
+
+
+def test_improves_is_not_an_overclaim():
+    """`ABSTRACT_OVERCLAIM` matches whole words: `improves` is not `proves`."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nCreatine improves lean mass. [1]\n\n"
+        "## Introduction\n\nCreatine improves lean mass, on a single source. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "abstract_matches_body" not in score.signature(), score.report()
+
+
+def test_the_introduction_first_paragraph_is_graded_too():
+    """The same row runs on the introduction's first paragraph, not only the
+    abstract."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices, one trial supporting it. [1]\n\n"
+        "## Introduction\n\nThis paper proves the loop halts before a person notices. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "abstract_matches_body" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert "introduction" in row.detail
+
+
+def test_a_body_with_no_abstract_heading_is_inert():
+    """The row runs on every check, and a snippet another row's test built
+    has no `## Abstract` heading and nothing to grade. `signature()` only
+    ever lists failing rows, so absence there is not proof the row ran;
+    check the row itself, on a body that would fail the overclaim rule if
+    it were graded."""
+    body = "# Title\n\n## Introduction\n\nThis paper proves nothing yet. [1]\n\n## References\n\n1. https://a\n"
+    score = checks.check(body, ["https://a"])
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert row.passed, row.detail
+
+
+def test_the_recorded_fixture_paper_passes_abstract_matches_body(tmp_path):
+    """The paper `task demo` writes assembles with the abstract last, and it
+    matches the body it summarizes. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    report = json.loads((work / "check.json").read_text(encoding="utf-8"))
+    names = {row["name"] for row in report["checks"]}
+    assert "abstract_matches_body" in names
+    assert report["passed"], report

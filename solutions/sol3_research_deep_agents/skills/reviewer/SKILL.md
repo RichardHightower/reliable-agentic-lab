@@ -24,6 +24,7 @@ Grade each row `pass` or `fail`. A row is not a feeling.
 | `depth` | A body section only restates its bound claims, with no mechanism, alternative, or evidence limit |
 | `voice` | Marketing language, a hook, an analogy in place of a mechanism, or a rhetorical question |
 | `figure_earns_place` | A figure shows what the adjacent prose already said in one line |
+| `abstract_matches_body` | The abstract, or the introduction's first paragraph, claims more than the body it summarizes: a single-source claim there drops the hedge the body carries, a cited number never appears in the body, or a sentence claims more certainty than the body does, even one Python's fixed overclaim list does not catch |
 
 `depth` is the row that keeps this pipeline from shipping a cited brief and
 calling it a paper. Two short paragraphs that quote the claims are not enough,
