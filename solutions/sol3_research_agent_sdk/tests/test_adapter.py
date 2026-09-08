@@ -405,3 +405,81 @@ def test_an_api_error_result_is_retried(fake_sdk, work, monkeypatch):
     assert result.ok
     assert result.retries == 1
     assert waits == [5.0]
+
+
+def test_a_401_is_not_retried(fake_sdk, work, monkeypatch):
+    """#482: a `ResultError` with `terminal_reason == "api_error"` used to
+    retry unconditionally, so a bad key burned the whole 65-second backoff
+    and four attempts before it finally failed. `api_error_status` is
+    already on the exception; a 4xx other than 408 or 429 is the provider
+    rejecting the request, not a dropped connection, and escapes on the
+    first raise with no sleep."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise module.ResultError(
+            "invalid x-api-key (401)", terminal_reason="api_error", api_error_status=401
+        )
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert calls["n"] == 1, "a permanent 4xx must not be retried"
+    assert waits == []
+    assert "401" in result.output
+
+
+def test_a_429_is_still_retried(fake_sdk, work, monkeypatch):
+    """429 is the one 4xx a retry can plausibly outlive."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise module.ResultError(
+                "rate limited", terminal_reason="api_error", api_error_status=429
+            )
+        yield FakeResultMessage(result="ok")
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.retries == 1
+    assert waits == [5.0]
+
+
+def test_a_5xx_api_error_is_still_retried(fake_sdk, work, monkeypatch):
+    """A 5xx is the provider's own failure, not the request's. Still
+    transient."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise module.ResultError(
+                "overloaded", terminal_reason="api_error", api_error_status=529
+            )
+        yield FakeResultMessage(result="ok")
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.retries == 1
+    assert waits == [5.0]

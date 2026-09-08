@@ -103,9 +103,19 @@ class FakeProcessError(FakeClaudeSDKError):
 
 
 class FakeResultError(FakeProcessError):
-    def __init__(self, message: str = "api error", terminal_reason: str | None = "api_error"):
+    def __init__(
+        self,
+        message: str = "api error",
+        terminal_reason: str | None = "api_error",
+        api_error_status: int | None = None,
+    ):
         super().__init__(message)
         self.terminal_reason = terminal_reason
+        # #482: the real `ResultError` carries the failing call's HTTP
+        # status here, `None` when the CLI reported no status (a timeout,
+        # say). `adapter._is_transient` reads it to tell a 4xx (permanent,
+        # 429 excepted) from a dropped connection or a 5xx (transient).
+        self.api_error_status = api_error_status
 
 
 def make_sdk_module(messages=None):

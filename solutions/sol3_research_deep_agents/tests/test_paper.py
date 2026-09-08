@@ -2213,3 +2213,73 @@ def test_the_backoff_sequence_is_five_fifteen_forty_five(run_dir, stub_renderer,
     run._ask("planner", "Write plan.json for this topic.")
 
     assert waits == [5.0, 15.0, 45.0]
+
+
+# -- the retry asymmetry from #409 (#482) -----------------------------------
+
+
+def _overloaded_error():
+    import anthropic  # noqa: PLC0415
+    import httpx2  # noqa: PLC0415
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(
+        529,
+        request=request,
+        json={"error": {"type": "overloaded_error", "message": "overloaded"}},
+    )
+    return anthropic.OverloadedError(
+        "overloaded", response=response, body={"error": {"type": "overloaded_error"}}
+    )
+
+
+def test_a_529_is_retried(run_dir, stub_renderer, monkeypatch):
+    """#482: HTTP 529 (overloaded) is the most common transient Anthropic
+    failure in practice, and `langchain_anthropic`'s `AnthropicOverloadedError`
+    is an `APIStatusError`, not an `APIConnectionError`, so the pre-#482
+    tuple missed it."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _overloaded_error, 2)
+    run = build_run(run_dir, runner=runner)
+
+    assert run.run() == 0
+    assert run.state.attempts("plan") == 1
+
+
+def test_a_retry_gets_a_fresh_request_window(run_dir, stub_renderer, monkeypatch):
+    """#482: `begin_request` opens a window around `_ask` (one tool call,
+    a few provider calls inside it). The first attempt can spend that
+    window's one tool call and then drop with a transient error; a retry
+    that reuses the spent window hits `BudgetExceeded` on its own search
+    and degrades to "NO ANSWER. request search budget spent" instead of
+    actually searching again. `_ask`'s retry loop must re-arm the window
+    so the retried researcher turn still gets its search."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+    calls = {"n": 0}
+
+    class Runner(paper.FixtureRunner):
+        def ask(self, role, prompt):
+            if role == "researcher":
+                calls["n"] += 1
+                run.budget.reserve_tool()
+                if calls["n"] == 1:
+                    raise _connection_error()
+            return super().ask(role, prompt)
+
+    run = build_run(run_dir, runner=Runner(FIXTURES / "replies.json"))
+    run.budget.begin_request(max_calls=1, max_provider_calls=3)
+    try:
+        run._ask(
+            "researcher",
+            "What happens when a graph has no explicit exit condition",
+        )
+    finally:
+        run.budget.end_request()
+    assert calls["n"] == 2, "the retry must actually run its search, not skip straight to BudgetExceeded"

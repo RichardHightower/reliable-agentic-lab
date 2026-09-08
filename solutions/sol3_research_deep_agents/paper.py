@@ -70,7 +70,8 @@ def _sleep(seconds: float) -> None:
 
 
 def _transient_provider_errors() -> tuple[type[BaseException], ...]:
-    """Exception classes for a dropped connection or a rate limit.
+    """Exception classes for a dropped connection, a rate limit, or an
+    overloaded or failing provider.
 
     Imported lazily, the same way `roles.py` imports `langchain_anthropic`:
     the fixture runner needs neither package installed, and importing here
@@ -78,14 +79,28 @@ def _transient_provider_errors() -> tuple[type[BaseException], ...]:
     and `anthropic.RateLimitError` are the base classes LangChain's Anthropic
     wrapper (`AnthropicConnectionError`, `AnthropicTimeoutError`,
     `AnthropicRateLimitError`) subclasses, so catching the two bases catches
-    the wrapped forms too. A gate failure, `BudgetSpent`, and a schema error
-    are never in this tuple.
+    the wrapped forms too.
+
+    #482: `anthropic.OverloadedError` (HTTP 529, the most common transient
+    Anthropic failure in practice) and `anthropic.InternalServerError` (a
+    5xx) are `APIStatusError`s, not `APIConnectionError`s, so the pair above
+    missed them. LangChain's `AnthropicOverloadedError` subclasses
+    `anthropic.OverloadedError` and `AnthropicAPIError` subclasses
+    `anthropic.InternalServerError`, so catching the two Anthropic bases
+    catches LangChain's wrapped forms too, the same way the pair above
+    already does. A gate failure, `BudgetSpent`, and a schema error are
+    never in this tuple.
     """
     try:
         import anthropic  # noqa: PLC0415
     except ImportError:
         return ()
-    return (anthropic.APIConnectionError, anthropic.RateLimitError)
+    return (
+        anthropic.APIConnectionError,
+        anthropic.RateLimitError,
+        anthropic.OverloadedError,
+        anthropic.InternalServerError,
+    )
 
 
 def _section_word_range(heading: str, claim_count: int) -> str:
@@ -688,6 +703,15 @@ class Paper:
                         f"after {wait:.0f}s: {exc}"
                     )
                     _sleep(wait)
+                    # #482: the caller may have opened a request window
+                    # around this whole `_ask` call (`begin_request`, one
+                    # tool call and its provider calls). The first attempt
+                    # can spend that window before it drops, and a retry
+                    # that reuses the spent window hits `BudgetExceeded` on
+                    # its own search instead of trying again. Re-arm the
+                    # window with its own limits so the retried attempt
+                    # gets its budget back; a no-op when no window is open.
+                    self.budget.reset_request()
         elapsed = time.monotonic() - started
 
         self.state.spend(reply.usd)
