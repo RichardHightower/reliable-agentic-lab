@@ -407,3 +407,11 @@ def test_a_backend_that_raises_after_spending_reports_the_spend(tmp_path, monkey
     assert not result.ok
     assert result.usd == 0.77
     assert "boom after spend" in result.output
+
+
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#541. A non-integer value must not raise at import and kill the run."""
+    assert adapter._timeout_env("SOL1_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL1_QUERY_TIMEOUT_SECONDS_TEST", "not-a-number")
+    assert adapter._timeout_env("SOL1_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "not-a-number" in capsys.readouterr().err

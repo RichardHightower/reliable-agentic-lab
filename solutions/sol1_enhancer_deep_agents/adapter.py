@@ -13,9 +13,11 @@ nothing extra to import lazily here. Nothing in this module is exercised by
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -23,6 +25,33 @@ from pathlib import Path
 
 import roles
 from write_scope import WriteScope
+
+
+def _timeout_env(name: str, default: int) -> int:
+    """Read an integer timeout from the environment, never raising at import.
+
+    #541. A bad value here used to raise `ValueError` at import time and take
+    the whole module down with it. A logged fallback keeps the process alive,
+    the same way a missing dependency reports as a result, not a traceback.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        print(
+            f"[sol1] {name}={raw!r} is not an integer; using the default {default}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        return default
+
+
+# #541, matching #301 (sol3) and #539 (sol2). A ceiling nobody can reach is
+# the bug, not a safety net. Read at import so a test can still patch the
+# module attribute directly.
+QUERY_TIMEOUT_SECONDS = _timeout_env("SOL1_QUERY_TIMEOUT_SECONDS", 900)
 
 
 @dataclass
@@ -209,6 +238,18 @@ def last_ai_text(result) -> str:
     return _content_text(_content_of(messages[-1]))
 
 
+def _usage_cost(usage: dict) -> float:
+    """One usage dict's cost, reading the first cost key it carries."""
+    for key in ("total_cost", "total_cost_usd", "cost"):
+        if usage.get(key) is None:
+            continue
+        try:
+            return float(usage[key])
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
 def last_usd(result) -> float:
     """What the run cost, summed from usage metadata. Missing is zero.
 
@@ -232,15 +273,56 @@ def last_usd(result) -> float:
         )
         if not isinstance(usage, dict):
             continue
-        for key in ("total_cost", "total_cost_usd", "cost"):
-            if usage.get(key) is None:
-                continue
-            try:
-                total += float(usage[key])
-            except (TypeError, ValueError):
-                continue
-            break
+        total += _usage_cost(usage)
     return total
+
+
+def _usage_callback():
+    """#541. A callback that sums `usage_metadata` off every completed LLM
+    call, so a wall-clock timeout that interrupts `agent.invoke()` mid-call
+    still reports what those calls cost and how many of them ran, instead of
+    losing them along with the interrupt. `agent.invoke()` returns no state
+    on an interrupt or a raise, so `last_usd`, which reads the returned
+    state, never gets the chance.
+
+    Imported lazily and never let to raise: this module has to stay
+    importable, and this handler safe to attach, with no `deepagents` or
+    `langchain_core` installed, the same as every offline test already runs.
+    """
+    try:
+        from langchain_core.callbacks import BaseCallbackHandler  # noqa: PLC0415
+    except ImportError:
+        return None
+
+    class UsageCallback(BaseCallbackHandler):
+        def __init__(self):
+            self.total_usd = 0.0
+            self.calls = 0
+            self.saw_usage = False
+
+        def on_llm_end(self, response, **kwargs):
+            self.calls += 1
+            try:
+                for generation_list in getattr(response, "generations", None) or []:
+                    for generation in generation_list:
+                        message = getattr(generation, "message", None)
+                        usage = getattr(message, "usage_metadata", None) if message else None
+                        if isinstance(usage, dict):
+                            self.total_usd += _usage_cost(usage)
+                            self.saw_usage = True
+            except Exception:
+                # A telemetry side channel must never crash the run it is
+                # only supposed to be watching.
+                pass
+
+    return UsageCallback()
+
+
+def _invoke_config(usage) -> dict:
+    """`{}` when no callback is available, exactly matching `agent.invoke(payload)`
+    with no `config=` at all -- the shape every existing test with no
+    `langchain_core` installed already pins."""
+    return {"callbacks": [usage]} if usage is not None else {}
 
 
 def _describe_exc(exc: Exception) -> str:
@@ -259,22 +341,33 @@ class DeepAgentsBackend(Backend):
 
     name = "deep_agents"
 
-    def __init__(self, agent, *, timeout_s: float = 180.0):
+    def __init__(self, agent, *, timeout_s: float = QUERY_TIMEOUT_SECONDS):
         self.agent = agent
         self.timeout_s = timeout_s
 
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
         role, ticket = _call_kind(prompt)
         print(f"deep-agents {ticket} {role}: started", flush=True)
+        # #541. Attached whether or not the wall clock ever fires: `on_llm_end`
+        # fires per completed model turn, well before a timeout or a raise
+        # (which only happens after some number of turns already ran) reaches
+        # this method at all.
+        usage = _usage_callback()
+        started = time.monotonic()
         try:
             scope = WriteScope(allow=list(allow))
             before = _changed_files(repo)
-            started = time.monotonic()
+            payload = {"messages": [{"role": "user", "content": prompt}]}
+            config = _invoke_config(usage)
             # `roles.write_allow` narrows every write tool to this turn's paths.
             # Without it the tool falls back to the role's row, which is where a
             # doer can reach the real ticket instead of its candidate.
             with roles.write_allow(allow), _wall_clock_timeout(self.timeout_s):
-                result = self.agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+                result = (
+                    self.agent.invoke(payload, config=config)
+                    if config
+                    else self.agent.invoke(payload)
+                )
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]
             output = last_ai_text(result)
             _trace(repo, role=role, ticket=ticket, prompt=prompt, result=output)
@@ -285,22 +378,35 @@ class DeepAgentsBackend(Backend):
             return DoerResult(wrote=wrote, output=output, usd=last_usd(result))
         except QueryTimedOut as exc:
             # #541. `agent.invoke()` was interrupted mid-call and never
-            # returned a state, so there is no `last_usd(result)` to read;
-            # `usd=None` says that plainly instead of the 0.0 default, which
-            # would read as "this turn was free".
-            message = str(exc)
+            # returned a state, so there is no `last_usd(result)` to read.
+            # `usage` still saw every model call that finished before the
+            # interrupt, so a timeout reports elapsed seconds, how many of
+            # those calls ran, and what they spent, instead of a bare 0.0
+            # or a message with none of that.
+            elapsed = time.monotonic() - started
+            spent = usage.total_usd if usage is not None and usage.saw_usage else None
+            events = usage.calls if usage is not None else 0
+            message = (
+                f"{exc} (elapsed={elapsed:.0f}s, events={events}, "
+                f"usd={'unknown' if spent is None else format(spent, '.4f')}). "
+                f"Raise SOL1_QUERY_TIMEOUT_SECONDS or shrink the prompt."
+            )
             _trace(repo, role=role, ticket=ticket, prompt=prompt, result=message)
             print(f"deep-agents {ticket} {role}: timed out", flush=True)
-            return DoerResult(ok=False, timed_out=True, usd=None, output=message)
+            return DoerResult(ok=False, timed_out=True, usd=spent, output=message)
         # Graceful failure, mirrors CliBackend.run. A backend that raises
         # takes the loop down with it.
         except Exception as exc:
             # #541, matching #539's fix in sol2. A raise means `invoke()`
-            # never answered, so `usd` is `None`, not the 0.0 that reads as
-            # "this turn was free"; `_describe_exc` names the exception class
-            # so a caller does not have to guess whether this was a raised
-            # backend or an honest empty reply.
+            # never answered a final state, so `usd` is `None`, not the 0.0
+            # that reads as "this turn was free" -- unless `usage` actually
+            # saw a completed model turn before the raise, in which case
+            # that spend is real and reporting `None` would discard it.
+            # `_describe_exc` names the exception class so a caller does not
+            # have to guess whether this was a raised backend or an honest
+            # empty reply.
+            spent = usage.total_usd if usage is not None and usage.saw_usage else None
             message = f"deep agents backend failed: {_describe_exc(exc)}"
             _trace(repo, role=role, ticket=ticket, prompt=prompt, result=message)
             print(f"deep-agents {ticket} {role}: failed: {exc}", flush=True)
-            return DoerResult(ok=False, usd=None, output=message)
+            return DoerResult(ok=False, usd=spent, output=message)
