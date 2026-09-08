@@ -2400,17 +2400,17 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
             and not run.file("edit.done.json").exists()
             and not run.exhausted()
         ):
-            run.log("  10 edit      ...")
+            run.log("  11 edit      ...")
             before = run.state.total_usd
             meta = edit_paper(run)
             run.state.mark("edit", "complete", usd=round(run.state.total_usd - before, 4), **meta)
             run.state.save(work)
-            run.log(f"  10 edit      {meta}")
+            run.log(f"  11 edit      {meta}")
             assemble(run)
             check_meta = check(run)
             review(run)
-            run.log(f"  7 assemble  after edit")
-            run.log(f"  8 check     {check_meta['signature']}")
+            run.log(f"  8 assemble  after edit")
+            run.log(f"  9 check     {check_meta['signature']}")
             score = run.read_json("check.json")
             verdict = run.read_json("review.json")
             judge_done = bool(verdict.get("done"))
@@ -2459,18 +2459,18 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
     if run.ingest_brain is not None:
         ingest = rkc.ingest_brain(run.file("knowledge"), run.ingest_brain)
         run.state.mark("ingest", "complete" if ingest.get("ok") else "skipped", **ingest)
-        run.log(f"  11 ingest    {ingest}")
+        run.log(f"  12 ingest    {ingest}")
         run.state.save(work)
 
     gist = None
     if run.should_publish:
         if decision.gate != gates.PASS:
-            run.log("  11 publish    skipped. The paper did not pass.")
+            run.log("  12 publish    skipped. The paper did not pass.")
             run.state.mark("publish", "skipped", reason=decision.reason)
         else:
             gist = publisher.publish(work, topic=run.topic)
             run.state.mark("publish", "complete", url=gist["url"])
-            run.log(f"  11 publish    {gist['url']}")
+            run.log(f"  12 publish    {gist['url']}")
     run.state.save(work)
 
     return {

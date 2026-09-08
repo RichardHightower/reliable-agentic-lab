@@ -2059,12 +2059,20 @@ class Paper:
         for figure in planned:
             name = evidence.slug(figure["name"])
             prior = previous.get(name) or {}
-            spent = int(prior.get("attempts") or 0)
+            # #476 N2: the budget check reads `dropped`, not attempts alone.
+            # A figure that succeeded is not carrying a lifetime debt; only
+            # a durably dropped figure's prior attempts count against the
+            # next budget. Charging a passed figure's own `attempts: 3` here
+            # left `remaining` at 0, an empty attempt loop that never
+            # rebuilds a source the wipe-on-change step just deleted, and
+            # `diagram_gate` raised `missing_figures` on re-entry for a
+            # figure the run never dropped.
+            spent = int(prior.get("attempts") or 0) if prior.get("dropped") else 0
             if prior.get("dropped") and spent >= diagrams.MAX_LABEL_ATTEMPTS:
-                # #476 B2: this figure already spent its lifetime attempt
-                # budget on an earlier commissioning. A section changing
-                # elsewhere in the paper must not buy it a fresh three;
-                # durable means durable. No source, no ask, no image.
+                # This figure already spent its lifetime attempt budget on
+                # an earlier commissioning. A section changing elsewhere in
+                # the paper must not buy it a fresh three; durable means
+                # durable. No source, no ask, no image.
                 dropped.add(name)
                 continue
             remaining = diagrams.MAX_LABEL_ATTEMPTS - spent

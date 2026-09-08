@@ -368,12 +368,29 @@ def test_label_direction_reads_the_three_outcome_buckets():
 
 def test_label_direction_inverts_on_negation():
     """#476 F1. "Did not prevent lean mass loss" is a loss claim, not a
-    preservation claim; the bare word list reads `prevent` the wrong way."""
+    preservation claim; the bare word list reads `prevent` the wrong way.
+
+    #476 N1: a negated gain or a negated loss is a preservation claim (a
+    neutral "nothing changed" reading), not each other's opposite. The
+    first cut of `_INVERT_DIRECTION` sent a negated loss to gain, so "no
+    loss of lean mass" read as a gain claim.
+    """
     assert diagrams.label_direction("Creatine did not prevent lean mass loss") == "loss"
-    assert diagrams.label_direction("The trial found no strength gain") == "loss"
-    assert diagrams.label_direction("Fails to increase strength") == "loss"
-    assert diagrams.label_direction("Without a fat-free mass gain") == "loss"
+    assert diagrams.label_direction("The trial found no strength gain") == "preservation"
+    assert diagrams.label_direction("Fails to increase strength") == "preservation"
+    assert diagrams.label_direction("Without a fat-free mass gain") == "preservation"
+    assert diagrams.label_direction("There was no loss of lean mass") == "preservation"
     assert diagrams.label_direction("Strength gain, not measured directly") == "gain"
+
+
+def test_a_hedged_loss_does_not_back_a_gain_label():
+    """#476 N1: a negated loss is a preservation claim, not a gain claim.
+    `_INVERT_DIRECTION` used to send it the other way, so "there was no
+    loss of lean mass" backed a bare "Lean mass gain" label, the overclaim
+    this ticket exists to stop."""
+    labels = ["Lean mass gain"]
+    claims = [_claim("There was no loss of lean mass.")]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass gain"]
 
 
 def test_a_label_that_contradicts_the_section_claims_fails():

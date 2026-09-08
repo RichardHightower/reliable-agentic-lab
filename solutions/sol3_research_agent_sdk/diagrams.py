@@ -286,7 +286,14 @@ _DIRECTION_OF = {
 # says loss happened. Checked only in the text before the outcome word: a
 # negation after it belongs to a different clause.
 NEGATION_WORD = re.compile(r"\b(no|not|without|fails to)\b", re.I)
-_INVERT_DIRECTION = {"gain": "loss", "loss": "gain", "preservation": "loss"}
+# #476 N1. A negated loss is "no loss", a preservation claim, not a gain
+# claim; the first cut of this table sent it to gain, which let "there was
+# no loss of lean mass" back a bare "Lean mass gain" label, the overclaim
+# this ticket exists to stop, in this ticket's own domain. A negated gain
+# is "no gain", the same neutral preservation claim, not a loss. Negating
+# preservation still means the bad outcome happened, loss, which the F1
+# fixture ("did not prevent lean mass loss") already confirmed correct.
+_INVERT_DIRECTION = {"gain": "preservation", "loss": "preservation", "preservation": "loss"}
 
 
 def label_direction(label: str) -> str | None:

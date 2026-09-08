@@ -1036,6 +1036,33 @@ def test_the_attempt_budget_is_durable_across_a_changed_section(offline, run_dir
     assert "three-exits" not in body
 
 
+def test_a_rendered_figure_with_three_attempts_does_not_raise_on_re_entry(
+    offline, run_dir, stub_renderer
+):
+    """#476 N2: the budget check must read `dropped`, not attempts alone.
+    A figure that succeeded on its third label attempt (`attempts: 3,
+    dropped: false`, a record the production code itself writes) is not
+    carrying a lifetime debt. Charging it anyway left `remaining` at 0, an
+    empty attempt loop that never rebuilt a source the wipe-on-change step
+    had just deleted, and `diagram_gate` raised `missing_figures` for a
+    figure the run never dropped."""
+    _run_up_to_write(offline)
+    offline.stage_diagram()
+
+    guard_path = run_dir / "diagrams.json"
+    recorded = json.loads(guard_path.read_text())
+    for record in recorded["figures"]:
+        record["attempts"] = 3
+        record["dropped"] = False
+    guard_path.write_text(json.dumps(recorded))
+
+    heading = next(iter(offline.written))
+    offline.written[heading] += "\nA section rewrite to force recommissioning."
+    offline._save_sections()
+
+    offline.stage_diagram()  # must not raise GateFailed: missing_figures
+
+
 def test_a_shortfall_hedges_the_writer_brief(offline, run_dir, stub_renderer):
     """#475, judge revision on #520, F6a: a section bound to a question
     whose evidence_requirements fell short is told to hedge its
@@ -1043,7 +1070,7 @@ def test_a_shortfall_hedges_the_writer_brief(offline, run_dir, stub_renderer):
 
     Injects the shortfall directly rather than relying on the fixture to
     produce one incidentally (it does not, once #476 F6c's fixture fix
-    gives q1/q2 a real recency window that their yearless sources pass):
+    removes the recency window their yearless sources used to fail):
     `q1`'s subject, `exit-conditions`, is what the "Exit conditions"
     section's bound claims resolve to.
     """
