@@ -881,6 +881,57 @@ def test_a_clean_paper_passes_question_heading():
     assert "question_heading" not in gate(GOOD, URLS).signature()
 
 
+def test_a_heading_inside_a_fence_is_not_a_heading():
+    """#509. A `##` line inside a fenced code block is not paper structure,
+    in every row that scans headings: `question_headings`,
+    `last_prose_heading`, `has_body` (`sections_without_prose`), and
+    `top_level_sections`, the boundary helper others build on. The same
+    line outside the fence still fails `question_heading`.
+    """
+    fenced = (
+        "## Real heading\n\n"
+        "Real prose describes a heading question with a rubric here today [1].\n\n"
+        "```markdown\n"
+        "## Is this a heading?\n"
+        "more fence text\n"
+        "```\n\n"
+        "## Another heading\n\n"
+        "More real prose closes the section out today [1].\n"
+    )
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+
+    assert paper_check.question_headings(fenced, outline) == []
+    assert set(paper_check.top_level_sections(fenced)) == {"real heading", "another heading"}
+    assert paper_check.last_prose_heading(fenced) == "Another heading"
+    assert paper_check.sections_without_prose(fenced, 5) == []
+
+    unfenced = (
+        "## Real heading\n\n"
+        "Real prose describes a heading question with a rubric here today [1].\n\n"
+        "## Is this a heading?\n\n"
+        "more fence text\n\n"
+        "## Another heading\n\n"
+        "More real prose closes the section out today [1].\n"
+    )
+    assert "Is this a heading?" in paper_check.question_headings(unfenced, outline)
+
+
+def test_a_fenced_heading_does_not_satisfy_the_sections_row():
+    """#509. A fenced markdown example naming a required heading must not
+    let `sections` (`missing_sections`) believe that section is present.
+    """
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nSummary text here today. [1]\n\n"
+        "```markdown\n"
+        "## Introduction\n"
+        "example only\n"
+        "```\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert paper_check.missing_sections(body, ("abstract", "introduction", "references")) == ["introduction"]
+
+
 def test_the_recorded_fixture_paper_passes_question_heading(run_dir, stub_renderer):
     """`task paper` assembles a paper with no heading that pastes a
     question, under `assemble_gate`'s own production call."""
