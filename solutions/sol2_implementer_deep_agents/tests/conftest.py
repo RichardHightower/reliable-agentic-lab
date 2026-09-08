@@ -80,6 +80,40 @@ def fake_langchain(monkeypatch: pytest.MonkeyPatch):
     return module
 
 
+# The stand-ins `fake_deepagents` hands out below, at module level so a test
+# can read each class's own `__init__` and compare its field names against
+# the real `deepagents` package (see test_roles.py,
+# `test_the_fake_declares_the_fields_the_real_types_accept`). A fake whose
+# fields drift from the SDK is worse than none: it would keep passing while
+# proving nothing about the real thing.
+class FilesystemPermission:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class GeneralPurposeSubagentProfile:
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+
+
+class HarnessProfile:
+    def __init__(self, excluded_tools=(), general_purpose_subagent=None):
+        self.excluded_tools = excluded_tools
+        self.general_purpose_subagent = general_purpose_subagent
+
+
+class FilesystemBackend:
+    def __init__(self, root_dir="", virtual_mode=False):
+        self.root_dir = root_dir
+        self.virtual_mode = virtual_mode
+
+
+class CompositeBackend:
+    def __init__(self, default=None, routes=None):
+        self.default = default
+        self.routes = routes or {}
+
+
 @pytest.fixture
 def fake_deepagents(monkeypatch: pytest.MonkeyPatch):
     """Record what `build_agent` asks the SDK for, without the SDK.
@@ -96,29 +130,6 @@ def fake_deepagents(monkeypatch: pytest.MonkeyPatch):
     def register_harness_profile(model, profile):
         seen["harness_model"] = model
         seen["harness_profile"] = profile
-
-    class FilesystemPermission:
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
-
-    class GeneralPurposeSubagentProfile:
-        def __init__(self, enabled=True):
-            self.enabled = enabled
-
-    class HarnessProfile:
-        def __init__(self, excluded_tools=(), general_purpose_subagent=None):
-            self.excluded_tools = excluded_tools
-            self.general_purpose_subagent = general_purpose_subagent
-
-    class FilesystemBackend:
-        def __init__(self, root_dir="", virtual_mode=False):
-            self.root_dir = root_dir
-            self.virtual_mode = virtual_mode
-
-    class CompositeBackend:
-        def __init__(self, default=None, routes=None):
-            self.default = default
-            self.routes = routes or {}
 
     package = types.ModuleType("deepagents")
     package.create_deep_agent = create_deep_agent
