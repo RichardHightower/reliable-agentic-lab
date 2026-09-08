@@ -66,9 +66,18 @@ STAGE_ORDER = (
 class GateFailed(Exception):
     """The stage produced something unusable. The message is the retry prompt."""
 
-    def __init__(self, message: str, signature: tuple[str, ...] = ()):
+    def __init__(
+        self,
+        message: str,
+        signature: tuple[str, ...] = (),
+        *,
+        score: float | None = None,
+    ):
         super().__init__(message)
         self.signature = signature or (message.split(".", maxsplit=1)[0][:40],)
+        # Set only by `review_gate`, when the reviewer's reply carried one.
+        # `_run_stage` reads it to tell a converging draft from a stalled one.
+        self.score = score
 
 
 @dataclass
@@ -713,6 +722,31 @@ def define_acronym_once(sections: dict[str, str], phrase: str, acronym: str) -> 
 # -- 7. review ------------------------------------------------------------
 
 
+def _split_verdict(verdict: dict) -> tuple[list[str], list[str], float | None]:
+    """Read either reply shape the reviewer skill may hand back.
+
+    Paired: `{"failed_rows": [{"row": "no_filler", "note": "..."}], "score": 0.7}`.
+    The row and its note travel together, so they can never drift apart the
+    way the flat shape's two parallel lists could (#411).
+
+    Legacy: `{"failed_rows": ["no_filler"], "notes": ["..."]}`, with no score.
+    Still accepted, so an older recorded reply still parses.
+    """
+    raw_rows = verdict.get("failed_rows") or []
+    score = verdict.get("score")
+    try:
+        score = None if score is None else max(0.0, min(1.0, float(score)))
+    except (TypeError, ValueError):
+        score = None
+    if raw_rows and isinstance(raw_rows[0], dict):
+        rows = [str(item.get("row", "")).strip() for item in raw_rows]
+        notes = [str(item.get("note", "")).strip() for item in raw_rows]
+        return rows, notes, score
+    rows = [str(row) for row in raw_rows]
+    notes = [str(note) for note in (verdict.get("notes") or []) if str(note).strip()]
+    return rows, notes, score
+
+
 def review_gate(verdict: dict) -> None:
     """Fail the draft on the reviewer's rows, and never mislabel one.
 
@@ -722,14 +756,14 @@ def review_gate(verdict: dict) -> None:
     again. A live run stalled that way with `scope_honest` labelled
     "evidence_matches is now fixed" (#326).
 
-    The reviewer skill asks for one sentence per row, so pair them when the
-    counts agree. When they do not, report both lists plainly rather than
-    guessing which sentence belongs to which row.
+    The paired reply shape pairs every row with its note by construction. The
+    legacy flat shape does not, so pair its two lists only when the counts
+    agree; when they do not, report both lists plainly rather than guessing
+    which sentence belongs to which row.
     """
-    rows = verdict.get("failed_rows") or []
+    rows, notes, score = _split_verdict(verdict)
     if not rows:
         return
-    notes = [str(note) for note in (verdict.get("notes") or []) if str(note).strip()]
     if len(notes) == len(rows):
         detail = " ".join(f"{row}: {note}" for row, note in zip(rows, notes, strict=True))
     else:
@@ -740,7 +774,7 @@ def review_gate(verdict: dict) -> None:
                 f" The reviewer returned {len(notes)} notes for {len(rows)} rows, so"
                 " they are not matched up. All of them: " + " ".join(notes)
             )
-    raise GateFailed(f"the reviewer failed these rows. {detail}", tuple(sorted(rows)))
+    raise GateFailed(f"the reviewer failed these rows. {detail}", tuple(sorted(rows)), score=score)
 
 
 # -- 8. assemble ----------------------------------------------------------

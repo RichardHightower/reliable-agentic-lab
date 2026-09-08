@@ -460,6 +460,163 @@ def test_a_review_retry_sends_failed_rows_to_the_writer(offline, monkeypatch):
     assert calls["revise"] and "names_tradeoff" in calls["revise"][0]
 
 
+# -- #411: the review stall rule gets a progress escape ---------------------
+
+
+def test_review_retry_continues_when_the_score_rises_a_tenth(offline, monkeypatch):
+    """The same rows failing twice is not a stall when the score is moving.
+    Copied from the SDK port's `decide(progressed=...)` rule (#361, #362)."""
+    calls = {"review": 0}
+
+    def review(_extra=""):
+        calls["review"] += 1
+        if calls["review"] == 1:
+            raise GateFailed("still filler", ("no_filler",), score=0.5)
+        if calls["review"] == 2:
+            raise GateFailed("still filler", ("no_filler",), score=0.65)
+        return paper.StageResult("review", summary="fixed")
+
+    monkeypatch.setattr(offline, "stage_review", review)
+    monkeypatch.setattr(
+        offline, "stage_revise", lambda feedback, **_: paper.StageResult("revise", summary="ok")
+    )
+
+    assert offline._run_stage("review") is None
+    assert calls["review"] == 3
+    assert offline.state.stages["review"].status == pstate.COMPLETE
+
+
+def test_review_retry_escalates_when_the_score_does_not_rise(offline, monkeypatch):
+    """The same rows and the same score is exactly the existing stall: the
+    loop is not converging, and the message says so."""
+    calls = {"review": 0}
+
+    def review(_extra=""):
+        calls["review"] += 1
+        raise GateFailed("still filler", ("no_filler",), score=0.5)
+
+    monkeypatch.setattr(offline, "stage_review", review)
+    monkeypatch.setattr(
+        offline, "stage_revise", lambda feedback, **_: paper.StageResult("revise", summary="ok")
+    )
+    said = []
+    monkeypatch.setattr(offline, "say", said.append)
+
+    assert offline._run_stage("review") == 2
+    assert calls["review"] == 2
+    assert offline.state.stages["review"].status == pstate.FAILED
+    assert any("the same rows failed twice" in line for line in said)
+
+
+def test_a_resumed_review_at_budget_escalates_without_a_model_call(offline, monkeypatch):
+    """#411: a resume is another attempt against the budget, not a clean
+    slate. A stage that already spent every attempt does not buy another."""
+    for _ in range(offline.attempts):
+        offline.state.mark_in_progress("review")
+    offline.state.mark_failed(
+        "review", "the same rows failed twice: no_filler. The loop is not converging."
+    )
+    offline.state.save()
+
+    calls = {"review": 0}
+    monkeypatch.setattr(
+        offline, "stage_review", lambda extra="": calls.__setitem__("review", calls["review"] + 1)
+    )
+    said = []
+    monkeypatch.setattr(offline, "say", said.append)
+
+    assert offline._run_stage("review") == 2
+    assert calls["review"] == 0, "no model call is spent on an already-exhausted stage"
+    assert any("3 of 3" in line for line in said)
+    assert offline.state.stages["review"].status == pstate.FAILED
+
+
+def test_a_resumed_review_below_budget_continues_from_the_persisted_count(offline, monkeypatch):
+    """#411: `resuming review at attempt 3 of 3` reads the persisted count,
+    not a fresh local counter, and keeps going against the same budget."""
+    offline.state.mark_in_progress("review")
+    offline.state.mark_in_progress("review")
+    offline.state.mark_failed("review", "still filler")
+    offline.state.save()
+
+    said = []
+    monkeypatch.setattr(offline, "say", said.append)
+    monkeypatch.setattr(
+        offline, "stage_review", lambda extra="": paper.StageResult("review", summary="fixed")
+    )
+
+    assert offline._run_stage("review") is None
+    assert any("resuming review at attempt 3 of 3" in line for line in said)
+    assert offline.state.stages["review"].attempts == 3
+
+
+def test_review_retry_hands_revise_the_paired_notes_keyed_by_row(offline, monkeypatch):
+    """#411: the paired reply shape reaches `stage_revise` with each row
+    still attached to its own note."""
+    verdict = {
+        "failed_rows": [
+            {"row": "no_filler", "note": "Paragraph two restates the abstract."},
+            {"row": "defines_terms", "note": "MCP is used before it is defined."},
+        ],
+        "score": 0.4,
+    }
+    calls = {"review": 0}
+
+    def review(_extra=""):
+        calls["review"] += 1
+        if calls["review"] == 1:
+            stages.review_gate(verdict)
+        return paper.StageResult("review", summary="fixed")
+
+    feedback_seen = []
+
+    def revise(feedback, **_):
+        feedback_seen.append(feedback)
+        return paper.StageResult("revise", summary="ok")
+
+    monkeypatch.setattr(offline, "stage_review", review)
+    monkeypatch.setattr(offline, "stage_revise", revise)
+
+    assert offline._run_stage("review") is None
+    assert feedback_seen
+    assert "no_filler: Paragraph two restates the abstract." in feedback_seen[0]
+    assert "defines_terms: MCP is used before it is defined." in feedback_seen[0]
+
+
+def test_review_retry_with_the_legacy_reply_shape_still_reaches_revise(offline, monkeypatch):
+    """The flat list-of-names-plus-notes shape still parses and still reaches
+    the revise stage."""
+    verdict = {"failed_rows": ["voice"], "notes": ["A rhetorical question opens section 2."]}
+    calls = {"review": 0}
+
+    def review(_extra=""):
+        calls["review"] += 1
+        if calls["review"] == 1:
+            stages.review_gate(verdict)
+        return paper.StageResult("review", summary="fixed")
+
+    feedback_seen = []
+
+    def revise(feedback, **_):
+        feedback_seen.append(feedback)
+        return paper.StageResult("revise", summary="ok")
+
+    monkeypatch.setattr(offline, "stage_review", review)
+    monkeypatch.setattr(offline, "stage_revise", revise)
+
+    assert offline._run_stage("review") is None
+    assert feedback_seen
+    assert "voice: A rhetorical question opens section 2." in feedback_seen[0]
+
+
+def test_the_reviewer_skill_documents_the_paired_reply_shape():
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "reviewer" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert '"score"' in skill
+    assert '"row"' in skill
+
+
 def test_writer_heading_is_removed_before_the_citation_gate():
     assert paper.section_body("## Abstract\n\nGrounded summary. [1]", "Abstract") == "Grounded summary. [1]"
     assert paper.section_body("Abstract\n\nGrounded summary. [1]", "Abstract") == "Grounded summary. [1]"
