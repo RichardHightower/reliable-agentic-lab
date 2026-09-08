@@ -363,6 +363,7 @@ def corpus_pack(run: Run) -> dict:
     )
     return {
         "hits": len(packed["hits"]),
+        "relevant": packed["relevant"],
         "brains": packed["roots"],
         "missing": packed["missing"],
         "corpus_thin": packed["corpus_thin"],
