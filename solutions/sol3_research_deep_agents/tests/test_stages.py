@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import evidence
+import paper
 import pytest
 import stages
+from conftest import build_run
 from stages import GateFailed
 
 
@@ -651,6 +653,7 @@ def test_agreed_second_source_fetches_its_metadata(monkeypatch):
             "venue": "A Journal",
             "note": "",
             "text": "",
+            "pubtype": ["Randomized Controlled Trial"],
         },
     )
     led = evidence.Ledger("/nonexistent")
@@ -674,6 +677,156 @@ def test_agreed_second_source_fetches_its_metadata(monkeypatch):
     assert source.authors == ["A. Author"]
     assert source.year == "2020"
     assert stages.render_reference(source).startswith("A. Author (2020)")
+    # #473: the second source gets a tier the same way any other does.
+    assert source.tier == "primary_trial"
+
+
+# -- 2b. follow the summary to its primary. #473 -----------------------------
+
+
+def test_a_numeric_preprint_claim_gets_one_follow_turn(monkeypatch):
+    """A numeric claim bound only to a preprint is a follow candidate, and a
+    hit rebinds it to the primary study."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Preprint",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "category": "cs.AI",
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "A Preprint", "url": "https://docs.claude.com/preprint"}],
+            "claims": [
+                {
+                    "text": "The dose increased 42 percent.",
+                    "source_urls": ["https://docs.claude.com/preprint"],
+                }
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    candidates = stages.claims_needing_a_primary(led)
+    assert len(candidates) == 1
+    claim = candidates[0]
+
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "The Primary Trial",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent",
+            "pubtype": ["Randomized Controlled Trial"],
+        },
+    )
+    hit = stages.apply_follow_result(
+        led,
+        claim,
+        {"found": True, "url": "https://docs.claude.com/primary", "title": "The Primary Trial", "quote": ""},
+        backend=_FakeBackend(),
+    )
+    assert hit
+    rebound = led.sources[claim.source_ids[0]]
+    assert rebound.url == "https://docs.claude.com/primary"
+    assert rebound.tier == "primary_trial"
+    assert not str(claim.note or "").startswith("secondary:")
+    # A rebound claim no longer needs a second follow turn.
+    assert stages.claims_needing_a_primary(led) == []
+
+
+def test_a_follow_miss_marks_the_claim_secondary(monkeypatch):
+    """A miss keeps the finding bound to the review it started with, and the
+    brief the writer reads says "as summarized by [n]"."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "category": "cs.AI",
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "A Review", "url": "https://docs.claude.com/review"}],
+            "claims": [
+                {"text": "The effect was 20 percent.", "source_urls": ["https://docs.claude.com/review"]}
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    claim = stages.claims_needing_a_primary(led)[0]
+    hit = stages.apply_follow_result(led, claim, {"found": False}, backend=_FakeBackend())
+    assert not hit
+    assert str(claim.note or "").startswith("secondary:")
+
+    index, _ = stages.numbering(led)
+    brief = stages.claim_brief(led, claim.id, index)
+    assert "as summarized by" in brief
+
+
+class _CountingRunner(paper.Runner):
+    name = "counting"
+
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    def ask(self, role: str, prompt: str) -> paper.Reply:
+        self.prompts.append(prompt)
+        return paper.Reply(data={"found": False, "url": "", "title": "", "quote": ""})
+
+
+def _claim_with_tier(ledger: evidence.Ledger, tier: str, text: str) -> evidence.Claim:
+    source = ledger.add_source(
+        evidence.SourceDocument(
+            title="Src", url=f"https://docs.claude.com/{tier}-{len(ledger.sources)}", subject="s", tier=tier
+        )
+    )
+    return ledger.add_claim(evidence.Claim(text=text, subject="s", source_ids=[source.id]))
+
+
+def test_the_follow_pass_stops_at_the_run_cap(run_dir):
+    """Seven candidates, six turns: the run-wide cap, shakiest tier first."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    logs: list[str] = []
+    run.say = logs.append
+    for i in range(3):
+        _claim_with_tier(run.ledger, "preprint_or_compilation", f"The result changed {10 + i} percent.")
+    for i in range(3):
+        _claim_with_tier(run.ledger, "narrative_review", f"The rate moved {20 + i} percent.")
+    _claim_with_tier(run.ledger, "meta_analysis_or_systematic_review", "The effect was 99 percent.")
+
+    run._follow_primaries()
+
+    assert run.runner.prompts and len(run.runner.prompts) == run.max_follow == 6
+    followed = "\n".join(run.runner.prompts)
+    assert followed.count("changed 1") == 3
+    assert followed.count("moved 2") == 3
+    assert "effect was 99" not in followed, "the systematic review is the least shaky, and the one left out"
+
+    assert any("follow" in line and "cap 6" in line for line in logs), logs
 
 
 def test_search_gate_fails_with_no_claims():

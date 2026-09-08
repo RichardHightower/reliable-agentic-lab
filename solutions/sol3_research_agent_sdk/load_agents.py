@@ -236,6 +236,19 @@ LOCATE_SCHEMA = _schema(
     ["url", "supports", "excerpt"],
 )
 
+# #473. A hit names the primary study a review, a preprint, or a compilation
+# cited for one numeric claim; a miss is a first-class answer, the same as
+# `unclear` above, not something to force into a fabricated URL.
+FOLLOW_SCHEMA = _schema(
+    {
+        "found": {"type": "boolean"},
+        "url": {"type": "string"},
+        "title": {"type": "string"},
+        "quote": {"type": "string"},
+    },
+    ["found", "url", "title", "quote"],
+)
+
 DIAGRAM_SCHEMA = _schema(
     {
         "language": {"type": "string", "enum": ["mermaid", "plantuml"]},

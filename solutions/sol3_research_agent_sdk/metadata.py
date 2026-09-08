@@ -27,6 +27,14 @@ The offline switch: when `backend` is the fixture backend (`backend.name ==
 touches the network. Every other backend, including the live Agent SDK
 adapter, resolves for real. No new CLI flag, no new environment variable: the
 caller passes whatever backend the research stage already holds.
+
+The fetch also keeps the record's own raw publication-type fields, never
+interpreted here: PubMed and PMC's `pubtype` list (esummary), arXiv's
+`category`, and Crossref's `type`. #473's `source_policy.tier_for()` reads
+these to decide what kind of source this is, a review, a preprint, a
+position stand, a primary trial, without a model turn. A page fetched
+through `citation_title` meta tags carries none of these, so it tiers
+`other` by default.
 """
 
 from __future__ import annotations
@@ -118,6 +126,10 @@ def _from_pubmed(pubmed_id: str) -> dict:
         # esummary does not normally carry an abstract; efetch below usually
         # does. This is the fallback when efetch itself fails.
         "text": result.get("abstract") or "",
+        # Raw, uninterpreted. #473's `source_policy.tier_for()` maps these
+        # strings; `metadata.py` never decides what a "Practice Guideline" or
+        # a "Randomized Controlled Trial" means.
+        "pubtype": list(result.get("pubtype") or []),
     }
     try:
         abstract = _efetch_abstract("pubmed", pubmed_id)
@@ -142,6 +154,7 @@ def _from_pmc(pmc_id: str) -> dict:
         "year": str(result.get("pubdate") or "")[:4],
         "venue": result.get("fulljournalname") or result.get("source") or "",
         "text": result.get("abstract") or "",
+        "pubtype": list(result.get("pubtype") or []),
     }
     try:
         abstract = _efetch_abstract("pmc", pmc_id)
@@ -166,12 +179,15 @@ def _from_arxiv(arxiv_id: str) -> dict:
     ]
     published = entry.findtext("a:published", default="", namespaces=ns) or ""
     summary = " ".join((entry.findtext("a:summary", default="", namespaces=ns) or "").split())
+    category_el = entry.find("a:category", ns)
+    category = (category_el.get("term") or "") if category_el is not None else ""
     return {
         "title": title,
         "authors": [a for a in authors if a],
         "year": published[:4],
         "venue": "arXiv",
         "text": summary,
+        "category": category,
     }
 
 
@@ -199,6 +215,7 @@ def _from_crossref(doi: str) -> dict:
         # Crossref's abstract, when a publisher supplied one, arrives as
         # JATS XML. Strip tags rather than parse a schema nobody asked for.
         "text": " ".join(abstract.split()),
+        "crossref_type": str(message.get("type") or ""),
     }
 
 
@@ -258,12 +275,16 @@ def fetch_record(url: str, backend, *, model_title: str = "") -> dict:
     `fixtures/metadata/<sha1-of-url>.json`, or reports the miss. Any other
     backend resolves for real, one attempt, 10 seconds, no retry.
 
-    Returns `{"title", "authors", "year", "venue", "note", "text"}`. `title`
-    is the fetched title, or `model_title` when nothing was fetched. `text` is
-    the abstract or page text the record carried, capped at `TEXT_CAP`
-    characters, or empty when none was found; `paper.attributed()` reads it.
-    `note` carries a `title_mismatch: ...` message when a fetched title
-    disagrees with `model_title` by more than a third of their tokens, or a
+    Returns `{"title", "authors", "year", "venue", "note", "text", "pubtype",
+    "category", "crossref_type"}`. `title` is the fetched title, or
+    `model_title` when nothing was fetched. `text` is the abstract or page
+    text the record carried, capped at `TEXT_CAP` characters, or empty when
+    none was found; `paper.attributed()` reads it. `pubtype`, `category`, and
+    `crossref_type` are the record's own raw publication-type fields, empty
+    or `[]` when the source was not resolved through that path; #473's
+    `source_policy.tier_for()` is the only thing that interprets them. `note`
+    carries a `title_mismatch: ...` message when a fetched title disagrees
+    with `model_title` by more than a third of their tokens, or a
     fetch-failure message when the record could not be resolved. Never
     raises.
 
@@ -271,7 +292,17 @@ def fetch_record(url: str, backend, *, model_title: str = "") -> dict:
     the caller's disk instead of a page; the scheme is checked here too, so no
     caller can bypass it by skipping its own guard.
     """
-    record = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+    record = {
+        "title": model_title,
+        "authors": [],
+        "year": "",
+        "venue": "",
+        "note": "",
+        "text": "",
+        "pubtype": [],
+        "category": "",
+        "crossref_type": "",
+    }
     if not url or not url.lower().startswith(("http://", "https://")):
         if url:
             record["note"] = f"metadata fetch: not an http(s) url: {url}"
@@ -293,6 +324,9 @@ def fetch_record(url: str, backend, *, model_title: str = "") -> dict:
     record["year"] = str((fetched or {}).get("year") or "")
     record["venue"] = str((fetched or {}).get("venue") or "")
     record["text"] = str((fetched or {}).get("text") or "").strip()[:TEXT_CAP]
+    record["pubtype"] = list((fetched or {}).get("pubtype") or [])
+    record["category"] = str((fetched or {}).get("category") or "")
+    record["crossref_type"] = str((fetched or {}).get("crossref_type") or "")
     if (fetched or {}).get("note"):
         # A partial failure below the title, e.g. efetch failing after
         # esummary succeeded. The record's own fields still stand.

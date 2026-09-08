@@ -224,6 +224,11 @@ class SourceDocument:
     # no text; a claim bound to this source then keeps its binding
     # unattributed rather than dropped. #471
     text: str = ""
+    # What kind of source this is, from `source_policy.tier_for()` reading
+    # `metadata.fetch_record`'s raw publication-type fields. No model. `""`
+    # for a source retrieved before this ticket, or one nothing here could
+    # classify past `tier_for`'s own `other` default. #473
+    tier: str = ""
 
     def __post_init__(self) -> None:
         self.id = self.id or f"source.{slug(self.subject, 40)}.{new_id()}"
@@ -250,6 +255,7 @@ class SourceDocument:
                 "venue": self.venue or None,
                 "note": self.note or None,
                 "fetched_text": self.text or None,
+                "tier": self.tier or None,
             }
         )
         return f"{head}\n\n{self.body or self.url}\n"
@@ -555,6 +561,7 @@ class Ledger:
                         venue=fields.get("venue", "") or "",
                         note=fields.get("note", "") or "",
                         text=fields.get("fetched_text", "") or "",
+                        tier=fields.get("tier", "") or "",
                     )
                 )
             elif kind == "Claim":

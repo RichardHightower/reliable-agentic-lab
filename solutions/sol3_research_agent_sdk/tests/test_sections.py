@@ -419,6 +419,46 @@ def test_section_check_sourced_fails_on_a_version_not_in_evidence():
     assert any("3.13" in c.detail for c in score.checks if c.name == "sourced")
 
 
+def test_a_safety_section_without_a_position_stand_fails():
+    """#473: a safety, dosing, or protocol section must cite every
+    position-stand or guideline source it was handed. A section with no such
+    source among its own findings passes trivially."""
+    section = _section(
+        heading="Dosing and safety",
+        key_questions=["what dose is safe"],
+        word_target=0,
+    )
+    guideline = [{"id": "s1-f1", "number": 1, "tier": "position_stand_or_guideline"}]
+
+    missing = checks.section_check(
+        "A claim about the safe dose that never names the position stand.",
+        section=section,
+        findings=guideline,
+    )
+    assert "guideline_cited" in missing.signature()
+
+    cited = checks.section_check(
+        "A claim about the safe dose, per the position stand [1].",
+        section=section,
+        findings=guideline,
+    )
+    assert "guideline_cited" not in cited.signature()
+
+    no_guideline_source = checks.section_check(
+        "A claim about the safe dose with no guideline source in the ledger.",
+        section=section,
+        findings=[{"id": "s1-f1", "number": 1, "tier": "primary_trial"}],
+    )
+    assert "guideline_cited" not in no_guideline_source.signature()
+
+    off_topic = checks.section_check(
+        "A claim about something else entirely that never cites [1].",
+        section=_section(heading="Background", key_questions=["what is the mechanism"]),
+        findings=guideline,
+    )
+    assert "guideline_cited" not in off_topic.signature()
+
+
 def test_section_check_figures_fails_when_a_planned_figure_is_missing():
     body = "No picture here [1]. " + ("word " * 80)
     score = checks.section_check(
@@ -817,6 +857,135 @@ def test_all_the_claims_numbers_must_appear_not_just_one():
     finding = {"claim": "Creatine adds 1.2 kg of lean mass over 12 weeks.", "quote": ""}
     assert not sections.attributed(finding, "This was a 12 week study of resistance-trained adults.")
     assert sections.attributed(finding, "Over 12 weeks, creatine added 1.2 kg of lean mass on average.")
+
+
+# -- #473: follow a summary to its primary ----------------------------------
+
+
+def test_a_follow_miss_marks_the_claim_secondary():
+    """A miss leaves the finding bound to the review it started with, and the
+    writer's brief carries "as summarized by [n]" for that same number."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "The effect was 20 percent.",
+            "source": {
+                "url_or_path": "https://example.invalid/review",
+                "evidence_tier": "narrative_review",
+            },
+            "secondary": True,
+        }
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1", {"https://example.invalid/review": 3})
+    assert "as summarized by [3]" in bound[0]["text"]
+    assert bound[0]["tier"] == "narrative_review"
+
+
+def test_a_numeric_preprint_claim_gets_one_follow_turn(work, turns, monkeypatch):
+    """A numeric claim bound only to a preprint gets one follow turn. A hit
+    rebinds the finding to the primary study it names."""
+    records = {
+        "https://example.invalid/preprint": {"category": "cs.AI"},
+        "https://example.invalid/primary": {
+            "title": "The Primary Trial",
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "the dose increased 42 percent",
+        },
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    follow_log: list[tuple] = []
+
+    class WithFollow(turns):
+        backend = _FakeBackend()
+
+        def follow_primary(self, claim, source_title, source_tier):
+            follow_log.append((claim, source_tier))
+            return {"found": True, "url": "https://example.invalid/primary", "title": "The Primary Trial", "quote": ""}
+
+    claims = [
+        {
+            "text": "The dose increased 42 percent.",
+            "source_url": "https://example.invalid/preprint",
+            "quote": "",
+        }
+    ]
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithFollow(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert len(follow_log) == 1, "exactly one follow turn for the one candidate"
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved[0]["source_url"] == "https://example.invalid/primary"
+    assert saved[0]["evidence_tier"] == "primary_trial"
+    assert "; " not in saved[0]["note"] and "secondary" not in saved[0]["note"]
+
+
+def test_the_follow_pass_stops_at_the_run_cap(work, turns, monkeypatch):
+    """Seven candidates, six turns: the run-wide cap, shakiest tier first."""
+    records: dict[str, dict] = {}
+    claims = []
+    for i in range(3):
+        url = f"https://example.invalid/preprint{i}"
+        records[url] = {"category": "cs.AI"}
+        claims.append({"text": f"The result changed {10 + i} percent.", "source_url": url, "quote": ""})
+    for i in range(3):
+        url = f"https://example.invalid/review{i}"
+        records[url] = {"pubtype": ["Review"]}
+        claims.append({"text": f"The rate moved {20 + i} percent.", "source_url": url, "quote": ""})
+    records["https://example.invalid/meta0"] = {"pubtype": ["Systematic Review"]}
+    claims.append({"text": "The effect was 99 percent.", "source_url": "https://example.invalid/meta0", "quote": ""})
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    follow_log: list[str] = []
+
+    class WithFollow(turns):
+        backend = _FakeBackend()
+
+        def follow_primary(self, claim, source_title, source_tier):
+            follow_log.append(source_tier)
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+    logs: list[str] = []
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithFollow(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=logs.append,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert len(follow_log) == run.max_follow == 6
+    # The shakiest tiers exhaust the cap; the least shaky candidate, the one
+    # systematic review, is the one left out.
+    assert follow_log.count("preprint_or_compilation") == 3
+    assert follow_log.count("narrative_review") == 3
+    assert "meta_analysis_or_systematic_review" not in follow_log
+    assert any("follow" in line and "6/6" in line for line in logs), logs
 
 
 def test_attribute_findings_is_a_noop_with_no_backend():

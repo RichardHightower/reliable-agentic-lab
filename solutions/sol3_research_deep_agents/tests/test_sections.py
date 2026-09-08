@@ -48,6 +48,65 @@ def test_section_check_style_still_flags_a_rhetorical_question_in_prose():
     assert any(c.name == "style" and not c.passed for c in score.checks)
 
 
+def test_a_safety_section_without_a_position_stand_fails():
+    """#473: a safety, dosing, or protocol section must cite every
+    position-stand or guideline source it was handed. A section with no such
+    source among its own findings passes trivially."""
+    section = {"heading": "Dosing and safety", "key_questions": ["what dose is safe"]}
+    guideline = [{"id": "s1-f1", "number": 1, "evidence_tier": "position_stand_or_guideline"}]
+
+    missing = sections.section_check(
+        "A claim about the safe dose that never names the position stand.",
+        section=section,
+        findings=guideline,
+    )
+    assert "guideline_cited" in missing.signature()
+
+    cited = sections.section_check(
+        "A claim about the safe dose, per the position stand [1].",
+        section=section,
+        findings=guideline,
+    )
+    assert "guideline_cited" not in cited.signature()
+
+    no_guideline_source = sections.section_check(
+        "A claim about the safe dose with no guideline source in the ledger.",
+        section=section,
+        findings=[{"id": "s1-f1", "number": 1, "evidence_tier": "primary_trial"}],
+    )
+    assert "guideline_cited" not in no_guideline_source.signature()
+
+    off_topic = sections.section_check(
+        "A claim about something else entirely that never cites [1].",
+        section={"heading": "Background", "key_questions": ["what is the mechanism"]},
+        findings=guideline,
+    )
+    assert "guideline_cited" not in off_topic.signature()
+
+
+def test_findings_from_claims_carries_the_tier_from_the_ledger():
+    """#473: `evidence_tier` on the finding survives from the ledger's
+    `SourceDocument`, which is what wires `guideline_cited` to a real run."""
+    import evidence
+    from types import SimpleNamespace
+
+    ledger = evidence.Ledger("/nonexistent")
+    source = ledger.add_source(
+        evidence.SourceDocument(
+            title="A Position Stand",
+            url="https://a.example/stand",
+            subject="s",
+            tier="position_stand_or_guideline",
+        )
+    )
+    claim = ledger.add_claim(evidence.Claim(text="The safe dose is 5g.", subject="s", source_ids=[source.id]))
+    paper = SimpleNamespace(ledger=ledger)
+    section = {"heading": "Dosing and safety", "claim_ids": [claim.id]}
+
+    findings = sections.findings_from_claims(paper, section, {source.id: 1})
+    assert findings[0]["evidence_tier"] == "position_stand_or_guideline"
+
+
 def test_offline_run_writes_section_files_and_ledger(finished_paper: Path):
     assert (finished_paper / "paper_ledger.json").exists()
     entries = json.loads((finished_paper / "paper_ledger.json").read_text())["entries"]

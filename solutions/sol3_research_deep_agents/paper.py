@@ -476,6 +476,12 @@ class Paper:
     search_budget: research.Budget | None = None
     max_usd: float = DEFAULT_MAX_USD
     max_verify: int = stages.MAX_VERIFY_CLAIMS
+    # #473. How many secondary-tier numeric claims get a follow turn asking
+    # for the primary study, per run: the ticket asked for a cap per
+    # section, and eight sections at six each would roughly double a run.
+    # `_follow_primaries` runs once, at the end of `stage_search`, so a plain
+    # slice of the candidate list is already a whole-run cap.
+    max_follow: int = 6
     attempts: int = DEFAULT_STAGE_ATTEMPTS
     theme: str = "spillwave-light"
     publish: bool = False
@@ -1563,6 +1569,7 @@ class Paper:
             # Persist per question. A stop between questions must not discard
             # the answers this run already paid for.
             self.ledger.write()
+        self._follow_primaries()
         stages.search_gate(self.ledger, self.plan)
         self.ledger.write()
         provider = self.backend.active_name
@@ -1581,6 +1588,34 @@ class Paper:
                 f"via {provider}" + (f" ({transport})" if transport else "")
             ),
         )
+
+    def _follow_primaries(self) -> None:
+        """One follow turn per shaky numeric claim, capped at `self.max_follow`. #473
+
+        A claim bound only to a review, a preprint, or a compilation is
+        asked once for the primary study behind its number. A hit rebinds
+        the claim to that primary; a miss is recorded `secondary:`, so
+        `stages.claim_brief` can tell the writer "as summarized by [n]".
+        """
+        candidates = stages.claims_needing_a_primary(self.ledger)
+        if not candidates:
+            return
+        followed = candidates[: self.max_follow]
+        self.say(f"    follow: {len(followed)} of {len(candidates)} candidate(s), cap {self.max_follow}")
+        for claim in followed:
+            self.budget.begin_request(max_calls=1, max_provider_calls=3)
+            try:
+                reply = self._ask(
+                    "researcher",
+                    f"This numeric claim rests only on a summary, not the primary study: "
+                    f"{claim.text}\n\nFind the primary study the summary cites for this "
+                    "number. Search once. Return JSON: "
+                    '{"found": true|false, "url": "...", "title": "...", "quote": "..."}.',
+                )
+            finally:
+                self.budget.end_request()
+            parsed = self._json_reply("researcher", reply)
+            stages.apply_follow_result(self.ledger, claim, parsed, backend=self.backend)
 
     # -- 3. verify ---------------------------------------------------------
 

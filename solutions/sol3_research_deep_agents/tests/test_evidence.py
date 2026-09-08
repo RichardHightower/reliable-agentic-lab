@@ -262,3 +262,20 @@ def test_metadata_round_trips_through_the_ledger(tmp_path):
     assert str(reloaded.year) == fetched.year
     assert reloaded.venue == fetched.venue
     assert reloaded.note == fetched.note
+
+
+def test_tier_survives_a_ledger_round_trip(tmp_path):
+    """#473: `source_policy.tier_for()`'s answer survives a `to_markdown`
+    write and a `load` back, the same way the other metadata fields do."""
+    tiered = evidence.SourceDocument(
+        title="Position Stand on Creatine Supplementation",
+        url="https://a.example/position-stand",
+        subject="creatine",
+        tier="position_stand_or_guideline",
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_source(tiered)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load().source_for_url(tiered.url)
+    assert reloaded.tier == "position_stand_or_guideline"

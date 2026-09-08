@@ -237,3 +237,21 @@ def test_the_librarian_holds_no_write_path():
     librarian = roleplan.plan(None, "paper")["source_librarian"]
     assert not librarian.can_write
     assert "Write" not in librarian.tools and "WebSearch" not in librarian.tools
+
+
+# -- #473: what kind of source this is, from the record, never the model ----
+
+
+def test_tier_for_maps_the_record_types():
+    """One case per tier, from the raw fields `metadata.fetch_record` carries,
+    and `other` as the default when nothing matches."""
+    assert sp.tier_for({"pubtype": ["Journal Article", "Randomized Controlled Trial"]}) == "primary_trial"
+    assert sp.tier_for({"pubtype": ["Systematic Review"]}) == "meta_analysis_or_systematic_review"
+    assert sp.tier_for({"pubtype": ["Practice Guideline"]}) == "position_stand_or_guideline"
+    assert sp.tier_for({"pubtype": ["Review"]}) == "narrative_review"
+    assert sp.tier_for({"category": "cs.MA"}) == "preprint_or_compilation"
+    assert sp.tier_for({"crossref_type": "posted-content"}) == "preprint_or_compilation"
+    assert sp.tier_for({}) == "other"
+    assert sp.tier_for({"crossref_type": "journal-article"}) == "other", (
+        "Crossref alone cannot tell a primary trial from a position stand"
+    )

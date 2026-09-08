@@ -1575,6 +1575,18 @@ def _paragraphs(body: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
 
 
+# #473. What names a section's own topic as safety, dosing, or protocol.
+GUIDELINE_TOPIC_WORDS = ("safety", "dosing", "protocol")
+
+
+def _is_guideline_topic(section: dict) -> bool:
+    heading = str(section.get("heading") or "").lower()
+    questions = " ".join(
+        outlines.question_text(item) for item in section.get("key_questions") or []
+    ).lower()
+    return any(word in f"{heading} {questions}" for word in GUIDELINE_TOPIC_WORDS)
+
+
 def section_check(
     body: str,
     *,
@@ -1584,7 +1596,7 @@ def section_check(
     word_target: int = 0,
     figures_given: list | None = None,
 ) -> Score:
-    """Eight deterministic rows on one section, before any judge."""
+    """Nine deterministic rows on one section, before any judge."""
     section = section or {}
     findings = findings or []
     checks: list[Check] = []
@@ -1723,6 +1735,32 @@ def section_check(
         style_hits.append("rhetorical question")
     checks.append(
         Check("style", not style_hits, "clean" if not style_hits else ", ".join(style_hits))
+    )
+
+    # #473. A section about safety, dosing, or protocol re-derives from
+    # primaries exactly what a position stand or guideline already answers,
+    # unless it is made to cite one. Graded against `findings` (this call's
+    # own evidence), not a whole-run source ledger this function has no
+    # access to without opening `assemble`: a section with no
+    # `position_stand_or_guideline` source among its own findings passes.
+    guideline_numbers = sorted(
+        {
+            int(f["number"])
+            for f in findings
+            if f.get("tier") == "position_stand_or_guideline" and f.get("number")
+        }
+    )
+    missing_guideline = (
+        [number for number in guideline_numbers if f"[{number}]" not in body]
+        if guideline_numbers and _is_guideline_topic(section)
+        else []
+    )
+    checks.append(
+        Check(
+            "guideline_cited",
+            not missing_guideline,
+            "every position stand is cited" if not missing_guideline else f"missing: {missing_guideline}",
+        )
     )
     return Score(checks=checks)
 

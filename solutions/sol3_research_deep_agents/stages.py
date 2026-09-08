@@ -384,6 +384,10 @@ def record_findings(
                 venue=fetched.get("venue") or "",
                 note=fetched.get("note") or "",
                 text=fetched.get("text") or "",
+                # A dict lookup on the record's own publication type, never a
+                # model's opinion. `{}` (no backend) tiers `other`, the same
+                # as a fetch that found nothing. #473
+                tier=source_policy.tier_for(fetched),
             )
         )
         source_ids.append(source.id)
@@ -485,6 +489,82 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
             "is refused; name the coverage gap instead.",
             ("unanswered_important",),
         )
+
+
+# -- 2b. follow the summary to its primary ---------------------------------
+#
+# #473. A preprint's number is the least trustworthy citation in the paper; a
+# systematic review's is closest to a primary trial's own. Lower sorts
+# first, so a run past `--max-follow` spends its turns on the shakiest
+# claims.
+FOLLOW_TIER_ORDER = {
+    "preprint_or_compilation": 0,
+    "narrative_review": 1,
+    "meta_analysis_or_systematic_review": 2,
+}
+
+
+def claims_needing_a_primary(ledger: evidence.Ledger) -> list[evidence.Claim]:
+    """Numeric claims bound only to a review, a preprint, or a compilation.
+
+    Shakiest tier first. A claim `apply_follow_result` already marked
+    `secondary:` is skipped, so a resumed run does not spend a second follow
+    turn on the same miss.
+    """
+    candidates = []
+    for claim in ledger.claims.values():
+        if str(claim.note or "").startswith("secondary:"):
+            continue
+        if not re.search(r"\d", claim.text):
+            continue
+        tiers = [ledger.sources[sid].tier for sid in claim.source_ids if sid in ledger.sources]
+        if tiers and all(tier in source_policy.SECONDARY_TIERS for tier in tiers):
+            candidates.append(claim)
+    return sorted(
+        candidates,
+        key=lambda c: min(
+            FOLLOW_TIER_ORDER.get(ledger.sources[sid].tier, 9)
+            for sid in c.source_ids
+            if sid in ledger.sources
+        ),
+    )
+
+
+def apply_follow_result(ledger: evidence.Ledger, claim: evidence.Claim, result: dict, *, backend=None) -> bool:
+    """Rebind a claim to the primary a follow turn found, or mark it secondary.
+
+    A hit whose fetched text contradicts the claim is treated the same as a
+    miss: a primary study's own URL is not a licence to skip the check #471
+    already runs on every other binding.
+    """
+    url = str(result.get("url") or "").strip()
+    if result.get("found") and url.lower().startswith(("http://", "https://")):
+        source = ledger.source_for_url(url)
+        if source is None:
+            model_title = result.get("title") or url
+            fetched = metadata.fetch_record(url, backend, model_title=model_title) if backend is not None else {}
+            source = ledger.add_source(
+                evidence.SourceDocument(
+                    title=fetched.get("title") or model_title,
+                    url=url,
+                    subject=claim.subject,
+                    body=result.get("quote", ""),
+                    authors=fetched.get("authors") or [],
+                    year=fetched.get("year") or "",
+                    venue=fetched.get("venue") or "",
+                    note=fetched.get("note") or "",
+                    text=fetched.get("text") or "",
+                    tier=source_policy.tier_for(fetched),
+                )
+            )
+        if not source.text or evidence.attributed(claim, source.text, quote=result.get("quote", "")):
+            claim.source_ids = [source.id]
+            claim.attributed_source_ids = [source.id] if source.text else []
+            claim.note = ""
+            evidence.corroborate(claim)
+            return True
+    claim.note = "secondary: the cited source only summarizes the primary"
+    return False
 
 
 # How many claims one verify stage will cross-check.
@@ -614,6 +694,7 @@ def apply_verification(ledger: evidence.Ledger, report: dict, *, backend=None) -
                             venue=fetched.get("venue") or "",
                             note=fetched.get("note") or "",
                             text=fetched.get("text") or "",
+                            tier=source_policy.tier_for(fetched),
                         )
                     )
                 if source.id not in claim.source_ids:
@@ -795,6 +876,11 @@ def claim_brief(ledger: evidence.Ledger, claim_id: str, index: dict[str, int]) -
     caveat = ""
     if claim.truth_state == evidence.SINGLE_SOURCE:
         caveat = "  (SINGLE SOURCE. Say so in the paragraph that uses this.)"
+    if str(claim.note or "").startswith("secondary:"):
+        # #473. A follow turn found no primary, so the writer is told
+        # outright: this number is as summarized by the review or preprint
+        # bound here, not the primary study's own report.
+        caveat += f"  (as summarized by {markers}. Say so in the paragraph that uses this.)"
     return f"- {claim.id}: {claim.text} {markers}{caveat}"
 
 

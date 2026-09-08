@@ -501,6 +501,24 @@ def test_a_runtime_that_cannot_search_reports_a_miss():
     assert offline.locate("A Paper", "Anthropic", "head") == miss
 
 
+def test_the_default_follow_primary_is_a_miss_and_the_live_one_asks(work):
+    """#473. Default: a miss, the same as `locate`'s "cannot search" answer.
+    The live turn asks the researcher agent with `FOLLOW_SCHEMA`."""
+    from load_agents import FOLLOW_SCHEMA  # noqa: PLC0415
+
+    miss = {"found": False, "url": "", "title": "", "quote": ""}
+    assert t.Turns().follow_primary("a claim", "a title", "narrative_review") == miss
+
+    backend = Backend([result(structured=miss)])
+    t.SdkTurns(backend=backend, work_dir=work).follow_primary(
+        "The dose increased 42 percent.", "A Review", "narrative_review"
+    )
+    prompt, _allow, output_format = backend.prompts[0]
+    assert prompt.startswith("Use the research-researcher agent.")
+    assert "The dose increased 42 percent." in prompt
+    assert output_format is FOLLOW_SCHEMA
+
+
 def test_a_generating_turn_carries_the_grounding_contract(work):
     backend = Backend([result(structured={"answer": "", "sources": [], "claims": []})])
     turns = t.SdkTurns(backend=backend, work_dir=work)

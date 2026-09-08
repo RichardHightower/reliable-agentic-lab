@@ -322,3 +322,66 @@ def run_allowlist(admitted: Iterable[str]) -> tuple[str, ...]:
     if len(hosts) < MIN_ADMITTED:
         return SEED_ALLOWLIST
     return hosts[:MAX_PERPLEXITY_DOMAINS]
+
+
+# What kind of source this is, from the record's own publication type, never
+# a model's opinion. #473. Keys are the raw, lower-cased strings
+# `metadata.fetch_record` carries: PubMed and PMC's `pubtype` entries, and
+# Crossref's `type`. arXiv carries no comparable enum -- every arXiv record
+# is an unreviewed preprint whatever its `category`, so `tier_for` treats any
+# non-empty `category` as `preprint_or_compilation` directly, without a table
+# entry per subject area.
+#
+# A Crossref `type` of `journal-article` is deliberately absent: Crossref
+# alone cannot tell a primary trial from a position stand published in the
+# same kind of journal, so a DOI-only source with no PubMed pubtype falls
+# through to `other` rather than guessing.
+TIERS: dict[str, str] = {
+    # PubMed / PMC publication types (esummary's or efetch's `pubtype`)
+    "randomized controlled trial": "primary_trial",
+    "clinical trial": "primary_trial",
+    "clinical trial, phase i": "primary_trial",
+    "clinical trial, phase ii": "primary_trial",
+    "clinical trial, phase iii": "primary_trial",
+    "clinical trial, phase iv": "primary_trial",
+    "observational study": "primary_trial",
+    "systematic review": "meta_analysis_or_systematic_review",
+    "meta-analysis": "meta_analysis_or_systematic_review",
+    "practice guideline": "position_stand_or_guideline",
+    "guideline": "position_stand_or_guideline",
+    "consensus development conference": "position_stand_or_guideline",
+    "review": "narrative_review",
+    "preprint": "preprint_or_compilation",
+    # Crossref `type`
+    "posted-content": "preprint_or_compilation",
+}
+
+# A claim resting on one of these alone is resting on a summary, not the
+# primary study. #473's follow pass exists for exactly this set.
+SECONDARY_TIERS = frozenset(
+    {"narrative_review", "meta_analysis_or_systematic_review", "preprint_or_compilation"}
+)
+
+
+def tier_for(record: dict) -> str:
+    """The source's tier, from its own record. No model, no title-sniffing.
+
+    Checks every PubMed/PMC `pubtype` entry against `TIERS` first, since a
+    record commonly carries several ("Journal Article", "Randomized
+    Controlled Trial") and the more specific one should win over the generic
+    one. Then Crossref's `type`. Then arXiv's `category`: present at all
+    means an unreviewed preprint, whatever the subject. No match anywhere:
+    `other`.
+    """
+    for raw in record.get("pubtype") or []:
+        tier = TIERS.get(str(raw).strip().lower())
+        if tier:
+            return tier
+    crossref_type = str(record.get("crossref_type") or "").strip().lower()
+    if crossref_type:
+        tier = TIERS.get(crossref_type)
+        if tier:
+            return tier
+    if str(record.get("category") or "").strip():
+        return "preprint_or_compilation"
+    return "other"
