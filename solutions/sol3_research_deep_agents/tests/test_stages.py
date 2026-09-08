@@ -1038,6 +1038,19 @@ def test_a_stage_retry_does_not_exceed_max_follow_in_total(run_dir):
 # -- 2c. the counter-evidence pass. #474 -------------------------------------
 
 
+def test_stage_search_wires_in_the_counter_evidence_pass(run_dir):
+    """`Paper.stage_search` runs `_counter_evidence` before `search_gate`,
+    not only when a test calls it directly."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    run.plan = {"questions": []}
+    run.ledger.add_claim(
+        evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    )
+    with pytest.raises(GateFailed):
+        run.stage_search()
+    assert len(run.runner.prompts) == 1
+
+
 def test_a_generalizing_claim_gets_one_counter_turn(run_dir):
     """"protein alone did not prevent lean-mass loss" gets exactly one
     counter turn, and the contrary claim binds with `counterargument_to`."""
