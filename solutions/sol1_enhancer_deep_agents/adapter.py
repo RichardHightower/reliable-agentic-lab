@@ -29,7 +29,11 @@ from write_scope import WriteScope
 class DoerResult:
     wrote: list[str] = field(default_factory=list)
     output: str = ""
-    usd: float = 0.0
+    # #541. `None` means the backend never answered a turn (a timed-out
+    # invoke, a raised exception), which is not the same as an answered turn
+    # that cost nothing. The default stays 0.0: an offline classroom backend
+    # really did answer, for free.
+    usd: float | None = 0.0
     ok: bool = True
     timed_out: bool = False
 
@@ -239,6 +243,13 @@ def last_usd(result) -> float:
     return total
 
 
+def _describe_exc(exc: Exception) -> str:
+    """#541, matching #539's fix in sol2. The exception's own class name
+    first, so a raised backend reads as one, instead of surviving only in a
+    message a reader would have to already know to look for."""
+    return f"{type(exc).__name__}: {exc}"
+
+
 class DeepAgentsBackend(Backend):
     """Runs the doer role through a Deep Agents agent's `.invoke`.
 
@@ -273,14 +284,23 @@ class DeepAgentsBackend(Backend):
             )
             return DoerResult(wrote=wrote, output=output, usd=last_usd(result))
         except QueryTimedOut as exc:
+            # #541. `agent.invoke()` was interrupted mid-call and never
+            # returned a state, so there is no `last_usd(result)` to read;
+            # `usd=None` says that plainly instead of the 0.0 default, which
+            # would read as "this turn was free".
             message = str(exc)
             _trace(repo, role=role, ticket=ticket, prompt=prompt, result=message)
             print(f"deep-agents {ticket} {role}: timed out", flush=True)
-            return DoerResult(ok=False, timed_out=True, output=message)
+            return DoerResult(ok=False, timed_out=True, usd=None, output=message)
         # Graceful failure, mirrors CliBackend.run. A backend that raises
         # takes the loop down with it.
         except Exception as exc:
-            message = f"deep agents backend failed: {exc}"
+            # #541, matching #539's fix in sol2. A raise means `invoke()`
+            # never answered, so `usd` is `None`, not the 0.0 that reads as
+            # "this turn was free"; `_describe_exc` names the exception class
+            # so a caller does not have to guess whether this was a raised
+            # backend or an honest empty reply.
+            message = f"deep agents backend failed: {_describe_exc(exc)}"
             _trace(repo, role=role, ticket=ticket, prompt=prompt, result=message)
             print(f"deep-agents {ticket} {role}: failed: {exc}", flush=True)
-            return DoerResult(ok=False, output=message)
+            return DoerResult(ok=False, usd=None, output=message)

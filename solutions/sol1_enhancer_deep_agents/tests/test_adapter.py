@@ -119,6 +119,38 @@ def test_a_failing_agent_returns_not_ok(tmp_path, monkeypatch):
     assert "no key" in result.output
 
 
+# -- #541: a raised backend never claims a silent 0.0 -----------------------
+
+
+def test_a_backend_that_raises_reports_usd_as_none_not_zero(tmp_path, monkeypatch):
+    """A raise means `agent.invoke()` never answered. `usd=0.0` there reads
+    as "this turn was free", indistinguishable from an honest empty reply."""
+    _diffs(monkeypatch, before=set(), after=set())
+    backend = adapter.DeepAgentsBackend(FakeAgent(raises=RuntimeError("no key")))
+
+    result = backend.run(repo=tmp_path, prompt="enhance", allow=["tickets/**"])
+
+    assert result.ok is False
+    assert result.usd is None
+
+
+def test_a_backend_failure_names_the_exception_class(tmp_path, monkeypatch):
+    """A `GraphRecursionError` must read as one, not survive only in the
+    driver's generic wording."""
+    _diffs(monkeypatch, before=set(), after=set())
+
+    class GraphRecursionError(RuntimeError):
+        pass
+
+    exc = GraphRecursionError("Recursion limit of 16 reached without hitting a stop condition.")
+    backend = adapter.DeepAgentsBackend(FakeAgent(raises=exc))
+
+    result = backend.run(repo=tmp_path, prompt="enhance", allow=["tickets/**"])
+
+    assert "GraphRecursionError" in result.output
+    assert "Recursion limit of 16" in result.output
+
+
 def test_a_timeout_returns_a_distinct_fail_closed_result(tmp_path, monkeypatch):
     _diffs(monkeypatch, before=set(), after=set())
 
@@ -134,6 +166,7 @@ def test_a_timeout_returns_a_distinct_fail_closed_result(tmp_path, monkeypatch):
 
     assert result.ok is False
     assert result.timed_out is True
+    assert result.usd is None
     assert "exceeded 180 seconds" in result.output
 
 
