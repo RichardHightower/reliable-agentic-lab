@@ -2218,10 +2218,21 @@ class Paper:
             for name, reason in backend_failed.items():
                 dropped.add(name)
                 prior_attempts = records.get(name, {}).get("attempts", 0)
+                # A backend failure is not a label failure. `dropped: True`
+                # here would make the durable budget check above (`spent =
+                # attempts if dropped else 0`) treat a figure that already
+                # earned its labels as permanently disqualified once
+                # `attempts` reaches `MAX_LABEL_ATTEMPTS`, for a cause its
+                # labels had nothing to do with; the Agent SDK does not
+                # have this problem, it leaves `dropped` false on the same
+                # path. Keep `dropped` false and `attempts` exactly what
+                # the label loop already earned, so a later commissioning
+                # gets its full label budget back once the backend
+                # recovers.
                 records[name] = {
                     "name": name,
                     "attempts": prior_attempts,
-                    "dropped": True,
+                    "dropped": False,
                     "reason": f"{stages.BACKEND_FAILURE_MARK}{reason}",
                 }
                 self.say(f"    note: {name} skipped, {stages.BACKEND_FAILURE_MARK}{reason}")
