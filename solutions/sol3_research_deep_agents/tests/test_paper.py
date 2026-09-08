@@ -1036,6 +1036,45 @@ def test_the_attempt_budget_is_durable_across_a_changed_section(offline, run_dir
     assert "three-exits" not in body
 
 
+def test_a_shortfall_hedges_the_writer_brief(offline, run_dir, stub_renderer):
+    """#475, judge revision on #520, F6a: a section bound to a question
+    whose evidence_requirements fell short is told to hedge its
+    generalizations, and the shortfall reason reaches the writer prompt.
+
+    Injects the shortfall directly rather than relying on the fixture to
+    produce one incidentally (it does not, once #476 F6c's fixture fix
+    gives q1/q2 a real recency window that their yearless sources pass):
+    `q1`'s subject, `exit-conditions`, is what the "Exit conditions"
+    section's bound claims resolve to.
+    """
+    offline.stage_corpus()
+    offline.stage_scout()
+    offline.stage_plan()
+    offline.stage_sources()
+    offline.stage_search()
+    offline.stage_verify()
+    offline.stage_outline()
+    offline.stage_charts()
+
+    offline.evidence_shortfall_unmet = {"q1": "needs 1 other, has 0"}
+
+    prompts = []
+    real_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        if role == "writer":
+            prompts.append(prompt)
+        return real_ask(role, prompt)
+
+    offline.runner.ask = spy
+    offline.stage_write()
+
+    assert any(
+        "Evidence requirements were not fully met" in p and "Hedge every generalization" in p
+        for p in prompts
+    ), "at least one section's brief must carry the shortfall hedge"
+
+
 def test_redraw_state_does_not_leak_into_a_later_call(
     offline, run_dir, stub_renderer, monkeypatch
 ):

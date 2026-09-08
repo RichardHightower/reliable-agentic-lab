@@ -16,7 +16,7 @@
                 "other"
               ],
               "min_count": 1,
-              "recency_years": 10,
+              "recency_years": 0,
               "populations": []
             }
           },
@@ -31,7 +31,7 @@
                 "other"
               ],
               "min_count": 1,
-              "recency_years": 10,
+              "recency_years": 0,
               "populations": []
             }
           },
