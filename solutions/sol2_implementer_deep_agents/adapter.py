@@ -238,6 +238,8 @@ def _usage_callback(max_call_usd: float | None = None):
     condition: once a completed turn's cost pushes it over the cap, the
     callback raises `DeepAgentsBudgetExceeded` naming the spend so far, the
     same job the SDK's per-query `asyncio.wait_for` timeout does mid-turn.
+    The check runs after a whole turn reports its cost, so the cap is a
+    ceiling with up to one turn of slack, not a hard stop mid-turn.
 
     Imported lazily and never let to raise for a parsing failure: this
     module has to stay importable, and this handler safe to attach, with no
@@ -250,6 +252,15 @@ def _usage_callback(max_call_usd: float | None = None):
         return None
 
     class UsageCallback(BaseCallbackHandler):
+        # #549, judge of PR #552. langchain_core's callback manager
+        # (`handle_event`/`ahandle_event`) wraps every handler call in its
+        # own `except Exception`, logs a warning, and only re-raises when
+        # `raise_error` is true. Without this, `DeepAgentsBudgetExceeded`
+        # below never reaches `agent.invoke()`, and a live call spends
+        # straight through the cap to the recursion limit, measured true
+        # against langchain_core 1.6.2 for both the sync and async path.
+        raise_error = True
+
         def __init__(self):
             self.total_usd = 0.0
             self.saw_usage = False
@@ -368,8 +379,15 @@ class DeepAgentsBackend(Backend):
             # raised backend or an honest empty reply, the two the judge of
             # PR #537 found indistinguishable.
             spend = usage.total_usd if usage is not None and usage.saw_usage else None
+            # #549, judge of PR #552. Named the same way the SDK port names
+            # its own cost stop, so e2e_t001.CONTROLLED_STOPS reads a
+            # deliberate cutoff as one, not as a crashed query.
+            stop_reason = "cost budget spent" if isinstance(exc, DeepAgentsBudgetExceeded) else None
             return DoerResult(
-                ok=False, usd=spend, output=f"deep_agents backend failed: {_describe_exc(exc)}"
+                ok=False,
+                usd=spend,
+                output=f"deep_agents backend failed: {_describe_exc(exc)}",
+                stop_reason=stop_reason,
             )
 
     def judge(self, *, repo: Path, prompt: str) -> DoerResult:
@@ -387,8 +405,12 @@ class DeepAgentsBackend(Backend):
             )
         except Exception as exc:
             spend = usage.total_usd if usage is not None and usage.saw_usage else None
+            stop_reason = "cost budget spent" if isinstance(exc, DeepAgentsBudgetExceeded) else None
             return DoerResult(
-                ok=False, usd=spend, output=f"deep_agents judge failed: {_describe_exc(exc)}"
+                ok=False,
+                usd=spend,
+                output=f"deep_agents judge failed: {_describe_exc(exc)}",
+                stop_reason=stop_reason,
             )
 
     def plan(self, *, repo: Path, prompt: str) -> DoerResult:
