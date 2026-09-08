@@ -174,6 +174,8 @@ The paper follows one house style, published once on the wiki as [Sol-3-White-Pa
 
 The evidence contract is arithmetic, not a promise from the model. `source_policy.py` seeds the allowlist by field (`seed_for_field`), bans a host outright (`DENYLIST`), and grades a source's tier (`tier_for`). A shaky numeric claim spends one follow turn, and a generalizing claim spends one counter turn before a lever is ruled out; the `counterweighed` row names a claim nobody checked. A safety claim needs a cited guideline (`guideline_cited`), and a question with stated evidence requirements needs `evidence_requirements_met`. A citation's title, authors, and year come from the fetched record, never the model's guess, and a claim earns attribution only when the fetched text supports it. A diagram is graded against the section's own claims before it is embedded.
 
+The glossary, front-matter, next-step, and study-table rows (`glossary_complete`, `glossary_exact`, `methods_present`, `conclusion_present`, `study_table`, `front_matter`, `next_step`, `cta_language`) sit behind `enforce_structure`, off by default. Every `task demo` lane runs with it on, offline included; only a direct call to `check()` in a test leaves it off.
+
 ## Run the loop
 
 The live operator path is [HOW_TO_RUN.md](HOW_TO_RUN.md). `task setup` creates

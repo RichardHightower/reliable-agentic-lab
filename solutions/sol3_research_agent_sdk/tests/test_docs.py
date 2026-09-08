@@ -298,16 +298,49 @@ FEATURE_MAP = FOLDER.parent.parent / "slides" / "FEATURE-MAP.md"
 # or a CLI flag quoted for readability is never mistaken for a row name.
 _BARE_IDENTIFIER = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
 
+# A name that only appears inside a comment or a docstring is not a row
+# definition, so it must not satisfy the check below. Regex, not
+# `tokenize`: a `#` inside a string literal could still be swallowed.
+# ponytail: upgrade to `tokenize` if that ever produces a false negative.
+_DOCSTRING = re.compile(r'("""|\'\'\')[\s\S]*?\1')
+_COMMENT = re.compile(r"#.*")
+
+
+def _code_only(src: str) -> str:
+    return _COMMENT.sub("", _DOCSTRING.sub("", src))
+
+
+def _row_haystack() -> str:
+    import checks  # noqa: PLC0415
+
+    src = Path(checks.__file__).read_text(encoding="utf-8")
+    src += (FOLDER / "source_policy.py").read_text(encoding="utf-8")
+    return _code_only(src)
+
+
+def _unknown_names(cited: set[str], haystack: str) -> list[str]:
+    return sorted(name for name in cited if not re.search(rf"\b{re.escape(name)}\b", haystack))
+
+
 # SPEC.md, HOW_TO_RUN.md, and DESIGN_DOC.md all carry one house-style
 # section, cited from the same check module and the same source_policy.py.
-# #467 #480.
+# DESIGN_DOC.md numbers its copy of the heading; the others do not. #467
+# #480.
 STYLE_DOCS = ("SPEC.md", "HOW_TO_RUN.md", "DESIGN_DOC.md")
-STYLE_SECTION = "## House style and the evidence contract"
+STYLE_SECTION = re.compile(r"^## (?:\d+\.\s*)?House style and the evidence contract\n", re.M)
+
+
+def _style_section_text(text: str, label: str) -> str:
+    match = STYLE_SECTION.search(text)
+    assert match, f"{label} has no House style and the evidence contract section"
+    return text[match.end() :].split("\n## ", 1)[0]
 
 
 def test_feature_map_module_three_names_the_style():
     """#467: a reader of Module 3 finds house style, glossary, and CTA named,
-    not only a citation row."""
+    not only a citation row, and every backticked name there is a real row
+    or constant, not drift. The judge inserted `totally_fake_row` into the
+    FEATURE-MAP paragraphs and this test is the one that now catches it."""
     if not FEATURE_MAP.is_file():
         pytest.skip("slides/FEATURE-MAP.md sits one level above a standalone copy")
     text = FEATURE_MAP.read_text(encoding="utf-8")
@@ -317,24 +350,25 @@ def test_feature_map_module_three_names_the_style():
     assert "cta" in module_three.lower(), module_three
     assert STYLE_URL in text
 
+    tail = text.split("Module 4 is the same graph with nobody at the keyboard.", 1)[-1]
+    cited = set(_BARE_IDENTIFIER.findall(module_three + "\n" + tail))
+    assert cited, "FEATURE-MAP Module 3 names no row or constant to verify"
+    unknown = _unknown_names(cited, _row_haystack())
+    assert not unknown, f"FEATURE-MAP names {unknown}, absent from checks.py/source_policy.py"
+
 
 @pytest.mark.parametrize("name", STYLE_DOCS)
 def test_both_specs_name_the_evidence_contract(name):
     """#480: SPEC.md, HOW_TO_RUN.md, and DESIGN_DOC.md name only rows and
-    constants that `checks.py` and `source_policy.py` actually carry. The
-    Deep Agents copy runs the same check against its own two files."""
-    import checks  # noqa: PLC0415
-
-    haystack = Path(checks.__file__).read_text(encoding="utf-8")
-    haystack += (FOLDER / "source_policy.py").read_text(encoding="utf-8")
+    constants that `checks.py` and `source_policy.py` actually define, a
+    comment or a docstring mention excluded. The Deep Agents copy runs the
+    same check against its own three files."""
+    haystack = _row_haystack()
 
     text = (FOLDER / name).read_text(encoding="utf-8")
-    assert STYLE_SECTION in text, f"{name} has no {STYLE_SECTION!r} section"
     assert STYLE_URL in text
-    section = text.split(STYLE_SECTION, 1)[1].split("\n## ", 1)[0]
-    cited = _BARE_IDENTIFIER.findall(section)
+    section = _style_section_text(text, name)
+    cited = set(_BARE_IDENTIFIER.findall(section))
     assert cited, f"{name} names no row or constant to verify"
-    unknown = sorted(
-        name_ for name_ in set(cited) if not re.search(rf"\b{re.escape(name_)}\b", haystack)
-    )
+    unknown = _unknown_names(cited, haystack)
     assert not unknown, f"{name} names {unknown}, absent from checks.py/source_policy.py"
