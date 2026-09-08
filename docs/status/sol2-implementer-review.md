@@ -1,7 +1,7 @@
 ---
 date: 2026-09-07
 slug: sol2-implementer-review
-title: Sol 2 implementer review — where the loop still misses the Module 2 slides
+title: "Sol 2 implementer review: where the loop still misses the Module 2 slides"
 git_base: "cb88cbc8"
 epic: 414
 wiki: Sol-2-Implementer-Review
@@ -107,7 +107,7 @@ step is not.
 
 ### 6. Planner flag
 
-Still Python `plan_for`. That is the five-hour choice and it should stay
+Still Python `plan_for`. This is the five-hour choice and it should stay
 the default. Stretch is `--planner derived|sdk|deep` with fail-closed
 schema. Do not let a live planner invent `kind/path/goal`.
 

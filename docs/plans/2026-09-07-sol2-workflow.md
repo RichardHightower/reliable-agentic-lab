@@ -93,7 +93,7 @@ Publish the review page
 
 ---
 
-## Story 0/9 — publish Sol-2-Implementer-Review on the wiki
+## Story 0/9: publish Sol-2-Implementer-Review on the wiki
 
 Kind: ops. The retrieve-and-execute handle for every later story.
 
@@ -108,7 +108,7 @@ Done when those two wiki URLs render the pages, not Home.
 
 ---
 
-## Story 1/9 — receipt.check tests in both ports, then wire or strike the push gate
+## Story 1/9: receipt.check tests in both ports, then wire or strike the push gate
 
 Kind: feature.
 
@@ -149,7 +149,7 @@ false, *or* the FEATURE-MAP row no longer claims a hook.
 
 ---
 
-## Story 2/9 — the judge sees the diff, and offline can say not done
+## Story 2/9: the judge sees the diff, and offline can say not done
 
 Kind: feature.
 
@@ -181,7 +181,7 @@ after a green rubric yields `gate == escalate`.
 
 ---
 
-## Story 3/9 — run the loop in an isolated git worktree
+## Story 3/9: run the loop in an isolated git worktree
 
 Kind: feature.
 
@@ -208,7 +208,7 @@ change files outside the worktree path; the original `repo` has no
 
 ---
 
-## Story 4/9 — durable state, resume, and CI exit codes
+## Story 4/9: durable state, resume, and CI exit codes
 
 Kind: feature.
 
@@ -248,12 +248,12 @@ red-gate escalate; returns 0 on `--doer reference` happy path; a truncated
 
 ---
 
-## Story 5/9 — the test implementer reads the plan and may retry
+## Story 5/9: the test implementer reads the plan and may retry
 
 Kind: feature.
 
 Code-phase retry is done (#288). Test phase is still one shot. The prompt
-is the ticket, not the plan the planner (or `plan_for`) just wrote. That
+is the ticket, not the plan the planner (or `plan_for`) just wrote. This
 is the Graph Engineering hole: we derive `steps.jsonl` and then hide it
 from the only role that should consume the test steps.
 
@@ -276,7 +276,7 @@ when budget ≥ 2.
 
 ---
 
-## Story 6/9 — planner-as-subagent behind a flag, schema unchanged
+## Story 6/9: planner-as-subagent behind a flag, schema unchanged
 
 Kind: feature.
 
@@ -299,7 +299,7 @@ backend; a planner payload with `kind` instead of `role` does not become
 
 ---
 
-## Story 7/9 — Deep Agents SPEC and live fence probe, copied not imported
+## Story 7/9: Deep Agents SPEC and live fence probe, copied not imported
 
 Kind: feature.
 
@@ -324,7 +324,7 @@ would receive and asserts: general-purpose disabled, `write_file` /
 `execute` excluded on the parent, judge tools `== [read_file]`, last
 permission deny. If Deep Agents is installed, run against the real types;
 if not, skip the real-type assertion and keep the fake. A skip is not a
-pass on CI for the fake path — the fake path already exists.
+pass on CI for the fake path; the fake path already exists.
 
 Tests that must fail if reverted: enabling the general-purpose subagent
 in `build_agent` fails a test; judge tools growing a write tool fails a
@@ -332,7 +332,7 @@ test.
 
 ---
 
-## Story 8/9 — no live backend holds Bash
+## Story 8/9: no live backend holds Bash
 
 Kind: feature.
 
@@ -358,7 +358,7 @@ this folder either fails or the command line it would run has no Bash.
 
 ---
 
-## Story 9/9 — docs, traces, and parity tests
+## Story 9/9: docs, traces, and parity tests
 
 Kind: ops. Last. Depends on 1–8 being decided, even if some children chose
 "strike the slide" instead of "wire it."
