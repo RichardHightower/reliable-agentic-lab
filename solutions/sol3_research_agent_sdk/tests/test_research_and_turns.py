@@ -66,7 +66,15 @@ def test_every_recorded_fixture_key_is_reachable():
     is dead: nothing exercises the source it cites, and a resume can carry
     it for releases without anyone noticing. #519 fixed one such entry in
     the e2e fixture; this guards both fixture files going forward.
+
+    #528. #520 made a key question `{text, kind, evidence_requirements}`.
+    `outline.question_text` is the one helper the live path (`sections.py`'s
+    `question_list`) uses to pull the string out of that object before a
+    backend ever sees it; this test routes through the same helper rather
+    than keeping a second copy of the rule.
     """
+    import outline as outlines  # noqa: PLC0415
+
     offline = t.OfflineTurns(backend=None)
     outline = offline.outline("a topic", "")
     questions = [
@@ -82,12 +90,31 @@ def test_every_recorded_fixture_key_is_reachable():
         backend = research.FixtureBackend(path)
         reached = set()
         for question in questions:
-            finding = backend.search(question)
+            finding = backend.search(outlines.question_text(question))
             for key, value in data.items():
                 if isinstance(value, dict) and value.get("answer") == finding.answer:
                     reached.add(key)
                     break
         assert reached == keys, f"{path.name}: {keys - reached} unreachable from the fixture outline"
+
+
+def test_a_question_object_is_routed_by_its_text():
+    """#528. Pins both halves of the #520/#523 contract: `FixtureBackend.search`
+    refuses a raw question object with a named-type `TypeError` instead of
+    failing inside a hash, and the same object reaches the right recorded
+    answer once its text is pulled out the one way the live path does it,
+    `outline.question_text`.
+    """
+    import outline as outlines  # noqa: PLC0415
+
+    question = {"text": "loop engineering exit criteria", "kind": "fact"}
+    backend = research.FixtureBackend(FIXTURE)
+
+    with pytest.raises(TypeError, match="dict"):
+        backend.search(question)
+
+    finding = backend.search(outlines.question_text(question))
+    assert "done, then cost, then max turns" in finding.answer
 
 
 # -- perplexity -------------------------------------------------------------
