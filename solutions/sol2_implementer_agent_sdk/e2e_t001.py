@@ -276,7 +276,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Agent SDK E2E setup failed: {exc}", file=sys.stderr)
         return 2
 
-    _write_extras(repo, trace, backend, audit)
+    # #506. `implementer.run` does all its work in `<repo>.worktrees/<ticket>`
+    # (`_worktree`), never against `repo` itself, and writes `.harness/`
+    # there. `trace["repo"]` is that worktree path; write the summary beside
+    # the `.harness/` the run itself produced, not next to the clone.
+    _write_extras(Path(trace["repo"]), trace, backend, audit)
     print(trace.get("rubric", ""))
     print()
     print(f"gate: {trace.get('gate', 'missing')}")
