@@ -82,11 +82,39 @@ task run -- --ticket T001 --doer deep
 `task run` calls `harness.py --repo <target>`. Extra flags after `--` go to
 `harness.py`. Python still owns the red gate and `gates.decide`. Same
 signature twice means stop. A retry carries the failed rubric rows and the
-failing test ids. After a green rubric the judge subagent answers in JSON;
-unparseable is a fail.
+failing test ids. After a green rubric the judge subagent answers in JSON.
+An unparseable answer is a fail.
 
 LangChain does not emit a dollar cost. This port prices token counts at
 Sonnet-class rates so the money exit can fire. That number is an estimate.
+
+## The run is isolated, resumable, and cleaned up by hand
+
+`--repo` names the target repo, but the loop never writes to it. Every run
+opens its own git worktree at `<repo>.worktrees/<ticket>`, on branch
+`implementer/<ticket>`, and writes there instead. The worktree stays after
+the run. Nothing removes it for you, because a passing run just wrote the
+code you want to push, and the receipt lives beside it.
+
+```bash
+task run -- --ticket T001 --doer reference
+git -C ../../work/northwind-field-crm worktree list
+git -C ../../work/northwind-field-crm.worktrees/T001 push -u origin implementer/T001
+```
+
+Push from inside the worktree. The CRM's own push gate, tracked at
+`.claude/hooks/gate.py`, follows the worktree onto its branch and reads
+`.harness/receipt.json` there.
+
+Pass `--cleanup` to remove the worktree and its branch once you are done
+with it. Pass `--resume` to re-enter a killed run from that worktree's own
+`.harness/state.json`, instead of starting over. `--planner` accepts
+`derived`, `sdk`, or `deep`, and defaults to `derived`, which calls no
+model. `--doer none` and `--doer reference` force `derived` regardless of
+the flag.
+
+`main` exits `0` on pass, `2` on escalate, `1` on a contract error or a
+corrupt `state.json`.
 
 ## What this folder will not do
 

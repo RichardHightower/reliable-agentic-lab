@@ -78,12 +78,15 @@ git -C ../../work/northwind-field-crm rev-parse --verify --quiet origin/known-go
 test -f ../../work/northwind-field-crm/tickets/T001-due-dates.ready.md
 ```
 
-Reset before every run.
+The loop never resets `$CRM` itself and never writes to it. Since A4
+(#431), every run opens its own git worktree at `$CRM.worktrees/T001`, on
+branch `implementer/T001`, and does its work there. Clear a leftover
+worktree between full E2E passes instead of resetting the CRM:
 
 ```bash
 CRM=../../work/northwind-field-crm
-git -C $CRM checkout --force main
-git -C $CRM clean -fd
+git -C $CRM worktree remove --force $CRM.worktrees/T001 2>/dev/null
+git -C $CRM worktree prune
 ```
 
 **E0a. Honest failure.**
@@ -92,20 +95,21 @@ git -C $CRM clean -fd
 task run -- --ticket T001 --doer none
 ```
 
-Pass: `gate: escalate`. Reason names the red gate. `app/` and `tests/`
-unchanged except `steps.jsonl`.
+Pass: `gate: escalate`. Reason names the red gate. The worktree's `app/`
+and `tests/` are unchanged except `steps.jsonl`. `$CRM` itself is
+untouched: `git -C $CRM status --porcelain` prints nothing.
 
 **E0b. Classroom path.**
 
 ```bash
-git -C $CRM checkout --force main && git -C $CRM clean -fd
+git -C $CRM worktree remove --force $CRM.worktrees/T001 2>/dev/null
 task run -- --ticket T001 --doer reference
 ```
 
 Pass: `gate: pass`. Tests appear in the test phase. App files appear in the
 code phase. No `tests/**` write in the code phase. Judge ran. Receipt at
-`$CRM/.harness/receipt.json`.
-Trace: `$CRM/.harness/last-implementer.json`.
+`$CRM.worktrees/T001/.harness/receipt.json`.
+Trace: `$CRM.worktrees/T001/.harness/last-implementer.json`.
 
 If E0b escalates on the red gate, that is a fixture bug. Fix it before any
 SDK call.
@@ -139,10 +143,18 @@ cannot go green.
 
 ```bash
 CRM=/tmp/lab-sol2-test/work/northwind-field-crm
-git -C $CRM checkout --force main && git -C $CRM clean -fd
+git -C $CRM worktree remove --force $CRM.worktrees/T001 2>/dev/null
 cd /tmp/lab-sol2-test/solutions/sol2_implementer_agent_sdk
 timeout 420 .venv/bin/python e2e_t001.py --repo $CRM --ticket T001 --budget 1
 ```
+
+`e2e_t001.py` calls this folder's `implementer.run`, so the actual attempt
+happens in `$CRM.worktrees/T001`, not in `$CRM`. Read the receipt and the
+harness trace there: `$CRM.worktrees/T001/.harness/receipt.json` and
+`$CRM.worktrees/T001/.harness/last-implementer.json`. `e2e_t001.py`'s own
+summary file, `last-sdk-e2e.md`, still writes next to `$CRM` itself, so its
+diff stat can read empty even on a passing run. The harness trace in the
+worktree is the record that matters.
 
 Or, same loop through Task:
 
