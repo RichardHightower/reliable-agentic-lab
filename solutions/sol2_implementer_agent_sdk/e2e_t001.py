@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -191,13 +192,20 @@ def _instrument_hooks(options, audit: list[dict[str, str | None]]) -> None:
             matchers[index] = replacement
 
 
-def _build_backend(repo: Path, budget: int | None) -> tuple[AgentSdkE2EBackend, list[dict]]:
+def _build_backend(
+    repo: Path, budget: int | None, ticket_id: str
+) -> tuple[AgentSdkE2EBackend, list[dict]]:
     """Build one capped SDK backend for the driver without calling a model."""
     if budget is not None and budget < 1:
         raise ValueError("--budget must be at least 1")
     target = contract.Contract(repo)
     iterations = budget if budget is not None else int(target.budget.get("iterations", 3))
     per_query_usd = MAX_TOTAL_USD / (iterations + 2)
+    # #543. `implementer.run` executes every phase in this worktree, not in
+    # `repo` (the clone). Computed with no side effect, the same path
+    # `implementer._worktree` itself resolves to, so a live query works
+    # where the red gate actually reads from.
+    cwd = implementer._worktree_path(repo, ticket_id)
     audit: list[dict] = []
     phases = {}
     for phase, role_name in (
@@ -205,7 +213,7 @@ def _build_backend(repo: Path, budget: int | None) -> tuple[AgentSdkE2EBackend, 
         ("code", "code_implementer"),
         ("judge", "judge"),
     ):
-        options = sdk_options_with_budget(target, role_name, per_query_usd)
+        options = sdk_options_with_budget(target, role_name, per_query_usd, cwd)
         _instrument_hooks(options, audit)
         phases[phase] = adapter.AgentSdkBackend(options)
     inner = adapter.AgentSdkPhaseBackend(
@@ -214,7 +222,7 @@ def _build_backend(repo: Path, budget: int | None) -> tuple[AgentSdkE2EBackend, 
     return AgentSdkE2EBackend(inner), audit
 
 
-def sdk_options_with_budget(target, role_name: str, per_query_usd: float):
+def sdk_options_with_budget(target, role_name: str, per_query_usd: float, cwd: Path):
     import roles as sdk_roles  # noqa: PLC0415
 
     return sdk_roles.options_for(
@@ -222,13 +230,43 @@ def sdk_options_with_budget(target, role_name: str, per_query_usd: float):
         max_usd=per_query_usd,
         max_turns=E2E_MAX_TURNS,
         role_names=frozenset({role_name}),
+        cwd=cwd,
     )
 
 
-def _write_extras(repo: Path, trace: dict, backend: AgentSdkE2EBackend, audit: list[dict]) -> None:
-    """Write operator-safe evidence next to the shared harness receipt."""
+_KEY_PATTERN = re.compile(r"sk-ant-[A-Za-z0-9_-]+")
+
+
+def _redact(text: str) -> str:
+    """#543. Strip what a durable, checked-in copy must never carry: the
+    operator's own home directory, and anything shaped like a live key.
+    `docs/status/` is a git-tracked path; the worktree's own copy this
+    replaces stays wherever `--repo` names, cleaned up by hand."""
+    text = text.replace(str(Path.home()), "<HOME>")
+    return _KEY_PATTERN.sub("<REDACTED-KEY>", text)
+
+
+def _write_extras(
+    repo: Path,
+    trace: dict,
+    backend: AgentSdkE2EBackend,
+    audit: list[dict],
+    *,
+    extra_log_dir: Path | None = None,
+) -> None:
+    """Write operator-safe evidence next to the shared harness receipt.
+
+    #543. `extra_log_dir`, when given, gets a redacted copy of each call's
+    raw event log too. The worktree `.harness/` this always writes to is
+    cleaned up between runs by hand; a status note that only references a
+    path there stops resolving the moment that happens. `extra_log_dir`
+    lets the caller point at somewhere durable, `docs/status/` in this
+    repo, without this file having to know that path exists.
+    """
     out = Path(repo) / ".harness"
     out.mkdir(parents=True, exist_ok=True)
+    if extra_log_dir is not None:
+        extra_log_dir.mkdir(parents=True, exist_ok=True)
     lines = [
         "# Agent SDK T001 E2E",
         "",
@@ -258,6 +296,10 @@ def _write_extras(repo: Path, trace: dict, backend: AgentSdkE2EBackend, audit: l
             raw_name = f"last-sdk-e2e-raw-{index}-{call.phase}.txt"
             (out / raw_name).write_text(call.raw_output, encoding="utf-8")
             lines.append(f"  raw: .harness/{raw_name}")
+            if extra_log_dir is not None:
+                (extra_log_dir / raw_name).write_text(
+                    _redact(call.raw_output), encoding="utf-8"
+                )
     lines.extend(("", "## Hook audit"))
     for event in audit:
         lines.append(
@@ -281,6 +323,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ticket", default="T001")
     parser.add_argument("--budget", type=int)
     parser.add_argument("--table-only", action="store_true")
+    # #543. The worktree's own copy is cleaned up between runs by hand; a
+    # status note that only references it stops resolving the moment that
+    # happens. Optional and off by default, so a copied-out folder needs no
+    # sibling `docs/status/` to run.
+    parser.add_argument(
+        "--raw-log-dir", default=os.environ.get("SOL2_E2E_RAW_LOG_DIR")
+    )
     args = parser.parse_args(argv)
 
     if args.table_only:
@@ -298,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
 
     repo = Path(args.repo).expanduser().resolve()
     try:
-        backend, audit = _build_backend(repo, args.budget)
+        backend, audit = _build_backend(repo, args.budget, args.ticket)
         trace = implementer.run(repo=repo, ticket_id=args.ticket, doer=backend, budget=args.budget)
     except Exception as exc:
         print(f"Agent SDK E2E setup failed: {exc}", file=sys.stderr)
@@ -308,7 +357,10 @@ def main(argv: list[str] | None = None) -> int:
     # (`_worktree`), never against `repo` itself, and writes `.harness/`
     # there. `trace["repo"]` is that worktree path; write the summary beside
     # the `.harness/` the run itself produced, not next to the clone.
-    _write_extras(Path(trace["repo"]), trace, backend, audit)
+    extra_log_dir = (
+        Path(args.raw_log_dir).expanduser().resolve() if args.raw_log_dir else None
+    )
+    _write_extras(Path(trace["repo"]), trace, backend, audit, extra_log_dir=extra_log_dir)
     print(trace.get("rubric", ""))
     print()
     print(f"gate: {trace.get('gate', 'missing')}")

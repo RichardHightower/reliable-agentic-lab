@@ -150,6 +150,23 @@ def test_build_agent_fences_the_harness(contract, fake_langchain, fake_deepagent
     assert [rule.mode for rule in orchestrator] == ["deny"]
 
 
+def test_build_agent_roots_the_backend_at_cwd_not_the_clone(
+    contract, fake_langchain, fake_deepagents
+):
+    """#543. `implementer.run` executes every phase in
+    `<repo>.worktrees/<ticket>`, never `contract.repo` (the `--repo` clone).
+    `FilesystemBackend(root_dir=...)` used to root the live session at the
+    clone regardless, so a doer's writes landed where the red gate never
+    looks. `cwd=` is what a caller building a live session for that worktree
+    passes instead."""
+    worktree = contract.repo.parent / f"{contract.repo.name}.worktrees" / "T001"
+
+    roles.build_agent(contract, subagent_names=frozenset({"planner"}), cwd=worktree)
+
+    assert fake_deepagents["backend"].default.root_dir == str(worktree.resolve())
+    assert fake_deepagents["backend"].default.root_dir != str(contract.repo.resolve())
+
+
 # -- Layer 3, checked again against the real deepagents package -------------
 #
 # `fake_deepagents` above proves `build_agent` calls the SDK the way this

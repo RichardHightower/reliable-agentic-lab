@@ -17,6 +17,17 @@ import pytest
 import roles
 import steps
 
+try:
+    import langchain_core.callbacks  # noqa: F401
+
+    HAS_LANGCHAIN = True
+except ImportError:
+    HAS_LANGCHAIN = False
+
+NEEDS_LANGCHAIN = pytest.mark.skipif(
+    not HAS_LANGCHAIN, reason="needs langchain_core, installed only by `task setup`"
+)
+
 
 class Block:
     """A content block that is an object, not a dict."""
@@ -211,7 +222,11 @@ def test_phase_backend_sets_the_documented_recursion_limit(tmp_path):
 
     backend.run(repo=tmp_path, prompt="write code", allow=["app/**"])
 
-    assert agent.calls[0][1] == {"recursion_limit": 16}
+    # #543. Membership, not exact equality: `config` also carries a
+    # `callbacks` key when `langchain_core` is installed (it captures
+    # `usage_metadata` for a recursion failure), and this test only pins
+    # the recursion limit's own wiring.
+    assert agent.calls[0][1]["recursion_limit"] == 16
 
 
 def test_the_live_recursion_limit_gives_room_for_a_t001_code_phase():
@@ -314,6 +329,41 @@ def test_a_backend_failure_names_the_exception_class(tmp_path):
     )
     assert "GraphRecursionError" in result.output
     assert "Recursion limit of 16" in result.output
+
+
+@NEEDS_LANGCHAIN
+def test_a_recursion_failure_after_reported_usage_returns_the_spend_not_none(tmp_path):
+    """#543. `agent.invoke()` discards its return value on a raise, but the
+    callback's `on_llm_end` already fired for whatever turns did complete
+    first. A `GraphRecursionError` after real usage must report that spend,
+    not the generic "never answered" `None` #539 reserved for a truly empty
+    turn."""
+
+    class FakeMessage:
+        def __init__(self, usage_metadata):
+            self.usage_metadata = usage_metadata
+
+    class FakeGeneration:
+        def __init__(self, message):
+            self.message = message
+
+    class FakeLLMResult:
+        def __init__(self, usage_metadata):
+            self.generations = [[FakeGeneration(FakeMessage(usage_metadata))]]
+
+    class RaisesAfterUsageAgent:
+        def invoke(self, payload, config=None):
+            for callback in (config or {}).get("callbacks", []):
+                callback.on_llm_end(FakeLLMResult({"total_cost": 0.42}))
+            raise RuntimeError("GraphRecursionError: Recursion limit of 32 reached")
+
+    result = adapter.DeepAgentsBackend(RaisesAfterUsageAgent()).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+
+    assert not result.ok
+    assert result.usd == 0.42
+    assert "RuntimeError" in result.output
 
 
 def test_a_judge_that_raises_reports_usd_as_none(tmp_path):
@@ -535,7 +585,7 @@ class WritingAgent:
         self.text = text
         self.usd = usd
 
-    def invoke(self, _payload):
+    def invoke(self, _payload, config=None):
         target = self.repo / self.relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(self.text, encoding="utf-8")
@@ -632,14 +682,14 @@ def test_planner_deep_with_doer_deep_invokes_the_planner_graph(contract, monkeyp
 
     calls: list[str] = []
 
-    def fake_build_agent(contract_arg, loop=None, model="x", subagent_names=None):
+    def fake_build_agent(contract_arg, loop=None, model="x", subagent_names=None, cwd=None):
         label = sorted(subagent_names)[0]
         calls.append(label)
         return RecordingAgent(f"built:{label}")
 
     monkeypatch.setattr(harness.deep, "build_agent", fake_build_agent)
 
-    backend = harness.backend(contract)
+    backend = harness.backend(contract, "T001")
     result = backend.plan(repo=tmp_path, prompt="write the plan")
 
     assert "planner" in calls

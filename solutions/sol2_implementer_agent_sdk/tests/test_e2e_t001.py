@@ -241,7 +241,7 @@ def test_the_e2e_summary_lands_in_the_worktree(tmp_path, monkeypatch):
     monkeypatch.setattr(
         e2e_t001,
         "_build_backend",
-        lambda repo, budget: (e2e_t001.AgentSdkE2EBackend(FakeAgentSdkBackend()), []),
+        lambda repo, budget, ticket_id: (e2e_t001.AgentSdkE2EBackend(FakeAgentSdkBackend()), []),
     )
 
     exit_code = e2e_t001.main(["--repo", str(repo), "--ticket", "T001", "--budget", "1"])
@@ -279,7 +279,7 @@ def test_the_query_failed_message_names_the_absolute_worktree_path(tmp_path, mon
     monkeypatch.setattr(
         e2e_t001,
         "_build_backend",
-        lambda repo, budget: (e2e_t001.AgentSdkE2EBackend(FailingBackend()), []),
+        lambda repo, budget, ticket_id: (e2e_t001.AgentSdkE2EBackend(FailingBackend()), []),
     )
 
     exit_code = e2e_t001.main(["--repo", str(repo), "--ticket", "T001", "--budget", "1"])
@@ -364,7 +364,7 @@ def test_the_summary_reports_the_cap_it_applied_and_keeps_the_raw_event_log(
     monkeypatch.setattr(
         e2e_t001,
         "_build_backend",
-        lambda repo, budget: (
+        lambda repo, budget, ticket_id: (
             e2e_t001.AgentSdkE2EBackend(TimedOutBackend(), max_total_usd=2.0),
             [],
         ),
@@ -380,3 +380,64 @@ def test_the_summary_reports_the_cap_it_applied_and_keeps_the_raw_event_log(
     assert raw.is_file()
     assert "some tool call" in raw.read_text(encoding="utf-8")
     assert "raw: .harness/last-sdk-e2e-raw-0-test.txt" in summary
+
+
+def test_the_raw_log_survives_cleanup_via_raw_log_dir_with_secrets_stripped(
+    tmp_path, monkeypatch
+):
+    """#543. The worktree's own copy of the raw event log is cleaned up
+    between runs by hand; a status note that only points there stops
+    resolving the moment that happens. `--raw-log-dir` copies it somewhere
+    durable, with the operator's home directory and anything key-shaped
+    stripped first."""
+    repo = _git_repo(tmp_path / "repo")
+    baseline = _run(passed=("tests/test_health.py::test_health",))
+    still_green = _run(passed=("tests/test_health.py::test_health",))
+    _patch_runs(monkeypatch, [baseline, still_green])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(e2e_t001, "_load_operator_env", lambda: None)
+
+    class LeakyBackend:
+        def run(self, *, repo, prompt, allow):
+            return SimpleNamespace(
+                wrote=[],
+                output="agent sdk query timed out after 900 seconds",
+                usd=None,
+                ok=False,
+                stop_reason="query timeout",
+                structured=None,
+                raw_output=(
+                    f"cwd: {Path.home()}/work/northwind-field-crm\n"
+                    "key: sk-ant-abc123DEF456\n"
+                ),
+            )
+
+    monkeypatch.setattr(
+        e2e_t001,
+        "_build_backend",
+        lambda repo, budget, ticket_id: (e2e_t001.AgentSdkE2EBackend(LeakyBackend()), []),
+    )
+
+    raw_log_dir = tmp_path / "docs-status"
+    e2e_t001.main(
+        [
+            "--repo", str(repo), "--ticket", "T001", "--budget", "1",
+            "--raw-log-dir", str(raw_log_dir),
+        ]
+    )
+
+    copied = raw_log_dir / "last-sdk-e2e-raw-0-test.txt"
+    assert copied.is_file()
+    text = copied.read_text(encoding="utf-8")
+    assert str(Path.home()) not in text
+    assert "<HOME>" in text
+    assert "sk-ant-" not in text
+    assert "<REDACTED-KEY>" in text
+
+    # The worktree's own copy stays exactly as reported; only the durable
+    # copy is redacted.
+    worktree_raw = (
+        repo.parent / f"{repo.name}.worktrees" / "T001" / ".harness"
+        / "last-sdk-e2e-raw-0-test.txt"
+    )
+    assert str(Path.home()) in worktree_raw.read_text(encoding="utf-8")

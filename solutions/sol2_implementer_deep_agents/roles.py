@@ -231,12 +231,20 @@ def build_agent(
     loop: str = DEFAULT_LOOP,
     model: str = DEFAULT_MODEL,
     subagent_names: frozenset[str] | None = None,
+    cwd: Path | str | None = None,
 ):
     """The orchestrator. Holds `run_tests`. Holds nothing that writes.
 
     Needs `deepagents>=0.7`. The default general-purpose subagent is turned off.
     Built-in write tools are hidden from the main agent. The target repo is
     mounted as a virtual filesystem so `..` cannot walk off it.
+
+    #543. `cwd` is where the live session actually works: `contract.repo`
+    when unset, matching every caller before this ticket, or the caller's
+    own worktree path when `implementer.run` executes somewhere other than
+    `contract.repo` itself (the `--repo` clone). `contract` still supplies
+    the subagent config either way -- `.loop.yml` lives in the clone, and a
+    worktree that does not exist yet at build time has none to read.
     """
     from deepagents import (  # noqa: PLC0415  (optional dependency)
         FilesystemPermission,
@@ -247,7 +255,7 @@ def build_agent(
     )
     from deepagents.backends import CompositeBackend, FilesystemBackend  # noqa: PLC0415
 
-    repo = Path(contract.repo).resolve()
+    repo = Path(cwd).resolve() if cwd is not None else Path(contract.repo).resolve()
     register_harness_profile(
         model,
         HarnessProfile(
