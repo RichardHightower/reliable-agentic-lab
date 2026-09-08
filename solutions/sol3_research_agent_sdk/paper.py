@@ -1645,7 +1645,6 @@ def write_sections(run: Run) -> dict:
         if section["id"] in by_id:
             by_id[section["id"]] = {**by_id[section["id"]], **section}
     claims = run.read_json("claims.json")["claims"]
-    figures = run.read_json("diagrams.json")["figures"]
     usable, _ = _numbered(claims, planned, run.work_dir)
 
     notes = ""
@@ -1681,7 +1680,15 @@ def write_sections(run: Run) -> dict:
         existing = path.read_text(encoding="utf-8") if path.exists() else ""
         path.unlink(missing_ok=True)
         bound = [c for c in usable if c["section"] == section["id"]]
-        figures_here = [f for f in figures if f["section"] == section["id"] and f["path"]]
+        # #464. Empty, always, even on a rewrite: `diagram` sits after
+        # `write` in `CYCLE` (#476) so a figure has no number yet at write
+        # time, and by a retry a figure already has a rendered path in
+        # `diagrams.json` -- but `assemble` places it from that record
+        # regardless of what this section's own text says, and a writer
+        # handed the record re-embedded its raw `![Figure: name](path)`
+        # line with no `Figure N.` caption, a line `assemble` never sees
+        # because it is already present in the section file.
+        figures_here: list[dict] = []
         relative = f"sections/{section['id']}.md"
         instruction = _section_instruction(payload, notes)
         try:
@@ -1801,7 +1808,7 @@ def assemble(run: Run) -> dict:
     # order, contiguous from one. A chart and a diagram share the same
     # sequence: a reader counts figures on the page, not by kind.
     figure_number = 0
-    skipped_charts = _skipped_charts(run)
+    skipped_figures = _skipped_figures(run)
     noted_skips: set[int] = set()
     # P7, #472. `write_abstract` writes this from the assembled body, after
     # every section, so it is preferred over the outline's own thesis line,
@@ -1877,11 +1884,11 @@ def assemble(run: Run) -> dict:
         # under the section that asked for it. A blockquote so `cited`
         # never reads it as an unsourced claim, the same free ride an
         # image's own caption paragraph already gets.
-        for skip in skipped_charts:
+        for skip in skipped_figures:
             if skip["section"] != section["id"] or id(skip) in noted_skips:
                 continue
             noted_skips.add(id(skip))
-            parts += [f"> {skip['name']} was not charted: {skip['reason']}.", ""]
+            parts += [f"> {skip['name']} was not shown: {skip['reason']}.", ""]
     for figure in _rendered_diagrams(run):
         if _diagram_key(figure) in used_diagrams:
             continue
@@ -1897,10 +1904,10 @@ def assemble(run: Run) -> dict:
     # A skip with no owning section (an empty `section`, or one that never
     # matched a planned section id) still gets a note, not silence, just
     # not one a specific section can claim.
-    for skip in skipped_charts:
+    for skip in skipped_figures:
         if id(skip) in noted_skips:
             continue
-        parts += [f"> {skip['name']} was not charted: {skip['reason']}.", ""]
+        parts += [f"> {skip['name']} was not shown: {skip['reason']}.", ""]
     # No captured term means no section, not an empty one. Alphabetical, case
     # insensitive, so "Loop" and "loop" do not sort by accident of case.
     if glossary:
@@ -2022,6 +2029,44 @@ def _skipped_charts(run: Run) -> list[dict]:
     return out
 
 
+def _skipped_diagrams(run: Run) -> list[dict]:
+    """Every diagram a live image backend failed to render, `{"name",
+    "section", "reason"}`. #386, #464, #531.
+
+    Only the #531 backend-failure case: `diagrams.draw` records
+    `"image backend unavailable: ..."` in `misses` when `available()` said
+    yes and a live render call then failed. The renderer being absent
+    altogether (`"the renderer is not installed"`, every offline and CI
+    run) is not a skip worth narrating on every page, and a claims-mismatch
+    drop is E7's own territory: it already strips the figure's reference
+    from the outline before assembly, so there is no dangling mention to
+    explain here.
+    """
+    out = []
+    for item in _load_diagrams(run):
+        if item.get("path") or item.get("dropped"):
+            continue
+        misses = item.get("misses") or []
+        failure = next((m for m in misses if "image backend unavailable" in str(m)), None)
+        if failure is None:
+            continue
+        out.append(
+            {
+                "name": str(item.get("name") or ""),
+                "section": str(item.get("section") or ""),
+                "reason": str(failure),
+            }
+        )
+    return out
+
+
+def _skipped_figures(run: Run) -> list[dict]:
+    """Every named skip on the page: a chart Python refused, and a diagram
+    a live image backend failed to render. #386, #464, #531.
+    """
+    return _skipped_charts(run) + _skipped_diagrams(run)
+
+
 def corpus_for(run: Run) -> str:
     """Everything that was actually retrieved, as one blob.
 
@@ -2112,7 +2157,7 @@ def check(run: Run) -> dict:
         claims=claims,
         charts=_rendered_charts(run),
         diagrams=_rendered_diagrams(run),
-        skipped_charts=_skipped_charts(run),
+        skipped_figures=_skipped_figures(run),
     )
     run.write_json("check.json", score.to_dict())
     return score.to_dict()

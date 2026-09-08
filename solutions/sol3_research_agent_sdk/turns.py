@@ -914,6 +914,20 @@ def slugify(text: str, limit: int = 60) -> str:
     return slug[:limit].strip("-") or "untitled"
 
 
+def _figure_mention_sentence(number: int, caption: str) -> str:
+    """A plain sentence naming a figure, distinct enough from another
+    figure's own mention to never itself become a `caveat_once` repeat.
+
+    #464. `WORD` (the shingle tokenizer `repeat_shingles` uses) drops a
+    bare digit, so "Figure 1 illustrates this point." and "Figure 2
+    illustrates this point." shingle identically once the number is gone
+    and Jaccard-match each other as a restatement. A few words of the
+    figure's own caption is content two different figures do not share.
+    """
+    gist = " ".join((caption or "").split()[:6]).rstrip(",.:;")
+    return f"Figure {number} shows {gist}." if gist else f"Figure {number} illustrates this point."
+
+
 def _fit_word_target(lines: list[str], target: int) -> list[str]:
     """Keep the section inside 0.6 to 1.25 of word_target for the offline twin."""
     if target <= 0:
@@ -1494,12 +1508,16 @@ class OfflineTurns(Turns):
             start, end = span
             segment = body[start:end]
             mention = f"Figure {number}"
-            if mention in segment:
-                continue
             image_match = re.search(r"^!\[", segment, re.M)
             cut = image_match.start() if image_match else len(segment)
             prose, tail = segment[:cut].rstrip(), segment[cut:]
-            sentence = f"{mention} illustrates this point."
+            # The `Figure N.` caption line itself always names the figure;
+            # it lives in `tail`, never in `prose`. Checking `segment` as a
+            # whole read the caption as an existing mention and skipped
+            # every figure whose image already carried one. #464.
+            if mention in prose:
+                continue
+            sentence = _figure_mention_sentence(number, figure.get("caption") or "")
             prose = f"{prose} {sentence}" if prose else sentence
             segment = prose + ("\n\n" + tail if tail else "\n\n")
             body = body[:start] + segment + body[end:]

@@ -297,15 +297,17 @@ def _mask_for_ste(text: str) -> str:
 
 def _prose_sentences(text: str) -> list[str]:
     """Sentence-shaped chunks of body prose. Skips headings, images, lists,
-    tables, quotes, and fences, the same exemptions `uncited_claims` already
-    grants, because none of those are a sentence a writer composed.
+    tables, quotes, fences, and a `Figure N.` caption, the same exemptions
+    `uncited_claims` already grants, because none of those are a sentence a
+    writer composed. A caption is system-generated from a diagram's own
+    node labels, not prose a writer is held to the STE belt for. #464.
     """
     sentences: list[str] = []
     for block in re.split(r"\n\s*\n", text):
         block = block.strip()
         if not block or block.startswith(("#", "!", "|", ">", "```", "-", "*")):
             continue
-        if LIST_ITEM.match(block):
+        if LIST_ITEM.match(block) or FIGURE_CAPTION.match(block):
             continue
         for piece in SENTENCE_END.split(block):
             piece = piece.strip()
@@ -1307,8 +1309,13 @@ def top_level_section_spans(body: str) -> dict[str, tuple[int, int]]:
 def _section_sentences_with_lines(text: str) -> list[tuple[int, str]]:
     """(line, sentence) pairs inside one section's own text, the line counted
     from that section's own first line. Skips a heading, an image, a list, a
-    table, a quote, and a fence, the same exemptions `_prose_sentences`
-    grants, because none of those is a sentence a writer composed.
+    table, a quote, a fence, and a `Figure N.` caption, the same exemptions
+    `_prose_sentences` grants, because none of those is a sentence a writer
+    composed. The caption exemption matters here specifically: two
+    auto-described diagrams of the same paper share enough boilerplate
+    wording ("A flowchart diagram of <topic>, showing ...") to read as a
+    repeat of each other, which is not a finding restated, it is two
+    figures about the same paper. #464.
     """
     out: list[tuple[int, str]] = []
     block_lines: list[str] = []
@@ -1318,7 +1325,11 @@ def _section_sentences_with_lines(text: str) -> list[tuple[int, str]]:
         if not block_lines:
             return
         block = "\n".join(block_lines).strip()
-        if block.startswith(("#", "!", "|", ">", "```", "-", "*")) or LIST_ITEM.match(block):
+        if (
+            block.startswith(("#", "!", "|", ">", "```", "-", "*"))
+            or LIST_ITEM.match(block)
+            or FIGURE_CAPTION.match(block)
+        ):
             return
         for piece in SENTENCE_END.split(block):
             piece = piece.strip()
@@ -1719,7 +1730,7 @@ def check(
     claims=None,
     charts=None,
     diagrams=None,
-    skipped_charts=None,
+    skipped_figures=None,
 ) -> Score:
     """Score a paper. No model call."""
     checks: list[Check] = []
@@ -1889,7 +1900,7 @@ def check(
 
     # Unconditional, and inert with nothing skipped: a snippet another
     # row's test built has no skip to note. #386, #464.
-    skip_missing = skip_noted_violations(body, skipped_charts)
+    skip_missing = skip_noted_violations(body, skipped_figures)
     checks.append(
         Check(
             "skip_noted",
