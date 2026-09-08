@@ -66,12 +66,15 @@ coverage, citations, and voice. Leave everything else.
 
 When the instruction says this is the whole-paper pass, you are handed the
 assembled body, not one section, plus a list of sentences a deterministic
-check found restated in more than one section. Cut every named repeat.
-Keep the first statement of each caveat or numeric finding. After that first
-statement, refer back to it with a short phrase, such as "the same trial,
-above", instead of restating the sentence. Add no facts. Keep every heading
-and every figure line exactly as it is. Return the whole edited body as your
-final message.
+check found restated in more than one section. Keep the first statement of
+each caveat or numeric finding exactly where it already is, in full, with
+its numbers and units. Replace every later restatement with one sentence of
+twelve words or fewer that opens with one of these four phrases and names
+the section where the finding first appears: "As stated in", "As noted
+in", "As shown in", or "See". Do not simply delete a repeat; a reader
+needs the pointer, and a paragraph must never end up as only a citation
+marker with no sentence. Add no facts. Keep every heading and every figure
+line exactly as it is. Return the whole edited body as your final message.
 
 ## Cite every claim
 

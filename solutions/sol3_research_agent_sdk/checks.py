@@ -1059,7 +1059,28 @@ CAVEAT_EXEMPT_SECTIONS = {"glossary", "references"}
 # unit, is a repeat even when the wording around it differs enough to dodge
 # the shingle threshold below: "2.4 percent" once, then "2.4%" a paragraph
 # later, is one finding either way.
+#
+# Methods is exempt from this rule once P11 lands: it is Python-written from
+# the run's own ledger, so the same count it names (sources retrieved,
+# claims verified) legitimately recurs there in the same units a body
+# section reports for an unrelated reason. Not built yet; noted here so the
+# exemption is not lost when Methods is.
 NUMERIC_FULL = re.compile(r"\b\d+(?:\.\d+)?\s*(?:%|percent)\b", re.I)
+# D2, #477. The whole-paper pass replaces a repeat with a short sentence
+# that points back to the section stating it first. That sentence is not
+# itself a repeat, even when the exact same short sentence appears in two
+# sections pointing at the same source: the writer card for the pass is
+# told to open with exactly one of these four phrases, so a sentence this
+# short starting this way is recognized as a pointer, not a restatement.
+BACK_REFERENCE_CUES = ("as stated in", "as noted in", "as shown in", "see ")
+BACK_REFERENCE_MAX_WORDS = 12
+
+
+def _is_back_reference(sentence: str) -> bool:
+    words = WORD.findall(sentence)
+    if not words or len(words) > BACK_REFERENCE_MAX_WORDS:
+        return False
+    return sentence.strip().lower().startswith(BACK_REFERENCE_CUES)
 
 
 def top_level_sections(body: str) -> dict[str, str]:
@@ -1077,6 +1098,23 @@ def top_level_sections(body: str) -> dict[str, str]:
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
         out[match.group(2).strip().lower()] = body[match.end() : end]
+    return out
+
+
+def top_level_section_spans(body: str) -> dict[str, tuple[int, int]]:
+    """Byte offsets for `top_level_sections`' own boundaries.
+
+    A deterministic edit that must touch only the one section a repeat
+    names, and never search the rest of the document, slices `body[start:
+    end]`, edits that slice, and splices it back, instead of asking
+    `str.replace` to find a short sentence that a different section might
+    also happen to contain. #477.
+    """
+    matches = [m for m in SECTION_HEADING.finditer(body) if len(m.group(1)) == 2]
+    out: dict[str, tuple[int, int]] = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        out[match.group(2).strip().lower()] = (match.end(), end)
     return out
 
 
@@ -1150,6 +1188,8 @@ def repeat_shingles(sections: dict[str, str]) -> list[dict]:
         if name in CAVEAT_EXEMPT_SECTIONS:
             continue
         for line, sentence in _section_sentences_with_lines(text):
+            if _is_back_reference(sentence):
+                continue
             entries.append(
                 {
                     "section": name,

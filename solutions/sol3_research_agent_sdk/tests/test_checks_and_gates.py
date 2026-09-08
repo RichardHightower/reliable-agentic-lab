@@ -367,19 +367,9 @@ def test_the_recorded_fixture_paper_passes_the_ste_belt(tmp_path):
             "--backend", "fixture",
             "--brain", str(folder / "tests" / "fixtures" / "brain"),
             "--fresh",
-            # P9, #477. This fixture's thin corpus binds the same finding to
-            # three sections. One attempt lets the whole-paper pass cut every
-            # restated sentence and have it stick; a second attempt would
-            # rebuild the assembled body from the untrimmed section files
-            # and reintroduce it, because the trim only ever edits the
-            # already-assembled paper, never the sections behind it.
-            "--max-iterations", "1",
         ]
     )
-    # Cutting real duplication drops this thin-corpus body under the demo
-    # profile's 2000-word floor, so the gate still escalates on `length`, a
-    # row none of these tests grades.
-    assert code == 1, "escalates on length only, once caveat_once is fixed"
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
     body = (work / "paper.md").read_text(encoding="utf-8")
     assert checks.ste_language_violations(body) == []
     assert checks.noun_stacks(body) == []
@@ -448,19 +438,9 @@ def test_the_recorded_fixture_paper_passes_the_person_and_marketing_rows(tmp_pat
             "--backend", "fixture",
             "--brain", str(folder / "tests" / "fixtures" / "brain"),
             "--fresh",
-            # P9, #477. This fixture's thin corpus binds the same finding to
-            # three sections. One attempt lets the whole-paper pass cut every
-            # restated sentence and have it stick; a second attempt would
-            # rebuild the assembled body from the untrimmed section files
-            # and reintroduce it, because the trim only ever edits the
-            # already-assembled paper, never the sections behind it.
-            "--max-iterations", "1",
         ]
     )
-    # Cutting real duplication drops this thin-corpus body under the demo
-    # profile's 2000-word floor, so the gate still escalates on `length`, a
-    # row none of these tests grades.
-    assert code == 1, "escalates on length only, once caveat_once is fixed"
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
     body = (work / "paper.md").read_text(encoding="utf-8")
     assert checks.person_violations(body) == []
     assert checks.marketing_violations(body) == []
@@ -614,26 +594,16 @@ def test_the_recorded_fixture_paper_passes_the_glossary_rows(tmp_path):
             "--backend", "fixture",
             "--brain", str(folder / "tests" / "fixtures" / "brain"),
             "--fresh",
-            # P9, #477. This fixture's thin corpus binds the same finding to
-            # three sections. One attempt lets the whole-paper pass cut every
-            # restated sentence and have it stick; a second attempt would
-            # rebuild the assembled body from the untrimmed section files
-            # and reintroduce it, because the trim only ever edits the
-            # already-assembled paper, never the sections behind it.
-            "--max-iterations", "1",
         ]
     )
-    # Cutting real duplication drops this thin-corpus body under the demo
-    # profile's 2000-word floor, so the gate still escalates on `length`, a
-    # row none of these tests grades.
-    assert code == 1, "escalates on length only, once caveat_once is fixed"
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
     body = (work / "paper.md").read_text(encoding="utf-8")
     assert "TERM" not in body
     report = json.loads((work / "check.json").read_text(encoding="utf-8"))
     names = {row["name"] for row in report["checks"]}
     assert "glossary_complete" in names
     assert "glossary_exact" in names
-    assert {row["name"] for row in report["checks"] if not row["passed"]} <= {"length"}, report
+    assert report["passed"], report
 
 
 # -- P4, the next-step section --------------------------------------------
@@ -755,19 +725,9 @@ def test_the_recorded_fixture_paper_passes_the_next_step_rows(tmp_path):
             "--backend", "fixture",
             "--brain", str(folder / "tests" / "fixtures" / "brain"),
             "--fresh",
-            # P9, #477. This fixture's thin corpus binds the same finding to
-            # three sections. One attempt lets the whole-paper pass cut every
-            # restated sentence and have it stick; a second attempt would
-            # rebuild the assembled body from the untrimmed section files
-            # and reintroduce it, because the trim only ever edits the
-            # already-assembled paper, never the sections behind it.
-            "--max-iterations", "1",
         ]
     )
-    # Cutting real duplication drops this thin-corpus body under the demo
-    # profile's 2000-word floor, so the gate still escalates on `length`, a
-    # row none of these tests grades.
-    assert code == 1, "escalates on length only, once caveat_once is fixed"
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
     body = (work / "paper.md").read_text(encoding="utf-8")
     assert body.index("## Next step") < body.index("## References")
     assert "Evaluate the three exits on a live ticket" in body, "the CTA steps, not a coverage stub"
@@ -915,23 +875,13 @@ def test_the_recorded_fixture_paper_passes_question_heading(tmp_path):
             "--backend", "fixture",
             "--brain", str(folder / "tests" / "fixtures" / "brain"),
             "--fresh",
-            # P9, #477. This fixture's thin corpus binds the same finding to
-            # three sections. One attempt lets the whole-paper pass cut every
-            # restated sentence and have it stick; a second attempt would
-            # rebuild the assembled body from the untrimmed section files
-            # and reintroduce it, because the trim only ever edits the
-            # already-assembled paper, never the sections behind it.
-            "--max-iterations", "1",
         ]
     )
-    # Cutting real duplication drops this thin-corpus body under the demo
-    # profile's 2000-word floor, so the gate still escalates on `length`, a
-    # row none of these tests grades.
-    assert code == 1, "escalates on length only, once caveat_once is fixed"
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
     report = json.loads((work / "check.json").read_text(encoding="utf-8"))
     names = {row["name"] for row in report["checks"]}
     assert "question_heading" in names
-    assert {row["name"] for row in report["checks"] if not row["passed"]} <= {"length"}, report
+    assert report["passed"], report
 
 
 # -- P6, the paper does not narrate the harness --------------------------------
@@ -1044,19 +994,9 @@ def test_the_recorded_fixture_paper_passes_policy_leak(tmp_path):
             "--backend", "fixture",
             "--brain", str(folder / "tests" / "fixtures" / "brain"),
             "--fresh",
-            # P9, #477. This fixture's thin corpus binds the same finding to
-            # three sections. One attempt lets the whole-paper pass cut every
-            # restated sentence and have it stick; a second attempt would
-            # rebuild the assembled body from the untrimmed section files
-            # and reintroduce it, because the trim only ever edits the
-            # already-assembled paper, never the sections behind it.
-            "--max-iterations", "1",
         ]
     )
-    # Cutting real duplication drops this thin-corpus body under the demo
-    # profile's 2000-word floor, so the gate still escalates on `length`, a
-    # row none of these tests grades.
-    assert code == 1, "escalates on length only, once caveat_once is fixed"
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
     body = (work / "paper.md").read_text(encoding="utf-8")
     hits = checks.policy_leak_violations(body)
     assert hits == [], hits
@@ -1182,20 +1122,10 @@ def test_the_recorded_fixture_paper_passes_abstract_matches_body(tmp_path):
             "--backend", "fixture",
             "--brain", str(folder / "tests" / "fixtures" / "brain"),
             "--fresh",
-            # P9, #477. This fixture's thin corpus binds the same finding to
-            # three sections. One attempt lets the whole-paper pass cut every
-            # restated sentence and have it stick; a second attempt would
-            # rebuild the assembled body from the untrimmed section files
-            # and reintroduce it, because the trim only ever edits the
-            # already-assembled paper, never the sections behind it.
-            "--max-iterations", "1",
         ]
     )
-    # Cutting real duplication drops this thin-corpus body under the demo
-    # profile's 2000-word floor, so the gate still escalates on `length`, a
-    # row none of these tests grades.
-    assert code == 1, "escalates on length only, once caveat_once is fixed"
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
     report = json.loads((work / "check.json").read_text(encoding="utf-8"))
     names = {row["name"] for row in report["checks"]}
     assert "abstract_matches_body" in names
-    assert {row["name"] for row in report["checks"] if not row["passed"]} <= {"length"}, report
+    assert report["passed"], report

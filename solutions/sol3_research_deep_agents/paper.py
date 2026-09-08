@@ -505,10 +505,6 @@ class Paper:
     # The most expensive call seen per role. The budget check reads it as the
     # headroom the next call of that kind is likely to need.
     _worst: dict = field(default_factory=dict, init=False)
-    # P9. The whole-paper trim pass runs at most once per run: a pass that
-    # could not clear `caveat_once` fails the gate normally on the next
-    # attempt, and the ordinary writer retry loop takes over. #477.
-    _trimmed: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         self.work_dir = Path(self.work_dir)
@@ -2074,33 +2070,16 @@ class Paper:
         import brief  # noqa: PLC0415
 
         body = brief.strip_em_dashes(body)
-        usd = 0.0
-        gate_kwargs = {
-            "charts": self._loaded_charts(),
-            "allowed_domains": self.allowed_domains,
-            "loop_doctrine": self.loop_doctrine,
+        score = stages.assemble_gate(
+            body,
+            self.ledger,
+            charts=self._loaded_charts(),
+            allowed_domains=self.allowed_domains,
+            loop_doctrine=self.loop_doctrine,
             # `self.plan`'s sections carry `key_questions`, so `question_heading`
             # can grade a heading against them, not only against "ends in ?". #463.
-            "outline": self.plan,
-        }
-        try:
-            score = stages.assemble_gate(body, self.ledger, **gate_kwargs)
-        except GateFailed as failure:
-            # P9. `caveat_once` is Python-only and the defect is a repeat
-            # across sections, so no per-section writer turn can see it. One
-            # whole-paper pass runs here, then the gate runs again. Bounded
-            # to once per run by `self._trimmed`: a pass that could not
-            # clear it re-raises below and the ordinary writer retry loop
-            # takes over. #477.
-            if "caveat_once" not in failure.signature or self._trimmed:
-                raise
-            self._trimmed = True
-            self.paper_path.write_text(body, encoding="utf-8")
-            repeats = paper_check.repeat_shingles(paper_check.top_level_sections(body))
-            trimmed = self.stage_trim(repeats)
-            usd += trimmed.usd
-            body = self.paper_path.read_text(encoding="utf-8")
-            score = stages.assemble_gate(body, self.ledger, **gate_kwargs)
+            outline=self.plan,
+        )
         self.paper_path.write_text(body, encoding="utf-8")
         # A warning is not a failure. Filing both under one key made a short
         # paper look like it had failed a gate, and `publish` reads this file to
@@ -2119,69 +2098,97 @@ class Paper:
         self.state.record("paper", self.paper_path)
         return StageResult(
             "assemble",
-            usd=usd,
             artifacts={"words": len(body.split())},
             summary=f"{len(body.split())} words, every hard gate green",
         )
 
-    def stage_trim(self, repeats: list[dict], figures: list | None = None) -> StageResult:
-        """The P9 whole-paper pass: one writer turn sees the assembled body
-        and every `caveat_once` repeat, and cuts each one. Add no facts.
+    # -- 7b. trim ------------------------------------------------------------
 
-        Reads and writes `self.paper_path` directly, not a section file,
-        because the repeat is a cross-section defect `stage_assemble`
-        already stitched together. `new_claims` still has the last word: a
-        specific the evidence never retrieved reverts the whole edit, the
-        same defence the SDK port's `edit_whole_paper` gives its own body.
-        `figures` is P10's parameter, unused until that unit lands. #477.
+    def stage_trim(self, extra: str = "") -> StageResult:
+        """The P9 whole-paper pass. Runs once, between write and review, so
+        `stage_review` (the reviewer the creatine run's `no_filler`
+        complaint named) never grades a draft that restates the same
+        finding across sections. Operates on `self.written` directly:
+        assembly has not run yet, so there is no `paper.md` to read.
+
+        Add no facts; `new_claims` reverts the whole edit if it invents a
+        specific the evidence never retrieved, the same defence the SDK
+        port's `edit_whole_paper` gives its own body. Never raises: a
+        repeat this pass cannot clear is still Python's business at
+        `stage_assemble`'s gate, not a reason to fail this stage.
         """
-        before = self.paper_path.read_text(encoding="utf-8")
+        self._need_written()
+        by_lower = {heading.lower(): heading for heading in self.written}
+        sections = {lowered: self.written[heading] for lowered, heading in by_lower.items()}
+        repeats = paper_check.repeat_shingles(sections)
+        if not repeats:
+            return StageResult("trim", summary="no repeat")
+
+        before = dict(self.written)
         if self.runner.name == "fixture":
             # A canned reply is keyed by a phrase in the prompt; a
             # whole-paper prompt has no fixed heading to key on. No model,
-            # so no paraphrase either: cut one occurrence of each named
-            # repeat's own text, leaving the canonical statement standing.
-            # A repeat and its canonical sentence can differ by a citation
-            # marker alone ("...behind [1]." versus "...behind [2].") and
-            # still shingle as identical, because the marker carries no word
-            # `WORD` tokenizes, so match each entry by its own text rather
-            # than folding to a set of unique strings first.
-            after = before
+            # so no paraphrase either: replace the repeat named by each
+            # match, in the one section it names, with a back reference.
+            # `self.written` is already split per section, so the edit
+            # touches only that section's own string, never the rest of
+            # the draft.
+            usd = 0.0
             for item in repeats:
+                source = by_lower.get(item["section"], item["section"])
                 for match in item.get("matches") or []:
                     sentence = match.get("sentence") or ""
-                    if sentence:
-                        after = after.replace(sentence, "", 1)
-            after = re.sub(r"\n{3,}", "\n\n", after)
-            usd = 0.0
+                    target_heading = by_lower.get(match["section"])
+                    if not sentence or target_heading is None:
+                        continue
+                    text = self.written[target_heading]
+                    if sentence not in text:
+                        continue
+                    reference = f"As stated in {source}, this point also holds here."
+                    self.written[target_heading] = text.replace(sentence, reference, 1)
         else:
+            draft = "\n\n".join(f"## {head}\n\n{body}" for head, body in self.written.items())
             reply = self._ask(
                 "writer",
-                "This is the whole-paper pass. Cut every repeat named below: keep "
-                "the first statement of each caveat or numeric finding, and refer "
-                "back to it afterward by a short phrase, like \"the same trial, "
-                "above\", instead of restating it. Add no facts. Keep every "
-                "heading and every figure line exactly as it is. Return the "
-                "whole edited body.\n\n"
+                "This is the whole-paper pass. Each entry below names a "
+                "sentence and the other sections that restate it. Keep the "
+                "first statement, in full, with its numbers and units, "
+                "exactly where it already is. Replace every later "
+                "restatement with one sentence of twelve words or fewer "
+                "that opens with one of these four phrases and names the "
+                "section where the finding first appears: \"As stated in\", "
+                "\"As noted in\", \"As shown in\", or \"See\". Do not "
+                "simply delete a repeat; a reader needs the pointer, and a "
+                "paragraph must never end up as only a citation marker "
+                "with no sentence. Add no facts. Keep every heading and "
+                "every figure line exactly as it is. Return the whole "
+                "edited body.\n\n"
                 f"Repeats:\n{json.dumps(repeats, indent=2)}\n\n"
-                f"The paper body, already assembled:\n{before}",
+                f"The paper body:\n{draft}",
             )
-            after = (reply.text or "").strip()
             usd = reply.usd
+            edited = (reply.text or "").strip()
+            if edited:
+                blocks = paper_check.top_level_sections(edited)
+                for lowered, heading in by_lower.items():
+                    if lowered in blocks:
+                        self.written[heading] = blocks[lowered].strip()
+
+        before_blob = "\n\n".join(before.values())
+        after_blob = "\n\n".join(self.written.values())
         evidence_blob = "\n".join(
             [claim.text for claim in self.ledger.claims.values()]
             + [f"{src.title} {src.url} {src.text}" for src in self.ledger.bibliography()]
         )
-        novel = paper_check.new_claims(before, after) if after else []
+        novel = paper_check.new_claims(before_blob, after_blob)
         invented = [token for token in novel if token.lower() not in evidence_blob.lower()]
-        if not after or invented:
-            self.state.mark_complete("trim", cost_usd=usd, trimmed=False, reverted=invented)
+        if invented:
+            self.written = before
             return StageResult(
                 "trim", usd=usd, artifacts={"trimmed": False, "reverted": invented},
-                summary="reverted: an invented specific" if invented else "reverted: empty reply",
+                summary="reverted: an invented specific",
             )
-        self.paper_path.write_text(after, encoding="utf-8")
-        self.state.mark_complete("trim", cost_usd=usd, trimmed=True, reverted=[])
+        self._save_sections()
         return StageResult(
             "trim", usd=usd, artifacts={"trimmed": True, "reverted": []},
             summary=f"{len(repeats)} repeats cut",

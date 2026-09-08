@@ -107,3 +107,17 @@ Reference a figure by its markdown image with real alt text describing what the
 figure shows. Never paste diagram source into the paper. After the image, spend
 three to five sentences on what the figure makes visible that the surrounding
 prose does not.
+
+## Whole-paper trim mode
+
+When the instruction says this is the whole-paper pass, you are handed the
+whole draft, not one section, plus a list of sentences a deterministic check
+found restated in more than one section. Keep the first statement of each
+caveat or numeric finding exactly where it already is, in full, with its
+numbers and units. Replace every later restatement with one sentence of
+twelve words or fewer that opens with one of these four phrases and names
+the section where the finding first appears: "As stated in", "As noted
+in", "As shown in", or "See". Do not simply delete a repeat; a reader
+needs the pointer, and a paragraph must never end up as only a citation
+marker with no sentence. Add no facts. Keep every heading and every figure
+line exactly as it is. Return the whole edited body.

@@ -112,16 +112,10 @@ tasks:
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - |
-        # P9, #477. This fixture's thin corpus binds the same finding to
-        # three sections. One attempt lets the whole-paper pass cut every
-        # restated sentence and have it stick; a second attempt would
-        # rebuild the assembled body from the untrimmed section files and
-        # reintroduce it, because the trim only ever edits the
-        # already-assembled paper, never the sections behind it.
         if [ -x "{{.RUN_PY}}" ]; then
-          "{{.RUN_PY}}" -u loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain --max-iterations 1
+          "{{.RUN_PY}}" -u loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain
         else
-          {{.PY}} -u loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain --max-iterations 1
+          {{.PY}} -u loop.py --topic "{{.TOPIC}}" --backend fixture --fresh --brain tests/fixtures/brain
         fi
 
   e2e-fixture:

@@ -806,10 +806,17 @@ class SdkTurns(Turns):
         """
         result = self._ask(
             "research-writer",
-            "This is the whole-paper pass. Cut every repeat named below: keep "
-            "the first statement of each caveat or numeric finding, and refer "
-            "back to it afterward by a short phrase, like \"the same trial, "
-            "above\", instead of restating it. Add no facts. Keep every "
+            "This is the whole-paper pass. Each entry below names a sentence "
+            "and the other sections that restate it. Keep the first "
+            "statement, in full, with its numbers and units, exactly where "
+            "it already is. Replace every later restatement with one "
+            "sentence of twelve words or fewer that opens with one of these "
+            "four phrases and names the section where the finding first "
+            "appears: \"As stated in\", \"As noted in\", \"As shown in\", or "
+            "\"See\". For example: \"As stated in the Approach, this finding "
+            "also applies here.\" Do not simply delete a repeat; a reader "
+            "needs the pointer, and a paragraph must never end up as only a "
+            "citation marker with no sentence. Add no facts. Keep every "
             "heading and every figure line exactly as it is. Return the "
             "whole edited body.\n\n"
             f"Repeats:\n{json.dumps(repeats, indent=2)[:6000]}\n\n"
@@ -1329,20 +1336,36 @@ class OfflineTurns(Turns):
         return body
 
     def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
-        """No model, so no paraphrase either: cut one occurrence of each
-        named repeat's own text, leaving the canonical statement standing.
+        """No model, so no paraphrase either: replace the repeat named by
+        each match, in the one section it names, with a back reference to
+        the section that stated it first. The canonical statement is never
+        touched, because this only ever edits the match's own section slice
+        of the body, never the source section's, and never searches the
+        rest of the document: a short sentence a match names can coincide
+        with text elsewhere that has nothing to do with this repeat.
 
-        A repeat and its canonical sentence can differ by a citation marker
-        alone ("...behind [1]." versus "...behind [2].") and still shingle
-        as identical, because the marker carries no word `WORD` tokenizes.
-        Matching each `matches` entry by its own text, not by a set folded
-        down to unique strings, is what removes that variant too.
+        The reference opens with "As stated in", one of the four cues
+        `checks.BACK_REFERENCE_CUES` exempts from the row it clears, so
+        pointing several sections at the same source never becomes a new
+        repeat of the pointer itself.
         """
         for item in repeats:
+            source = item["section"]
             for match in item.get("matches") or []:
                 sentence = match.get("sentence") or ""
-                if sentence:
-                    body = body.replace(sentence, "", 1)
+                target = match["section"]
+                if not sentence:
+                    continue
+                span = checks.top_level_section_spans(body).get(target)
+                if span is None:
+                    continue
+                start, end = span
+                segment = body[start:end]
+                if sentence not in segment:
+                    continue
+                reference = f"As stated in {source}, this point also holds here."
+                segment = segment.replace(sentence, reference, 1)
+                body = body[:start] + segment + body[end:]
         return re.sub(r"\n{3,}", "\n\n", body)
 
     def review(self, paper: str, report: str, ledger=None) -> dict:

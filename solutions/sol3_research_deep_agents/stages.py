@@ -80,6 +80,12 @@ STAGE_ORDER = (
     "diagram",
     "charts",
     "write",
+    # P9, #477. Between write and review, not after assemble: `stage_review`
+    # is the reviewer the creatine run's `no_filler` complaint named, and it
+    # grades `self.written` directly, before assembly exists. A repeat
+    # caught after assembly would leave the reviewer grading a body that
+    # already failed this row.
+    "trim",
     "review",
     "assemble",
     "publish",
