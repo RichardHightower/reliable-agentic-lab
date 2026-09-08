@@ -2178,6 +2178,35 @@ class Paper:
             self.plan.get("title") or self.topic,
             theme_name=self.theme,
         )
+        # #514: a live backend call failing for one figure, once the
+        # renderer already reported itself available, must not sink the
+        # whole run. `stages.render_figures` marks such a complaint with
+        # `BACKEND_FAILURE_MARK`; pull those figures out before the gate
+        # ever sees them as "missing," the same way a claims-mismatch drop
+        # already does, and name the backend's own error in `records`.
+        backend_failed: dict[str, str] = {}
+        for complaint in complaints:
+            if stages.BACKEND_FAILURE_MARK in complaint:
+                name = Path(complaint.split(":", 1)[0]).stem
+                backend_failed[name] = complaint.split(stages.BACKEND_FAILURE_MARK, 1)[1]
+        if backend_failed:
+            complaints = [c for c in complaints if stages.BACKEND_FAILURE_MARK not in c]
+            for name, reason in backend_failed.items():
+                dropped.add(name)
+                prior_attempts = records.get(name, {}).get("attempts", 0)
+                records[name] = {
+                    "name": name,
+                    "attempts": prior_attempts,
+                    "dropped": True,
+                    "reason": f"{stages.BACKEND_FAILURE_MARK}{reason}",
+                }
+                self.say(f"    note: {name} skipped, {stages.BACKEND_FAILURE_MARK}{reason}")
+                figure_spec = next(
+                    (f for f in survivors if evidence.slug(f["name"]) == name), None
+                )
+                if figure_spec:
+                    self._drop_figure_reference(figure_spec["name"])
+            survivors = [f for f in survivors if evidence.slug(f["name"]) not in backend_failed]
         self._redraw = {Path(c.split(":", 1)[0]).stem for c in complaints}
         stages.diagram_gate(self.figures, complaints, survivors)
         for complaint in complaints:
@@ -2198,12 +2227,18 @@ class Paper:
         # whose source is still on disk, claims gate included.
         self._redraw = set()
         accepted = sum(1 for figure in self.figures if figure.best is not None)
+        claims_dropped = len(dropped) - len(backend_failed)
         return StageResult(
             "diagram",
             usd=usd,
             artifacts={"figures": len(self.figures), "accepted": accepted, "dropped": sorted(dropped)},
             summary=f"{accepted} judged imagen-diagrams PNGs"
-            + (f", {len(dropped)} dropped for a claims mismatch" if dropped else ""),
+            + (f", {claims_dropped} dropped for a claims mismatch" if claims_dropped else "")
+            + (
+                f", {len(backend_failed)} skipped, image backend unavailable"
+                if backend_failed
+                else ""
+            ),
         )
 
     def _section_for_figure(self, figure_name: str) -> dict | None:

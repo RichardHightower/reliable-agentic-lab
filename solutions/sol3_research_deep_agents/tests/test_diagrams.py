@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import diagrams
@@ -107,6 +108,40 @@ def test_available_requires_both_plugin_scripts(monkeypatch, tmp_path):
     assert not diagrams.available()
     (scripts / "judge.py").write_text("")
     assert diagrams.available()
+
+
+def test_available_is_a_real_probe(monkeypatch, tmp_path):
+    """#514: a file-exists check alone reports available on a clone whose
+    live call then fails. `available()` must actually invoke the renderer,
+    and cache the result for the process. A fake `SCRIPTS` folder keeps this
+    independent of whether the real renderer clone is on disk."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "render.py").write_text("")
+    (scripts / "judge.py").write_text("")
+    monkeypatch.setattr(diagrams, "SCRIPTS", scripts)
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+    diagrams._probe_backend.cache_clear()
+    calls = []
+
+    def ok(script, args):
+        calls.append((script, args))
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(diagrams, "_run", ok)
+    assert diagrams.available()
+    assert calls[0][0] == "render.py"
+    assert "--dry-run" in calls[0][1]
+    assert diagrams.available()
+    assert len(calls) == 1, "the probe result is cached for the process"
+    diagrams._probe_backend.cache_clear()
+
+    def fails(script, args):
+        return type("Result", (), {"returncode": 2})()
+
+    monkeypatch.setattr(diagrams, "_run", fails)
+    assert not diagrams.available()
+    diagrams._probe_backend.cache_clear()
 
 
 def test_renderer_child_receives_the_imagen_06_key_alias(monkeypatch):
@@ -453,3 +488,22 @@ def test_main_returns_two_for_a_missing_backend(monkeypatch, tmp_path):
 
     monkeypatch.setattr(diagrams, "render", unavailable)
     assert diagrams.main(["--src", str(source), "--out", str(prompt.parent)]) == 2
+
+
+# -- the live renderer, skipped without a real backend key --------------------
+
+_LIVE_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY")
+
+
+@pytest.mark.skipif(
+    not diagrams.available() or not any(os.environ.get(k) for k in _LIVE_KEYS),
+    reason="needs an installed renderer and a real image backend key",
+)
+def test_a_live_render_when_keys_are_present(tmp_path):
+    """#514: the offline lane never touches this. One real render, only when
+    a key is actually present, covers the renderer itself."""
+    source = tmp_path / "probe.mmd"
+    source.write_text(SIMPLE, encoding="utf-8")
+    figure = diagrams.render(source, tmp_path / "out", topic="loop safety", force=True)
+    assert figure.png is not None
+    assert figure.png.exists() and figure.png.stat().st_size >= 4096
