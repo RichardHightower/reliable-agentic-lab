@@ -7,7 +7,9 @@ import subprocess
 from pathlib import Path
 
 import adapter
+import harness
 import pytest
+import steps
 from conftest import FakeResultMessage
 
 
@@ -173,3 +175,63 @@ def test_a_hung_query_times_out(fake_sdk, target, monkeypatch):
     assert result.stop_reason == "query timeout"
     assert "timed out" in result.output
     assert "never reached" not in result.output
+
+
+# -- A9 (#437 #422): the planner scope and the planner graph -----------------
+
+
+def test_the_planner_scope_routes_to_the_planner_backend():
+    """`steps.jsonl` is the planner's whole write scope. `_for` must route on
+    it before the tests/ and app/ branches, and refuse a scope no branch
+    names, the same as before this unit."""
+    test_backend = adapter.AgentSdkBackend(object())
+    code_backend = adapter.AgentSdkBackend(object())
+    planner_backend = adapter.AgentSdkBackend(object())
+    phase = adapter.AgentSdkPhaseBackend(
+        test=test_backend, code=code_backend, planner=planner_backend
+    )
+
+    assert phase._for([steps.STEPS_FILE]) is planner_backend
+    assert phase._for(["tests/**"]) is test_backend
+    assert phase._for(["app/**"]) is code_backend
+    with pytest.raises(ValueError, match="no Agent SDK backend"):
+        phase._for(["reports/**"])
+
+
+def test_an_unconfigured_planner_fails_closed():
+    phase = adapter.AgentSdkPhaseBackend(
+        test=adapter.AgentSdkBackend(object()), code=adapter.AgentSdkBackend(object())
+    )
+    with pytest.raises(ValueError, match="no Agent SDK planner backend"):
+        phase.plan(repo=Path("."), prompt="plan it")
+
+
+def test_plan_runs_the_planner_backend_with_its_own_scope(fake_sdk, target):
+    """`plan()` is `run()` scoped to `steps.jsonl`, the same shape as `judge()`
+    scoping to the judge backend."""
+    module = fake_sdk([FakeResultMessage(result="wrote the plan")])
+    phase = adapter.AgentSdkPhaseBackend(
+        test=adapter.AgentSdkBackend(object()),
+        code=adapter.AgentSdkBackend(object()),
+        planner=adapter.AgentSdkBackend(object()),
+    )
+
+    result = phase.plan(repo=target, prompt="write steps.jsonl")
+
+    assert result.ok
+    assert result.output == "wrote the plan"
+    assert module.last_prompt == "write steps.jsonl"
+
+
+def test_planner_sdk_with_doer_sdk_invokes_the_planner_graph(fake_sdk, contract, repo):
+    """A9 (#437 #422), test 2 of 5. `--planner sdk --doer sdk` must reach the
+    planner subagent, not the test or code one. `harness.backend` builds all
+    four graphs; `.plan()` must be the one that dispatches to the one named
+    `implementer-planner`."""
+    module = fake_sdk([FakeResultMessage(result='{"ok": true}')])
+
+    backend = harness.backend(contract)
+    result = backend.plan(repo=repo, prompt="write the plan")
+
+    assert result.ok
+    assert list(module.last_options.agents) == ["implementer-planner"]

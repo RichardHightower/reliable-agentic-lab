@@ -1726,3 +1726,171 @@ def test_resume_does_not_recopy_an_edited_ticket(tmp_path, monkeypatch):
     assert second["gate"] == "pass"
     assert (worktree / "tickets" / "T001.md").read_text(encoding="utf-8") == ticket_before_resume
     assert not any("tickets/" in v for v in second.get("scope_violations", []))
+
+
+# -- A9 (#437 #422): --planner derived|sdk|deep ------------------------------
+
+
+def _step_ids(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    return [json.loads(line)["id"] for line in text.splitlines() if line.strip()]
+
+
+class PlanningScriptedBackend(ScriptedBackend):
+    """A `ScriptedBackend` with a `plan()` that must never be called under
+    the default planner. Calling it fails the test that holds it, not the
+    run: `run()` itself has no assertion that would turn this into a
+    trace."""
+
+    def plan(self, *, repo: Path, prompt: str) -> doers.DoerResult:
+        raise AssertionError("the derived planner must not call backend.plan")
+
+
+def test_default_planner_never_calls_backend_plan(tmp_path, monkeypatch):
+    """A9 (#437 #422), test 1 of 5. --planner defaults to derived: plan_for,
+    no model, and backend.plan is never even asked for."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+
+    trace = implementer.run(
+        repo=repo, ticket_id="T001", doer=PlanningScriptedBackend([]), budget=2, write_trace=True
+    )
+
+    # A silent doer still escalates on the red gate, exactly as it did before
+    # this unit. The interesting assertion is that PlanningScriptedBackend's
+    # own plan() never raised its AssertionError getting here.
+    assert trace["gate"] == "escalate"
+
+
+def test_a_kind_path_goal_payload_never_becomes_a_plan_and_escalates(tmp_path, monkeypatch):
+    """A9 (#437 #422), test 3 of 5. The planner's only contract is
+    id/ticket/role/action/validation. A payload shaped like a different
+    schema must never become steps.jsonl: Plan.load rejects it, and the run
+    ends in an escalate trace, never an uncaught error."""
+    repo = _git_repo(tmp_path / "repo")
+    _patch_runs(monkeypatch, [])
+
+    class BadPlanBackend(doers.Backend):
+        name = "bad-planner"
+
+        def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+            raise AssertionError("a rejected plan must never reach the test or code phase")
+
+        def plan(self, *, repo: Path, prompt: str) -> doers.DoerResult:
+            (repo / "steps.jsonl").write_text(
+                json.dumps({"kind": "feature", "path": "app/x.py", "goal": "do it"}) + "\n",
+                encoding="utf-8",
+            )
+            return doers.DoerResult(output="wrote a plan")
+
+    trace = implementer.run(
+        repo=repo, ticket_id="T001", doer=BadPlanBackend(), planner="sdk", budget=1,
+    )
+
+    assert trace["gate"] == "escalate"
+    assert "the planner produced an unusable plan" in trace["reason"]
+
+
+def test_doer_none_and_reference_force_derived_regardless_of_planner_flag(
+    tmp_path, monkeypatch, capsys
+):
+    """A9 (#437 #422), test 4 of 5. A live planner with no live doer produces
+    a plan nothing can execute, so --doer none and --doer reference force
+    derived even when --planner names a live one."""
+    health = "tests/test_health.py::test_health"
+
+    none_repo = _git_repo(tmp_path / "none-repo")
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+    exit_code = implementer.main(
+        ["--repo", str(none_repo), "--ticket", "T001", "--doer", "none",
+         "--planner", "sdk", "--budget", "1"]
+    )
+    assert exit_code == 2
+    out = capsys.readouterr().out
+    assert "gate: escalate" in out
+    assert "red gate: no new test was observed failing" in out
+    assert "planner produced an unusable plan" not in out
+
+    ref_repo = _git_repo(tmp_path / "ref-repo")
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    (ref_repo / "tests" / "test_greet.py").write_text(
+        "def test_ac1():\n    assert False\n", encoding="utf-8"
+    )
+    (ref_repo / "app" / "greet.py").write_text(
+        "def greet():\n    return 'hello'\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "tests/test_greet.py", "app/greet.py"], cwd=ref_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "known good answer"], cwd=ref_repo, check=True, capture_output=True
+    )
+    subprocess.run(["git", "branch", "known-good"], cwd=ref_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "reset", "--hard", "HEAD~1"], cwd=ref_repo, check=True, capture_output=True
+    )
+
+    exit_code = implementer.main(
+        ["--repo", str(ref_repo), "--ticket", "T001", "--doer", "reference",
+         "--planner", "deep", "--budget", "1"]
+    )
+    assert exit_code == 0
+    assert "gate: pass" in capsys.readouterr().out
+
+
+def test_resume_loads_the_saved_plan_and_never_replans(tmp_path, monkeypatch):
+    """A9 (#437 #422), test 5 of 5. A regenerated plan after a killed code
+    phase would renumber the steps the stored red_ids were proven against, so
+    --resume must Plan.load steps.jsonl rather than call plan_for again."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
+
+    first = implementer.run(
+        repo=repo, ticket_id="T001", doer=ScriptedBackend([]), budget=2, write_trace=True
+    )
+    assert first["gate"] == "escalate"
+    worktree = Path(first["repo"])
+    saved_ids = _step_ids(worktree / "steps.jsonl")
+
+    calls: list[int] = []
+    real_plan_for = implementer.plan_for
+
+    def spy_plan_for(*args, **kwargs):
+        calls.append(1)
+        return real_plan_for(*args, **kwargs)
+
+    monkeypatch.setattr(implementer, "plan_for", spy_plan_for)
+
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    second_backend = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+    second = implementer.run(
+        repo=repo, ticket_id="T001", doer=second_backend, budget=1, resume=True, write_trace=True,
+    )
+
+    assert second["gate"] == "pass"
+    assert calls == []
+    # Not a byte-for-byte compare: the code phase marks a step done with
+    # evidence and re-saves. The ids proving no renumbering happened are
+    # what a resume actually has to protect.
+    assert _step_ids(worktree / "steps.jsonl") == saved_ids

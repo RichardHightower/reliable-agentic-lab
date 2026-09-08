@@ -61,6 +61,12 @@ def backend(contract, *, max_turns: int = DEFAULT_MAX_TURNS):
         judge=AgentSdkBackend(
             build(contract, max_turns=max_turns, role_names=frozenset({"judge"}))
         ),
+        # A9 (#437 #422). --planner sdk reads this graph through `plan()`.
+        # Built unconditionally, the way the other three are: it is inert
+        # unless `_plan_from_backend` calls it.
+        planner=AgentSdkBackend(
+            build(contract, max_turns=max_turns, role_names=frozenset({"planner"}))
+        ),
     )
 
 
@@ -71,6 +77,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--ticket", default="T001")
     parser.add_argument("--doer", default="reference", help="reference | sdk | none")
+    parser.add_argument(
+        "--planner",
+        default="derived",
+        help=(
+            "derived | sdk | deep. derived is plan_for and calls no model. "
+            "--doer none or reference forces derived regardless of this flag."
+        ),
+    )
     parser.add_argument("--budget", type=int, default=None)
     parser.add_argument("--table-only", action="store_true")
     parser.add_argument(
@@ -108,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             repo=args.repo,
             ticket_id=args.ticket,
             doer=doer,
+            planner=args.planner,
             budget=args.budget,
             cleanup=args.cleanup,
             resume=args.resume,
