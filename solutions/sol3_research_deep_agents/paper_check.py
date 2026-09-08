@@ -62,6 +62,183 @@ SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
 # a Figures appendix is images with their alt text.
 PROSE_EXEMPT = ("references", "figures")
 
+# STE-S6, no contractions. `n't` covers do not/does not/etc; the pronoun list
+# covers `it's`, `that's`, `we're`, and the like without also matching a
+# genitive noun such as "the writer's card", which is not a contraction.
+CONTRACTION = re.compile(
+    r"\b[A-Za-z]+n't\b"
+    r"|\b(?:i|you|we|they|it|he|she|that|there|who|what|here|let|how|when|where|why)"
+    r"'(?:m|re|ve|ll|d|s)\b",
+    re.I,
+)
+# STE-S7, no Latin abbreviations. Write "for example", not "e.g."
+LATIN_ABBREV = re.compile(r"\b(?:e\.g\.|i\.e\.|etc\.)", re.I)
+# Split into sentence-shaped chunks without breaking on the two periods inside
+# "e.g."/"i.e."/"etc." themselves.
+SENTENCE_END = re.compile(r"(?<!e\.g\.)(?<!i\.e\.)(?<!etc\.)(?<=[.!?])\s+", re.I)
+REFERENCES_HEADING = re.compile(r"^#{1,6}\s+references?\s*$", re.I | re.M)
+LIST_ITEM = re.compile(r"^\d+[.)]\s")
+
+# STE-S5, no noun stack longer than three. There is no part-of-speech tagger
+# in this codebase and this unit may not add one, so a token counts as a noun
+# candidate only when it is not one of these function words and does not carry
+# a verb or adverb ending. The list is short on purpose: articles,
+# prepositions, conjunctions, pronouns/determiners, auxiliaries, and the
+# common verbs and adverbs a briefing actually uses. Copied from the SDK port,
+# not imported.
+STE_FUNCTION_WORDS = frozenset(
+    """
+    a an the
+    of in on at by for with about against between into through during before
+    after above below to from up down over under again further than once off
+    out across along among around behind beside beyond near toward towards
+    upon within without via per amid versus plus minus
+    and but or nor so yet because although though while if unless whether
+    since as
+    i you he she it we they this that these those who whom which what whose
+    when where why how whatever whoever whichever wherever whenever
+    someone something anyone anything everyone everything nothing each either
+    neither all any some such one two three four five six seven eight nine
+    ten first second third fourth fifth last next single multiple several
+    various many few much more most less least other another same own new old
+    whole entire additional its his her their our your my no not
+    every cannot both none them due
+    be is are was were been being have has had do does did will would shall
+    should may might must can could
+    run runs use uses need needs want wants show shows name names hold holds
+    take takes give gives get gets know knows see sees say says call calls
+    make makes made
+    also only just still even already always never often sometimes here
+    there now then well however therefore thus very quite rather instead
+    hence otherwise nonetheless nevertheless regardless moreover furthermore
+    meanwhile besides namely indeed perhaps maybe given whereas whereby
+    thereby notwithstanding
+    """.split()
+)
+# A gerund/participle, an adverb, or a third-person-singular verb / plain
+# plural reads as a verb or an adverb, not a noun, often enough that excluding
+# the ending is cheaper than tagging the word. A trailing double `s`,
+# `harness`, `process`, is left alone, because that `s` is not the plural or
+# verb marker.
+# ponytail: heuristic noun test, upgrade to a tagger if false positives appear
+STE_VERB_ADVERB_SUFFIX = re.compile(r"(?:ing|ed|ly)$|(?<!s)s$", re.I)
+# A handful of adjective endings read as a descriptive modifier, not the noun
+# it modifies: "virtual", "single-source", "top level" survives, "folder-local
+# Python virtual environment" does not once "folder-local" and "virtual" both
+# drop out. A hyphenated token is almost always a compound modifier
+# ("folder-local", "twenty-four") rather than the noun itself, and a spelled-
+# out number is a quantifier, not a noun.
+MODIFIER_SUFFIX = re.compile(r"(?:al|ous|ive|able|ible|ful|less|ic|ish|ary|ent|ant)$", re.I)
+NUMBER_WORDS = frozenset(
+    """
+    one two three four five six seven eight nine ten eleven twelve thirteen
+    fourteen fifteen sixteen seventeen eighteen nineteen twenty hundred
+    thousand
+    """.split()
+)
+# Digits stay inside a token so `E2E` is one token, not `E` and `E` either
+# side of an invisible `2`; a token that carries a digit is never itself a
+# noun candidate, so it still breaks the run instead of extending it.
+STE_WORD_TOKEN = re.compile(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
+NOUN_STACK_LIMIT = 3
+# The SDK's inline-and-fenced code mask, copied so a contraction inside
+# single backticks is not scored as prose in this port either. `FENCE`
+# elsewhere in this file grades only a full fenced block; this one is scoped
+# to the STE belt.
+CODE_SPAN = re.compile(r"`[^`]*`|```.*?```", re.S)
+
+
+def _mask_references(text: str) -> str:
+    """Blank the references section. A host name in a URL is not body prose."""
+    match = REFERENCES_HEADING.search(text)
+    if not match:
+        return text
+    return text[: match.start()] + " " * (len(text) - match.start())
+
+
+def _mask_code(text: str) -> str:
+    """Blank inline and fenced code so a code sample is not scanned for STE
+    violations. Offsets are kept.
+    """
+    return CODE_SPAN.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def _mask_for_ste(text: str) -> str:
+    """Code and references, gone. Everything else is body prose."""
+    return _mask_references(_mask_code(text))
+
+
+def _prose_sentences(text: str) -> list[str]:
+    """Sentence-shaped chunks of body prose. Skips headings, images, lists,
+    tables, quotes, and fences, none of which are a sentence a writer composed.
+    """
+    sentences: list[str] = []
+    for block in re.split(r"\n\s*\n", text):
+        block = block.strip()
+        if not block or block.startswith(("#", "!", "|", ">", "```", "-", "*")):
+            continue
+        if LIST_ITEM.match(block):
+            continue
+        for piece in SENTENCE_END.split(block):
+            piece = piece.strip()
+            if piece:
+                sentences.append(piece)
+    return sentences
+
+
+def ste_language_violations(body: str) -> list[str]:
+    """Sentences carrying a contraction or a Latin abbreviation.
+
+    STE-S6 and STE-S7. Unconditional: a clean sentence passes by construction.
+    """
+    masked = _mask_for_ste(body)
+    return [
+        sentence[:160]
+        for sentence in _prose_sentences(masked)
+        if CONTRACTION.search(sentence) or LATIN_ABBREV.search(sentence)
+    ]
+
+
+def _noun_candidate(word: str) -> bool:
+    if "-" in word or any(ch.isdigit() for ch in word):
+        return False
+    lowered = word.lower()
+    if lowered in STE_FUNCTION_WORDS or lowered in NUMBER_WORDS:
+        return False
+    return not (STE_VERB_ADVERB_SUFFIX.search(word) or MODIFIER_SUFFIX.search(word))
+
+
+NOUN_RUN_BREAK = re.compile(r"[,;:()]")
+
+
+def noun_stacks(body: str, limit: int = NOUN_STACK_LIMIT) -> list[str]:
+    """Runs of more than `limit` consecutive noun-candidate tokens.
+
+    STE-S5. Advisory: reported, never a hard gate. A hyphenated token,
+    `folder-local`, stays one token so it breaks the run as one unit, but it
+    reads as a compound modifier and is never itself a candidate. A comma-
+    separated list, "the researcher, verifier, writer, and gate boundaries",
+    is enumeration, not a stack, so punctuation between two tokens also
+    breaks the run.
+    """
+    masked = _mask_for_ste(body)
+    hits: list[str] = []
+    for sentence in _prose_sentences(masked):
+        run: list[str] = []
+        end = 0
+        for match in STE_WORD_TOKEN.finditer(sentence):
+            if NOUN_RUN_BREAK.search(sentence, end, match.start()):
+                run = []
+            end = match.end()
+            word = match.group(0)
+            if _noun_candidate(word):
+                run.append(word)
+                if len(run) == limit + 1:
+                    hits.append(" ".join(run))
+            else:
+                run = []
+    return hits
+
 
 @dataclass
 class Check:
@@ -412,6 +589,32 @@ def check(
         )
     )
 
+    ste_hits = ste_language_violations(body)
+    checks.append(
+        Check(
+            "ste_language",
+            not ste_hits,
+            "no contractions or Latin abbreviations in body prose"
+            if not ste_hits
+            else f"contraction or e.g./i.e./etc. in: {ste_hits[0]!r}",
+        )
+    )
+
+    stacks = noun_stacks(body)
+    checks.append(
+        Check(
+            "noun_stack",
+            not stacks,
+            "no noun cluster longer than three"
+            if not stacks
+            else f"noun cluster: {stacks[0]!r}",
+            # Advisory until the heuristic earns a hard gate: a deviation from
+            # #456, stated in the P1-fix PR body. It still reports its detail
+            # and never blocks `passed`.
+            hard=False,
+        )
+    )
+
     rows = reference_rows(body)
     checks.append(
         Check(
@@ -658,6 +861,48 @@ def demo() -> None:
     score = gate(caveated, urls, ledger=ledger)
     assert not score.passed
     assert "no_contradicted" in score.signature()
+
+    assert ste_language_violations("The writer does not skip a step.") == []
+    hit = ste_language_violations("The writer doesn't skip a step.")
+    assert hit and "doesn't" in hit[0]
+    assert ste_language_violations("For example, the writer names the actor.") == []
+    assert ste_language_violations("The writer names the actor, e.g. the host.")
+    assert ste_language_violations("```\nThe writer doesn't skip a step.\n```") == [], (
+        "a fenced code block is masked"
+    )
+    assert ste_language_violations("`The writer doesn't skip a step.`") == [], (
+        "an inline code span is masked too, copied from the SDK's mask"
+    )
+    assert ste_language_violations("## References\n\nSee it's fine at example.com.") == [], (
+        "the references section is masked"
+    )
+    assert ste_language_violations("The writer's card names the actor.") == [], (
+        "a genitive is not a contraction"
+    )
+    assert noun_stacks("The orchestrator charges the budget before the writer runs.") == []
+    assert noun_stacks("A loop harness gate ledger ships every seminar.")
+    assert noun_stacks("The independent researcher, verifier, writer, and gate boundaries appear.") == [], (
+        "a comma-separated list is enumeration, not a stack"
+    )
+    # The judge's five reported false positives on PR #492, each traced to a
+    # missing guard and now fixed: a suffix that reads as a modifier, a
+    # hyphen that reads as a compound modifier, a missing function word, and
+    # a digit swallowed by the old tokenizer.
+    assert noun_stacks("This is a standalone Claude Agent SDK for the seminar.") == [], (
+        "Agent ends in -ent, a modifier suffix"
+    )
+    assert noun_stacks("Each lab uses a folder-local Python virtual environment.") == [], (
+        "folder-local is a hyphenated modifier and virtual ends in -al"
+    )
+    assert noun_stacks("The plan names a twenty-four question research phase.") == [], (
+        "twenty-four is a hyphenated number word"
+    )
+    assert noun_stacks("The allowlist governs every top level domain.") == [], (
+        "every is a function word"
+    )
+    assert noun_stacks("The default live E2E run costs about a dollar.") == [], (
+        "E2E is one digit-bearing token, not two bare letters"
+    )
 
     print("paper_check: all demo assertions passed")
 
