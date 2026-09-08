@@ -510,14 +510,22 @@ def test_render_hands_the_backend_the_sanitized_source(tmp_path, monkeypatch):
     assert handed.name == src.name
 
 
-# -- the live renderer, skipped without a real backend key --------------------
+# -- the live renderer, opt-in only, so `task test` stays deterministic ------
 
 _LIVE_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY")
+# `or`, short-circuited: the cheap env checks run first, so a plain `task
+# test` (opt-in unset) never pays for `diagrams.available()`'s subprocess
+# probe just to decide whether to skip. `task test-live` sets the variable.
+_LIVE_SKIP = (
+    os.environ.get("SOL3_LIVE_TESTS") != "1"
+    or not any(os.environ.get(k) for k in _LIVE_KEYS)
+    or not diagrams.available()
+)
 
 
 @pytest.mark.skipif(
-    not diagrams.available() or not any(os.environ.get(k) for k in _LIVE_KEYS),
-    reason="needs an installed renderer and a real image backend key",
+    _LIVE_SKIP,
+    reason="set SOL3_LIVE_TESTS=1 and a real image backend key to run this (task test-live)",
 )
 def test_a_live_render_when_keys_are_present(tmp_path):
     """#514: the offline lane never touches this. One real render, only when
