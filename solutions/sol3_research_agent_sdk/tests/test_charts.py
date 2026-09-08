@@ -223,9 +223,21 @@ def test_assemble_puts_an_unsectioned_diagram_under_figures(work, turns):
     assert "diagrams/orphan_imagen.png" in body
 
 
-def test_linear_runs_charts_after_diagram():
+def test_linear_runs_charts_before_write():
+    """`diagram` moved out of `LINEAR` (#476); `charts` is the only figure
+    phase left here, and it still runs before the write/diagram/assemble
+    cycle."""
     names = [name for _n, name, _out, _fn in paper.LINEAR]
-    assert names.index("diagram") < names.index("charts")
+    assert "diagram" not in names
+    assert names.index("charts") < len(names)
+
+
+def test_diagram_runs_after_write():
+    """#476: a figure is commissioned from the section's own claims, which
+    do not exist until the section is written. `diagram` sits in `CYCLE`,
+    between `write` and `assemble`."""
+    names = [name for _n, name, _fn in paper.CYCLE]
+    assert names.index("write") < names.index("diagram") < names.index("assemble")
 
 
 # -- the renderer is named, and a label is a name (#371) ------------------------

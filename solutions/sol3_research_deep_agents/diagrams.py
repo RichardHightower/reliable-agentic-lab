@@ -26,6 +26,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import evidence
+
 HERE = Path(__file__).resolve().parent
 RENDERER = HERE / ".cache" / "imagen-diagrams"
 SCRIPTS = RENDERER / "skills" / "imagen-diagrams" / "scripts"
@@ -165,6 +167,104 @@ def ordered_exit_checks(source: str) -> bool:
 
     done, cost, turns = decision("done"), decision("cost"), decision("turn")
     return bool(done and cost and turns and cost in edges.get(done, ()) and turns in edges.get(cost, ()))
+
+
+# -- #476: a label must agree with the section's claims -----------------------
+
+# Three attempts at a label the claims support, then the figure is dropped.
+# Distinct from the plugin's own render/fidelity retry, which is driven by
+# `GateFailed` at the stage level: a claims mismatch on one figure must not
+# escalate the whole stage, it drops that one figure and moves on.
+MAX_LABEL_ATTEMPTS = 3
+
+# Word-bounded so "alone" does not fire on "alone time" and "increase" does not
+# fire on "increases" reading only its stem. Three buckets: the real defect
+# this ticket names is two arms both labeled a gain, and an ending labeled a
+# preservation the body refuses to claim.
+OUTCOME_WORD = re.compile(
+    r"\b(gain|loss|preservation|preserve|increase|decrease|improve|improves|"
+    r"prevent|prevents|reduce|reduces)\b",
+    re.I,
+)
+_DIRECTION_OF = {
+    "gain": "gain",
+    "increase": "gain",
+    "improve": "gain",
+    "improves": "gain",
+    "loss": "loss",
+    "decrease": "loss",
+    "reduce": "loss",
+    "reduces": "loss",
+    "preservation": "preservation",
+    "preserve": "preservation",
+    "prevent": "preservation",
+    "prevents": "preservation",
+}
+
+
+# #476 F1. "Creatine did not prevent lean mass loss" reads `prevent` as
+# preservation-direction on the bare word list, and the sentence actually
+# says loss happened. Checked only in the text before the outcome word: a
+# negation after it belongs to a different clause.
+NEGATION_WORD = re.compile(r"\b(no|not|without|fails to)\b", re.I)
+# #476 N1. A negated loss is "no loss", a preservation claim, not a gain
+# claim; the first cut of this table sent it to gain, which let "there was
+# no loss of lean mass" back a bare "Lean mass gain" label, the overclaim
+# this ticket exists to stop, in this ticket's own domain. A negated gain
+# is "no gain", the same neutral preservation claim, not a loss. Negating
+# preservation still means the bad outcome happened, loss, which the F1
+# fixture ("did not prevent lean mass loss") already confirmed correct.
+_INVERT_DIRECTION = {"gain": "preservation", "loss": "preservation", "preservation": "loss"}
+
+
+def label_direction(label: str) -> str | None:
+    """Which outcome direction a label or a claim's text asserts, or `None`.
+
+    First outcome word wins. A label naming two directions in one clause is
+    rare, and untangling it is the caption's job, not this gate's.
+    """
+    text = label or ""
+    match = OUTCOME_WORD.search(text)
+    if not match:
+        return None
+    direction = _DIRECTION_OF[match.group(1).lower()]
+    if NEGATION_WORD.search(text[: match.start()]):
+        return _INVERT_DIRECTION.get(direction, direction)
+    return direction
+
+
+def figure_claims(labels: list[str], claims: list) -> list[str]:
+    """Node labels no claim in `claims` backs, direction by direction.
+
+    `claims` are `evidence.Claim` objects, not raw text: the single-source
+    rule reads `truth_state`, the field this port already tracks, not a
+    text-count proxy. #476 B4.
+
+    A label whose direction (gain, loss, or preservation) no claim in this
+    section asserts fails outright. When every claim backing a direction is
+    `evidence.SINGLE_SOURCE` -- this section's only support for it, however
+    many claims restate it -- the label must say "reported"; stated
+    plainly, it reads as a settled fact only one source made. A direction
+    with at least one claim past single-source needs no hedge.
+    """
+    supports: dict[str, list] = {}
+    for claim in claims:
+        direction = label_direction(getattr(claim, "text", "") or "")
+        if direction:
+            supports.setdefault(direction, []).append(claim)
+    mismatches = []
+    for label in labels:
+        direction = label_direction(label)
+        if direction is None:
+            continue
+        backers = supports.get(direction) or []
+        if not backers:
+            mismatches.append(label)
+            continue
+        single_source = all(getattr(c, "truth_state", None) == evidence.SINGLE_SOURCE for c in backers)
+        if single_source and "reported" not in label.lower():
+            mismatches.append(label)
+    return mismatches
 
 
 def simplify_instruction(inv: Inventory) -> str:
@@ -428,6 +528,29 @@ def demo() -> None:
     assert figure.best == Path("loop_imagen.png")
     figure.png = Path("loop.png")
     assert figure.best is None, "a non-plugin PNG must never become the published figure"
+
+    # #476: a node label must agree with the section's claims.
+    assert label_direction("Lean mass preservation") == "preservation"
+    assert label_direction("Corrected comparison") is None
+    assert label_direction("Creatine did not prevent lean mass loss") == "loss", "F1: negation"
+
+    def claim(text, truth_state=evidence.CORROBORATED):
+        return evidence.Claim(text=text, subject="demo", truth_state=truth_state)
+
+    mismatch = figure_claims(
+        ["Lean mass preservation"],
+        [claim("The trial could not distinguish water retention from tissue.")],
+    )
+    assert mismatch == ["Lean mass preservation"]
+    assert figure_claims(
+        ["Reported fat-free gain"],
+        [claim("One small trial reported a fat-free mass gain.", evidence.SINGLE_SOURCE)],
+    ) == []
+    assert figure_claims(
+        ["Fat-free gain"],
+        [claim("One small trial reported a fat-free mass gain.", evidence.SINGLE_SOURCE)],
+    ) == ["Fat-free gain"], "B4: a single-source claim needs the word reported"
+    assert figure_claims(["Fat-free gain"], []) == ["Fat-free gain"], "F3: absence is not support"
 
 
 def main(argv: list[str] | None = None) -> int:

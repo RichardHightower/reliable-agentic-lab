@@ -250,8 +250,8 @@ class RecordingTurns:
             "excerpt": "a thing is true",
         }
 
-    def diagram(self, name, concept, feedback=""):
-        self.asked.append(("diagram", name, concept, feedback))
+    def diagram(self, name, concept, feedback="", claims=None):
+        self.asked.append(("diagram", name, concept, feedback, list(claims or [])))
         return {"language": "mermaid", "source": "flowchart LR\n  A[A] --> B[B]", "caption": "Cap."}
 
     def chart_spec(self, figure, rows, note=""):

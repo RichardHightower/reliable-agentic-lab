@@ -180,6 +180,16 @@ def test_assemble_embeds_a_rendered_chart(tmp_path: Path):
     assert "charts/three-exits.png" in body
 
 
-def test_stage_order_runs_charts_after_diagram():
-    assert stages.STAGE_ORDER.index("diagram") < stages.STAGE_ORDER.index("charts")
+def test_stage_order_runs_charts_before_write_and_assemble():
+    """#476 moved `diagram` after `write`; `charts` still runs earlier, from
+    the plan alone, and lands before `assemble` either way."""
+    assert stages.STAGE_ORDER.index("charts") < stages.STAGE_ORDER.index("write")
     assert stages.STAGE_ORDER.index("charts") < stages.STAGE_ORDER.index("assemble")
+
+
+def test_diagram_runs_after_write():
+    """#476: a figure is commissioned from the bound claims of the section
+    that carries it, and those claims do not exist until the section is
+    written."""
+    assert stages.STAGE_ORDER.index("write") < stages.STAGE_ORDER.index("diagram")
+    assert stages.STAGE_ORDER.index("diagram") < stages.STAGE_ORDER.index("assemble")

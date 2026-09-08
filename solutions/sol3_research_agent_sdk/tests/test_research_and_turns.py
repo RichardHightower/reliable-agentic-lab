@@ -760,6 +760,16 @@ def test_each_turn_declares_the_scope_it_may_write(work):
     assert backend.prompts[0][1] == ["diagrams/pipeline.mmd", "diagrams/pipeline.puml"]
 
 
+def test_the_diagrammer_prompt_carries_the_sections_claims(work):
+    """#476: the diagrammer is grounded in what the section actually landed,
+    not only the outline's concept line."""
+    backend = Backend([result(structured={"language": "mermaid", "source": "", "caption": ""})])
+    t.SdkTurns(backend=backend, work_dir=work).diagram(
+        "pipeline", "c", claims=["Creatine increased fat-free mass."]
+    )
+    assert "Creatine increased fat-free mass." in backend.prompts[0][0]
+
+
 def test_cost_is_reported_to_the_driver(work):
     spent = []
     backend = Backend([result(usd=0.42, cost_reported=True, structured={"verdict": "supports"})])
