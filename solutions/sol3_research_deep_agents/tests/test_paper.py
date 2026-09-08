@@ -1928,3 +1928,18 @@ def test_the_backoff_sequence_is_five_fifteen_forty_five(run_dir, stub_renderer,
     run._ask("planner", "Write plan.json for this topic.")
 
     assert waits == [5.0, 15.0, 45.0]
+
+
+def test_zzz_ci_debug_pipeline(run_dir, stub_renderer):
+    """Temporary diagnostic: CI fails this pipeline while every local run
+    (three OS/Python combinations tried) passes it. Prints gates.json on
+    failure so the actual failing row is visible in the CI log."""
+    from conftest import build_run  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    code = run.run()
+    gates_path = run.work_dir / "gates.json"
+    if gates_path.exists():
+        print("GATES:", gates_path.read_text())
+    print("STATE:", (run.work_dir / pstate.STATE_FILE).read_text())
+    assert code == 0, f"exit {code}"
