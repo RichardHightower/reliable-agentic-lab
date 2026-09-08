@@ -65,6 +65,8 @@ def test_the_pdf_sidecar_records_the_block_on_page_one(tmp_path):
     title page, and the sidecar states so. #479"""
     pytest.importorskip("reportlab")
     pytest.importorskip("pypdf")
+    if not pdf_report.THEME_FILE.is_file():
+        pytest.skip("Arctic Fox theme not installed; run `task setup` (#514)")
     paper = tmp_path / "paper.md"
     paper.write_text(
         "# Loop Engineering\n\n"

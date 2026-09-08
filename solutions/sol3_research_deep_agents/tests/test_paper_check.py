@@ -1378,6 +1378,49 @@ def test_front_matter_sits_above_the_abstract():
     assert "front_matter" in moved_score.signature(), moved_score.report()
 
 
+def test_a_stray_h1_mid_page_does_not_reopen_the_exempt_zone():
+    """PR #542 judge F1. `_mask_front_matter` anchors on the document's own
+    first heading; a writer-emitted `#` later in the body is graded like
+    any other heading, never a second free pass for an uncited claim."""
+    body = GOOD + (
+        "\n# Discussion\n\n"
+        "This unsourced paragraph asserts a specific number, 42 percent, "
+        "and cites nothing at all.\n\n"
+    )
+    score = gate(body, enforce_structure=True)
+    assert "cited" in score.signature(), score.report()
+
+
+def test_a_fifth_paragraph_in_the_front_matter_zone_is_not_exempt():
+    """PR #542 judge F1 and F3. The zone exempts exactly the four lines
+    `front_matter_block` writes; a fifth paragraph slipped in above the
+    Abstract is graded like any other prose and fails `front_matter` too."""
+    extra = "Creatine increases lean mass by 42 percent in every population studied.\n\n"
+    body = GOOD.replace(FRONT_MATTER_BLOCK, FRONT_MATTER_BLOCK + extra)
+    score = gate(body, enforce_structure=True)
+    assert "cited" in score.signature(), score.report()
+    assert "front_matter" in score.signature(), score.report()
+
+
+def test_word_count_excludes_the_front_matter_block():
+    """PR #542 judge F2. The Python-written front matter must not move the
+    whole-paper word floor, the same rule Methods and the study table
+    already follow."""
+    without_block = GOOD.replace(FRONT_MATTER_BLOCK, "")
+    assert paper_check.word_count(GOOD) == paper_check.word_count(without_block)
+
+
+def test_mask_front_matter_leaves_a_body_with_no_h1_unmasked():
+    """PR #542 judge F4. `_mask_front_matter` requires the body's own first
+    heading to be a genuine H1; a body that opens with `## ` (no title at
+    all) is returned unchanged, never with its own first section blanked."""
+    body = (
+        "## Abstract\n\nThis paragraph asserts 42 percent and cites nothing.\n\n"
+        "## Findings\n\nAlso uncited prose here.\n"
+    )
+    assert paper_check._mask_front_matter(body) == body
+
+
 def _study_ledger_for_check(n=1):
     led = evidence.Ledger("/nonexistent")
     claims = []
@@ -1587,7 +1630,10 @@ def test_word_count_excludes_exactly_the_methods_section(finished_paper):
     import re  # noqa: PLC0415
 
     body = (finished_paper / "whitepaper.md").read_text(encoding="utf-8")
-    stripped = paper_check._strip_figure_notes(body)
+    # `word_count` now also masks the front-matter block above the Abstract
+    # (PR #542 judge F2); mask it here too, so the two counts below differ
+    # by exactly Methods, not by Methods plus the block.
+    stripped = paper_check._mask_front_matter(paper_check._strip_figure_notes(body))
     # The fixture topic carries no human-study claim (#478's Evidence
     # summary table never appears), so Methods is the only Python-written
     # section on the page and this difference is not diluted by a second one.

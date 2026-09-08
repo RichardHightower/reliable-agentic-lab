@@ -997,9 +997,11 @@ def word_count(body: str) -> int:
     excludes, and now also `PYTHON_WRITTEN_SECTIONS`: Methods and the study
     table are Python output, never a writer's prose, and crediting either
     toward the floor is the same overclaim `_strip_figure_notes` already
-    names. PR #535 judge revision F5.
+    names. PR #535 judge revision F5. The front-matter block above the
+    Abstract is Python output too, and gets the same exclusion: PR #542
+    judge F2.
     """
-    stripped = _mask_sections(_strip_figure_notes(body), PYTHON_WRITTEN_SECTIONS)
+    stripped = _mask_front_matter(_mask_sections(_strip_figure_notes(body), PYTHON_WRITTEN_SECTIONS))
     return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", stripped)))
 
 
@@ -1733,26 +1735,50 @@ def front_matter_violations(body: str) -> list[str]:
     if not FRONT_MATTER_PROVENANCE.search(zone):
         problems.append("no provenance line with source and verification counts")
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", zone) if p.strip()]
-    if len(paragraphs) < 4:
-        problems.append(f"only {len(paragraphs)} front-matter lines above the Abstract, need 4")
+    if len(paragraphs) != 4:
+        # PR #542 judge F3. `< 4` let a fifth paragraph slip into the
+        # exempt zone and still pass this row; the byline, the date, the
+        # provenance line, and the conflicts line are the whole block.
+        problems.append(f"{len(paragraphs)} front-matter lines above the Abstract, need exactly 4")
     return problems
 
 
 def _mask_front_matter(body: str) -> str:
-    """Blank the byline, date, provenance, and conflicts block above the
-    Abstract, the same span `_mask_sections` blanks for Methods and the
-    study table below it. `brief.uncited_claims` has no heading of its own
-    to skip there, since front matter carries no `## ` heading at all. #479
+    """Blank exactly the four lines `front_matter_block` writes above the
+    Abstract: the byline, the date, the provenance line, and the conflicts
+    line. `brief.uncited_claims` has no heading of its own to skip there,
+    since front matter carries no `## ` heading at all.
+
+    Anchored on the body's own first heading, and only when that heading is
+    a genuine H1 (`# `, not `## `): a snippet whose first heading is
+    already `## ` is returned unmasked, never with its own first section
+    blanked. Capped at the first four paragraphs a blank line splits,
+    never the whole zone up to the next heading, so a fifth paragraph a
+    writer or a later change slips in above the Abstract is graded like
+    any other prose, not given a second free pass. #479, PR #542 judge F1
+    (the shared exposure) and F4.
     """
     first = HEADING.search(body)
-    if first is None:
+    if first is None or not first.group(0).startswith("# ") or first.group(0).startswith("##"):
         return body
     after_title = first.end()
     second = SECTION_HEADING.search(body, after_title)
-    if second is None:
+    zone_end = second.start() if second is not None else len(body)
+    zone = body[after_title:zone_end]
+    # The blank line between the title and the first front-matter paragraph
+    # is not a paragraph separator; only what sits between two paragraphs
+    # counts toward the four-paragraph cap.
+    content_start = len(zone) - len(zone.lstrip("\n"))
+    breaks = list(re.finditer(r"\n\s*\n", zone[content_start:]))
+    if len(breaks) < 4:
+        # Fewer than four paragraphs above the first heading: not the shape
+        # `front_matter_block` writes, so there is nothing to exempt. A
+        # body with no front matter at all lands here too (zero paragraphs,
+        # zero breaks). Masking a partial zone would still eat the blank
+        # line the next heading depends on to stay its own block.
         return body
-    start = second.start()
-    return body[:after_title] + " " * (start - after_title) + body[start:]
+    zone_end = after_title + content_start + breaks[3].start()
+    return body[:after_title] + " " * (zone_end - after_title) + body[zone_end:]
 
 
 def check(

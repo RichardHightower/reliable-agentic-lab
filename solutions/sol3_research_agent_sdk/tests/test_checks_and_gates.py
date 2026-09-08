@@ -1875,3 +1875,35 @@ def test_front_matter_sits_above_the_abstract():
     )
     moved_score = checks.check(moved, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
     assert "front_matter" in moved_score.signature(), moved_score.report()
+
+
+def test_a_stray_h1_mid_page_does_not_reopen_the_exempt_zone():
+    """PR #542 judge F1. `_mask_front_matter` anchors on the document's own
+    first heading; a writer-emitted `#` later in the body is graded like
+    any other heading, never a second free pass for an uncited claim."""
+    body = GOOD_P12 + (
+        "\n# Discussion\n\n"
+        "This unsourced paragraph asserts a specific number, 42 percent, "
+        "and cites nothing at all.\n\n"
+    )
+    score = checks.check(body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "cited" in score.signature(), score.report()
+
+
+def test_a_fifth_paragraph_in_the_front_matter_zone_is_not_exempt():
+    """PR #542 judge F1 and F3. The zone exempts exactly the four lines
+    `assemble` writes; a fifth paragraph slipped in above the Abstract is
+    graded like any other prose and fails `front_matter` too."""
+    extra = "Creatine increases lean mass by 42 percent in every population studied.\n\n"
+    body = GOOD_P12.replace(FRONT_MATTER_P12, FRONT_MATTER_P12 + extra)
+    score = checks.check(body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "cited" in score.signature(), score.report()
+    assert "front_matter" in score.signature(), score.report()
+
+
+def test_word_count_excludes_the_front_matter_block():
+    """PR #542 judge F2. The Python-written front matter must not move the
+    whole-paper word floor, the same rule Methods and the study table
+    already follow."""
+    without_block = GOOD_P12.replace(FRONT_MATTER_P12, "")
+    assert checks.word_count(GOOD_P12) == checks.word_count(without_block)

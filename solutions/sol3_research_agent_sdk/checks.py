@@ -104,18 +104,11 @@ HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.M)  # re.M so finditer sees every he
 # to say why the section is exempt.
 PYTHON_WRITTEN_SECTIONS = {"methods", "evidence summary"}
 
-# #479. The byline, date, provenance, and conflicts block, above the
-# Abstract. `uncited_claims` is the one row that walks the whole body by
-# heading, H1 included, so it is the one row that needs this name; every
-# other section-keyed check reads only `## `-and-deeper headings and never
-# sees the zone between the title and the first one at all.
-FRONT_MATTER_SECTION = "front matter"
-
 # Sections where a paragraph without a citation is correct, not sloppy. An
 # abstract summarizes material that is cited below it, and a reference list is
 # the citation. Demanding a marker in either produces a paper that cites its own
 # bibliography.
-UNCITED_SECTIONS = {"abstract", "references", "summary", FRONT_MATTER_SECTION} | PYTHON_WRITTEN_SECTIONS
+UNCITED_SECTIONS = {"abstract", "references", "summary"} | PYTHON_WRITTEN_SECTIONS
 
 # Opt-in floors. Unit tests of other rows stay short. The pipeline passes
 # these when it is producing a paper rather than exercising one phase.
@@ -678,15 +671,7 @@ def uncited_claims(body: str) -> list[str]:
             continue
         heading = HEADING.match(text)
         if heading:
-            # #479. The H1 title's own block opens the front-matter zone,
-            # exempt the same way Methods and References are: nothing there
-            # is a claim to cite. A real `## ` heading below it overwrites
-            # `section` as it always did.
-            section = (
-                FRONT_MATTER_SECTION
-                if text.startswith("# ") and not text.startswith("##")
-                else heading.group(1).strip().lower()
-            )
+            section = heading.group(1).strip().lower()
             after_image = False
             continue
         if text.startswith("!["):
@@ -1816,6 +1801,42 @@ def _strip_figure_notes(body: str) -> str:
     return SKIP_NOTE.sub("", body)
 
 
+def _mask_front_matter(body: str) -> str:
+    """Blank exactly the four lines `assemble` writes above the Abstract:
+    the byline, the date, the provenance line, and the conflicts line.
+
+    Anchored on the body's own first heading, and only when that heading is
+    a genuine H1 (`# `, not `## `): a snippet another row's test built, with
+    no H1 at all, or one whose first heading is already `## `, is returned
+    unmasked. Capped at the first four paragraphs the split on a blank line
+    finds, never the whole zone up to the next heading, so a fifth
+    paragraph a writer or a later change slips in above the Abstract is
+    graded like any other prose, not given a second free pass. #479, PR
+    #542 judge F1 (the shared exposure) and F2.
+    """
+    first = HEADING.search(body)
+    if first is None or not first.group(0).startswith("# ") or first.group(0).startswith("##"):
+        return body
+    after_title = first.end()
+    second = SECTION_HEADING.search(body, after_title)
+    zone_end = second.start() if second is not None else len(body)
+    zone = body[after_title:zone_end]
+    # The blank line between the title and the first front-matter paragraph
+    # is not a paragraph separator; only what sits between two paragraphs
+    # counts toward the four-paragraph cap.
+    content_start = len(zone) - len(zone.lstrip("\n"))
+    breaks = list(re.finditer(r"\n\s*\n", zone[content_start:]))
+    if len(breaks) < 4:
+        # Fewer than four paragraphs above the first heading: not the shape
+        # `assemble` writes, so there is nothing to exempt. A snippet with
+        # no front matter at all lands here too (zero paragraphs, zero
+        # breaks). Masking a partial zone would still eat the blank line
+        # the next heading depends on to stay its own block.
+        return body
+    zone_end = after_title + content_start + breaks[3].start()
+    return body[:after_title] + " " * (zone_end - after_title) + body[zone_end:]
+
+
 def word_count(body: str) -> int:
     """The whole-paper word count `length` grades against `MIN_WORDS`.
 
@@ -1823,9 +1844,11 @@ def word_count(body: str) -> int:
     excludes, and now also `PYTHON_WRITTEN_SECTIONS`: Methods and the study
     table are Python output, never a writer's prose, and crediting either
     toward the floor is the same overclaim `_strip_figure_notes` already
-    names. PR #535 judge revision F5.
+    names. PR #535 judge revision F5. The front-matter block above the
+    Abstract is Python output too, and gets the same exclusion: PR #542
+    judge F2.
     """
-    stripped = _mask_sections(_strip_figure_notes(body), PYTHON_WRITTEN_SECTIONS)
+    stripped = _mask_front_matter(_mask_sections(_strip_figure_notes(body), PYTHON_WRITTEN_SECTIONS))
     return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", stripped)))
 
 
@@ -1935,8 +1958,11 @@ def front_matter_violations(body: str) -> list[str]:
     if not FRONT_MATTER_PROVENANCE.search(zone):
         problems.append("no provenance line with source and verification counts")
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", zone) if p.strip()]
-    if len(paragraphs) < 4:
-        problems.append(f"only {len(paragraphs)} front-matter lines above the Abstract, need 4")
+    if len(paragraphs) != 4:
+        # PR #542 judge F3. `>= 4` let a fifth paragraph slip into the
+        # exempt zone and still pass this row; the byline, the date, the
+        # provenance line, and the conflicts line are the whole block.
+        problems.append(f"{len(paragraphs)} front-matter lines above the Abstract, need exactly 4")
     return problems
 
 
@@ -2078,7 +2104,11 @@ def check(
         )
     )
 
-    loose = uncited_claims(body)
+    # #479, PR #542 judge F1. The front-matter block carries no citation of
+    # its own to demand, the same exemption Methods already has; masked
+    # here rather than named in `UNCITED_SECTIONS`, since `uncited_claims`
+    # tracks section by heading and the block sits above every heading.
+    loose = uncited_claims(_mask_front_matter(body))
     checks.append(
         Check(
             "cited",
