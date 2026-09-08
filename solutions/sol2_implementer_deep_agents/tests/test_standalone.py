@@ -69,3 +69,29 @@ def test_cleanup_flag_reaches_implementer_run(monkeypatch, target_repo):
 
     assert captured.get("cleanup") is True
     assert exit_code == 0
+
+
+def test_main_maps_gate_to_exit_code(monkeypatch, target_repo):
+    """A5 (#432 #434). 0 pass, 2 escalate, 1 crash. harness.main mirrors
+    implementer.main's mapping exactly, without repeating implementer.run's
+    own worktree mechanics."""
+    import harness
+    import implementer
+
+    monkeypatch.setattr(
+        implementer, "run", lambda **_kw: {"rubric": "", "gate": "pass", "reason": "ok"}
+    )
+    assert harness.main(["--repo", str(target_repo), "--doer", "none"]) == 0
+
+    monkeypatch.setattr(
+        implementer,
+        "run",
+        lambda **_kw: {"rubric": "", "gate": "escalate", "reason": "red gate"},
+    )
+    assert harness.main(["--repo", str(target_repo), "--doer", "none"]) == 2
+
+    def fake_crash(**_kw):
+        raise implementer.ContractError("boom")
+
+    monkeypatch.setattr(implementer, "run", fake_crash)
+    assert harness.main(["--repo", str(target_repo), "--doer", "none"]) == 1

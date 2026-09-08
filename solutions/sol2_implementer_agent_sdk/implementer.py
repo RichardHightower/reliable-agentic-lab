@@ -42,6 +42,8 @@ import ticket as tickets
 import write_scope as roles
 from contract import Contract, ContractError
 
+LOOP = "implementer"
+
 
 def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
     """Test ids that are failing now and did not exist before. The red proof."""
@@ -257,11 +259,24 @@ def _worktree(repo: Path, ticket_id: str) -> Path:
         # baseline, rather than carrying the last attempt's code forward.
         # -fd, not -x, so a gitignored .venv the bootstrap step symlinked in
         # is left alone.
+        #
+        # state.json is cumulative across runs of this ticket (A5's `runs`
+        # counter, and the corrupt-state guard that reads it before this run
+        # does anything), and survives the reset on purpose. `.harness` is
+        # untracked and `git clean -fd` removes it along with everything
+        # else, so its bytes are captured before either git command runs,
+        # not after. Everything else in .harness describes only the run that
+        # just ended.
+        harness_dir = path / ".harness"
+        state_path = harness_dir / "state.json"
+        saved_state = state_path.read_bytes() if state_path.is_file() else None
         _git(path, "reset", "--hard", "HEAD")
         _git(path, "clean", "-fd")
-        harness_dir = path / ".harness"
         if harness_dir.exists():
             shutil.rmtree(harness_dir)
+        if saved_state is not None:
+            harness_dir.mkdir(parents=True, exist_ok=True)
+            state_path.write_bytes(saved_state)
     else:
         branch = f"implementer/{ticket_id}"
         added = subprocess.run(
@@ -370,6 +385,11 @@ def run(  # noqa: PLR0915
     contract = Contract(worktree)
     target = contract.repo
 
+    # A corrupt state.json is never a fresh start: fail closed before the
+    # ticket loads, before the baseline test runs, before any backend call.
+    previous_state = _read_state(target / ".harness" / "state.json")
+    previous_runs = previous_state.get("runs", 0) if previous_state else 0
+
     the_ticket = tickets.load(target, ticket_id, contract.tickets.get("path", "tickets"))
     if not the_ticket.ready:
         raise ContractError(f"{ticket_id} is not ready. Run the enhancer first.")
@@ -446,7 +466,10 @@ def run(  # noqa: PLR0915
                 "test phase wrote outside its scope: " + ", ".join(sorted(scope_violations))
             )
             trace["red_ids"] = sorted(red_ids)
-            return _finish(contract, trace, write_trace, source_repo=source_repo, cleanup=cleanup)
+            return _finish(
+                contract, trace, write_trace,
+                source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+            )
 
         if not contract.rubric.get("require_red", True) or red_ids:
             break
@@ -466,15 +489,25 @@ def run(  # noqa: PLR0915
         )
         if decision.stop:
             trace["gate"] = gates.ESCALATE
-            trace["reason"] = (
-                decision.reason
-                if decision.repeat_failure
-                else "red gate: no new test was observed failing. A test that passes before "
-                "any code exists proves nothing."
-            )
+            # A stop here is either a stable failure, the money budget, or the
+            # iteration budget. The first two name a real reason worth keeping
+            # (the money one is the fold-in fix: `decide` already says "the
+            # money budget is spent", and this branch used to overwrite that
+            # with the generic red-gate wording below). Only a plain
+            # iteration-budget exhaustion falls through to that wording.
+            if decision.repeat_failure or boss.usd_left <= 0:
+                trace["reason"] = decision.reason
+            else:
+                trace["reason"] = (
+                    "red gate: no new test was observed failing. A test that passes before "
+                    "any code exists proves nothing."
+                )
             trace["red_ids"] = []
             trace["scope_violations"] = list(scope_violations)
-            return _finish(contract, trace, write_trace, source_repo=source_repo, cleanup=cleanup)
+            return _finish(
+                contract, trace, write_trace,
+                source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+            )
         previous_test_signature = signature
 
     trace["red_ids"] = sorted(red_ids)
@@ -559,7 +592,10 @@ def run(  # noqa: PLR0915
     trace["gate"] = decision.gate
     trace["reason"] = decision.reason
     trace["plan"] = plan.summary()
-    return _finish(contract, trace, write_trace, source_repo=source_repo, cleanup=cleanup)
+    return _finish(
+        contract, trace, write_trace,
+        source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+    )
 
 
 def _mark_proven(plan: steps.Plan, passing: set[str], repo: Path) -> steps.Plan:
@@ -588,6 +624,24 @@ def _mark_proven(plan: steps.Plan, passing: set[str], repo: Path) -> steps.Plan:
     return plan
 
 
+def _read_state(path: Path) -> dict | None:
+    """The previous `state.json`, or None the first time this ticket runs.
+
+    A file that exists but will not parse is corrupt, and a corrupt state is
+    never a fresh start: raise so the caller fails closed before a single
+    baseline test runs, let alone a backend call.
+    """
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ContractError(f"{path} is corrupt: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ContractError(f"{path} is corrupt: not a JSON object")
+    return payload
+
+
 def _finish(
     contract: Contract,
     trace: dict,
@@ -595,6 +649,7 @@ def _finish(
     *,
     source_repo: Path | None = None,
     cleanup: bool = False,
+    previous_runs: int = 0,
 ) -> dict:
     trace.setdefault("gate", gates.ESCALATE)
     if write_trace:
@@ -604,6 +659,14 @@ def _finish(
         (out / "last-implementer.json").write_text(json.dumps(trace, indent=2), encoding="utf-8")
         exit_code = 0 if trace.get("gate") == gates.PASS else 1
         receipt.write(contract.repo, exit_code, list(trace.get("red_ids") or []))
+        state = {
+            "runs": previous_runs + 1,
+            "last_gate": trace.get("gate"),
+            "last_reason": trace.get("reason"),
+            "last_run_at": trace["written_at"],
+            "loop": LOOP,
+        }
+        (out / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
     if source_repo is not None:
         # Never removed automatically. `cleanup` is the one explicit flag
         # that does; otherwise `main` prints the path and the command to do
@@ -644,19 +707,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    trace = run(
-        repo=args.repo,
-        ticket_id=args.ticket,
-        doer=args.doer,
-        budget=args.budget,
-        cleanup=args.cleanup,
-    )
+    try:
+        trace = run(
+            repo=args.repo,
+            ticket_id=args.ticket,
+            doer=args.doer,
+            budget=args.budget,
+            cleanup=args.cleanup,
+        )
+    except ContractError as exc:
+        print(f"error: {exc}")
+        return 1
+
     print(trace.get("rubric", ""))
     print()
     print(f"gate: {trace['gate']}")
     print(f"reason: {trace['reason']}")
     _print_worktree_status(trace)
-    return 0 if trace["gate"] == gates.PASS else 1
+    return 0 if trace["gate"] == gates.PASS else 2
 
 
 if __name__ == "__main__":
