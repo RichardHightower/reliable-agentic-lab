@@ -2014,6 +2014,9 @@ class Paper:
             charts=self._loaded_charts(),
             allowed_domains=self.allowed_domains,
             loop_doctrine=self.loop_doctrine,
+            # `self.plan`'s sections carry `key_questions`, so `question_heading`
+            # can grade a heading against them, not only against "ends in ?". #463.
+            outline=self.plan,
         )
         self.paper_path.write_text(body, encoding="utf-8")
         # A warning is not a failure. Filing both under one key made a short
