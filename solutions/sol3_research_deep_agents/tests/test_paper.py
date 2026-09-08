@@ -1102,6 +1102,70 @@ def test_a_shortfall_hedges_the_writer_brief(offline, run_dir, stub_renderer):
     ), "at least one section's brief must carry the shortfall hedge"
 
 
+def test_stage_write_fails_an_uncited_ledger_guideline_and_briefs_it(offline, run_dir, stub_renderer):
+    """#517 follow-up 3. `guideline_brief`'s call site inside `stage_write`
+    is what a live run actually executes, not only the unit call to
+    `sections.guideline_brief`/`section_check`. A guideline injected into
+    the ledger, on topic for a recorded section and never cited by it,
+    fails `guideline_cited` on that section's own `section-check.json`
+    (and, since #517 also makes Deep Agents enforce that row, stops the
+    section the same way `stub` always has), and the writer's own prompt
+    for that section names the source and its number.
+    """
+    import evidence  # noqa: PLC0415
+
+    offline.stage_corpus()
+    offline.stage_scout()
+    offline.stage_plan()
+    offline.stage_sources()
+    offline.stage_search()
+    offline.stage_verify()
+    offline.stage_outline()
+    offline.stage_charts()
+
+    target = next(s for s in offline.outline["sections"] if s["heading"] == "Independent verification")
+    target["key_questions"] = list(target.get("key_questions") or []) + [
+        "what does the verification checkpoint require for safety"
+    ]
+
+    guideline = offline.ledger.add_source(
+        evidence.SourceDocument(
+            title="Practice Guideline on Verification Checkpoint Safety",
+            url="https://example.org/verification-guideline",
+            subject="verification",
+            tier="position_stand_or_guideline",
+        )
+    )
+    offline.ledger.add_claim(
+        evidence.Claim(
+            text="A guideline sets the checkpoint bar.",
+            subject="verification",
+            source_ids=[guideline.id],
+        )
+    )
+
+    prompts = {}
+    real_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        if role == "writer" and "'Independent verification' section" in prompt:
+            prompts["Independent verification"] = prompt
+        return real_ask(role, prompt)
+
+    offline.runner.ask = spy
+    with pytest.raises(GateFailed) as exc:
+        offline.stage_write()
+    assert "guideline_cited" in exc.value.signature
+
+    score = json.loads(
+        (run_dir / "knowledge" / "independent-verification" / "section-check.json").read_text()
+    )
+    assert "guideline_cited" in score["signature"]
+
+    prompt = prompts["Independent verification"]
+    assert "Practice Guideline on Verification Checkpoint Safety" in prompt
+
+
 def test_redraw_state_does_not_leak_into_a_later_call(
     offline, run_dir, stub_renderer, monkeypatch
 ):

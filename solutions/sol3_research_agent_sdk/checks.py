@@ -2138,6 +2138,14 @@ def guideline_ledger_matches(ledger_sources: list[dict], section: dict, topic: s
     guideline retrieved for an unrelated question must not be forced on a
     section that never asked about it.
 
+    `source_policy.GUIDELINE_VOCABULARY` (position, stand, guideline,
+    consensus, statement, practice, clinical) is dropped from both sides
+    before the overlap is counted. #517 follow-up 1: without this, a key
+    question that names the tier itself, "what does the position stand say
+    about training load", shared "position" and "stand" with any title
+    beginning "Position Stand on ...", pulling in a guideline from any
+    unrelated field.
+
     Called from `section_check`'s `guideline_cited` and `grounded` rows,
     and from `sections.py`'s writer brief, so the row that requires a
     citation and the row that would otherwise call it dangling never
@@ -2145,7 +2153,11 @@ def guideline_ledger_matches(ledger_sources: list[dict], section: dict, topic: s
     """
     if not ledger_sources or not _is_guideline_topic(section):
         return []
-    target_terms = _coverage_terms(
+
+    def content_terms(text: str) -> set[str]:
+        return _coverage_terms(text) - source_policy.GUIDELINE_VOCABULARY
+
+    target_terms = content_terms(
         " ".join(
             [str(topic or "")]
             + [
@@ -2161,7 +2173,7 @@ def guideline_ledger_matches(ledger_sources: list[dict], section: dict, topic: s
     for source in ledger_sources:
         if not isinstance(source, dict) or source.get("tier") != "position_stand_or_guideline":
             continue
-        source_terms = _coverage_terms(f"{source.get('title') or ''} {source.get('abstract') or ''}")
+        source_terms = content_terms(f"{source.get('title') or ''} {source.get('abstract') or ''}")
         if len(source_terms & target_terms) >= 2:
             matches.append(source)
     return matches

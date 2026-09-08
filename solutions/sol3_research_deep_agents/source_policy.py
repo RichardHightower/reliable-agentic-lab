@@ -371,6 +371,20 @@ GUIDELINE_TITLE = re.compile(
     r"\b(position stand|consensus statement|practice guideline|clinical guideline)\b", re.IGNORECASE
 )
 
+# #517 follow-up 1. The exact words `GUIDELINE_TITLE` matches on, extracted
+# from the pattern rather than retyped so the two can never drift apart. A
+# title heuristic that admits a source must not also let its own naming
+# vocabulary count as evidence that the source is on some section's topic:
+# a key question that literally asks about "the position stand" shares
+# "position" and "stand" with any title beginning "Position Stand on ...",
+# whatever that title is actually about. `sections.guideline_ledger_matches`
+# drops these words from both sides of its two-term test before comparing.
+GUIDELINE_VOCABULARY = frozenset(
+    word
+    for phrase in GUIDELINE_TITLE.pattern.removeprefix(r"\b(").removesuffix(r")\b").split("|")
+    for word in phrase.split()
+)
+
 # #475. The vocabulary a planner's `evidence_requirements.study_types` may
 # name: `TIERS`'s own values, plus `other`, the untiered default `tier_for`
 # returns. One source of truth for the planner card's schema and

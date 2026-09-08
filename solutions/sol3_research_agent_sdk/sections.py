@@ -896,26 +896,50 @@ def _write_findings(run, section_id: str, payload: dict) -> None:
 
 
 def _ledger_guideline_sources(run, section_id: str) -> list[dict]:
-    """Every `position_stand_or_guideline`-tier source the run has retrieved
-    so far, from any section's `findings.json` except this one. #517
+    """Every `position_stand_or_guideline`-tier source an earlier section has
+    already retrieved, by the approved outline's own order. #517
 
     Sections run forward-only (`paper.do_sections`), one fully finished
-    before the next starts, so every prior section's `findings.json` is
-    already on disk by the time this one is checked and written; this
-    section's own findings reach `checks.section_check` through `findings`
-    already, so they are excluded here rather than counted twice.
+    before the next starts, so on a fresh run every earlier section's
+    `findings.json` is already on disk and no later one is. #517 follow-up
+    6: a resumed or `--reuse-research` run can already hold a later
+    section's `findings.json` from an earlier, interrupted pass, so
+    filtering by disk presence alone would show this section a guideline
+    a fresh run never would have. The outline's own order, not the
+    filesystem, decides "earlier": a section not in `order` at all (a test
+    double with no approved outline) falls back to every other file, the
+    behaviour before this ticket.
+
+    This section's own findings reach `checks.section_check` through
+    `findings` already, so they are excluded here rather than counted
+    twice, whichever branch decides "earlier".
 
     Each entry is registered for a citation number here, the same call
     `run_section` already makes for this section's own findings, so a
     guideline the writer is told to cite is never one `citations.register`
-    has not yet given a number.
+    has not yet given a number. Registration is idempotent by construction
+    (`citations.register` reuses a url's existing number), so calling this
+    again on a resume never re-adds or renumbers a guideline it already
+    gave one to.
     """
     root = run.file("knowledge")
     if not root.is_dir():
         return []
+    try:
+        import paper as paper_mod  # noqa: PLC0415
+
+        order = [item["id"] for item in paper_mod.approved_outline(run).get("sections") or []]
+    except Exception:
+        order = []
+    position = {sid: index for index, sid in enumerate(order)}
+    limit = position.get(section_id)
+
     seen: dict[str, dict] = {}
     for fpath in sorted(root.glob("*/findings.json")):
-        if fpath.parent.name == section_id:
+        sid = fpath.parent.name
+        if sid == section_id:
+            continue
+        if limit is not None and position.get(sid, -1) >= limit:
             continue
         try:
             payload = json.loads(fpath.read_text(encoding="utf-8"))
@@ -927,6 +951,16 @@ def _ledger_guideline_sources(run, section_id: str) -> list[dict]:
                 continue
             url = str(source.get("url_or_path") or "")
             if not url or url in seen:
+                continue
+            # #517 follow-up 5. `citations.register` below raises on anything
+            # that is not `http(s)`. A live run's own locator already drops a
+            # corpus key or `brain:` reference before it ever reaches
+            # `findings.json`, so this is a defence against a stale or
+            # hand-edited work directory, not a path a fresh run takes: skip
+            # the source rather than let one unrelated section's guideline
+            # crash a later section's own check.
+            if not url.lower().startswith(("http://", "https://")):
+                run.log(f"    {section_id} ledger scan: skipping {url!r}, not a url a reader can open")
                 continue
             seen[url] = {
                 "url": url,
@@ -965,8 +999,9 @@ def _guideline_brief(section: dict, ledger_sources: list[dict], topic: str, boun
         return ""
     return (
         "The ledger already holds these guideline or position-stand sources, "
-        "retrieved while researching another section. Cite the one(s) this "
-        "section actually discusses, by their reference number:\n" + "\n".join(lines)
+        "retrieved while researching another section, on this section's own "
+        "topic. Every one listed here must be cited, by its reference "
+        "number:\n" + "\n".join(lines)
     )
 
 

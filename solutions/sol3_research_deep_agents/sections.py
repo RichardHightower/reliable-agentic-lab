@@ -17,6 +17,7 @@ from pathlib import Path
 
 import evidence
 import paper_check
+import source_policy
 from paper_check import Check, PaperScore
 
 STUB = re.compile(r"\bTODO\b|\[placeholder\]|lorem ipsum", re.I)
@@ -238,6 +239,14 @@ def guideline_ledger_matches(ledger_sources: list[dict], section: dict, topic: s
     already applies it, with the paper topic or this section's own key
     questions. One shared word is not on topic.
 
+    `source_policy.GUIDELINE_VOCABULARY` (position, stand, guideline,
+    consensus, statement, practice, clinical) is dropped from both sides
+    before the overlap is counted. #517 follow-up 1: without this, a key
+    question that names the tier itself, "what does the position stand say
+    about training load", shared "position" and "stand" with any title
+    beginning "Position Stand on ...", pulling in a guideline from any
+    unrelated field.
+
     Called from `section_check`'s `guideline_cited` and `grounded` rows, and
     from `guideline_brief`'s writer hint, so the row that requires a
     citation and the row that would otherwise call it dangling never
@@ -245,19 +254,23 @@ def guideline_ledger_matches(ledger_sources: list[dict], section: dict, topic: s
     """
     if not ledger_sources or not _is_guideline_topic(section):
         return []
+
+    def content_terms(text: str) -> set[str]:
+        return _terms(text) - source_policy.GUIDELINE_VOCABULARY
+
     parts = [str(topic or "")]
     for item in section.get("key_questions") or []:
         text = item if not isinstance(item, dict) else item.get("text") or item.get("question") or ""
         if str(text).strip():
             parts.append(str(text))
-    target_terms = _terms(" ".join(parts))
+    target_terms = content_terms(" ".join(parts))
     if not target_terms:
         return []
     matches = []
     for source in ledger_sources:
         if not isinstance(source, dict) or source.get("tier") != "position_stand_or_guideline":
             continue
-        source_terms = _terms(f"{source.get('title') or ''} {source.get('abstract') or ''}")
+        source_terms = content_terms(f"{source.get('title') or ''} {source.get('abstract') or ''}")
         if len(source_terms & target_terms) >= 2:
             matches.append(source)
     return matches
@@ -285,8 +298,9 @@ def guideline_brief(ledger, section: dict, topic: str, index: dict[str, int], al
         return "", widened
     note = (
         "The ledger already holds these guideline or position-stand sources, "
-        "retrieved while researching another section. Cite the one(s) this "
-        "section actually discusses, by their reference number:\n" + "\n".join(lines)
+        "retrieved while researching another section, on this section's own "
+        "topic. Every one listed here must be cited, by its reference "
+        "number:\n" + "\n".join(lines)
     )
     return note, widened
 
@@ -561,8 +575,15 @@ def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
 def close_section(paper, section: dict, body: str, *, force: bool = False) -> float:
     """Write findings, check, judge, and ledger for one accepted section.
 
-    Returns USD spent on the judge and ledger turns. Stub failures raise
-    GateFailed so a retry rewrites only this section.
+    Returns USD spent on the judge and ledger turns. Any hard row's failure
+    (`stub`, `cited`, `counterweighed`, `evidence_requirements_met`,
+    `guideline_cited`, and so on -- every `Check` this file does not mark
+    `hard=False`) raises `GateFailed` so a retry rewrites only this
+    section. #517 follow-up: before this, `close_section` raised only for
+    `stub`; every other hard row was written to `section-check.json` and
+    never read back, so a section that failed `guideline_cited` still
+    shipped. The SDK twin already enforces every hard row this way,
+    through `check_failed = bool(last_score.signature())`.
     """
     import stages as stages_mod  # noqa: PLC0415
     from stages import GateFailed  # noqa: PLC0415
@@ -616,8 +637,8 @@ def close_section(paper, section: dict, body: str, *, force: bool = False) -> fl
         + "\n",
         encoding="utf-8",
     )
-    if "stub" in score.signature():
-        raise GateFailed(score.report(), ("stub",))
+    if not score.passed:
+        raise GateFailed(score.report(), score.signature())
 
     usd = 0.0
     reply = paper._ask(

@@ -287,6 +287,34 @@ def test_an_off_topic_guideline_is_not_required():
     assert "guideline_cited" not in score.signature()
 
 
+def test_a_position_stand_about_an_unrelated_field_is_off_topic():
+    """#517 follow-up 1: the tier's own naming words (position, stand,
+    guideline, consensus, statement, practice, clinical) do not count
+    toward the two-term overlap. A key question that literally names the
+    tier, "what does the position stand say", shares "position" and
+    "stand" with any title beginning "Position Stand on ...", whatever
+    that title is actually about; those two words must not be enough."""
+    section = _safety_section(
+        key_questions=["what does the position stand say about training load"]
+    )
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/unrelated",
+            "title": "Position Stand on Vitamin D and Bone Density",
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 9,
+        }
+    ]
+    score = sections.section_check(
+        "A claim about training load that never cites the unrelated guideline.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
 def test_a_ledger_with_no_guideline_passes():
     """#517: a ledger holding no `position_stand_or_guideline` source at
     all passes, the same as no ledger."""
@@ -376,6 +404,25 @@ def test_guideline_ledger_sources_reads_the_whole_ledger():
     assert set(by_url) == {cited.url, uncited.url}
     assert by_url[cited.url]["number"] == 5
     assert by_url[uncited.url]["number"] == 0
+
+
+def test_widening_allowed_is_a_no_op_when_no_guideline_is_required():
+    """#517 follow-up 7: `guideline_brief` widens `allowed` before
+    `stages.write_gate` sees it. When no ledger guideline is on topic, the
+    widening must be a true no-op: a section that cites only its own
+    findings still passes `write_gate`, and `no_citation` is never armed
+    by a widening that added nothing."""
+    import evidence  # noqa: PLC0415
+    import stages  # noqa: PLC0415
+
+    ledger = evidence.Ledger("/nonexistent")
+    section = {"heading": "Background", "key_questions": ["what is the mechanism"]}
+
+    note, allowed = sections.guideline_brief(ledger, section, "", {}, [2])
+    assert note == ""
+    assert allowed == [2]
+
+    stages.write_gate("Background", "A finding about the mechanism [2]. " + ("word " * 80), allowed)
 
 
 def test_findings_from_claims_carries_the_tier_from_the_ledger():
