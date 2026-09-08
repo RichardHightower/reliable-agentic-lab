@@ -68,8 +68,17 @@ _LAST_TRACE_FILE = HARNESS_DIR + "last-implementer.json"
 # _finish's merge and were trusted by the next --resume.
 _LOOP_OUTPUTS = frozenset({steps.STEPS_FILE, _STATE_FILE, _LAST_TRACE_FILE, receipt.RECEIPT})
 
+# The three named outputs a doer can reach without ever touching a path
+# state.json's own dedicated mechanism (_state_tampered, the checkpoint's
+# tampered return, and _finish's terminal check) already covers. steps.jsonl
+# sits at the repo root, inside no role's scope; last-implementer.json and
+# receipt.json are normally written only once, at the true end of a run --
+# except on --resume, where the previous run's own copies are already on
+# disk before this run's first scan (judge of PR #527, follow-up 3).
+_HASHED_OUTPUTS = frozenset({steps.STEPS_FILE, _LAST_TRACE_FILE, receipt.RECEIPT})
 
-def _is_loop_bookkeeping(path: str, target: Path, last_steps_bytes: bytes | None) -> bool:
+
+def _is_loop_bookkeeping(path: str) -> bool:
     """`steps.jsonl` and this loop's own three `.harness/` files are its own
     output, never a role's. Excluded everywhere `rubric.changed_files` feeds
     `preexisting`, `after_test_phase`, or the code phase's own `changed`
@@ -89,19 +98,60 @@ def _is_loop_bookkeeping(path: str, target: Path, last_steps_bytes: bytes | None
     these four itself -- is still a write this loop did not make, and stays
     visible to `write_scope` and the checkpoint's own read-then-merge.
 
-    `steps.jsonl` is the one member of this set a doer can reach without
-    ever touching `.harness/`: it lives at the repo root, inside no role's
-    declared scope, and the exclusion above used to match it by name alone,
-    the same bug PR #500's judge found in `state.json` before
-    `_state_tampered` closed it. `last_steps_bytes` is this run's own last
-    write of `steps.jsonl` (set right after `plan.save`, and refreshed after
-    every `_mark_proven` save in the code loop); a `steps.jsonl` whose bytes
-    differ from that is a doer's hand, not this loop's, and stays visible to
-    `write_scope` the same way `.harness/planted.py` already does.
+    This blanket exclusion always holds, even for a tampered `steps.jsonl`,
+    `last-implementer.json`, or `receipt.json`: tampering with those three is
+    caught separately, by `_tampered_outputs`, called directly against each
+    known path rather than filtered out of `rubric.changed_files`. A doer
+    that deletes a never-tracked file leaves nothing for `git status` to
+    report (judge of PR #527, follow-up 1), so a filter over that list can
+    never see a deletion, only a change to a path that still exists.
     """
-    if path != steps.STEPS_FILE:
-        return path in _LOOP_OUTPUTS
-    return not _state_tampered(target / steps.STEPS_FILE, last_steps_bytes)
+    return path in _LOOP_OUTPUTS
+
+
+def _loop_output_tampered(path: Path, last_written: bytes | None) -> bool:
+    """True when a loop output differs from this run's own last legitimate
+    write of it: content changed, the file is gone, or a doer replaced it
+    with a symlink.
+
+    `last_written is None` means this run has not written the file yet (a
+    fresh run's first save), or -- for the two `_finish`-only files -- never
+    saw one on disk at all, so whatever is there is never mistaken for
+    tampering.
+
+    Broader than `_state_tampered`: judge of PR #527, follow-ups 1 and 2. A
+    plain unlink or a symlink swap into `app/**` both used to read as
+    bookkeeping, because `_mark_proven` recreates a missing `steps.jsonl`
+    silently and `plan.save` writes straight through a symlink. `_worktree`
+    already refuses a symlinked worktree path for the same class of reason
+    (`path.is_symlink()`, above `git worktree add`).
+    """
+    if last_written is None:
+        return False
+    if path.is_symlink():
+        return True
+    if not path.is_file():
+        return True
+    return path.read_bytes() != last_written
+
+
+def _tampered_outputs(target: Path, last_output_bytes: dict[str, bytes | None]) -> set[str]:
+    """Named loop outputs whose on-disk state no longer matches this run's
+    own last legitimate write. Checked directly against each known path,
+    not through `rubric.changed_files`: that scan can only ever report a
+    path that still exists on disk, so it is blind to a deletion (judge of
+    PR #527, follow-up 1). `last_output_bytes[steps.STEPS_FILE]` is set
+    right after `plan.save` and refreshed after every `_mark_proven` save in
+    the code loop; the other two are captured once, at the top of `run`,
+    from whatever a previous run's `_finish` may have left on disk (follow-
+    up 3). `state.json` keeps its own separate mechanism and is not part of
+    this set.
+    """
+    return {
+        name
+        for name in _HASHED_OUTPUTS
+        if _loop_output_tampered(target / name, last_output_bytes.get(name))
+    }
 
 
 def _state_tampered(path: Path, last_written: bytes | None) -> bool:
@@ -551,6 +601,20 @@ def run(  # noqa: PLR0915
     # not built here.
     last_state_bytes = state_path.read_bytes() if state_path.is_file() else None
 
+    # Judge of PR #527, follow-up 3. last-implementer.json and receipt.json
+    # are normally written only once, by _finish, after this run's last
+    # scan -- except on --resume, where the previous run's own copies are
+    # already on disk before this run's first scan. Capture them here too,
+    # the same way state.json's bytes are captured above, so a doer that
+    # rewrites either mid-run does not read as bookkeeping for the rest of
+    # this run. steps.jsonl's own entry is set right after plan.save below.
+    last_trace_path = target / _LAST_TRACE_FILE
+    last_receipt_path = target / receipt.RECEIPT
+    last_output_bytes: dict[str, bytes | None] = {
+        _LAST_TRACE_FILE: last_trace_path.read_bytes() if last_trace_path.is_file() else None,
+        receipt.RECEIPT: last_receipt_path.read_bytes() if last_receipt_path.is_file() else None,
+    }
+
     # A6 (#433). Nothing to resume is fail-closed for the same reason, and
     # checked at the same point. `_worktree` above already refused a resume
     # with no worktree at all; these two are the cases where a worktree can
@@ -610,7 +674,7 @@ def run(  # noqa: PLR0915
     # This run's own last write of steps.jsonl. `_is_loop_bookkeeping` reads
     # it back at every changed-files scan below; a doer overwrite between
     # scans shows up as a byte difference, never as a silent exclusion.
-    last_steps_bytes = (target / steps.STEPS_FILE).read_bytes()
+    last_output_bytes[steps.STEPS_FILE] = (target / steps.STEPS_FILE).read_bytes()
 
     trace: dict = {
         "ticket": the_ticket.id,
@@ -640,9 +704,7 @@ def run(  # noqa: PLR0915
         # edits tickets before the implementer runs, and blaming this loop
         # for that would fail write_scope for a change it never made.
         preexisting = {
-            path
-            for path in rubric.changed_files(target)
-            if not _is_loop_bookkeeping(path, target, last_steps_bytes)
+            path for path in rubric.changed_files(target) if not _is_loop_bookkeeping(path)
         }
 
     if resume_into_code:
@@ -688,10 +750,16 @@ def run(  # noqa: PLR0915
             after_test_phase = {
                 path
                 for path in rubric.changed_files(target)
-                if not _is_loop_bookkeeping(path, target, last_steps_bytes)
-                and path not in preexisting
+                if not _is_loop_bookkeeping(path) and path not in preexisting
             }
-            scope_violations = tester.violations(sorted(after_test_phase))
+            # `_tampered_outputs` is checked directly, not filtered from the
+            # scan above: a doer that deletes steps.jsonl leaves nothing in
+            # `after_test_phase` for `git status` to have reported (judge of
+            # PR #527, follow-up 1).
+            scope_violations = sorted(
+                set(tester.violations(sorted(after_test_phase)))
+                | _tampered_outputs(target, last_output_bytes)
+            )
             trace["test_phase"] = {
                 "attempts": attempt,
                 "wrote": list(test_result.wrote),
@@ -828,6 +896,16 @@ def run(  # noqa: PLR0915
     last_failed_rows: list[str] = []
     last_failed_tests: list[str] = []
     decision = gates.Decision(gates.RETRY, "not started")
+    # Judge of PR #527, blocking finding. `_mark_proven`'s own rewrite of
+    # steps.jsonl (below) erases a doer's overwrite of it one line after the
+    # scan that caught it, and `last_output_bytes` refreshes right after, so
+    # the very next iteration's scan reads clean. A code-turn violation has
+    # to stay flagged for the rest of the run the way `.harness/planted.py`
+    # does -- it never leaves disk, so it never leaves `changed_files` --
+    # even though this loop's own next write does repair steps.jsonl on
+    # disk. This set carries every code-phase violation forward across
+    # iterations; `_mark_proven`'s refresh never touches it.
+    code_scope_violations: set[str] = set()
 
     while True:
         iteration = boss.start_iteration()
@@ -844,17 +922,29 @@ def run(  # noqa: PLR0915
         changed = [
             c
             for c in rubric.changed_files(target)
-            if not _is_loop_bookkeeping(c, target, last_steps_bytes) and c not in preexisting
+            if not _is_loop_bookkeeping(c) and c not in preexisting
         ]
         code_phase = [path for path in changed if path not in after_test_phase]
-        violations = sorted(set(scope_violations) | set(coder.violations(code_phase)))
+        # `_tampered_outputs` is checked directly, not filtered from the scan
+        # above: a doer that deletes steps.jsonl leaves nothing in `changed`
+        # for `git status` to have reported (judge of PR #527, follow-up 1).
+        # Checked before `_mark_proven`'s refresh below, using this
+        # iteration's still-stale `last_output_bytes`, so this turn's own
+        # tamper is what gets caught, never next turn's clean scan.
+        code_scope_violations |= set(coder.violations(code_phase)) | _tampered_outputs(
+            target, last_output_bytes
+        )
+        violations = sorted(set(scope_violations) | code_scope_violations)
 
         # `_mark_proven` is this loop's own rewrite of steps.jsonl, the same
         # kind of write `plan.save` made above -- refresh the tamper baseline
         # right after it, or next iteration's scan would read this turn's own
-        # legitimate write as a doer's.
+        # legitimate write as a doer's. `code_scope_violations` above already
+        # recorded whatever this scan found, so the refresh below cannot
+        # erase the violation itself, only the evidence a later scan would
+        # otherwise need to rediscover it.
         plan = _mark_proven(plan, test_run.junit.passed_ids, target)
-        last_steps_bytes = (target / steps.STEPS_FILE).read_bytes()
+        last_output_bytes[steps.STEPS_FILE] = (target / steps.STEPS_FILE).read_bytes()
 
         score = rubric.score(
             contract=contract,
@@ -908,6 +998,12 @@ def run(  # noqa: PLR0915
     trace["gate"] = decision.gate
     trace["reason"] = decision.reason
     trace["plan"] = plan.summary()
+    # Sticky code-phase violations reach the trace here, even on an
+    # eventual "pass": as long as `code_scope_violations` is non-empty the
+    # write_scope rubric row can never pass, so `decision.gate` can never
+    # actually be PASS in that case, but the trace still has to name what
+    # made the run fail, the same as the test phase already does above.
+    trace["scope_violations"] = sorted(set(scope_violations) | code_scope_violations)
     return _finish(
         contract, trace, write_trace,
         phase="code", red_ids=red_ids, preexisting=preexisting,
