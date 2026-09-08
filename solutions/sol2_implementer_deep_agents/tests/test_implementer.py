@@ -1354,6 +1354,52 @@ def test_a_forged_state_json_overwrite_is_overwritten_back_by_the_loop(tmp_path,
     assert state["phase"] == "test"
 
 
+def test_a_forged_state_json_during_the_code_phase_escalates_at_finish(tmp_path, monkeypatch):
+    """Judge's second blocker on PR #500. The code loop has no per-attempt
+    checkpoint, so a doer that forges state.json on a code turn is only
+    caught when `_finish` reads the file back before its own terminal
+    write, comparing against the "code" checkpoint's own bytes from just
+    before the code loop started. The forged bytes never survive to disk,
+    and the escalate names the tampered path."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health,), failed=(new_test,)),  # code turn: still red, doer forges instead
+        ],
+    )
+    forged = json.dumps(
+        {
+            "phase": "test",
+            "red_ids": ["evil"],
+            "preexisting": ["haha"],
+            "test_phase_files": [],
+            "test_phase_attempts": 999,
+        }
+    )
+    backend = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [(".harness/state.json", forged)],
+        ]
+    )
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert ".harness/state.json" in trace["scope_violations"]
+    state = json.loads(
+        (Path(trace["repo"]) / ".harness" / "state.json").read_text(encoding="utf-8")
+    )
+    assert state["red_ids"] == [new_test]
+    assert state["preexisting"] == []
+    assert state["phase"] == "code"
+
+
 def test_resume_after_a_killed_code_phase_reenters_the_code_loop(tmp_path, monkeypatch):
     """A killed code phase checkpoints state.json at phase="code". --resume
     must not call the test-implementer backend again -- it must not rewrite

@@ -92,6 +92,27 @@ def _is_loop_bookkeeping(path: str) -> bool:
     return path in _LOOP_OUTPUTS
 
 
+def _state_tampered(path: Path, last_written: bytes | None) -> bool:
+    """True when `state.json` exists and its bytes differ from what this
+    run's own last write put there.
+
+    Judge of PR #500, second finding: excluding `state.json` from
+    `write_scope` (above) means an overwrite of it is otherwise invisible.
+    Only `_write_checkpoint` and `_finish` have a legitimate reason to touch
+    this file, so any other difference from the bytes this run itself last
+    wrote is a doer's hand, not a checkpoint.
+
+    `last_written is None` means this run has not written the file yet
+    (the very first checkpoint of a fresh run, or a resume that goes
+    straight to the code loop before ever calling `_write_checkpoint`), so
+    whatever is already there -- a previous run's own trustworthy leftover
+    state, or nothing at all -- is never mistaken for tampering. A missing
+    file is likewise not tampering: `_write_checkpoint` and `_finish`
+    recreate it either way.
+    """
+    return last_written is not None and path.is_file() and path.read_bytes() != last_written
+
+
 def plan_for(target_ticket: tickets.Ticket) -> steps.Plan:
     """A plan derived from the ticket, one test step and one code step per criterion.
 
@@ -452,6 +473,14 @@ def run(  # noqa: PLR0915
     resume: the worktree already holds the ticket the killed run used, and
     an enhancer edit made between the kill and the resume would otherwise
     show up as an untracked diff to a path neither role's scope covers.
+
+    `_write_checkpoint` and `_finish` both write `state.json` from the
+    values this function computed, never by merging whatever is already on
+    disk, and both refuse to trust a `state.json` that changed since this
+    run's own last write of it (`_state_tampered`). Live doers are fenced
+    from `.harness/` by their role's own tool restrictions, so only an
+    offline scripted backend -- exactly what this file's own tests use --
+    can reach `state.json` directly; a real doer with a live key cannot.
     """
     contract = Contract(repo)
     contract.validate()
@@ -463,8 +492,16 @@ def run(  # noqa: PLR0915
 
     # A corrupt state.json is never a fresh start: fail closed before the
     # ticket loads, before the baseline test runs, before any backend call.
-    previous_state = _read_state(target / ".harness" / "state.json")
+    state_path = target / ".harness" / "state.json"
+    previous_state = _read_state(state_path)
     previous_runs = previous_state.get("runs", 0) if previous_state else 0
+    # ponytail: the tamper check below can only compare against bytes this
+    # process itself wrote or read. A forge followed by a kill before the
+    # loop's next write leaves no earlier-known-good copy to fall back to,
+    # and the next --resume reads the forged file as-is. Closing that needs
+    # a second, append-only copy of state.json outside the doer's reach;
+    # not built here.
+    last_state_bytes = state_path.read_bytes() if state_path.is_file() else None
 
     # A6 (#433). Nothing to resume is fail-closed for the same reason, and
     # checked at the same point. `_worktree` above already refused a resume
@@ -529,9 +566,10 @@ def run(  # noqa: PLR0915
         red_ids = set(previous_state.get("red_ids") or [])
         after_test_phase = set(previous_state.get("test_phase_files") or [])
         scope_violations: list[str] = []
+        test_phase_attempts = previous_state.get("test_phase_attempts", 0)
         trace["red_ids"] = sorted(red_ids)
         trace["test_phase"] = {
-            "attempts": previous_state.get("test_phase_attempts", 0),
+            "attempts": test_phase_attempts,
             "files": sorted(after_test_phase),
             "violations": [],
             "resumed": True,
@@ -578,19 +616,28 @@ def run(  # noqa: PLR0915
             # A6 (#433). Checkpointed before the next line can escalate, or
             # this process can be killed outright, so a resume always finds
             # a phase to read: "test" until the red gate is satisfied,
-            # "code" once it flips just below the loop.
-            _write_checkpoint(
+            # "code" once it flips just below the loop. Judge of PR #500,
+            # second finding: this read-back happens before the write, so a
+            # doer that reached `.harness/state.json` since the loop's own
+            # last write of it (`last_state_bytes`) is caught here, not
+            # trusted.
+            last_state_bytes, tampered = _write_checkpoint(
                 harness_dir,
                 phase="test",
                 red_ids=red_ids,
                 preexisting=preexisting,
                 test_phase_files=after_test_phase,
                 test_phase_attempts=attempt,
+                last_written=last_state_bytes,
             )
+            if tampered:
+                scope_violations = sorted(set(scope_violations) | {_STATE_FILE})
+                trace["test_phase"]["violations"] = list(scope_violations)
 
             # Step 4. The red gate. A scope violation escalates on the turn
             # it happens; the test phase never gets a second try to stay in
-            # scope.
+            # scope. A tampered state.json is folded into the same
+            # violations set above, so it escalates through this one path.
             if scope_violations:
                 trace["test_phase_scope_violations"] = sorted(scope_violations)
                 trace["scope_violations"] = sorted(scope_violations)
@@ -601,6 +648,9 @@ def run(  # noqa: PLR0915
                 trace["red_ids"] = sorted(red_ids)
                 return _finish(
                     contract, trace, write_trace,
+                    phase="test", red_ids=red_ids, preexisting=preexisting,
+                    test_phase_files=after_test_phase, test_phase_attempts=attempt,
+                    last_written=last_state_bytes,
                     source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
                 )
 
@@ -653,19 +703,36 @@ def run(  # noqa: PLR0915
                 trace["scope_violations"] = list(scope_violations)
                 return _finish(
                     contract, trace, write_trace,
+                    phase="test", red_ids=red_ids, preexisting=preexisting,
+                    test_phase_files=after_test_phase, test_phase_attempts=attempt,
+                    last_written=last_state_bytes,
                     source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
                 )
             previous_test_signature = signature
 
         trace["red_ids"] = sorted(red_ids)
-        _write_checkpoint(
+        test_phase_attempts = attempt
+        last_state_bytes, tampered = _write_checkpoint(
             harness_dir,
             phase="code",
             red_ids=red_ids,
             preexisting=preexisting,
             test_phase_files=after_test_phase,
             test_phase_attempts=attempt,
+            last_written=last_state_bytes,
         )
+        if tampered:
+            trace["gate"] = gates.ESCALATE
+            trace["reason"] = "test phase wrote outside its scope: " + _STATE_FILE
+            trace["scope_violations"] = [_STATE_FILE]
+            trace["red_ids"] = sorted(red_ids)
+            return _finish(
+                contract, trace, write_trace,
+                phase="test", red_ids=red_ids, preexisting=preexisting,
+                test_phase_files=after_test_phase, test_phase_attempts=attempt,
+                last_written=last_state_bytes,
+                source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+            )
 
     # Steps 5 to 8. Code until green, then judge.
     coder = cast["code_implementer"]
@@ -749,6 +816,9 @@ def run(  # noqa: PLR0915
     trace["plan"] = plan.summary()
     return _finish(
         contract, trace, write_trace,
+        phase="code", red_ids=red_ids, preexisting=preexisting,
+        test_phase_files=after_test_phase, test_phase_attempts=test_phase_attempts,
+        last_written=last_state_bytes,
         source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
     )
 
@@ -831,18 +901,25 @@ def _write_checkpoint(
     preexisting,
     test_phase_files,
     test_phase_attempts: int,
-) -> None:
+    last_written: bytes | None = None,
+) -> tuple[bytes, bool]:
     """A resume-only checkpoint, written before this process might be killed.
 
     Merged onto whatever `state.json` already holds, so a previous run's
     `runs`, `last_gate`, `last_reason`, and `last_run_at` survive; only the
     fields a `--resume` needs to re-enter mid-run are replaced. `_finish`'s
-    own write, at the true end of a run, merges onto this the same way, so
-    the terminal `state.json` still names the phase and files a resume would
-    need if that run itself ended in an escalate rather than a pass.
+    own write, at the true end of a run, writes these same fields fresh from
+    `run()`'s own values (never by merging), so the terminal `state.json`
+    still names the phase and files a resume would need if that run itself
+    ended in an escalate rather than a pass.
+
+    Returns the bytes just written, and whether the file had already been
+    tampered with (`_state_tampered`) before this write -- the caller is the
+    one that knows which phase is running, so it decides how to escalate.
     """
     harness_dir.mkdir(parents=True, exist_ok=True)
     state_path = harness_dir / "state.json"
+    tampered = _state_tampered(state_path, last_written)
     state = _read_state(state_path) or {}
     state.update(
         {
@@ -853,7 +930,9 @@ def _write_checkpoint(
             "test_phase_attempts": test_phase_attempts,
         }
     )
-    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    payload = json.dumps(state, indent=2).encode("utf-8")
+    state_path.write_bytes(payload)
+    return payload, tampered
 
 
 def _finish(
@@ -861,6 +940,12 @@ def _finish(
     trace: dict,
     write_trace: bool,
     *,
+    phase: str,
+    red_ids,
+    preexisting,
+    test_phase_files,
+    test_phase_attempts: int,
+    last_written: bytes | None = None,
     source_repo: Path | None = None,
     cleanup: bool = False,
     previous_runs: int = 0,
@@ -869,25 +954,40 @@ def _finish(
     if write_trace:
         out = contract.repo / ".harness"
         out.mkdir(parents=True, exist_ok=True)
+        state_path = out / "state.json"
+        if _state_tampered(state_path, last_written):
+            # Judge of PR #500, second finding. A doer that forges
+            # state.json on a code turn is never checkpointed mid-loop (the
+            # code loop has none), so this terminal read-back is the first
+            # chance to catch it. Escalate through the same wording the
+            # test phase already uses, whichever phase this call names.
+            trace["gate"] = gates.ESCALATE
+            trace["reason"] = f"{phase} phase wrote outside its scope: {_STATE_FILE}"
+            trace["scope_violations"] = sorted(
+                set(trace.get("scope_violations") or []) | {_STATE_FILE}
+            )
         trace["written_at"] = time.time()
         (out / "last-implementer.json").write_text(json.dumps(trace, indent=2), encoding="utf-8")
         exit_code = 0 if trace.get("gate") == gates.PASS else 1
         receipt.write(contract.repo, exit_code, list(trace.get("red_ids") or []))
-        # Merge onto the checkpoint `_write_checkpoint` already left behind
-        # in this same run, rather than overwriting it: `phase`, `red_ids`,
-        # `preexisting`, and `test_phase_files` already name where this run
-        # ended, and a resume of an escalating run reads those back.
-        state_path = out / "state.json"
-        state = _read_state(state_path) or {}
-        state.update(
-            {
-                "runs": previous_runs + 1,
-                "last_gate": trace.get("gate"),
-                "last_reason": trace.get("reason"),
-                "last_run_at": trace["written_at"],
-                "loop": LOOP,
-            }
-        )
+        # Every key, written fresh from what `run()` itself computed this
+        # call -- never merged from whatever is on disk. A merge is exactly
+        # what let a doer's forged `red_ids` and `preexisting` survive into
+        # the next `--resume` (judge of PR #500): only `runs` needs the old
+        # file at all, and that value came from `previous_runs`, captured at
+        # the head of `run()`, not from this read.
+        state = {
+            "runs": previous_runs + 1,
+            "last_gate": trace.get("gate"),
+            "last_reason": trace.get("reason"),
+            "last_run_at": trace["written_at"],
+            "loop": LOOP,
+            "phase": phase,
+            "red_ids": sorted(red_ids),
+            "preexisting": sorted(preexisting),
+            "test_phase_files": sorted(test_phase_files),
+            "test_phase_attempts": test_phase_attempts,
+        }
         state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
     if source_repo is not None:
         # Never removed automatically. `cleanup` is the one explicit flag
