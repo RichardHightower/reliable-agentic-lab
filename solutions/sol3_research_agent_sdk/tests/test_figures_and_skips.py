@@ -85,6 +85,32 @@ def test_figures_are_numbered_in_body_order(work, turns):
     assert placed[1]["section"] == "limitations"
 
 
+def test_a_caption_is_exempt_from_noun_stack():
+    """A caption is system-generated from a diagram's own node labels, not
+    prose a writer composed; it is not held to the STE noun-cluster
+    advisory the way a written sentence is.
+    """
+    assert checks.noun_stacks("Figure 1. A loop harness gate ledger diagram.") == []
+    assert checks.noun_stacks("A loop harness gate ledger diagram.") != []
+
+
+def test_two_similar_captions_are_not_a_caveat_once_repeat():
+    """Two auto-described diagrams of the same paper share enough
+    boilerplate wording to Jaccard-match each other; the `Figure N.`
+    caption line itself is exempt from the scan that finds a repeat.
+    """
+    body = (
+        "# On a topic\n\n"
+        "## Discussion\n\nA point. [1]\n\n"
+        "![a](diagrams/a_imagen.png)\n\n"
+        "Figure 1. A flowchart diagram of Exit conditions, showing Turn ends, Done?.\n\n"
+        "## Limitations\n\nA different point. [1]\n\n"
+        "![b](diagrams/b_imagen.png)\n\n"
+        "Figure 2. A sequence diagram of Exit conditions, showing Maker, Checker.\n"
+    )
+    assert "caveat_once" not in checks.check(body, ["https://a"]).signature()
+
+
 # -- figure_referenced --------------------------------------------------
 
 
@@ -126,6 +152,30 @@ def test_the_whole_paper_pass_adds_the_figure_mention(work, turns):
     # section's own file.
     limitations = (Path(work) / "sections" / "limitations.md").read_text(encoding="utf-8")
     assert "A different point." in limitations
+
+
+def test_two_figure_mentions_never_collide_on_caveat_once():
+    """A live run's two diagrams often carry near-identical boilerplate
+    captions ("A flowchart diagram of <topic>, showing ..."). The mention
+    sentence a whole-paper pass adds for each must not shingle identically
+    once its own figure number is dropped (`WORD` ignores bare digits), or
+    two different figures' own mentions read as the same repeated sentence.
+    """
+    import turns as turns_mod  # noqa: PLC0415
+
+    one = turns_mod._figure_mention_sentence(
+        1, "A flowchart diagram of Exit conditions, showing Turn ends, Done?."
+    )
+    two = turns_mod._figure_mention_sentence(
+        2, "A sequence diagram of Exit conditions, showing Maker, Checker."
+    )
+    assert one != two
+    body = (
+        "# On a topic\n\n"
+        f"## Discussion\n\n{one} [1]\n\n"
+        f"## Limitations\n\n{two} [1]\n"
+    )
+    assert "caveat_once" not in checks.check(body, ["https://a"]).signature()
 
 
 def test_figure_referenced_never_demands_a_skipped_figures_mention():

@@ -193,7 +193,7 @@ def test_collapse_never_flattens_a_same_block_figure_line():
     body = (
         "# On a topic\n\n"
         "## Discussion\n\nA point. [1]\n\n"
-        f"## Conclusion\n\n{pointer} {pointer} [1]\n"
+        f"## Conclusion\n\n{pointer} {pointer}\n"
         "![fig](diagrams/fig_imagen.png)\n"
     )
     collapsed = checks.collapse_repeated_back_references(body)

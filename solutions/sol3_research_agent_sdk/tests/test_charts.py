@@ -372,3 +372,14 @@ def test_do_charts_skips_a_figure_the_ledger_serves_with_one_number(work, turns,
     meta = paper.do_charts(run)
     assert meta["skipped"] == 1, meta
     assert meta["rendered"] == 0, meta
+    # #386, #464. Named, not a bare string: a reader (and `assemble`) needs
+    # the owning section and the reason, not only the fact that one figure
+    # never rendered.
+    recorded = json.loads((Path(work) / "charts.json").read_text())["skipped"]
+    assert recorded == [
+        {
+            "name": "token-cost-multipliers",
+            "section": "s1",
+            "reason": "1 value, a sentence, not a chart",
+        }
+    ], recorded
