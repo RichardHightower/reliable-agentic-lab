@@ -2120,6 +2120,53 @@ def _is_guideline_topic(section: dict) -> bool:
     return any(word in f"{heading} {questions}" for word in GUIDELINE_TOPIC_WORDS)
 
 
+def guideline_ledger_matches(ledger_sources: list[dict], section: dict, topic: str = "") -> list[dict]:
+    """The run's ledger-wide guideline sources this section must reckon with. #517
+
+    `ledger_sources` is every `position_stand_or_guideline`-tier source the
+    whole run has retrieved so far, from whichever section's research found
+    it, not only this section's own `findings`. #473's own wiring graded a
+    section against its own evidence alone, so a position stand retrieved
+    for the introduction and never cited by the safety section it actually
+    answers passed unnoticed.
+
+    A source only counts here when the section itself is about safety,
+    dosing, or protocol (`_is_guideline_topic`) and its title or abstract
+    shares at least two content terms, `COVERAGE_STOP` applied the same way
+    `_coverage_terms` already applies it, with the paper topic or this
+    section's own key questions. One shared word is not on topic; a title
+    guideline retrieved for an unrelated question must not be forced on a
+    section that never asked about it.
+
+    Called from `section_check`'s `guideline_cited` and `grounded` rows,
+    and from `sections.py`'s writer brief, so the row that requires a
+    citation and the row that would otherwise call it dangling never
+    disagree about which sources are in play.
+    """
+    if not ledger_sources or not _is_guideline_topic(section):
+        return []
+    target_terms = _coverage_terms(
+        " ".join(
+            [str(topic or "")]
+            + [
+                text
+                for text in (question_text(item) for item in section.get("key_questions") or [])
+                if text
+            ]
+        )
+    )
+    if not target_terms:
+        return []
+    matches = []
+    for source in ledger_sources:
+        if not isinstance(source, dict) or source.get("tier") != "position_stand_or_guideline":
+            continue
+        source_terms = _coverage_terms(f"{source.get('title') or ''} {source.get('abstract') or ''}")
+        if len(source_terms & target_terms) >= 2:
+            matches.append(source)
+    return matches
+
+
 def section_check(
     body: str,
     *,
@@ -2129,10 +2176,16 @@ def section_check(
     word_target: int = 0,
     figures_given: list | None = None,
     evidence_requirements_unmet: dict[str, str] | None = None,
+    ledger_sources: list[dict] | None = None,
+    topic: str = "",
 ) -> Score:
     """Eleven deterministic rows on one section, before any judge."""
     section = section or {}
     findings = findings or []
+    # #517. Computed once, reused by `grounded` (so a citation `guideline_cited`
+    # demands below is never also read back as a dangling marker) and by
+    # `guideline_cited` itself.
+    ledger_guidelines = guideline_ledger_matches(ledger_sources or [], section, topic)
     checks: list[Check] = []
     target = int(word_target or section.get("word_target") or 0)
     words = word_count(body)
@@ -2196,6 +2249,10 @@ def section_check(
     )
 
     numbers = {str(f.get("number") or "") for f in findings if f.get("number")}
+    # #517. A ledger guideline `guideline_cited` requires below is a real,
+    # run-wide reference number even when it never reached this section's
+    # own findings. Without this, citing it here read as dangling.
+    numbers |= {str(source.get("number")) for source in ledger_guidelines if source.get("number")}
     ids = {str(f.get("id") or "") for f in findings}
     dangling = []
     # A citation is grounded when it names a finding, by its number or by its
@@ -2271,33 +2328,51 @@ def section_check(
         Check("style", not style_hits, "clean" if not style_hits else ", ".join(style_hits))
     )
 
-    # #473. A section about safety, dosing, or protocol re-derives from
+    # #473 #517. A section about safety, dosing, or protocol re-derives from
     # primaries exactly what a position stand or guideline already answers,
     # unless it is made to cite one. Graded against `findings` (this call's
-    # own evidence), not a whole-run source ledger this function has no
-    # access to without opening `assemble`: a section with no
-    # `position_stand_or_guideline` source among its own findings passes.
-    guideline_numbers = set()
+    # own evidence) and, since #517, `ledger_guidelines`: every on-topic
+    # `position_stand_or_guideline` source the whole run has retrieved so
+    # far, whichever section's research found it. A guideline retrieved for
+    # the introduction and never cited by the safety section it actually
+    # answers now fails here, naming the source and its number. A section
+    # with neither kind of guideline source passes, as before.
+    named_guidelines: dict[int, str] = {}
     for f in findings:
         if f.get("tier") != "position_stand_or_guideline" or not f.get("number"):
             continue
         try:
-            guideline_numbers.add(int(f["number"]))
+            number = int(f["number"])
         except (TypeError, ValueError):
             # A truthy, non-numeric `number` is not this row's problem to
             # raise on; every current producer supplies an int. #473
             continue
-    guideline_numbers = sorted(guideline_numbers)
+        named_guidelines.setdefault(number, str(f.get("title") or ""))
+    for source in ledger_guidelines:
+        number = source.get("number")
+        if not number:
+            # Not yet in the run's citation registry. The writer brief
+            # (`sections.py`) still lists it with the citation form the
+            # port uses; nothing here can fail a section on a number that
+            # does not exist yet. #517
+            continue
+        try:
+            number = int(number)
+        except (TypeError, ValueError):
+            continue
+        named_guidelines.setdefault(number, str(source.get("title") or ""))
     missing_guideline = (
-        [number for number in guideline_numbers if f"[{number}]" not in body]
-        if guideline_numbers and _is_guideline_topic(section)
+        sorted((number, title) for number, title in named_guidelines.items() if f"[{number}]" not in body)
+        if named_guidelines and _is_guideline_topic(section)
         else []
     )
     checks.append(
         Check(
             "guideline_cited",
             not missing_guideline,
-            "every position stand is cited" if not missing_guideline else f"missing: {missing_guideline}",
+            "every position stand is cited"
+            if not missing_guideline
+            else "missing: " + ", ".join(f"{title or 'untitled'} [{number}]" for number, title in missing_guideline),
         )
     )
 

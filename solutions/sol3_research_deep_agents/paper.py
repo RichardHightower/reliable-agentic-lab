@@ -2437,7 +2437,15 @@ class Paper:
                     if sid in index
                 }
             )
+            # #517. Every on-topic guideline the ledger already holds from
+            # another section's research, named for the writer and added to
+            # `allowed` so citing it here is never read as a stray citation.
+            guideline_note, allowed = sections.guideline_brief(
+                self.ledger, section, self.topic, index, allowed
+            )
             briefs = "\n".join(stages.claim_brief(self.ledger, cid, index) for cid in claim_ids)
+            if guideline_note:
+                briefs = f"{briefs}\n{guideline_note}" if briefs else guideline_note
             word_range = _section_word_range(heading, len(claim_ids))
             # #475, judge revision on #520: a question graded and still
             # short after its one shot travels as a named gap, not a run
@@ -2587,7 +2595,15 @@ class Paper:
                     if source_id in index
                 }
             )
+            # #517. Same widening `stage_write` applies, so a revise pass can
+            # still add a ledger guideline's citation without `write_gate`
+            # calling it stray.
+            guideline_note, allowed = sections.guideline_brief(
+                self.ledger, section, self.topic, index, allowed
+            )
             briefs = "\n".join(stages.claim_brief(self.ledger, claim_id, index) for claim_id in claim_ids)
+            if guideline_note:
+                briefs = f"{briefs}\n{guideline_note}" if briefs else guideline_note
             word_range = _section_word_range(heading, len(claim_ids))
             earlier = []
             for prior_heading, prior_body in self.written.items():

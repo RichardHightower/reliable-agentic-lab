@@ -493,6 +493,196 @@ def test_guideline_cited_skips_a_non_numeric_number_rather_than_raising():
     assert "guideline_cited" not in score.signature()
 
 
+_LEDGER_TITLE = "Position Stand on Creatine Supplementation and Lean Mass"
+
+
+def _safety_section(**kwargs):
+    kwargs.setdefault("heading", "Dosing and safety")
+    kwargs.setdefault("key_questions", ["does creatine preserve lean mass safely"])
+    kwargs.setdefault("word_target", 0)
+    return _section(**kwargs)
+
+
+def test_a_guideline_retrieved_elsewhere_must_be_cited_by_the_safety_section():
+    """#517: `guideline_cited` grades the whole run's ledger, not only this
+    section's own findings. A position stand retrieved for another section
+    (the introduction, say) that is on this section's own topic still has
+    to be cited here."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/xyz123",
+            "title": _LEDGER_TITLE,
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 7,
+        }
+    ]
+    missing = checks.section_check(
+        "A claim about the safe dose that never names the position stand.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" in missing.signature()
+    detail = next(c.detail for c in missing.checks if c.name == "guideline_cited")
+    assert _LEDGER_TITLE in detail
+    assert "[7]" in detail
+
+
+def test_the_same_section_citing_it_passes():
+    """#517: citing the ledger guideline's own reference number passes the
+    row, and the number is never flagged dangling either -- the row that
+    requires the citation and the row that would call it ungrounded agree."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/xyz123",
+            "title": _LEDGER_TITLE,
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 7,
+        }
+    ]
+    score = checks.section_check(
+        "A claim about the safe dose, per the position stand [7].",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+    assert "grounded" not in score.signature()
+
+
+def test_an_off_topic_guideline_is_not_required():
+    """#517: on topic means at least two shared content terms, not one. A
+    ledger guideline sharing only "dose" with the section's key question is
+    not required."""
+    section = _safety_section(key_questions=["what dose of creatine is safe"])
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/other",
+            "title": "Position Stand on Recovery Dose Protocols",
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 3,
+        }
+    ]
+    score = checks.section_check(
+        "A claim about the safe dose that never names the other guideline.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
+def test_a_ledger_with_no_guideline_passes():
+    """#517: a ledger holding no `position_stand_or_guideline` source at
+    all passes, the same as no ledger."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/primary",
+            "title": "A Randomized Trial of Creatine Dosing and Lean Mass",
+            "abstract": "",
+            "tier": "primary_trial",
+            "number": 2,
+        }
+    ]
+    score = checks.section_check(
+        "A claim about the safe dose.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
+def test_the_safety_brief_lists_the_ledger_guidelines():
+    """#517: the writer brief for a safety or dosing section names each
+    on-topic ledger guideline it has not already cited, with its reference
+    number, so the writer can cite it. A source this section's own findings
+    already bound has nothing new to say."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/xyz123",
+            "title": _LEDGER_TITLE,
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 7,
+        }
+    ]
+    note = sections._guideline_brief(section, ledger_sources, "", bound=[])
+    assert _LEDGER_TITLE in note
+    assert "[7]" in note
+
+    assert sections._guideline_brief(section, ledger_sources, "", bound=[{"number": 7}]) == ""
+
+
+def test_ledger_guideline_sources_reads_every_other_sections_findings(tmp_path):
+    """#517: the ledger scan picks up a guideline-tier source another
+    section already retrieved and wrote to disk, gives it a citation
+    number the same way `run_section` numbers its own findings, skips a
+    non-guideline source, and never re-reads this section's own file."""
+
+    class FakeRun:
+        work_dir = tmp_path
+
+        def file(self, name):
+            return tmp_path / name
+
+    intro = tmp_path / "knowledge" / "introduction"
+    intro.mkdir(parents=True)
+    (intro / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "source": {
+                            "url_or_path": "https://doi.org/10.1000/xyz123",
+                            "title": _LEDGER_TITLE,
+                            "text": "an abstract",
+                            "evidence_tier": "position_stand_or_guideline",
+                        }
+                    },
+                    {
+                        "source": {
+                            "url_or_path": "https://a.example/trial",
+                            "title": "A Trial",
+                            "evidence_tier": "primary_trial",
+                        }
+                    },
+                ]
+            }
+        )
+    )
+    safety = tmp_path / "knowledge" / "safety"
+    safety.mkdir(parents=True)
+    (safety / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "source": {
+                            "url_or_path": "https://doi.org/10.1000/own",
+                            "title": "Own Guideline",
+                            "evidence_tier": "position_stand_or_guideline",
+                        }
+                    }
+                ]
+            }
+        )
+    )
+
+    found = sections._ledger_guideline_sources(FakeRun(), "safety")
+    assert [source["url"] for source in found] == ["https://doi.org/10.1000/xyz123"]
+    assert found[0]["title"] == _LEDGER_TITLE
+    assert found[0]["abstract"] == "an abstract"
+    assert found[0]["number"] == 1
+
+
 def test_section_check_figures_fails_when_a_planned_figure_is_missing():
     body = "No picture here [1]. " + ("word " * 80)
     score = checks.section_check(

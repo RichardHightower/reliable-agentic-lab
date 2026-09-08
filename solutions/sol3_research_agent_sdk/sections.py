@@ -895,6 +895,81 @@ def _write_findings(run, section_id: str, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _ledger_guideline_sources(run, section_id: str) -> list[dict]:
+    """Every `position_stand_or_guideline`-tier source the run has retrieved
+    so far, from any section's `findings.json` except this one. #517
+
+    Sections run forward-only (`paper.do_sections`), one fully finished
+    before the next starts, so every prior section's `findings.json` is
+    already on disk by the time this one is checked and written; this
+    section's own findings reach `checks.section_check` through `findings`
+    already, so they are excluded here rather than counted twice.
+
+    Each entry is registered for a citation number here, the same call
+    `run_section` already makes for this section's own findings, so a
+    guideline the writer is told to cite is never one `citations.register`
+    has not yet given a number.
+    """
+    root = run.file("knowledge")
+    if not root.is_dir():
+        return []
+    seen: dict[str, dict] = {}
+    for fpath in sorted(root.glob("*/findings.json")):
+        if fpath.parent.name == section_id:
+            continue
+        try:
+            payload = json.loads(fpath.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for finding in payload.get("findings") or []:
+            source = finding.get("source") or {}
+            if source.get("evidence_tier") != "position_stand_or_guideline":
+                continue
+            url = str(source.get("url_or_path") or "")
+            if not url or url in seen:
+                continue
+            seen[url] = {
+                "url": url,
+                "title": source.get("title") or "",
+                "abstract": source.get("text") or "",
+                "tier": "position_stand_or_guideline",
+            }
+    if not seen:
+        return []
+    numbers = citations.register(run.work_dir, list(seen.keys()))
+    for url, source in seen.items():
+        source["number"] = numbers.get(url) or 0
+    return list(seen.values())
+
+
+def _guideline_brief(section: dict, ledger_sources: list[dict], topic: str, bound: list[dict]) -> str:
+    """Tell a safety or dosing section's writer which ledger guidelines it
+    may cite, one line each, by the number `checks.section_check`'s
+    `guideline_cited` row will hold it to. #517
+
+    `checks.guideline_ledger_matches` is the one place that decides which
+    ledger sources are on topic; this only turns its answer into prose the
+    writer reads, and skips a source `bound` already carries: nothing new
+    to tell the writer about a claim it already has.
+    """
+    matches = checks.guideline_ledger_matches(ledger_sources, section, topic)
+    if not matches:
+        return ""
+    already = {str(f.get("number")) for f in bound if f.get("number")}
+    lines = [
+        f"- {source.get('title') or source.get('url')} [{source.get('number')}]"
+        for source in matches
+        if source.get("number") and str(source.get("number")) not in already
+    ]
+    if not lines:
+        return ""
+    return (
+        "The ledger already holds these guideline or position-stand sources, "
+        "retrieved while researching another section. Cite the one(s) this "
+        "section actually discusses, by their reference number:\n" + "\n".join(lines)
+    )
+
+
 def _pack_hits(run) -> list[dict]:
     """The corpus pack's hits, or an empty list. A missing pack is not an error."""
     path = run.file("corpus/brain-pack.json")
@@ -1315,6 +1390,10 @@ def run_section(run, section: dict) -> dict:
         [(f.get("source") or {}).get("url_or_path") or "" for f in findings],
     )
     bound = _claims_for_writer(findings, verdicts, sid, numbers)
+    # #517. Every on-topic guideline this run has already retrieved for a
+    # different section, so `checks.section_check`'s `guideline_cited` row
+    # can require it here too, and the writer's brief can name it.
+    ledger_sources = _ledger_guideline_sources(run, sid)
     figures = []
     diagrams_path = run.file("diagrams.json")
     if diagrams_path.exists():
@@ -1354,6 +1433,8 @@ def run_section(run, section: dict) -> dict:
 
     from paper import _section_instruction, _strip_policy_leak  # noqa: PLC0415
 
+    guideline_note = _guideline_brief(section, ledger_sources, run.topic, bound)
+
     previous_sig: tuple[str, ...] | None = None
     previous_gaps: dict[str, float] = {}
     last_score = None
@@ -1385,6 +1466,8 @@ def run_section(run, section: dict) -> dict:
         for line in cuts:
             run.log(f"    {sid} context: {line}")
         instruction = _section_instruction(section, retry_note)
+        if guideline_note:
+            instruction = f"{instruction}\n\n{guideline_note}"
         edit_rows = _rows_for_editor(last_score, last_verdict)
         edit_verdict = {**last_verdict, "failed_rows": edit_rows}
         if edit_rows:
@@ -1459,6 +1542,8 @@ def run_section(run, section: dict) -> dict:
             evidence_requirements_unmet=getattr(
                 getattr(run, "state", None), "evidence_shortfall_unmet", None
             ),
+            ledger_sources=ledger_sources,
+            topic=run.topic,
         )
         (knowledge / "section-check.json").write_text(
             json.dumps(last_score.to_dict(), indent=2) + "\n", encoding="utf-8"
