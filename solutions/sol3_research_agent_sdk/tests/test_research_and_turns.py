@@ -359,6 +359,16 @@ def test_the_writer_contract_drops_the_exact_string_rule(work):
     assert "exact string" not in write_prompt
     assert "as that string" not in write_prompt
 
+    edit_backend = Backend([result(output="an edited section")])
+    t.SdkTurns(backend=edit_backend, work_dir=work).edit_section(
+        section, "old body", {"failed_rows": ["coverage"]}
+    )
+    edit_prompt = edit_backend.prompts[0][0]
+    assert "exact string" not in edit_prompt
+
+    card = Path(__file__).resolve().parents[1] / "plugin" / "agents" / "research-writer.md"
+    assert "exact string" not in card.read_text(encoding="utf-8")
+
 
 def test_the_writer_message_names_no_allowlist_host(work):
     """#452 #465 #412: a claim also carries `source_url` and `quote`, the
@@ -400,16 +410,6 @@ def test_the_writer_message_names_no_allowlist_host(work):
     edit_prompt = edit_backend.prompts[0][0]
     assert "arxiv.org" not in edit_prompt, edit_prompt
     assert "source_url" not in edit_prompt, edit_prompt
-
-    edit_backend = Backend([result(output="an edited section")])
-    t.SdkTurns(backend=edit_backend, work_dir=work).edit_section(
-        section, "old body", {"failed_rows": ["coverage"]}
-    )
-    edit_prompt = edit_backend.prompts[0][0]
-    assert "exact string" not in edit_prompt
-
-    card = Path(__file__).resolve().parents[1] / "plugin" / "agents" / "research-writer.md"
-    assert "exact string" not in card.read_text(encoding="utf-8")
 
 
 def test_the_judge_prompt_carries_the_number_to_source_map(work):

@@ -89,7 +89,8 @@ The reader is reading about the subject, not about how the paper was made. Do
 not mention the research pass, the verification pass, a budget, a tool, or what
 this pipeline did or did not check. Sentences like "no step in this run
 re-verified them" or "the verification pass stopped on cost" belong in a handoff
-note, not in the paper.
+note, not in the paper. Write about the topic, never about where the evidence
+was searched for.
 
 The verification status of a claim changes how you word it, and never gives you
 something to say. An unverified claim is stated qualitatively. It is not stated

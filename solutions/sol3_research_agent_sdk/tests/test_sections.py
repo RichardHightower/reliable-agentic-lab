@@ -955,6 +955,84 @@ def test_the_editor_is_told_the_deterministic_row_it_must_fix(work, turns):
     assert "length" in rows, rows
 
 
+class _HostLeak(_Recorder):
+    """A `cited` failure that quotes an uncited sentence naming a host."""
+
+    def write(self, section, claims, figures, notes, path=""):
+        self.calls.append(("write", section["id"]))
+        body = "The 2019 trial on arxiv.org reported strong effects. " + ("word " * 400)
+        target = Path(self.root) / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+        return body
+
+    def judge_section(self, section, body, findings, note=""):
+        self.calls.append(("judge_section", section["id"]))
+        return {"passed": True, "failed_rows": []}
+
+
+def test_a_retry_note_naming_a_host_reaches_the_editor_scrubbed(work, turns):
+    """PR #511 judge reproduction: a `cited` failure quotes the offending
+    sentence into `last_score.report()`, host and all. That report becomes
+    the editor's `note=` on the next attempt, and the writer's `instruction`
+    on the one after. Neither may carry the host. #452 #465 #412."""
+    recorder = _HostLeak(turns(root=work), work)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+        allowed_domains=("arxiv.org",),
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+    assert recorder.edit_notes, "the editor never ran"
+    assert "arxiv.org" not in recorder.edit_notes[0], recorder.edit_notes[0]
+
+
+def test_a_retry_instruction_naming_a_host_reaches_the_writer_scrubbed(work, turns):
+    """The `write()` retry path, taken when `run.turns` has no `edit_section`.
+    Same reproduction as `_HostLeak`, on the other branch of the same `if`.
+    #452 #465 #412."""
+
+    class HostLeakWriter(turns):
+        def write(self, section, claims, figures, notes, path=""):
+            self.asked.append(("write", section["id"], notes, path))
+            attempt = sum(1 for item in self.asked if item[0] == "write")
+            if attempt == 1:
+                body = "The 2019 trial on arxiv.org reported strong effects. " + ("word " * 400)
+            else:
+                body = "The result held under load [1]. " + ("word " * 400)
+            target = Path(work) / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
+            return body
+
+    recorder = HostLeakWriter()
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+        allowed_domains=("arxiv.org",),
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+    notes = [item[2] for item in recorder.asked if item[0] == "write"]
+    assert len(notes) >= 2, notes
+    assert "arxiv.org" not in notes[1], notes[1]
+
+
 def test_rows_for_editor_names_a_python_only_failure():
     score = checks.Score(checks=[checks.Check("length", False, "1912 words", advisory=True)])
     rows = sections._rows_for_editor(score, {"passed": True, "failed_rows": []})
