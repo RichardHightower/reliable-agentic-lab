@@ -198,6 +198,10 @@ RESEARCH_SCHEMA = _schema(
                     "text": {"type": "string"},
                     "source_url": {"type": "string"},
                     "quote": {"type": "string"},
+                    # Population, design, and sample size, when there is one.
+                    # Optional: unused until #478's study table, and most
+                    # claims carry none. #471
+                    "study": {"type": "object"},
                 },
                 ["text", "source_url", "quote"],
             )["schema"],
@@ -214,6 +218,9 @@ VERIFY_SCHEMA = _schema(
         "verdict": {"type": "string", "enum": ["supports", "contradicts", "unclear"]},
         "source_url": {"type": "string"},
         "excerpt": {"type": "string"},
+        # Optional: the searches tried. #471's `not_found`-shaped miss writes
+        # these into the claim's record; silence is not a result.
+        "queries_used": {"type": "array", "items": {"type": "string"}},
     },
     ["verdict", "source_url", "excerpt"],
 )

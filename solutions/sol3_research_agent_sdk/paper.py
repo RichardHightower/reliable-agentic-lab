@@ -957,6 +957,14 @@ def verify(run: Run) -> dict:
 
     There is no arbiter. A disputed claim in a white paper is a claim you
     soften, not one you settle with a third opinion.
+
+    Legacy path. `do_research` and this function predate the per-section
+    loop in `sections.run_section` and are no longer part of `LINEAR` or
+    `CYCLE`; a real run never calls either. `attributed()` and the #471
+    attribution check now live in `sections.py`, on the path `do_sections`
+    actually runs. Kept here because the existing test suite still drives
+    `do_research` plus this function to exercise other phases (charts, the
+    doctrine flag) without paying for the full section loop.
     """
     claims = run.read_json("claims.json")["claims"]
     chosen = {id(claim) for claim in to_verify(claims, run.max_claims)}
@@ -1179,10 +1187,17 @@ def do_sections(run: Run) -> dict:
                 pass
         number = len(claims)
         for finding in section_findings:
-            status = (by_id.get(finding.get("id") or "") or {}).get("state") or "unverified"
+            verdict = by_id.get(finding.get("id") or "") or {}
+            status = verdict.get("state") or "unverified"
             url = (finding.get("source") or {}).get("url_or_path") or ""
             if status != "contradicted":
                 number += 1
+                # `source_note` carries #470's title_mismatch and #471's
+                # `unattributed` marker; `verdict.get("note")` carries #471's
+                # not-found queries, written by `run_section`'s verify step.
+                # Both belong in the one field a reader actually sees.
+                source_note = (finding.get("source") or {}).get("note") or ""
+                combined_note = "; ".join(n for n in (source_note, verdict.get("note") or "") if n)
                 claims.append(
                     {
                         "id": finding.get("id") or f"{sid}-c{number}",
@@ -1207,7 +1222,10 @@ def do_sections(run: Run) -> dict:
                         "authors": (finding.get("source") or {}).get("authors") or [],
                         "year": (finding.get("source") or {}).get("year") or "",
                         "venue": (finding.get("source") or {}).get("venue") or "",
-                        "note": (finding.get("source") or {}).get("note") or "",
+                        "note": combined_note,
+                        # Unused until #478; carried so it survives to
+                        # claims.json the same way the metadata fields do. #471
+                        "study": finding.get("study") or {},
                     }
                 )
             if url and url not in seen:

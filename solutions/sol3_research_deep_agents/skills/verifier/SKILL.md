@@ -29,14 +29,19 @@ narrative.
 - `disagreed`: a second source states something incompatible. Give the URL and
   the quote. Do not average the two. Do not decide which is right.
 - `not_found`: you could not find a second source. This is a real and common
-  answer. Report it.
+  answer. Report every query you tried in `queries_used`. Python writes them
+  into the claim's note, so a reader sees a search happened, not silence.
 
 `not_found` is not failure. A claim that stands on one source is publishable as
-long as the paper says so, and it is your `not_found` that makes the paper say
-it.
+long as the paper says so, and it is your `not_found`, with its queries, that
+makes the paper say it.
 
 ## What you never do
 
-You do not set a truth state. `evidence.corroborate` counts distinct source ids
-and sets it in Python. You do not decide whether a claim may be used. You do not
-rewrite a claim to make it easier to corroborate.
+You do not set a truth state. `evidence.corroborate` counts sources that pass
+`attributed()` -- the researcher's cited source checked against the text
+`metadata.fetch_record` retrieved for it, plus any second source you find here
+-- and sets the truth state in Python. Two URLs a researcher lists in one
+reply are not two independent looks; your look is what makes a second one.
+You do not decide whether a claim may be used. You do not rewrite a claim to
+make it easier to corroborate.

@@ -36,7 +36,9 @@ Find a source. Read enough of it to decide.
 
 `unclear` is a correct answer and it is used. A downstream phase softens an
 unclear claim rather than dropping it, so you lose nothing by being honest and
-you cost the paper a real error by guessing.
+you cost the paper a real error by guessing. On `unclear`, list every query you
+tried in `queries_used`. Python writes them into the claim's record, so a
+reader sees a search happened rather than silence.
 
 Never return `supports` on a source you did not read. Never return a quote you
 did not copy.
@@ -51,4 +53,8 @@ No prose before it, no fence around it.
 ```
 
 For `unclear` with no source found, use an empty string for both `source_url`
-and `excerpt`.
+and `excerpt`, and list the queries you tried:
+
+```json
+{"verdict": "unclear", "source_url": "", "excerpt": "", "queries_used": ["..."]}
+```

@@ -581,7 +581,9 @@ class SdkTurns(Turns):
         # turn an independent check into a reading-comprehension exercise.
         return self._json(
             "research-verifier",
-            f"Independently check this claim. Search for it yourself: {claim}",
+            f"Independently check this claim. Search for it yourself: {claim}\n\n"
+            "If you find nothing, return `unclear` and list every query you "
+            "tried in `queries_used`. Silence is not a result.",
             VERIFY_SCHEMA,
         )
 
