@@ -148,8 +148,8 @@ def test_stage_corpus_summary_names_the_relevant_count(loop_brain, tmp_path):
     # Substrings, not the exact string: `relevant` is now a hard index into
     # what `corpus.pack` returns, and pinning the whole sentence made every
     # future word choice here a fixture break for no reason.
-    assert "hits" in result.summary
-    assert "relevant" in result.summary
+    assert "20 hits" in result.summary
+    assert "0 relevant" in result.summary
     assert "thin" in result.summary
 
 

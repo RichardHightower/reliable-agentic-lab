@@ -112,25 +112,27 @@ FIELD_SEEDS: dict[str, tuple[dict[str, str], ...]] = {
         {"host": "jissn.biomedcentral.com", "org_type": "peer_reviewed_publisher"},
     ),
 }
-# ponytail: economics, law, and general have no named seed yet. An empty
-# scout proposal on one of those fields falls through with no forced host;
-# `run_allowlist`'s own MIN_ADMITTED fallback still keeps a run from
-# searching nothing. Add a seed here once a real run names what those fields
-# actually need.
-DEFAULT_FIELD = "software"
+# A field the model names that has no specific list above, economics, law,
+# and general among them, still gets a general scholarly host rather than
+# nothing: doi.org resolves a paper in any field. This is never the vendor
+# doc SEED_ALLOWLIST above; that fallback belongs to a run whose librarian
+# also comes up short, and only on the software field.
+GENERAL_FIELD_SEED: tuple[dict[str, str], ...] = ({"host": "doi.org", "org_type": "standards_body"},)
 
 
 def seed_for_field(field: str) -> tuple[dict, ...]:
     """The scout's own fallback proposal when the model names no host.
 
-    A missing or blank field keeps the old default, software, so a scout
-    that cannot yet name its field is no worse off than before this port
-    seeded by field. A field the model does name, biomedical among them,
-    gets its own seed instead of software's, and an unrecognized named
-    field gets no forced seed at all.
+    A blank or missing field seeds nothing: defaulting an undetermined field
+    to software's arxiv.org was the same field-blindness this ticket
+    reported, one layer up. A field the model does name gets FIELD_SEEDS's
+    own list when there is one, biomedical among them, and the general
+    scholarly seed otherwise. #469
     """
-    key = str(field or "").strip().lower() or DEFAULT_FIELD
-    return FIELD_SEEDS.get(key, ())
+    key = str(field or "").strip().lower()
+    if not key:
+        return ()
+    return FIELD_SEEDS.get(key, GENERAL_FIELD_SEED)
 
 
 _GITHUB_ORGS = frozenset(

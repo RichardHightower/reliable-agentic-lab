@@ -408,7 +408,8 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
     if missing:
         raise GateFailed(
             f"these important questions produced nothing: {missing}. "
-            "Search again with narrower wording, or report that no source exists.",
+            "Search again with narrower wording. A claim that no source exists "
+            "is refused; name the coverage gap instead.",
             ("unanswered_important",),
         )
 

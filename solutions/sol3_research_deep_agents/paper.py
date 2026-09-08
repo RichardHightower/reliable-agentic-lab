@@ -419,10 +419,7 @@ def _write_briefing(work_dir: Path, payload: dict) -> None:
             lines += [f"- {item}" for item in titles]
             lines.append("")
         if payload.get("seeded_by_field"):
-            lines += [
-                f"No host was proposed; seeded by field: {payload.get('field') or 'software'}.",
-                "",
-            ]
+            lines += [f"Seeded by field: {payload.get('field')}.", ""]
         lines += [
             "This is a map, not evidence. The outline judge must not treat it as research.",
             "",
@@ -851,13 +848,19 @@ class Paper:
             elif isinstance(item, dict):
                 proposed.append(item)
         field = str(proposal.get("field") or "").strip().lower()
-        seeded_by_field = False
-        if not proposed:
-            # The model named no host at all. Seed by field rather than
-            # forcing arxiv.org onto every topic: a biomedical topic gets
-            # PubMed and PMC, not an empty preprint search. #469
-            proposed = list(source_policy.seed_for_field(field))
-            seeded_by_field = bool(proposed)
+        # A named field's seed is added on top of whatever the model itself
+        # proposed, never in place of it: an economics topic that named one
+        # real host still gets doi.org beside it, not instead of it. A blank
+        # field seeds nothing, so a scout that cannot yet name its field
+        # forces nothing onto the run. #469
+        existing_hosts = {str(item.get("host") or "").strip().lower() for item in proposed}
+        seed_hosts = [
+            seed
+            for seed in source_policy.seed_for_field(field)
+            if str(seed.get("host") or "").strip().lower() not in existing_hosts
+        ]
+        seeded_by_field = bool(seed_hosts)
+        proposed = proposed + seed_hosts
         decided = source_policy.admit(proposed)
         payload = {
             "skipped": False,

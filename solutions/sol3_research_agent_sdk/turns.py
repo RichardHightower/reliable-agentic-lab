@@ -78,7 +78,7 @@ SCOUT_SCHEMA = {
             "enum": ["software", "physics", "biomedical", "economics", "law", "general"],
         },
     },
-    "required": ["headings", "domains"],
+    "required": ["headings", "domains", "field"],
 }
 
 
