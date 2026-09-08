@@ -1594,7 +1594,7 @@ def test_a_study_table_with_the_wrong_row_count_fails():
         METHODS_BLOCK,
         METHODS_BLOCK.rstrip("\n")
         + "\n\n"
-        + "## Evidence Summary\n\n"
+        + "## Evidence summary\n\n"
         "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
         "| --- | --- | --- | --- | --- | --- | --- |\n"
         "| 24 (older men) | 12 weeks | 500 kcal per day | yes | DXA | preserved lean mass [1] | primary_trial |\n\n",
@@ -1622,7 +1622,7 @@ def test_a_study_table_before_methods_fails():
     claims = [{"id": "c1", "number": 1, "study": {"participants": {"n": 24}}}]
     misplaced = (
         "# T\n\n"
-        "## Evidence Summary\n\n"
+        "## Evidence summary\n\n"
         "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
         "| --- | --- | --- | --- | --- | --- | --- |\n"
         "| 24 | not reported | not reported | not reported | not reported | "
@@ -1641,6 +1641,48 @@ def test_a_study_table_before_methods_fails():
         headings=["Limitations"],
     )
     assert "study_table" in score.signature(), score.report()
+
+
+def test_a_correctly_placed_table_passes_even_when_headings_start_with_abstract():
+    """PR #535 judge revision B1: a real outline's `headings` list can start
+    with a structural name like Abstract; `study_table_violations` must
+    still find the real first evidence section, not stop at index 0."""
+    claims = [{"id": "c1", "number": 1, "study": {"participants": {"n": 24}}}]
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+    )
+    body = GOOD_P11.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = checks.check(
+        body,
+        GOOD_P11_URLS,
+        reference_numbers=[1, 2],
+        enforce_structure=True,
+        claims=claims,
+        headings=["Abstract", "Introduction", "Limitations", "Next step"],
+    )
+    assert "study_table" not in score.signature(), score.report()
+
+
+def test_the_evidence_summary_table_passes_has_body():
+    """PR #535 judge revision B2: a table is not prose, and the 80-word
+    per-section floor must not measure it."""
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+    )
+    body = GOOD_P11.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = checks.check(
+        body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True, min_section_words=80
+    )
+    row = next(c for c in score.checks if c.name == "has_body")
+    assert "Evidence summary" not in row.detail, row.detail
 
 
 def test_a_body_with_no_heading_passes_methods_and_conclusion_by_construction():
@@ -1695,7 +1737,7 @@ def test_the_heading_order_is_frozen(tmp_path, no_renderer):
     assert order[0] == "Abstract"
     assert order[1] == "Methods"
     assert methods_at < conclusion_at < next_step_at < references_at
-    assert "Evidence Summary" not in order, "no human-study claim in this topic, no table"
+    assert "Evidence summary" not in order, "no human-study claim in this topic, no table"
 
 
 def test_next_step_still_grades_the_last_prose_heading(tmp_path, no_renderer):
@@ -1724,3 +1766,72 @@ def test_next_step_still_grades_the_last_prose_heading(tmp_path, no_renderer):
     report = json.loads((work / "check.json").read_text(encoding="utf-8"))
     row = next(r for r in report["checks"] if r["name"] == "next_step")
     assert row["passed"], row
+
+
+def test_word_count_does_not_credit_methods_or_the_study_table():
+    """PR #535 judge revision F5. Neither section is prose a writer
+    composed; `_strip_figure_notes`'s own docstring already names the
+    principle for a figure caption, and it now applies here too."""
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+    )
+    with_table = GOOD_P11.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    without_generated = with_table.replace(METHODS_BLOCK, "").replace(table, "")
+    assert checks.word_count(with_table) == checks.word_count(without_generated)
+
+
+# -- F9, the plan's two cross-lane P11 tests --------------------------------
+
+
+def test_a_tiered_claim_renders_in_the_study_table():
+    """`source_policy.tier_for()` (E4) is the actual source of a study
+    row's Tier column, not a hand-picked string. Plan's cross-lane P11
+    test."""
+    import source_policy  # noqa: PLC0415
+
+    record = {"pubtype": ["Randomized Controlled Trial"]}
+    tier = source_policy.tier_for(record)
+    assert tier == "primary_trial"
+    claims = [{"id": "c1", "number": 1, "study": {"participants": {"n": 24}}, "evidence_tier": tier}]
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        f"| 24 | not reported | not reported | not reported | not reported | "
+        f"preserved lean mass [1] | {tier} |\n\n"
+    )
+    body = GOOD_P11.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = checks.check(
+        body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True, claims=claims
+    )
+    assert "study_table" not in score.signature(), score.report()
+    assert tier in body
+
+
+def test_a_counterweighed_section_still_passes_the_page_rows():
+    """The E5 counter-evidence pass grades one section; P11's methods,
+    conclusion, and study_table rows grade the whole page. Plan's
+    cross-lane P11 test: neither reads the other's own findings."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "text": "The mechanism always holds across every deployment.",
+            "generalizing": True,
+            "counter": "hit",
+            "counterargument_to": "",
+        }
+    ]
+    section_score = checks.section_check(
+        "## Exit conditions\n\nThe mechanism always holds across every deployment. [1]\n",
+        section={"heading": "Exit conditions"},
+        findings=findings,
+    )
+    assert "counterweighed" not in section_score.signature(), section_score.report()
+
+    page_score = checks.check(GOOD_P11, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "methods_present" not in page_score.signature(), page_score.report()
+    assert "conclusion_present" not in page_score.signature(), page_score.report()

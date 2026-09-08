@@ -1464,19 +1464,42 @@ def references_block(urls: list[str], sources: list) -> str:
     return "\n".join(rows) + "\n"
 
 
-def study_table(ledger: evidence.Ledger, index: dict[str, int]) -> str:
-    """The Evidence Summary table, or "" when the ledger holds no
+def study_table(
+    ledger: evidence.Ledger, index: dict[str, int], written: dict[str, str] | None = None
+) -> str:
+    """The Evidence summary table, or "" when the ledger holds no
     human-study claim. Python from the ledger: one row per usable claim
     that carries E3's `study` object, reading E4's `SourceDocument.tier`
     for its own source. Not deduped by study identity: two claims about
     the same trial are two citations already, the same way the reference
     list treats them. #478
+
+    `written`, when given, is `self.written`: every body section's own
+    final text, already carrying the writer's own `[N]` markers. A claim
+    with a reference number is not proof any section's prose used it,
+    PR #535 judge revision F7, so a claim renders here only when at least
+    one of its own source numbers is a marker some section actually wrote.
+    `None` skips the filter, for a caller with no written body yet.
     """
-    rows = [claim for claim in ledger.claims.values() if claim.usable and claim.study]
+    cited_numbers = (
+        {int(n) for n in re.findall(r"\[(\d+)\]", "\n".join(written.values()))}
+        if written is not None
+        else None
+    )
+    rows = [
+        claim
+        for claim in ledger.claims.values()
+        if claim.usable
+        and claim.study
+        and (
+            cited_numbers is None
+            or any(index.get(sid) in cited_numbers for sid in claim.source_ids)
+        )
+    ]
     if not rows:
         return ""
     lines = [
-        "## Evidence Summary",
+        "## Evidence summary",
         "",
         "| Participants | Duration | Deficit | Training | Assay | Result | Tier |",
         "| --- | --- | --- | --- | --- | --- | --- |",
@@ -1529,7 +1552,7 @@ def assemble(
     # #478. Python, from the ledger: one row per human-study claim, spliced
     # in right after Methods, below. "" when the ledger holds none, and the
     # note that says so lives in Methods' own body, `Paper.stage_assemble`.
-    table_block = study_table(ledger, index)
+    table_block = study_table(ledger, index, written)
     by_name = {figure.name: figure for figure in figures}
     used_figures: set[str] = set()
     charts = [item for item in (charts or []) if item.get("path")]

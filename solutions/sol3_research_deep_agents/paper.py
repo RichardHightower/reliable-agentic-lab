@@ -2726,11 +2726,13 @@ class Paper:
     def _methods_lines(self) -> list[str]:
         """Methods, Python-written from the run record. No model turn. #478
 
-        Bulleted, not prose: `brief.uncited_claims` demands a citation on
-        every paragraph it does not already read as a list, and a Methods
-        fact is not a claim anything sourced. Names the admitted hosts by
-        design, which is why `policy_leak` and `caveat_once` both exempt
-        this section (`_mask_for_policy`, `CAVEAT_EXEMPT_SECTIONS`).
+        Prose, the same shape the SDK twin renders, not a bulleted list. PR
+        #535 judge revision, ruling (b): the two ports may not differ in
+        the paper's shape for a section Python writes from the same record
+        in both. Named hosts and a citation-free process description are
+        why `policy_leak`, `caveat_once`, and `cited` all exempt this
+        section by name (`_mask_for_policy`, `CAVEAT_EXEMPT_SECTIONS`,
+        `PYTHON_WRITTEN_SECTIONS`), not by an incidental list-line rule.
         """
         allowlist_path = self.work_dir / "corpus" / "source_allowlist.json"
         allowlist: dict = {}
@@ -2751,58 +2753,54 @@ class Paper:
         # phase test, that never reached that stage.
         admitted = list(allowlist.get("admitted") or briefing.get("admitted") or [])
         dropped = list(allowlist.get("dropped") or briefing.get("dropped") or [])
-        # Every planned section that answers a key question, not the
-        # structural ones `normalize_plan` inserted (Methods is Python, and
-        # the abstract/conclusion/references are generated, not researched).
-        fields = [
-            stages.plan_heading(item)
-            for item in self.plan.get("sections") or []
-            if stages.plan_heading(item).lower() not in stages.UNBOUND_SECTIONS
-        ]
+        # PR #535 judge revision F4: "fields searched" names the topic's
+        # own research field (biomedical, software, ...), the scout's own
+        # classification and the input to `source_policy.seed_for_field`,
+        # not the outline's section headings.
+        field = str(briefing.get("field") or "").strip()
         retrieved = len(self.ledger.sources)
         admitted_sources = len(self.ledger.bibliography())
         started = (self.state.started_at or "")[:10] or "an unrecorded date"
 
         lines = [
-            f"- This paper searched {len(fields)} planned sections for evidence, "
-            f"starting {started}: {', '.join(fields)}. Each planned section names a "
-            "facet of the topic the outline settled before research began."
-            if fields
-            else f"- This paper searched the topic for evidence, starting {started}, "
-            "before the outline named any section.",
-            f"- Admitted search hosts, decided once before any paid search ran: "
+            f"This paper searched the {field} field for evidence, starting {started}."
+            if field
+            else f"This paper searched the topic for evidence, starting {started}, "
+            "before a field was classified.",
+            f"Admitted search hosts, decided once before any paid search ran: "
             f"{', '.join(admitted)}. A host outside this list was not searched, and "
             "a source from it never reached a claim."
             if admitted
-            else "- Admitted search hosts, decided once before any paid search ran: "
+            else "Admitted search hosts, decided once before any paid search ran: "
             "the vendor documentation seed. No topic-specific host was proposed.",
-            f"- Sources retrieved during research: {retrieved}. Sources admitted to "
+            f"Sources retrieved during research: {retrieved}. Sources admitted to "
             "the reference list, after the same host and claim checks every finding "
             f"in this paper passed: {admitted_sources}.",
-            f"- The verification cap for this run allows a second opinion on up to "
+            # PR #535 judge revision F4: "this run spent N", not "of which N
+            # were spent", so the sentence never has to agree a verb with a
+            # count that might be exactly one.
+            f"The verification cap for this run allows a second opinion on up to "
             f"{self.max_verify} claims. The follow-turn cap allows {self.max_follow} "
-            f"secondary claims a look at their own primary study, of which "
-            f"{self.follow_used} were spent. The counter-evidence cap allows "
-            f"{self.max_counter} generalizing claims a search for a contrary "
-            f"finding, of which {self.counter_used} were spent.",
+            f"secondary claims a look at their own primary study; this run spent "
+            f"{self.follow_used}. The counter-evidence cap allows {self.max_counter} "
+            f"generalizing claims a search for a contrary finding; this run spent "
+            f"{self.counter_used}.",
         ]
         if dropped:
             reasons = "; ".join(
                 f"{item.get('host')} ({item.get('why')})" for item in dropped[:5] if item.get("host")
             )
             lines.append(
-                f"- Hosts excluded during admission, with the reason each was "
-                f"dropped: {reasons}."
+                f"Hosts excluded during admission, with the reason each was dropped: {reasons}."
                 if reasons
-                else "- No proposed host was excluded during admission; every host "
-                "cleared the wall."
+                else "No proposed host was excluded during admission; every host cleared the wall."
             )
         else:
             lines.append(
-                "- No proposed host was excluded during admission; every host cleared the wall."
+                "No proposed host was excluded during admission; every host cleared the wall."
             )
         if not any(claim.usable and claim.study for claim in self.ledger.claims.values()):
-            lines.append("- No claim in this run carries a recorded human study.")
+            lines.append("No claim in this run carries a recorded human study.")
         return lines
 
     def stage_assemble(self, extra: str = "") -> StageResult:
@@ -2820,7 +2818,7 @@ class Paper:
         # model turn), so it is injected here, right before assembly reads
         # `self.written`. Recomputed every call: it derives only from
         # already-persisted run state, so a retry costs nothing to redo.
-        self.written["Methods"] = "\n".join(self._methods_lines())
+        self.written["Methods"] = "\n\n".join(self._methods_lines())
         skipped_figures = self._skipped_figures()
         body = stages.assemble(
             self.plan,

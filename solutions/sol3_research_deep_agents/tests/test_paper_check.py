@@ -11,20 +11,20 @@ URLS = ["https://docs.langchain.com/one", "https://docs.claude.com/two"]
 # concatenation below is byte-identical to the inline text it replaced.
 METHODS_BLOCK = (
     "## Methods\n\n"
-    "- This paper searched two planned sections for evidence, starting 2026-01-01: "
-    "Abstract, Introduction. Each planned section names a facet of the topic the "
-    "outline settled before research began.\n"
-    "- Admitted search hosts, decided once before any paid search ran: "
-    "docs.langchain.com, docs.claude.com. A host outside this list was not searched.\n"
-    "- Sources retrieved during research: 2. Sources admitted to the reference "
+    "This paper searched the exit conditions field for evidence, starting "
+    "2026-01-01.\n\n"
+    "Admitted search hosts, decided once before any paid search ran: "
+    "docs.langchain.com, docs.claude.com. A host outside this list was not "
+    "searched, and a source from it never reached a claim.\n\n"
+    "Sources retrieved during research: 2. Sources admitted to the reference "
     "list, after the same host and claim checks every finding in this paper "
-    "passed: 2.\n"
-    "- The verification cap for this run allows a second opinion on up to 24 "
+    "passed: 2.\n\n"
+    "The verification cap for this run allows a second opinion on up to 24 "
     "claims. The follow-turn cap allows 6 secondary claims a look at their own "
-    "primary study, of which 0 were spent. The counter-evidence cap allows 6 "
-    "generalizing claims a search for a contrary finding, of which 0 were spent.\n"
-    "- No proposed host was excluded during admission; every host cleared the wall.\n"
-    "- No claim in this run carries a recorded human study.\n\n"
+    "primary study; this run spent 0. The counter-evidence cap allows 6 "
+    "generalizing claims a search for a contrary finding; this run spent 0.\n\n"
+    "No proposed host was excluded during admission; every host cleared the wall.\n\n"
+    "No claim in this run carries a recorded human study.\n\n"
 )
 CONCLUSION_BLOCK = (
     "## Conclusion\n\nThe evidence above supports the three exits, with the runtime scope "
@@ -1362,7 +1362,7 @@ def _study_ledger_for_check(n=1):
 _ONE_ROW_TABLE = (
     METHODS_BLOCK.rstrip("\n")
     + "\n\n"
-    + "## Evidence Summary\n\n"
+    + "## Evidence summary\n\n"
     "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
     "| --- | --- | --- | --- | --- | --- | --- |\n"
     "| 24 | not reported | not reported | not reported | not reported | "
@@ -1389,7 +1389,7 @@ def test_a_study_table_before_methods_fails():
     led, _claims = _study_ledger_for_check(1)
     misplaced = (
         "# T\n\n"
-        "## Evidence Summary\n\n"
+        "## Evidence summary\n\n"
         "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
         "| --- | --- | --- | --- | --- | --- | --- |\n"
         "| 24 | not reported | not reported | not reported | not reported | "
@@ -1407,6 +1407,31 @@ def test_a_study_table_before_methods_fails():
         outline={"sections": [{"heading": "Limitations"}]},
     )
     assert "study_table" in score.signature(), score.report()
+
+
+def test_a_correctly_placed_table_passes_with_a_real_normalized_plan():
+    """PR #535 judge revision B1: `assemble_gate` is handed `outline=self.plan`,
+    and a real `stages.normalize_plan` output always starts with Abstract
+    (`normalize_plan`'s own guarantee, and `outline_gate`'s required set).
+    The position check must still find the real first evidence section,
+    not stop at index 0."""
+    import stages  # noqa: PLC0415
+
+    plan = stages.normalize_plan(
+        {"questions": [], "sections": ["Abstract", "Introduction", "Limitations", "Next step"]}
+    )
+    assert plan["sections"][0]["heading"] == "Abstract"  # the exact trap B1 names
+    led, _claims = _study_ledger_for_check(1)
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+    )
+    body = GOOD.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = paper_check.check(body, URLS, ledger=led, enforce_structure=True, outline=plan)
+    assert "study_table" not in score.signature(), score.report()
 
 
 def test_a_conclusion_with_a_new_citation_fails():
@@ -1442,7 +1467,7 @@ def test_the_heading_order_is_frozen(run_dir, stub_renderer):
     next_step_at = order.index("Next step")
     references_at = order.index("References")
     assert methods_at < conclusion_at < next_step_at < references_at
-    assert "Evidence Summary" not in order, "no human-study claim in this topic, no table"
+    assert "Evidence summary" not in order, "no human-study claim in this topic, no table"
 
 
 def test_next_step_still_grades_the_last_prose_heading(run_dir, stub_renderer):
@@ -1458,3 +1483,54 @@ def test_next_step_still_grades_the_last_prose_heading(run_dir, stub_renderer):
     assert paper_check.last_prose_heading(body) == "Next step"
     gates_report = json.loads((run.work_dir / "gates.json").read_text(encoding="utf-8"))
     assert "next_step" not in gates_report["failures"]
+
+
+# -- F9, the plan's two cross-lane P11 tests --------------------------------
+
+
+def test_a_tiered_claim_renders_in_the_study_table():
+    """`source_policy.tier_for()` (E4) is the actual source of a study
+    row's Tier column, not a hand-picked string. Plan's cross-lane P11
+    test."""
+    import source_policy  # noqa: PLC0415
+
+    record = {"pubtype": ["Randomized Controlled Trial"]}
+    tier = source_policy.tier_for(record)
+    assert tier == "primary_trial"
+    led, _claims = _study_ledger_for_check(1)
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        f"| 24 | not reported | not reported | not reported | not reported | "
+        f"preserved lean mass [1] | {tier} |\n\n"
+    )
+    body = GOOD.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = gate(body, enforce_structure=True, ledger=led)
+    assert "study_table" not in score.signature(), score.report()
+    assert tier in body
+
+
+def test_a_counterweighed_section_still_passes_the_page_rows():
+    """The E5 counter-evidence pass grades one section; P11's methods,
+    conclusion, and study_table rows grade the whole page. Plan's
+    cross-lane P11 test: neither reads the other's own findings."""
+    import sections  # noqa: PLC0415
+
+    findings = [
+        {
+            "generalizing": True,
+            "counter": "hit",
+            "counterargument_to": "",
+        }
+    ]
+    section_score = sections.section_check(
+        "## Exit conditions\n\nThe mechanism always holds across every deployment. [1]\n",
+        section={"heading": "Exit conditions"},
+        findings=findings,
+    )
+    assert "counterweighed" not in section_score.signature(), section_score.report()
+
+    page_score = gate(GOOD, enforce_structure=True)
+    assert "methods_present" not in page_score.signature(), page_score.report()
+    assert "conclusion_present" not in page_score.signature(), page_score.report()

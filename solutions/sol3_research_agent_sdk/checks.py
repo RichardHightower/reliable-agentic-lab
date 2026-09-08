@@ -51,7 +51,7 @@ Rows `check()` added later, still Python's, still no vote for the model:
     skip_noted    every skipped figure is named, with its reason, on the page
     methods_present the Methods section, Python-written from the run record, is present
     conclusion_present the Conclusion section, one writer turn from the body, is present
-    study_table   one Evidence Summary row per human-study claim, placed after Methods
+    study_table   one Evidence summary row per human-study claim, placed after Methods
 
 Belt versus judge, matching the house style page's ownership table
 (https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style).
@@ -94,12 +94,20 @@ CODE_SPAN = re.compile(r"`[^`]*`|```.*?```", re.S)
 LIST_ITEM = re.compile(r"^\d+[.)]\s")
 HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.M)  # re.M so finditer sees every heading
 
+# Sections Python writes directly, never through a writer turn: Methods from
+# the run record, and the Evidence summary table from the ledger (#478).
+# Neither carries a citation of its own to demand and neither is prose a
+# length floor should measure. A name-based exemption, not an incidental
+# formatting rule: PR #535 judge revision, item (b) and F2. The day either
+# section's own rendering changes, this set is the one place that still has
+# to say why the section is exempt.
+PYTHON_WRITTEN_SECTIONS = {"methods", "evidence summary"}
+
 # Sections where a paragraph without a citation is correct, not sloppy. An
 # abstract summarizes material that is cited below it, and a reference list is
 # the citation. Demanding a marker in either produces a paper that cites its own
-# bibliography. Methods is Python-written process description, #478: it states
-# what the run did, not a claim about the topic, so it needs no citation either.
-UNCITED_SECTIONS = {"abstract", "references", "summary", "methods"}
+# bibliography.
+UNCITED_SECTIONS = {"abstract", "references", "summary"} | PYTHON_WRITTEN_SECTIONS
 
 # Opt-in floors. Unit tests of other rows stay short. The pipeline passes
 # these when it is producing a paper rather than exercising one phase.
@@ -110,8 +118,10 @@ MIN_SECTION_WORDS = 80
 # The conclusion joins the abstract here for the same reason: `OfflineTurns`
 # stands in with a short, deterministic placeholder rather than a full-length
 # turn, so the floor below would fail every offline run over a section no
-# model actually wrote at length. #478
-PROSE_EXEMPT = {"references", "figures", "abstract", "conclusion"}
+# model actually wrote at length. #478. Methods and the study table join for
+# the reason above: neither is prose a length floor should measure. PR #535
+# judge revision B2.
+PROSE_EXEMPT = {"references", "figures", "abstract", "conclusion"} | PYTHON_WRITTEN_SECTIONS
 SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
 # A judge on PR #529 found three fence shapes this pattern missed. Group 1 is
 # the delimiter run, backtick or tilde, backreferenced so a closer must use
@@ -806,6 +816,38 @@ def _mask_section(text: str, name: str) -> str:
     return text
 
 
+def _mask_sections(text: str, names: set[str]) -> str:
+    """Blank every heading in `names`, one pass, in an order that cannot
+    matter.
+
+    Calling `_mask_section` once per name chains: it re-scans the string the
+    previous call already mutated, and a mask always eats the newline right
+    before the next heading (the mask ends exactly where that heading's `#`
+    starts). Two masked sections sitting back to back lose the line break
+    between them on the first call, so the second call's own `_headings`
+    scan never sees the second heading at all, only sometimes, whichever
+    name a set happened to iterate first. Spans are computed once, from the
+    untouched text, so this never depends on scanning a text a prior mask
+    already edited.
+    """
+    matches = _headings(text)
+    spans = []
+    for index, match in enumerate(matches):
+        if match.group(2).strip().lower() not in names:
+            continue
+        level = len(match.group(1))
+        end = len(text)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        spans.append((match.start(), end))
+    out = text
+    for start, end in spans:
+        out = out[:start] + " " * (end - start) + out[end:]
+    return out
+
+
 def glossary_terms(body: str) -> dict[str, str]:
     """The term-to-definition map assembly wrote into `## Glossary`.
 
@@ -1150,7 +1192,13 @@ def abstract_matches_body(body: str, claims: list[dict] | None = None) -> list[s
 # nothing to do with a body finding's own numbers, and the same count can
 # land in both by coincidence. #478: exempt for the same reason Glossary and
 # References are, not narrative prose a "said once" rule should hold.
-CAVEAT_EXEMPT_SECTIONS = {"glossary", "references", "methods"}
+# Conclusion stays out of this set on purpose. PR #535 judge revision F3: its
+# own prompt asks it to restate the body, the same exposure the abstract
+# already carries and is graded on (`repeat_shingles`'s own abstract-only
+# exemption is narrower than this set). B4 (`_persist_trim` now stamps
+# `conclusion.json`) is the fix: a caught repeat gets a real repair path
+# instead of a silent pass.
+CAVEAT_EXEMPT_SECTIONS = {"glossary", "references"} | PYTHON_WRITTEN_SECTIONS
 # P9, #477. A numeric finding stated in full twice, with the same value and
 # unit, is a repeat even when the wording around it differs enough to dodge
 # the shingle threshold below: "2.4 percent" once, then "2.4%" a paragraph
@@ -1753,7 +1801,16 @@ def _strip_figure_notes(body: str) -> str:
 
 
 def word_count(body: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", _strip_figure_notes(body))))
+    """The whole-paper word count `length` grades against `MIN_WORDS`.
+
+    Blanks the same system-generated text `_strip_figure_notes` already
+    excludes, and now also `PYTHON_WRITTEN_SECTIONS`: Methods and the study
+    table are Python output, never a writer's prose, and crediting either
+    toward the floor is the same overclaim `_strip_figure_notes` already
+    names. PR #535 judge revision F5.
+    """
+    stripped = _mask_sections(_strip_figure_notes(body), PYTHON_WRITTEN_SECTIONS)
+    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", stripped)))
 
 
 def sections_without_prose(body: str, min_words: int) -> list[str]:
@@ -1772,8 +1829,20 @@ def sections_without_prose(body: str, min_words: int) -> list[str]:
     return thin
 
 
+# Headings a plan inserts as structure, never a body's own evidence section.
+# PR #535 judge revision B1: the SDK's own outline never carries one of
+# these today, which is why the position check below passed by accident;
+# Deep Agents' plan always starts with "abstract", so "the first evidence
+# section" has to skip every structural heading explicitly, not just take
+# the first one `headings` names.
+STRUCTURAL_HEADINGS = {"abstract", "introduction", "methods", "conclusion", "references"}
+
+# A markdown table's own separator row: only `|`, `-`, `:`, and whitespace.
+TABLE_SEPARATOR_ROW = re.compile(r"^\|[\s:|-]+\|$")
+
+
 def study_table_violations(body: str, human_studies: list[dict], headings: list[str]) -> list[str]:
-    """The Evidence Summary table exists, holds one row per human-study
+    """The Evidence summary table exists, holds one row per human-study
     claim, and sits after Methods and before the first evidence section.
     #478. Called only when `human_studies` is non-empty; a paper with no
     human-study claim carries no table to grade.
@@ -1781,20 +1850,30 @@ def study_table_violations(body: str, human_studies: list[dict], headings: list[
     sections = top_level_sections(body)
     order = list(sections)
     if "evidence summary" not in order:
-        return ["no Evidence Summary table for a ledger holding a human-study claim"]
+        return ["no Evidence summary table for a ledger holding a human-study claim"]
     rows = [
-        line
+        line.strip()
         for line in sections["evidence summary"].strip().splitlines()
         if line.strip().startswith("|")
     ]
-    # The first row is the header, the second the `---` separator.
-    data_rows = rows[2:]
+    # PR #535 judge revision F8: a fixed `rows[2:]` miscounted a table that
+    # lost its separator row, or that shares its section with an unrelated
+    # pipe-prefixed line. The header is the first row; every other row is
+    # data unless it is the separator itself.
+    data_rows = [row for row in rows[1:] if not TABLE_SEPARATOR_ROW.match(row)]
     problems = []
     if len(data_rows) != len(human_studies):
         problems.append(f"{len(data_rows)} table rows for {len(human_studies)} human-study claims")
     methods_at = order.index("methods") if "methods" in order else -1
     table_at = order.index("evidence summary")
-    first_section = next((h.strip().lower() for h in headings if h.strip().lower() in order), None)
+    first_section = next(
+        (
+            h.strip().lower()
+            for h in headings
+            if h.strip().lower() in order and h.strip().lower() not in STRUCTURAL_HEADINGS
+        ),
+        None,
+    )
     first_at = order.index(first_section) if first_section else len(order)
     if not (methods_at != -1 and methods_at < table_at < first_at):
         problems.append("the table is not between Methods and the first evidence section")

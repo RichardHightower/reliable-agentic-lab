@@ -2332,7 +2332,7 @@ def test_methods_names_the_admitted_hosts(run_dir):
         json.dumps({"admitted": ["docs.example-field.org"], "dropped": []}),
         encoding="utf-8",
     )
-    body = "## Methods\n\n" + "\n".join(run._methods_lines())
+    body = "## Methods\n\n" + "\n\n".join(run._methods_lines())
     assert "docs.example-field.org" in body
     assert not paper_check.policy_leak_violations(body, ("docs.example-field.org",))
 
@@ -2405,6 +2405,22 @@ def test_two_human_study_claims_render_a_two_row_table():
     assert "meta_analysis_or_systematic_review" in table
 
 
+def test_a_study_claim_never_cited_in_the_written_body_is_dropped():
+    """PR #535 judge revision F7: a claim carrying a reference number is
+    not proof any section's prose used it. `written`, when given, filters
+    the table to rows a section actually cites."""
+    led, claims = _study_ledger()
+    index, _ = stages.numbering(led)
+    numbers = {sid: n for sid, n in index.items()}
+    first_number = numbers[claims[0].source_ids[0]]
+    written_only_first = {"Introduction": f"A fact. [{first_number}]"}
+    table = stages.study_table(led, index, written_only_first)
+    rows = [line for line in table.strip().splitlines() if line.strip().startswith("|")]
+    data_rows = rows[2:]
+    assert len(data_rows) == 1, table
+    assert "older men" in table
+    assert "postmenopausal" not in table
+
 def test_the_table_sits_after_methods_and_before_the_first_evidence_section():
     led, claims = _study_ledger()
     out = {
@@ -2416,7 +2432,7 @@ def test_the_table_sits_after_methods_and_before_the_first_evidence_section():
         ]
     }
     body = stages.assemble(plan(title="T"), out, {"Introduction": "A fact. [1][2]"}, [], led)
-    assert body.index("## Methods") < body.index("## Evidence Summary") < body.index("## Introduction")
+    assert body.index("## Methods") < body.index("## Evidence summary") < body.index("## Introduction")
 
 
 def test_no_human_study_claim_renders_no_table():
@@ -2430,7 +2446,7 @@ def test_no_human_study_claim_renders_no_table():
         ]
     }
     body = stages.assemble(plan(title="T"), out, {"Introduction": "A fact. [1]"}, [], led)
-    assert "## Evidence Summary" not in body
+    assert "## Evidence summary" not in body
 
 
 def test_a_term_marker_is_harvested_and_stripped():

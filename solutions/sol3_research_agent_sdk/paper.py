@@ -1806,7 +1806,7 @@ def write_conclusion(run: Run) -> dict:
     )
 
 
-def _methods_lines(run: Run, planned: dict) -> list[str]:
+def _methods_lines(run: Run, admitted_sources: int) -> list[str]:
     """Methods, Python-written from the run record. No model turn. #478
 
     Names the admitted hosts by design, which is why `checks.policy_leak`
@@ -1820,39 +1820,41 @@ def _methods_lines(run: Run, planned: dict) -> list[str]:
     # test, that never reached that phase.
     admitted = list(allowlist.get("admitted") or briefing.get("admitted") or [])
     dropped = list(allowlist.get("dropped") or briefing.get("dropped") or [])
-    fields = [str(s.get("heading") or "") for s in planned["sections"] if s.get("heading")]
+    # PR #535 judge revision F4: "fields searched" names the topic's own
+    # research field (biomedical, software, ...), the scout's own
+    # classification and the input to `source_policy.seed_for_field`, not
+    # the outline's section headings.
+    field = str(briefing.get("field") or "").strip()
     sources_payload = _load_json(run, "sources.json")
     retrieved = len(sources_payload.get("sources") or [])
-    claims_payload = _load_json(run, "claims.json")
-    admitted_claims = sum(
-        1
-        for claim in claims_payload.get("claims") or []
-        if claim.get("status") in USABLE and claim.get("number")
-    )
     started = (run.state.started_at or "")[:10] or "an unrecorded date"
 
     lines = [
-        f"This paper searched {len(fields)} planned sections for evidence, starting "
-        f"{started}: {', '.join(fields)}. Each planned section names a facet of the "
-        "topic the outline settled before research began."
-        if fields
+        f"This paper searched the {field} field for evidence, starting {started}."
+        if field
         else f"This paper searched the topic for evidence, starting {started}, "
-        "before the outline named any section.",
+        "before a field was classified.",
         f"Admitted search hosts, decided once before any paid search ran: "
         f"{', '.join(admitted)}. A host outside this list was not searched, and a "
         "source from it never reached a claim."
         if admitted
         else "Admitted search hosts, decided once before any paid search ran: the "
         "vendor documentation seed. No topic-specific host was proposed.",
+        # PR #535 judge revision B3: `admitted_sources` counts distinct
+        # sources the reference list actually carries (the caller's own
+        # `_numbered()` result), never a count of claims.
         f"Sources retrieved during research: {retrieved}. Sources admitted to the "
-        "reference list, after the same host and claim checks every finding in this "
-        f"paper passed: {admitted_claims}.",
+        f"reference list, after the same host and claim checks every finding in "
+        f"this paper passed: {admitted_sources}.",
+        # PR #535 judge revision F4: "this run spent N", not "of which N
+        # were spent", so the sentence never has to agree a verb with a
+        # count that might be exactly one.
         f"The verification cap for this run allows a second opinion on up to "
         f"{run.max_claims} claims. The follow-turn cap allows {run.max_follow} "
-        f"secondary claims a look at their own primary study, of which "
-        f"{run.follow_used} were spent. The counter-evidence cap allows "
-        f"{run.max_counter} generalizing claims a search for a contrary finding, "
-        f"of which {run.counter_used} were spent.",
+        f"secondary claims a look at their own primary study; this run spent "
+        f"{run.follow_used}. The counter-evidence cap allows {run.max_counter} "
+        f"generalizing claims a search for a contrary finding; this run spent "
+        f"{run.counter_used}.",
     ]
     if dropped:
         reasons = "; ".join(
@@ -1868,25 +1870,46 @@ def _methods_lines(run: Run, planned: dict) -> list[str]:
     return lines
 
 
-def _study_rows(claims: list[dict]) -> list[dict]:
-    """Claims the paper actually cites (`number` set by `_numbered`) that
-    carry a non-empty E3 `study` object. One row per claim, not deduped by
-    study identity: two claims about the same trial are two citations
-    already, the same way the reference list treats them. #478
+def _load_bearing_numbers(run: Run, planned: dict) -> set[int]:
+    """Reference numbers a body section's own text actually cites, read
+    straight from the section files, before assembly's cleanup pass runs.
+
+    A claim carrying a footnote number is not proof any section's prose
+    used it: `_numbered` assigns one to every usable claim regardless.
+    #478, PR #535 judge revision F7.
     """
-    return [claim for claim in claims if claim.get("study") and claim.get("number")]
+    numbers: set[int] = set()
+    for section in planned["sections"]:
+        path = run.file("sections") / f"{section['id']}.md"
+        if path.exists():
+            numbers |= {int(n) for n in re.findall(r"\[(\d+)\]", path.read_text(encoding="utf-8"))}
+    return numbers
 
 
-def _study_table_block(claims: list[dict]) -> str:
-    """The Evidence Summary table, or "" when the ledger holds no
+def _study_rows(claims: list[dict], load_bearing: set[int]) -> list[dict]:
+    """Claims the paper actually cites (`number` set by `_numbered`, and
+    that number present in some body section's own text) that carry a
+    non-empty E3 `study` object. One row per claim, not deduped by study
+    identity: two claims about the same trial are two citations already,
+    the same way the reference list treats them. #478
+    """
+    return [
+        claim
+        for claim in claims
+        if claim.get("study") and claim.get("number") and claim["number"] in load_bearing
+    ]
+
+
+def _study_table_block(claims: list[dict], load_bearing: set[int]) -> str:
+    """The Evidence summary table, or "" when the ledger holds no
     human-study claim. Python from the ledger, reading E3's `study` object
     and E4's `evidence_tier`. #478
     """
-    rows = _study_rows(claims)
+    rows = _study_rows(claims, load_bearing)
     if not rows:
         return ""
     lines = [
-        "## Evidence Summary",
+        "## Evidence summary",
         "",
         "| Participants | Duration | Deficit | Training | Assay | Result | Tier |",
         "| --- | --- | --- | --- | --- | --- | --- |",
@@ -1978,12 +2001,13 @@ def assemble(run: Run) -> dict:
         parts += ["## Abstract", "", abstract_text.strip(), ""]
     # #478. Methods is Python-written, right after the Abstract and before
     # every outline section: it is not itself an outline section, so the
-    # loop below never has to skip it. The Evidence Summary table (Python,
+    # loop below never has to skip it. The Evidence summary table (Python,
     # from the ledger) sits immediately after it, when the run cites at
     # least one human-study claim; otherwise Methods carries a one-line
     # note instead of a table nobody could fill.
-    methods_lines = _methods_lines(run, planned)
-    table_block = _study_table_block(usable)
+    load_bearing = _load_bearing_numbers(run, planned)
+    methods_lines = _methods_lines(run, len(references))
+    table_block = _study_table_block(usable, load_bearing)
     if not table_block:
         methods_lines.append("No claim in this run carries a recorded human study.")
     parts += ["## Methods", "", "\n\n".join(methods_lines), ""]
@@ -2380,8 +2404,8 @@ def review(run: Run) -> dict:
 
 def _persist_trim(run: Run, body: str) -> None:
     """Write the whole-paper pass's edit back to the sources `assemble`
-    reads: the section files, and the stamped abstract when the pass
-    touched it.
+    reads: the section files, and the stamped abstract and conclusion when
+    the pass touched either.
 
     `assemble` rebuilds `paper.md` from `sections/*.md` on every call,
     including the unrelated `edit_paper` flow pass that already runs after
@@ -2399,15 +2423,24 @@ def _persist_trim(run: Run, body: str) -> None:
         path = run.file("sections") / f"{section['id']}.md"
         if path.exists():
             path.write_text(block.strip() + "\n", encoding="utf-8")
+    sha = _sections_sha(run, planned)
     abstract_block = blocks.get("abstract")
     if abstract_block is not None and run.file("abstract.json").exists():
         # `write_abstract` skips its turn when `sections_sha` already
         # matches. Stamping the sha the just-updated sections now hash to
         # keeps that guard from discarding the trimmed abstract on the next
         # attempt and spending a turn to regenerate what is already fixed.
+        run.write_json("abstract.json", {"abstract": abstract_block.strip(), "sections_sha": sha})
+    # PR #535 judge revision B4: P11's Conclusion is a second stamped
+    # section the same way the abstract already is, and `_persist_trim`
+    # never registered it. A repeat the whole-paper pass cut out of the
+    # Conclusion returned on the next `assemble`, because that call rebuilt
+    # the Conclusion from an untouched `conclusion.json`. #477's own fix
+    # for the abstract, applied here.
+    conclusion_block = blocks.get("conclusion")
+    if conclusion_block is not None and run.file("conclusion.json").exists():
         run.write_json(
-            "abstract.json",
-            {"abstract": abstract_block.strip(), "sections_sha": _sections_sha(run, planned)},
+            "conclusion.json", {"conclusion": conclusion_block.strip(), "sections_sha": sha}
         )
 
 
