@@ -2,10 +2,130 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import contract as contract_mod
 import e2e_t001
+import implementer
+from contract import CoverageReport, RunResult, SuiteReport
+
+# Copied from tests/test_implementer.py, not imported, the same way
+# tests/test_parity.py copies its own fixtures. Block style, matching
+# conftest.py's own fixture (#496).
+TASKFILE = """\
+version: '3'
+tasks:
+  setup:
+    cmds: [echo setup]
+  test:
+    cmds: [echo test]
+  e2e:
+    cmds: [echo e2e]
+  lint:
+    cmds: [echo lint]
+  format-check:
+    cmds: [echo format-check]
+"""
+
+LOOP_YML = """\
+version: 1
+roles:
+  planner:
+    write_allow: ["steps.jsonl"]
+  test_implementer:
+    write_allow: ["tests/**"]
+    write_deny: ["app/**"]
+  code_implementer:
+    write_allow: ["app/**"]
+    write_deny: ["tests/**"]
+  judge:
+    write_allow: []
+rubric:
+  coverage_floor: 80
+  require_red: true
+tickets:
+  source: local
+  path: tickets
+budget:
+  iterations: 3
+  usd: 2.00
+"""
+
+TICKET = """\
+---
+id: T001
+title: greet
+state: ready
+---
+
+# T001 greet
+
+## Acceptance criteria
+
+- (AC-1) greet() returns hello
+"""
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "lab@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "lab"], cwd=path, check=True)
+    (path / "Taskfile.yml").write_text(TASKFILE, encoding="utf-8")
+    (path / ".loop.yml").write_text(LOOP_YML, encoding="utf-8")
+    (path / "tickets").mkdir()
+    (path / "app").mkdir()
+    (path / "tests").mkdir()
+    (path / "tickets" / "T001.md").write_text(TICKET, encoding="utf-8")
+    (path / "app" / "health.py").write_text("ok = True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=path, check=True, capture_output=True)
+    return path
+
+
+def _suite(*, passed=(), failed=()) -> SuiteReport:
+    passed_ids = set(passed)
+    failed_ids = set(failed)
+    return SuiteReport(
+        exists=True,
+        tests=len(passed_ids) + len(failed_ids),
+        failures=len(failed_ids),
+        passed_ids=passed_ids,
+        failed_ids=failed_ids,
+    )
+
+
+def _run(*, passed=(), failed=(), coverage=True, ok=True) -> RunResult:
+    return RunResult(
+        task="test",
+        exit_code=0 if ok and not failed else 1,
+        output="",
+        junit=_suite(passed=passed, failed=failed),
+        coverage=CoverageReport(exists=coverage, line_rate=100.0 if coverage else 0.0),
+    )
+
+
+def _patch_runs(monkeypatch, runs: list[RunResult]):
+    """No `task` binary needed. `Contract.run` never shells out in this test."""
+    leftover = list(runs)
+
+    def fake_run(self, task: str, timeout: int = 900) -> RunResult:
+        if task != "test":
+            return RunResult(
+                task=task,
+                exit_code=0,
+                output="",
+                junit=_suite(passed=("e2e::ok",)) if task == "e2e" else SuiteReport(),
+                coverage=CoverageReport(),
+            )
+        if leftover:
+            return leftover.pop(0)
+        return _run(passed=("tests/test_health.py::test_health",), failed=())
+
+    monkeypatch.setattr(contract_mod.Contract, "run", fake_run)
+    monkeypatch.setattr(implementer.Contract, "run", fake_run)
 
 
 class FakeAgentSdkBackend:
@@ -102,3 +222,39 @@ def test_the_e2e_loader_checks_local_then_parent_then_checkout_root(monkeypatch,
     e2e_t001._load_operator_env()
 
     assert e2e_t001.os.environ["ANTHROPIC_API_KEY"] == "local"
+
+
+def test_the_e2e_summary_lands_in_the_worktree(tmp_path, monkeypatch):
+    """#506. `implementer.run` does its work in `<repo>.worktrees/<ticket>`,
+    never against the clone `--repo` names, and writes `.harness/` there.
+    `_write_extras` used to receive the clone path anyway, so
+    `last-sdk-e2e.md` landed beside a tree the run never touched, naming
+    paths that resolved against the wrong directory. Offline: `Contract.run`
+    is patched, so no `task` binary and no live Agent SDK credential are
+    needed."""
+    repo = _git_repo(tmp_path / "repo")
+    baseline = _run(passed=("tests/test_health.py::test_health",))
+    still_green = _run(passed=("tests/test_health.py::test_health",))
+    _patch_runs(monkeypatch, [baseline, still_green])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(e2e_t001, "_load_operator_env", lambda: None)
+    monkeypatch.setattr(
+        e2e_t001,
+        "_build_backend",
+        lambda repo, budget: (e2e_t001.AgentSdkE2EBackend(FakeAgentSdkBackend()), []),
+    )
+
+    exit_code = e2e_t001.main(["--repo", str(repo), "--ticket", "T001", "--budget", "1"])
+
+    assert exit_code == 1  # escalate: no new red observed at budget 1
+
+    worktree = repo.parent / f"{repo.name}.worktrees" / "T001"
+    assert worktree.is_dir()
+    summary = worktree / ".harness" / "last-sdk-e2e.md"
+    assert summary.is_file()
+    assert "gate: escalate" in summary.read_text(encoding="utf-8")
+    assert (worktree / ".harness" / "last-sdk-e2e-diff.txt").is_file()
+
+    # The regression this test pins: the summary must not land next to the
+    # clone the run never touched.
+    assert not (repo / ".harness" / "last-sdk-e2e.md").exists()

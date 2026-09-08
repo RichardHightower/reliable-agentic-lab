@@ -14,14 +14,18 @@ if str(ROOT) not in sys.path:
 
 from contract import Contract  # noqa: E402
 
-TASKFILE = """\
-version: '3'
+TASKFILE = """version: '3'
 tasks:
-  setup: {cmds: [echo setup]}
-  test: {cmds: [echo test]}
-  e2e: {cmds: [echo e2e]}
-  lint: {cmds: [echo lint]}
-  format-check: {cmds: [echo format-check]}
+  setup:
+    cmds: [echo setup]
+  test:
+    cmds: [echo test]
+  lint:
+    cmds: [echo lint]
+  format-check:
+    cmds: [echo format]
+  e2e:
+    cmds: [echo e2e]
 """
 
 LOOP_YML = """\
