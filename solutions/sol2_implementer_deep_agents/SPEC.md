@@ -11,6 +11,54 @@ orchestrator, planner, test_implementer, code_implementer, judge.
 `task`. It holds no write tool. Each subagent gets its own `tools` list, which
 **replaces** the parent. The judge's list is `read_file` only.
 
+## How this runtime enforces scope
+
+This port scopes in three places. All three have to hold, not just one.
+
+No role holds `Bash`. This runtime has no `Bash` tool to grant or refuse. The
+nearest built-in is `execute`, and `ORCHESTRATOR_EXCLUDED_TOOLS` removes it
+from the orchestrator (`roles.py:43`, `roles.py:254`). No subagent spec adds
+`execute` back. `subagents_for` attaches only the shared reader and, for a
+writing role, one scoped write tool (`roles.py:201-203`). `execute` never
+reaches any role in this cast.
+
+A subagent tool list replaces the parent list. `subagents_for` builds a
+`tools` list per role and stores it on that role's spec (`roles.py:201-208`).
+A subagent runs with that list only. It does not inherit the orchestrator's
+tools, and the orchestrator does not inherit a subagent's. The orchestrator
+itself never holds a built-in write tool. `ORCHESTRATOR_EXCLUDED_TOOLS` names
+`write_file`, `edit_file`, `delete`, and `execute` (`roles.py:43`), and
+`build_agent` passes that set into the harness profile the orchestrator's
+model runs under (`roles.py:254`).
+
+The judge holds `read_file` only. The judge cannot write, so `subagents_for`
+skips the write branch for it and leaves `tools = [reader]`
+(`roles.py:201-203`). `reader` is the `read_file` tool (`roles.py:134-147`).
+The judge subagent gets that one tool and nothing else.
+
+`virtual_mode` is routing, not a security boundary. `build_agent` mounts the
+target repo with `FilesystemBackend(root_dir=str(repo), virtual_mode=True)`
+(`roles.py:281`), so a built-in filesystem tool sees paths relative to the
+repo root instead of the real filesystem root. The mount does not stop a
+custom tool from walking `..` off the repo on its own. `_inside` is the real
+boundary. It resolves the requested path against the repo root and refuses
+anything that lands outside it. Both `read_file` and the scoped write tool
+call `_inside` before they touch disk (`roles.py:92-107`, `roles.py:124`,
+`roles.py:140`).
+
+Orchestrator `permissions` deny writes. `build_agent` passes
+`permissions=[FilesystemPermission(**DENY_EVERY_WRITE)]` to
+`create_deep_agent` (`roles.py:293`). `DENY_EVERY_WRITE` denies every write
+path (`roles.py:47`). This is a second layer under
+`ORCHESTRATOR_EXCLUDED_TOOLS`. Even if a later change gave the orchestrator a
+write tool, the declared permission would still refuse the call.
+
+The general-purpose subagent is off. Deep Agents ships one by default, with
+its own filesystem tools. `build_agent` registers a harness profile with
+`general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)`
+(`roles.py:255`). Without that line, the harness would still offer a generic
+subagent that can write anywhere in the repo.
+
 ## What Python still owns
 
 1. Ready ticket in.
