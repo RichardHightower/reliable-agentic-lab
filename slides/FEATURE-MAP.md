@@ -31,7 +31,7 @@ Do not survey seven production loops as labs. Name them in Module 4. Build one g
 | Deterministic judge | 2 | Arithmetic over `junit.xml`, `coverage.xml`, and the diff |
 | Model final judge | 2 | After a green rubric the judge subagent answers `done`. Green plus `judge_done=False` is escalate |
 | Unparseable verdict is a fail | 2 | A synthetic failing verdict, never a pass. Both sol2 ports parse JSON and treat garbage as `done=False` |
-| The push gate | 2 | A `PreToolUse` hook refuses `git push` without a green receipt |
+| The push gate | 2 | A `PreToolUse` hook in the CRM clone refuses `git push` without a green receipt. It lives at `.claude/hooks/gate.py` and shells `scripts/receipt.py check` |
 | The receipt | 2 | Green, this tree, and newer than the last edit. All three. Both sol2 ports write `.harness/receipt.json` |
 | Defense at two layers | 2 | In-process scope catches the loop. `write_scope` catches the subprocess. |
 | Reading harness output | 2 | Walk one trace. Name the row that blocked. |
@@ -44,8 +44,8 @@ Do not survey seven production loops as labs. Name them in Module 4. Build one g
 | Grounding as arithmetic | 3 | Every citation resolves. Every claim paragraph cites. No model call. |
 | Stopping an unbounded search | 3 | Call budget, dollar budget, stable failure, and no-source escalation |
 | Unattended trigger | 4 | `workflow_dispatch`, `pull_request`, or cron. Not a keystroke. |
-| Durable state | 4 | `.harness/state.json`. Runs, gate, reason, timestamp, loop. |
-| Exit codes CI can read | 4 | 0 pass, 2 escalate, 1 crash |
+| Durable state | 2 | `.harness/state.json`. Runs, gate, reason, timestamp, loop, phase, and the resume fields. Both sol2 ports write it. Neither sol4 port does. |
+| Exit codes CI can read | 2 | 0 pass, 2 escalate, 1 crash. Both sol2 ports return these from `main`. Neither sol4 port defines them. |
 | Observability | 4 | If you cannot read the last score, you cannot debug at 2 a.m. |
 | Local and remote gates agree | 4 | The same receipt rule in the hook and in the workflow |
 | Why the receipt exists | 4 | A model that acts and verifies can invent its own evidence |

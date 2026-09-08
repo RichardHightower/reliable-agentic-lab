@@ -104,6 +104,35 @@ Each writing role with a skill directory mounts `/skills/<role>/`. The body
 is not pasted into the system prompt. `/memory/` routes at `memory/`, not
 this folder.
 
+## The run, resumed, cleaned up, and planned
+
+`implementer.main` takes four flags beyond `--repo`, `--ticket`, and
+`--budget`. `--doer` accepts `none`, `reference`, `reference:<ref>`, or
+`judge-no`. It never accepts a CLI name; a coding CLI is not a doer this
+folder builds. `--planner` accepts `derived`, `sdk`, or `deep`, and defaults
+to `derived`, which is `plan_for` and calls no model. `--doer none` and
+`--doer reference` force `derived` regardless of the flag.
+
+Every run happens inside an isolated git worktree at
+`<repo>.worktrees/<ticket>`, on branch `implementer/<ticket>`. The target
+repo you pass with `--repo` is never written to. `--cleanup` removes the
+worktree after the run. Without it, the worktree stays so you can inspect
+it, or push from it. `--cleanup` leaves the branch behind; delete it by
+hand with `git branch -D implementer/<ticket>`. `--resume` re-enters a
+killed run from that worktree's own `.harness/state.json`, instead of
+starting over.
+
+`state.json` sits beside the receipt. It carries the run count, the last
+gate, the last reason, the last run time, the loop name, the phase, the
+red test ids, the preexisting files, the test-phase files, and the
+test-phase attempt count: ten fields in all. A `state.json` that will not
+parse, or holds the wrong type for one of those fields, is corrupt, and a
+corrupt state starts no work.
+
+`main` returns one of three exit codes: `0` on pass, `2` on escalate, `1`
+on a `ContractError` or a corrupt state. Retry never becomes an exit code,
+because `run()` only returns on a terminal gate.
+
 ## What this folder is not
 
 Not a second loop engine. Not Saturday's lab. Saturday fills `harness.py` under

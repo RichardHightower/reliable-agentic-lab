@@ -26,7 +26,7 @@ rather than a fresh red gate.
 
 Run it against any repo that satisfies the contract:
 
-    task loop:implementer -- --repo work/northwind-field-crm --ticket T001
+    task run -- --repo work/northwind-field-crm --ticket T001
 """
 
 from __future__ import annotations

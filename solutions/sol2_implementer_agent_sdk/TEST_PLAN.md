@@ -56,6 +56,13 @@ Covered without a model:
 - Folder-local `receipt.py` writes `.harness/receipt.json`.
 - `task setup` creates `.venv`. `HOW_TO_RUN.md` exists.
 - Docs name only tasks that exist in the Taskfile, including `task e2e`.
+- Every run isolates itself in `<repo>.worktrees/<ticket>` and leaves the
+  target repo untouched.
+- `.harness/state.json` carries ten fields, and `--resume` reads them back.
+- `main` exits `0` on pass, `2` on escalate, `1` on a contract error or a
+  corrupt `state.json`.
+- `--doer` accepts `none`, `reference`, `reference:<ref>`, or `judge-no`.
+  No CLI name is a valid doer.
 
 Those tests use a fake SDK. They cannot catch a live spawn, a live hook miss,
 or a PEP 668 install on a second machine.
@@ -117,6 +124,18 @@ task run -- --ticket T001 --doer reference
 `--doer none` must escalate on the red gate.
 `--doer reference` must pass, write a receipt, and leave a judge verdict
 on the trace.
+
+Both runs happen in `../../work/northwind-field-crm.worktrees/T001`, not
+in the clone itself. The clone stays clean: `git status --porcelain` in it
+prints nothing after either command. Read the receipt and the trace from
+the worktree, not the clone.
+
+`--resume` re-enters a killed run from that worktree's own `state.json`.
+`--cleanup` removes the worktree, but leaves the branch behind. Delete the
+branch by hand with `git branch -D implementer/T001`. `--planner` picks
+`derived`, `sdk`, or `deep`, and `--doer none` and `--doer reference` force
+`derived` either way. `main` exits `0` on pass, `2` on escalate, and `1` on
+a contract error or a corrupt `state.json`.
 
 ## Layer 3. Scratch-repo live fence probe
 
