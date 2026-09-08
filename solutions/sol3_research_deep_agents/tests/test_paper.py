@@ -964,6 +964,8 @@ def test_a_third_mismatch_drops_the_figure_and_the_image(offline, run_dir, stub_
             if role != "diagrammer" or "three-exits" not in prompt:
                 return self.inner.ask(role, prompt)
             self.calls += 1
+            self.prompts = getattr(self, "prompts", [])
+            self.prompts.append(prompt)
             return paper.Reply(text='flowchart LR\n  A["Lean mass preservation"]\n')
 
     fake = MismatchedDiagrammer(inner)
@@ -971,11 +973,17 @@ def test_a_third_mismatch_drops_the_figure_and_the_image(offline, run_dir, stub_
     result = offline.stage_diagram()
 
     assert fake.calls == diagrams_mod.MAX_LABEL_ATTEMPTS
+    assert "Claims this section may draw on:" in fake.prompts[0], (
+        "the diagrammer must be grounded in the section's own claims"
+    )
     assert result.artifacts["dropped"] == ["three-exits"]
     assert not (run_dir / "diagrams" / "three-exits.mmd").exists(), "no orphan source file"
     assert not any(
         p.name.startswith("three-exits") for p in (run_dir / "figures").glob("*")
     ), "no orphan image file"
+    assert not any(
+        "three-exits" in (section.get("figures") or []) for section in offline.outline["sections"]
+    ), "the dropped figure's section reference must be removed"
 
     body = stages.assemble(
         offline.plan, offline.outline, offline.written, offline.figures, offline.ledger
