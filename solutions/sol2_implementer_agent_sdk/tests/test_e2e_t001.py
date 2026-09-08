@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -179,6 +181,22 @@ def test_the_e2e_wrapper_selects_the_backend_for_each_phase(tmp_path):
 
 def test_the_live_turn_ceiling_is_high_enough_for_a_green_run():
     assert e2e_t001.E2E_MAX_TURNS >= 12
+
+
+def test_the_dollar_cap_is_tunable_by_environment_variable():
+    """#444/#539. The cap a status note reports must be a cap an operator
+    actually chose. Read at import, the same as adapter.QUERY_TIMEOUT_SECONDS,
+    so this is a subprocess check, not a monkeypatch of the module attribute."""
+    env = {**os.environ, "SOL2_E2E_MAX_USD": "4"}
+    out = subprocess.run(
+        [sys.executable, "-c", "import e2e_t001; print(e2e_t001.MAX_TOTAL_USD)"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        env=env,
+        check=True,
+    )
+    assert out.stdout.strip() == "4.0"
 
 
 def test_a_controlled_sdk_turn_ceiling_is_not_a_failed_query(tmp_path):

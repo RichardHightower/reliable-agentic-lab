@@ -26,7 +26,10 @@ import roleplan
 from load_agents import DEFAULT_MAX_TURNS
 
 FOLDER = Path(__file__).resolve().parent
-MAX_TOTAL_USD = 2.0
+# #444/#539. Read at import, the same way adapter.QUERY_TIMEOUT_SECONDS is,
+# so the cap a status note reports is a cap an operator actually chose, not
+# a number this file always hardcoded.
+MAX_TOTAL_USD = float(os.environ.get("SOL2_E2E_MAX_USD", "2.0"))
 E2E_MAX_TURNS = DEFAULT_MAX_TURNS
 CONTROLLED_STOPS = frozenset({"max turns", "cost budget spent"})
 
