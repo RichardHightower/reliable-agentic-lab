@@ -19,6 +19,11 @@ of it is enforced by something other than a prompt:
        Green rubric plus the judge saying not done is escalate.
     8. Pass, retry, or escalate.
 
+`--resume` re-enters a killed run from its own checkpoint (`_write_checkpoint`,
+read back through `state.json`'s `phase` field): a completed, green test phase
+is never replayed, and the code loop picks up with the stored `red_ids`
+rather than a fresh red gate.
+
 Run it against any repo that satisfies the contract:
 
     task loop:implementer -- --repo work/northwind-field-crm --ticket T001
@@ -48,6 +53,26 @@ LOOP = "implementer"
 def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
     """Test ids that are failing now and did not exist before. The red proof."""
     return {test_id for test_id in after_failed if test_id not in before}
+
+
+HARNESS_DIR = ".harness/"
+
+
+def _is_loop_bookkeeping(path: str) -> bool:
+    """`steps.jsonl` and everything under `.harness/` are this loop's own
+    output, never a role's. Excluded everywhere `rubric.changed_files` feeds
+    `preexisting`, `after_test_phase`, or the code phase's own `changed`
+    list.
+
+    A6 (#433) is what surfaces this: `_write_checkpoint` writes
+    `.harness/state.json` mid-run, before the test phase's red gate is even
+    decided, so a later `rubric.changed_files` scan in the same run would
+    otherwise see it as an untracked file with no role's scope covering it,
+    and `write_scope` would fail every run that reaches the code loop. A5's
+    own `.harness` writes never hit this, because they only ever ran once,
+    at the very end, after the last scan had already happened.
+    """
+    return path == steps.STEPS_FILE or path.startswith(HARNESS_DIR)
 
 
 def plan_for(target_ticket: tickets.Ticket) -> steps.Plan:
@@ -191,7 +216,7 @@ def _code_prompt(
     return extra + "\n\n" + body
 
 
-def _worktree(repo: Path, ticket_id: str) -> Path:
+def _worktree(repo: Path, ticket_id: str, *, resume: bool = False) -> Path:
     """An isolated git worktree for one ticket. Every run mutates this tree,
     never the caller's repo.
 
@@ -204,9 +229,9 @@ def _worktree(repo: Path, ticket_id: str) -> Path:
     two different parents.
 
     An existing, registered worktree is reused by this same deterministic
-    path; that determinism is what a future `--resume` (A6) needs. A path
-    that exists but is not a registered worktree is a leftover, and
-    `git worktree add` never runs on top of one.
+    path, which is what `--resume` (A6) reads back. A path that exists but
+    is not a registered worktree is a leftover, and `git worktree add` never
+    runs on top of one.
 
     Two things are refused before anything else runs, because either one
     would let `reset --hard` / `clean -fd` land somewhere other than this
@@ -246,6 +271,15 @@ def _worktree(repo: Path, ticket_id: str) -> Path:
         if line.startswith("worktree ")
     }
 
+    # A6 (#433). A resume with no worktree at all has nothing to read back:
+    # fail here, before `path.parent.mkdir` or any git command runs, rather
+    # than silently starting a fresh run under `--resume`'s name.
+    if resume and not path.exists():
+        raise ContractError(
+            f"nothing to resume for {ticket_id}: no worktree at {path}. "
+            "Run without --resume first."
+        )
+
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if path.exists():
@@ -254,29 +288,35 @@ def _worktree(repo: Path, ticket_id: str) -> Path:
                 f"{path} exists but is not a registered git worktree of {repo}. "
                 "Remove it by hand, or run a different --ticket."
             )
-        # Reused. There is no --resume flag yet (A6 adds one), so every run
-        # here is a fresh run: reset the worktree to HEAD before the
-        # baseline, rather than carrying the last attempt's code forward.
-        # -fd, not -x, so a gitignored .venv the bootstrap step symlinked in
-        # is left alone.
-        #
-        # state.json is cumulative across runs of this ticket (A5's `runs`
-        # counter, and the corrupt-state guard that reads it before this run
-        # does anything), and survives the reset on purpose. `.harness` is
-        # untracked and `git clean -fd` removes it along with everything
-        # else, so its bytes are captured before either git command runs,
-        # not after. Everything else in .harness describes only the run that
-        # just ended.
-        harness_dir = path / ".harness"
-        state_path = harness_dir / "state.json"
-        saved_state = state_path.read_bytes() if state_path.is_file() else None
-        _git(path, "reset", "--hard", "HEAD")
-        _git(path, "clean", "-fd")
-        if harness_dir.exists():
-            shutil.rmtree(harness_dir)
-        if saved_state is not None:
-            harness_dir.mkdir(parents=True, exist_ok=True)
-            state_path.write_bytes(saved_state)
+        if resume:
+            # A6 (#433). A resume never resets. The whole point is to pick up
+            # the killed run's own code -- and the checkpoint in `run()`'s
+            # `state.json` that describes it -- not throw both away the way
+            # the branch below does for an ordinary reused worktree.
+            pass
+        else:
+            # Reused, and this is not a resume: reset the worktree to HEAD
+            # before the baseline, rather than carrying the last attempt's
+            # code forward. -fd, not -x, so a gitignored .venv the bootstrap
+            # step symlinked in is left alone.
+            #
+            # state.json is cumulative across runs of this ticket (A5's
+            # `runs` counter, and the corrupt-state guard that reads it
+            # before this run does anything), and survives the reset on
+            # purpose. `.harness` is untracked and `git clean -fd` removes it
+            # along with everything else, so its bytes are captured before
+            # either git command runs, not after. Everything else in
+            # .harness describes only the run that just ended.
+            harness_dir = path / ".harness"
+            state_path = harness_dir / "state.json"
+            saved_state = state_path.read_bytes() if state_path.is_file() else None
+            _git(path, "reset", "--hard", "HEAD")
+            _git(path, "clean", "-fd")
+            if harness_dir.exists():
+                shutil.rmtree(harness_dir)
+            if saved_state is not None:
+                harness_dir.mkdir(parents=True, exist_ok=True)
+                state_path.write_bytes(saved_state)
     else:
         branch = f"implementer/{ticket_id}"
         added = subprocess.run(
@@ -363,6 +403,7 @@ def run(  # noqa: PLR0915
     budget: int | None = None,
     write_trace: bool = True,
     cleanup: bool = False,
+    resume: bool = False,
 ) -> dict:
     """Run one implementer loop against a target repo.
 
@@ -376,12 +417,19 @@ def run(  # noqa: PLR0915
     ticket and `.loop.yml` in first. `target` is bound to that worktree, so
     the ticket read and everything after it -- steps.jsonl, .harness, the
     receipt -- happen there, not against the source.
+
+    `resume=True` reads that worktree's own `state.json` instead of starting
+    over: `_worktree` skips its usual reset, and this function skips the test
+    phase entirely when the stored `phase` says it already went green,
+    restoring `preexisting`, the test phase's own files, and `red_ids` from
+    the checkpoint rather than recomputing them from a worktree `--resume`
+    left dirty on purpose.
     """
     contract = Contract(repo)
     contract.validate()
     source_repo = contract.repo
 
-    worktree = _worktree(source_repo, ticket_id)
+    worktree = _worktree(source_repo, ticket_id, resume=resume)
     contract = Contract(worktree)
     target = contract.repo
 
@@ -389,6 +437,17 @@ def run(  # noqa: PLR0915
     # ticket loads, before the baseline test runs, before any backend call.
     previous_state = _read_state(target / ".harness" / "state.json")
     previous_runs = previous_state.get("runs", 0) if previous_state else 0
+
+    # A6 (#433). Nothing to resume is fail-closed for the same reason, and
+    # checked at the same point. `_worktree` above already refused a resume
+    # with no worktree at all; these two are the cases where a worktree can
+    # still exist and nothing is left to resume: no run ever checkpointed a
+    # phase, or the last one already reached the terminal gate a resume
+    # exists to avoid replaying.
+    if resume and previous_state is None:
+        raise ContractError(f"nothing to resume for {ticket_id}: no state.json in {target}")
+    if resume and previous_state.get("last_gate") == gates.PASS:
+        raise ContractError(f"nothing to resume for {ticket_id}: the last run already passed")
 
     the_ticket = tickets.load(target, ticket_id, contract.tickets.get("path", "tickets"))
     if not the_ticket.ready:
@@ -416,101 +475,169 @@ def run(  # noqa: PLR0915
     baseline = contract.run("test")
     known_ids = baseline.junit.passed_ids | baseline.junit.failed_ids
 
-    # Whatever was already dirty is not this loop's doing. The enhancer edits
-    # tickets before the implementer runs, and blaming this loop for that would
-    # fail write_scope for a change it never made.
-    preexisting = {path for path in rubric.changed_files(target) if path != steps.STEPS_FILE}
+    harness_dir = target / ".harness"
 
-    # Step 3. Tests first. The test implementer owns tests/ and nothing else.
-    # A red-gate miss retries inside this loop's own attempt counter rather
-    # than escalating on the first empty attempt. This never calls
-    # `boss.start_iteration()`: that counter belongs to the code loop below,
-    # and sharing it would spend the code budget on test turns.
-    tester = cast["test_implementer"]
-    attempt = 0
-    previous_test_signature: tuple[str, ...] | None = None
-    while True:
-        attempt += 1
-        test_result = backend.run(
-            repo=target, prompt=_test_prompt(the_ticket, plan), allow=list(tester.scope.allow)
-        )
-        boss.spend(test_result.usd)
-        after_tests = contract.run("test")
-        red_ids = _new_test_ids(known_ids, after_tests.junit.failed_ids)
-
-        # Attribute writes by phase, not by what a backend claims. Files that
-        # appear during the test phase belong to the test implementer; files
-        # that appear later belong to the code implementer. A backend that
-        # lies about `wrote` cannot move a file out of its phase.
-        after_test_phase = {
-            path
-            for path in rubric.changed_files(target)
-            if path != steps.STEPS_FILE and path not in preexisting
+    # A6 (#433). Restore, never recompute, when resuming: `preexisting` was
+    # honest the moment the checkpoint below first wrote it, before anything
+    # in this run touched the tree. Recomputing it now would read a worktree
+    # `--resume` deliberately left dirty (Grok suggestion 4): a live doer's
+    # own test files would be folded into `preexisting`, hiding them from
+    # the `changed` list `rubric.score` scores in the code loop.
+    resume_into_code = resume and previous_state.get("phase") == "code"
+    if resume:
+        preexisting = set(previous_state.get("preexisting") or [])
+    else:
+        # Whatever was already dirty is not this loop's doing. The enhancer
+        # edits tickets before the implementer runs, and blaming this loop
+        # for that would fail write_scope for a change it never made.
+        preexisting = {
+            path for path in rubric.changed_files(target) if not _is_loop_bookkeeping(path)
         }
-        scope_violations = tester.violations(sorted(after_test_phase))
+
+    if resume_into_code:
+        # A completed, checkpointed test phase. Skip it: replaying it would
+        # call the test-implementer backend again for no reason, and risks
+        # rewriting a test file the red gate already proved.
+        red_ids = set(previous_state.get("red_ids") or [])
+        after_test_phase = set(previous_state.get("test_phase_files") or [])
+        scope_violations: list[str] = []
+        trace["red_ids"] = sorted(red_ids)
         trace["test_phase"] = {
-            "wrote": list(test_result.wrote),
+            "attempts": previous_state.get("test_phase_attempts", 0),
             "files": sorted(after_test_phase),
-            "violations": list(scope_violations),
-            "ok": test_result.ok,
-            "usd": test_result.usd,
+            "violations": [],
+            "resumed": True,
         }
-
-        # Step 4. The red gate. A scope violation escalates on the turn it
-        # happens; the test phase never gets a second try to stay in scope.
-        if scope_violations:
-            trace["test_phase_scope_violations"] = sorted(scope_violations)
-            trace["scope_violations"] = sorted(scope_violations)
-            trace["gate"] = gates.ESCALATE
-            trace["reason"] = (
-                "test phase wrote outside its scope: " + ", ".join(sorted(scope_violations))
+    else:
+        # Step 3. Tests first. The test implementer owns tests/ and nothing
+        # else. A red-gate miss retries inside this loop's own attempt
+        # counter rather than escalating on the first empty attempt. This
+        # never calls `boss.start_iteration()`: that counter belongs to the
+        # code loop below, and sharing it would spend the code budget on
+        # test turns. A resumed replay continues the attempt count a killed
+        # run's own checkpoint left behind, rather than starting back at 1.
+        tester = cast["test_implementer"]
+        attempt = previous_state.get("test_phase_attempts", 0) if resume else 0
+        previous_test_signature: tuple[str, ...] | None = None
+        while True:
+            attempt += 1
+            test_result = backend.run(
+                repo=target, prompt=_test_prompt(the_ticket, plan), allow=list(tester.scope.allow)
             )
-            trace["red_ids"] = sorted(red_ids)
-            return _finish(
-                contract, trace, write_trace,
-                source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+            boss.spend(test_result.usd)
+            after_tests = contract.run("test")
+            red_ids = _new_test_ids(known_ids, after_tests.junit.failed_ids)
+
+            # Attribute writes by phase, not by what a backend claims. Files
+            # that appear during the test phase belong to the test
+            # implementer; files that appear later belong to the code
+            # implementer. A backend that lies about `wrote` cannot move a
+            # file out of its phase.
+            after_test_phase = {
+                path
+                for path in rubric.changed_files(target)
+                if not _is_loop_bookkeeping(path) and path not in preexisting
+            }
+            scope_violations = tester.violations(sorted(after_test_phase))
+            trace["test_phase"] = {
+                "attempts": attempt,
+                "wrote": list(test_result.wrote),
+                "files": sorted(after_test_phase),
+                "violations": list(scope_violations),
+                "ok": test_result.ok,
+                "usd": test_result.usd,
+            }
+            # A6 (#433). Checkpointed before the next line can escalate, or
+            # this process can be killed outright, so a resume always finds
+            # a phase to read: "test" until the red gate is satisfied,
+            # "code" once it flips just below the loop.
+            _write_checkpoint(
+                harness_dir,
+                phase="test",
+                red_ids=red_ids,
+                preexisting=preexisting,
+                test_phase_files=after_test_phase,
+                test_phase_attempts=attempt,
             )
 
-        if not contract.rubric.get("require_red", True) or red_ids:
-            break
-
-        # Still no red. Retry while the attempt budget allows it, and reuse
-        # the code loop's own stop rule (gates.decide) rather than writing a
-        # second one: two attempts that touch the same files are not
-        # converging, and stop as a stable failure before the budget runs out.
-        signature = tuple(sorted(after_test_phase))
-        decision = gates.decide(
-            passed=False,
-            iteration=attempt,
-            budget=boss.budget_iterations,
-            signature=signature,
-            previous_signature=previous_test_signature,
-            usd_left=boss.usd_left,
-        )
-        if decision.stop:
-            trace["gate"] = gates.ESCALATE
-            # A stop here is either a stable failure, the money budget, or the
-            # iteration budget. The first two name a real reason worth keeping
-            # (the money one is the fold-in fix: `decide` already says "the
-            # money budget is spent", and this branch used to overwrite that
-            # with the generic red-gate wording below). Only a plain
-            # iteration-budget exhaustion falls through to that wording.
-            if decision.repeat_failure or boss.usd_left <= 0:
-                trace["reason"] = decision.reason
-            else:
+            # Step 4. The red gate. A scope violation escalates on the turn
+            # it happens; the test phase never gets a second try to stay in
+            # scope.
+            if scope_violations:
+                trace["test_phase_scope_violations"] = sorted(scope_violations)
+                trace["scope_violations"] = sorted(scope_violations)
+                trace["gate"] = gates.ESCALATE
                 trace["reason"] = (
-                    "red gate: no new test was observed failing. A test that passes before "
-                    "any code exists proves nothing."
+                    "test phase wrote outside its scope: " + ", ".join(sorted(scope_violations))
                 )
-            trace["red_ids"] = []
-            trace["scope_violations"] = list(scope_violations)
-            return _finish(
-                contract, trace, write_trace,
-                source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
-            )
-        previous_test_signature = signature
+                trace["red_ids"] = sorted(red_ids)
+                return _finish(
+                    contract, trace, write_trace,
+                    source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+                )
 
-    trace["red_ids"] = sorted(red_ids)
+            if not contract.rubric.get("require_red", True) or red_ids:
+                break
+
+            # Still no red. Retry while the attempt budget allows it, and
+            # reuse the code loop's own stop rule (gates.decide) rather than
+            # writing a second one: two attempts that touch the same files
+            # are not converging, and stop as a stable failure before the
+            # budget runs out.
+            signature = tuple(sorted(after_test_phase))
+            decision = gates.decide(
+                passed=False,
+                iteration=attempt,
+                budget=boss.budget_iterations,
+                signature=signature,
+                previous_signature=previous_test_signature,
+                usd_left=boss.usd_left,
+            )
+            if decision.stop:
+                trace["gate"] = gates.ESCALATE
+                # A stop here is either a stable failure, the money budget,
+                # or the iteration budget. The first two name a real reason
+                # worth keeping (the money one is a fold-in fix from A5:
+                # `decide` already says "the money budget is spent", and
+                # this branch used to overwrite that with the generic
+                # red-gate wording below). A stable failure with an empty
+                # signature gets the test phase's own wording, folded in
+                # from the judge of PR #490: `gates.decide`'s generic
+                # wording names the signature as "unknown", which reads as a
+                # bug in the trace rather than what actually happened -- two
+                # turns that wrote nothing at all. Only a plain
+                # iteration-budget exhaustion falls through to the red-gate
+                # wording.
+                if decision.repeat_failure:
+                    trace["reason"] = (
+                        decision.reason
+                        if signature
+                        else "two test turns wrote nothing. The loop is not converging."
+                    )
+                elif boss.usd_left <= 0:
+                    trace["reason"] = decision.reason
+                else:
+                    trace["reason"] = (
+                        "red gate: no new test was observed failing. A test that passes before "
+                        "any code exists proves nothing."
+                    )
+                trace["red_ids"] = []
+                trace["scope_violations"] = list(scope_violations)
+                return _finish(
+                    contract, trace, write_trace,
+                    source_repo=source_repo, cleanup=cleanup, previous_runs=previous_runs,
+                )
+            previous_test_signature = signature
+
+        trace["red_ids"] = sorted(red_ids)
+        _write_checkpoint(
+            harness_dir,
+            phase="code",
+            red_ids=red_ids,
+            preexisting=preexisting,
+            test_phase_files=after_test_phase,
+            test_phase_attempts=attempt,
+        )
 
     # Steps 5 to 8. Code until green, then judge.
     coder = cast["code_implementer"]
@@ -535,7 +662,7 @@ def run(  # noqa: PLR0915
         changed = [
             c
             for c in rubric.changed_files(target)
-            if c != steps.STEPS_FILE and c not in preexisting
+            if not _is_loop_bookkeeping(c) and c not in preexisting
         ]
         code_phase = [path for path in changed if path not in after_test_phase]
         violations = sorted(set(scope_violations) | set(coder.violations(code_phase)))
@@ -624,10 +751,33 @@ def _mark_proven(plan: steps.Plan, passing: set[str], repo: Path) -> steps.Plan:
     return plan
 
 
+# A6 (#433). Expected types for the keys `_read_state` will hand back. A
+# `state.json` that parses as JSON but carries the wrong shape for one of
+# these is corrupt in the same sense A5 already treats a truncated file: it
+# raises here, before any work starts, rather than crashing later on an
+# arithmetic or membership check that assumed the shape held. Folded in from
+# the judge of PR #497: a string `runs` used to reach `previous_runs + 1` and
+# raise `TypeError` well after the corrupt-state guard was supposed to catch
+# it.
+_STATE_FIELD_TYPES: dict[str, type | tuple[type, ...]] = {
+    "runs": int,
+    "last_gate": str,
+    "last_reason": str,
+    "last_run_at": (int, float),
+    "loop": str,
+    "phase": str,
+    "red_ids": list,
+    "preexisting": list,
+    "test_phase_files": list,
+    "test_phase_attempts": int,
+}
+
+
 def _read_state(path: Path) -> dict | None:
     """The previous `state.json`, or None the first time this ticket runs.
 
-    A file that exists but will not parse is corrupt, and a corrupt state is
+    A file that exists but will not parse, or parses but holds the wrong
+    type for a field this module reads, is corrupt, and a corrupt state is
     never a fresh start: raise so the caller fails closed before a single
     baseline test runs, let alone a backend call.
     """
@@ -639,7 +789,43 @@ def _read_state(path: Path) -> dict | None:
         raise ContractError(f"{path} is corrupt: {exc}") from exc
     if not isinstance(payload, dict):
         raise ContractError(f"{path} is corrupt: not a JSON object")
+    for key, expected in _STATE_FIELD_TYPES.items():
+        if key in payload and not isinstance(payload[key], expected):
+            raise ContractError(f"{path} is corrupt: {key!r} is not a {expected}")
     return payload
+
+
+def _write_checkpoint(
+    harness_dir: Path,
+    *,
+    phase: str,
+    red_ids,
+    preexisting,
+    test_phase_files,
+    test_phase_attempts: int,
+) -> None:
+    """A resume-only checkpoint, written before this process might be killed.
+
+    Merged onto whatever `state.json` already holds, so a previous run's
+    `runs`, `last_gate`, `last_reason`, and `last_run_at` survive; only the
+    fields a `--resume` needs to re-enter mid-run are replaced. `_finish`'s
+    own write, at the true end of a run, merges onto this the same way, so
+    the terminal `state.json` still names the phase and files a resume would
+    need if that run itself ended in an escalate rather than a pass.
+    """
+    harness_dir.mkdir(parents=True, exist_ok=True)
+    state_path = harness_dir / "state.json"
+    state = _read_state(state_path) or {}
+    state.update(
+        {
+            "phase": phase,
+            "red_ids": sorted(red_ids),
+            "preexisting": sorted(preexisting),
+            "test_phase_files": sorted(test_phase_files),
+            "test_phase_attempts": test_phase_attempts,
+        }
+    )
+    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 def _finish(
@@ -659,14 +845,22 @@ def _finish(
         (out / "last-implementer.json").write_text(json.dumps(trace, indent=2), encoding="utf-8")
         exit_code = 0 if trace.get("gate") == gates.PASS else 1
         receipt.write(contract.repo, exit_code, list(trace.get("red_ids") or []))
-        state = {
-            "runs": previous_runs + 1,
-            "last_gate": trace.get("gate"),
-            "last_reason": trace.get("reason"),
-            "last_run_at": trace["written_at"],
-            "loop": LOOP,
-        }
-        (out / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+        # Merge onto the checkpoint `_write_checkpoint` already left behind
+        # in this same run, rather than overwriting it: `phase`, `red_ids`,
+        # `preexisting`, and `test_phase_files` already name where this run
+        # ended, and a resume of an escalating run reads those back.
+        state_path = out / "state.json"
+        state = _read_state(state_path) or {}
+        state.update(
+            {
+                "runs": previous_runs + 1,
+                "last_gate": trace.get("gate"),
+                "last_reason": trace.get("reason"),
+                "last_run_at": trace["written_at"],
+                "loop": LOOP,
+            }
+        )
+        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
     if source_repo is not None:
         # Never removed automatically. `cleanup` is the one explicit flag
         # that does; otherwise `main` prints the path and the command to do
@@ -705,6 +899,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="remove the worktree after the run. Never automatic otherwise.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="re-enter the last killed run from its own state.json, instead of starting over.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -714,6 +913,7 @@ def main(argv: list[str] | None = None) -> int:
             doer=args.doer,
             budget=args.budget,
             cleanup=args.cleanup,
+            resume=args.resume,
         )
     except ContractError as exc:
         print(f"error: {exc}")
