@@ -31,7 +31,13 @@ CLI_COMMANDS = {
 class DoerResult:
     wrote: list[str] = field(default_factory=list)
     output: str = ""
-    usd: float = 0.0
+    # #541. `adapter.DoerResult.usd` widened to `float | None` first: `None`
+    # means the backend never answered a turn, not that it cost nothing.
+    # `fixer.py` routes both families through the same `boss.spend()` call
+    # site, so this sibling type carries the same annotation even though the
+    # classroom backends below (none, reference, cli) always answer with a
+    # real float.
+    usd: float | None = 0.0
     ok: bool = True
 
 
