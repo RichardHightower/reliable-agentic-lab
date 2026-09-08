@@ -284,3 +284,57 @@ def test_the_check_module_docstring_lists_belt_rows_against_judge_rows():
     assert judge_rows, "no judge rows found in research-judge.md"
     missing_judge = sorted(row for row in judge_rows if row not in doc)
     assert not missing_judge, f"docstring omits judge row(s): {missing_judge}"
+
+
+# -- P13, docs cite rows and constants that exist ----------------------------
+
+# One level above this port, next to the other three take-home folders. A
+# copy of this folder alone has no sibling `slides/`, so the one test below
+# that reads it skips rather than fails outside the monorepo checkout.
+FEATURE_MAP = FOLDER.parent.parent / "slides" / "FEATURE-MAP.md"
+
+# A bare backticked name, `like_this`, never `a/path.py` or `--a-flag`: the
+# dot, the slash, and the dash all fall outside this pattern, so a filename
+# or a CLI flag quoted for readability is never mistaken for a row name.
+_BARE_IDENTIFIER = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
+
+# SPEC.md, HOW_TO_RUN.md, and DESIGN_DOC.md all carry one house-style
+# section, cited from the same check module and the same source_policy.py.
+# #467 #480.
+STYLE_DOCS = ("SPEC.md", "HOW_TO_RUN.md", "DESIGN_DOC.md")
+STYLE_SECTION = "## House style and the evidence contract"
+
+
+def test_feature_map_module_three_names_the_style():
+    """#467: a reader of Module 3 finds house style, glossary, and CTA named,
+    not only a citation row."""
+    if not FEATURE_MAP.is_file():
+        pytest.skip("slides/FEATURE-MAP.md sits one level above a standalone copy")
+    text = FEATURE_MAP.read_text(encoding="utf-8")
+    module_three = "\n".join(line for line in text.splitlines() if "| 3 |" in line)
+    assert "house style" in module_three.lower(), module_three
+    assert "glossary" in module_three.lower(), module_three
+    assert "cta" in module_three.lower(), module_three
+    assert STYLE_URL in text
+
+
+@pytest.mark.parametrize("name", STYLE_DOCS)
+def test_both_specs_name_the_evidence_contract(name):
+    """#480: SPEC.md, HOW_TO_RUN.md, and DESIGN_DOC.md name only rows and
+    constants that `checks.py` and `source_policy.py` actually carry. The
+    Deep Agents copy runs the same check against its own two files."""
+    import checks  # noqa: PLC0415
+
+    haystack = Path(checks.__file__).read_text(encoding="utf-8")
+    haystack += (FOLDER / "source_policy.py").read_text(encoding="utf-8")
+
+    text = (FOLDER / name).read_text(encoding="utf-8")
+    assert STYLE_SECTION in text, f"{name} has no {STYLE_SECTION!r} section"
+    assert STYLE_URL in text
+    section = text.split(STYLE_SECTION, 1)[1].split("\n## ", 1)[0]
+    cited = _BARE_IDENTIFIER.findall(section)
+    assert cited, f"{name} names no row or constant to verify"
+    unknown = sorted(
+        name_ for name_ in set(cited) if not re.search(rf"\b{re.escape(name_)}\b", haystack)
+    )
+    assert not unknown, f"{name} names {unknown}, absent from checks.py/source_policy.py"

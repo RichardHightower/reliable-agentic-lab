@@ -42,6 +42,7 @@ Do not survey seven production loops as labs. Name them in Module 4. Build one g
 | Research in a sub-agent | 3 | The orchestrator gets a summary, never the dump |
 | Cost accounting | 3 | Every call adds to the budget. A hard cap raises. |
 | Grounding as arithmetic | 3 | Every citation resolves. Every claim paragraph cites. No model call. |
+| House style and glossary | 3 | STE prose, no marketing verb, a first-use term in a Glossary, and a non-marketing CTA closing section, not just the citation belt |
 | Stopping an unbounded search | 3 | Call budget, dollar budget, stable failure, and no-source escalation |
 | Unattended trigger | 4 | `workflow_dispatch`, `pull_request`, or cron. Not a keystroke. |
 | Durable state | 2 | `.harness/state.json`. Runs, gate, reason, timestamp, loop, phase, and the resume fields. Both sol2 ports write it. Neither sol4 port does. |
@@ -63,3 +64,7 @@ Module 1 is a loop that can run once.
 Module 2 is that loop made repeatable, and made honest.
 Module 3 is the same graph pointed at a question, with one tool boundary.
 Module 4 is the same graph with nobody at the keyboard.
+
+The paper follows one house style, published once on the wiki as [Sol-3-White-Paper-Style](https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style). The check module grades third person and no marketing verb (`person`, `marketing`), no contraction and no Latin abbreviation (`ste_language`), and a heading that answers its own question (`question_heading`). The body names no search host (`policy_leak`) and states a caveat once (`caveat_once`). A first-use term earns a `TERM:` marker and a Glossary entry (`glossary_complete`, `glossary_exact`). A figure earns a caption and a mention in its own section (`captioned`, `figure_referenced`). The body carries Methods and, for a human study, a study table (`methods_present`, `study_table`), with front matter above the Abstract (`front_matter`). The last body section is a next step, never a sale (`next_step`, `cta_language`), and the abstract is written last, graded against the body (`abstract_matches_body`).
+
+The evidence contract is arithmetic, not a promise from the model. `source_policy.py` seeds the allowlist by field (`seed_for_field`), bans a host outright (`DENYLIST`), and grades a source's tier (`tier_for`). A shaky numeric claim spends one follow turn, and a generalizing claim spends one counter turn before a lever is ruled out; the `counterweighed` row names a claim nobody checked. A safety claim needs a cited guideline (`guideline_cited`), and a question with stated evidence requirements needs `evidence_requirements_met`. A citation's title, authors, and year come from the fetched record, never the model's guess, and a claim earns attribution only when the fetched text supports it. A diagram is graded against the section's own claims before it is embedded.

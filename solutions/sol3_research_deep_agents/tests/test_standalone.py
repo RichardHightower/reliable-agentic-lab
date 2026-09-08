@@ -160,3 +160,40 @@ def test_the_check_module_docstring_lists_belt_rows_against_judge_rows():
     assert judge_rows, "no judge rows found in reviewer/SKILL.md"
     missing_judge = sorted(row for row in judge_rows if row not in doc)
     assert not missing_judge, f"docstring omits judge row(s): {missing_judge}"
+
+
+# -- P13, docs cite rows and constants that exist ----------------------------
+
+# A bare backticked name, `like_this`, never `a/path.py` or `--a-flag`: the
+# dot, the slash, and the dash all fall outside this pattern, so a filename
+# or a CLI flag quoted for readability is never mistaken for a row name.
+_BARE_IDENTIFIER = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
+
+# SPEC.md, DESIGN_DOC.md, and AGENTS.md all carry one house-style section,
+# cited from the same check module and the same source_policy.py. #467 #480.
+STYLE_DOCS = ("SPEC.md", "DESIGN_DOC.md", "AGENTS.md")
+STYLE_SECTION = "## House style and the evidence contract"
+
+
+@pytest.mark.parametrize("name", STYLE_DOCS)
+def test_both_specs_name_the_evidence_contract(name):
+    """#480: SPEC.md, DESIGN_DOC.md, and AGENTS.md name only rows and
+    constants that `paper_check.py`, `sections.py`, and `source_policy.py`
+    actually carry. The Agent SDK copy runs the same check against its own
+    two files."""
+    haystack = (ROOT / "paper_check.py").read_text(encoding="utf-8")
+    haystack += (ROOT / "sections.py").read_text(encoding="utf-8")
+    haystack += (ROOT / "source_policy.py").read_text(encoding="utf-8")
+
+    text = (ROOT / name).read_text(encoding="utf-8")
+    assert STYLE_SECTION in text, f"{name} has no {STYLE_SECTION!r} section"
+    assert STYLE_URL in text
+    section = text.split(STYLE_SECTION, 1)[1].split("\n## ", 1)[0]
+    cited = _BARE_IDENTIFIER.findall(section)
+    assert cited, f"{name} names no row or constant to verify"
+    unknown = sorted(
+        name_ for name_ in set(cited) if not re.search(rf"\b{re.escape(name_)}\b", haystack)
+    )
+    assert not unknown, (
+        f"{name} names {unknown}, absent from paper_check.py/sections.py/source_policy.py"
+    )
