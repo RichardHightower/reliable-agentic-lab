@@ -69,12 +69,19 @@ assembled body, not one section, plus a list of sentences a deterministic
 check found restated in more than one section. Keep the first statement of
 each caveat or numeric finding exactly where it already is, in full, with
 its numbers and units. Replace every later restatement with one sentence of
-twelve words or fewer that opens with one of these four phrases and names
-the section where the finding first appears: "As stated in", "As noted
-in", "As shown in", or "See". Do not simply delete a repeat; a reader
-needs the pointer, and a paragraph must never end up as only a citation
-marker with no sentence. Add no facts. Keep every heading and every figure
-line exactly as it is. Return the whole edited body as your final message.
+24 words or fewer that opens with one of these four phrases and names one
+of the paper's own `##` headings, the section where the finding first
+appears: "As stated in", "As noted in", "As shown in", or "See". A
+sentence that names no real heading still counts as a repeat. Do not simply
+delete a repeat; a reader needs the pointer, and a paragraph must never end
+up as only a citation marker with no sentence. Add no facts. Keep every
+heading and every figure line exactly as it is.
+
+You may also be handed a list of figures, each with a number, an owning
+section, and a caption, for a figure that section's own prose does not
+yet name. Add one short sentence naming it there, for example "Figure 2
+shows the retry sequence." Do not renumber a figure or move its image or
+caption line. Return the whole edited body as your final message.
 
 ## Cite every claim
 

@@ -127,13 +127,18 @@ def test_a_fourteen_word_back_reference_is_not_a_repeat():
     very row the pass was written to clear, on a live model-written
     outline whose headings run longer than the offline fixtures' one or
     two words. The cue still carries the exemption; the cap is 24 now.
+
+    #531. The exemption now also requires the sentence to name one of the
+    paper's own `##` headings, so this section is renamed to the long
+    heading the reference points at, rather than pointing at an invented
+    name no `##` in the body actually carries.
     """
     heading = "Independent Verification Under Bounded Budgets"
     reference = f"As stated in {heading}, this specific point still applies here."
     assert len(checks.WORD.findall(reference)) == 14
     body = (
         "# On a topic\n\n"
-        "## Discussion\n\n"
+        f"## {heading}\n\n"
         "A single non-arxiv source reported this finding and it should not "
         "be generalized. [1]\n\n"
         "## Limitations\n\n"

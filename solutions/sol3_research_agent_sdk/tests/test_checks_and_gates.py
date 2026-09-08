@@ -34,9 +34,17 @@ def test_no_corpus_means_no_opinion():
 
 def test_a_missing_figure_fails(tmp_path):
     (tmp_path / "there.png").write_bytes(b"x")
-    good = checks.check("A point [1].\n\n![f](there.png)", ["https://a"], base_dir=tmp_path)
+    good = checks.check(
+        "A point [1]. Figure 1 shows the same thing.\n\n![f](there.png)\n\nFigure 1. f",
+        ["https://a"],
+        base_dir=tmp_path,
+    )
     assert good.passed, good.report()
-    bad = checks.check("A point [1].\n\n![f](gone.png)", ["https://a"], base_dir=tmp_path)
+    bad = checks.check(
+        "A point [1]. Figure 1 shows the same thing.\n\n![f](gone.png)\n\nFigure 1. f",
+        ["https://a"],
+        base_dir=tmp_path,
+    )
     assert bad.signature() == ("images",)
 
 
@@ -60,7 +68,10 @@ def test_a_rendered_diagram_absent_from_the_paper_fails_images():
 
 
 def test_a_remote_figure_is_not_this_checks_problem(tmp_path):
-    body = "A point [1].\n\n![f](https://example.invalid/x.png)"
+    body = (
+        "A point [1]. Figure 1 shows the same thing.\n\n"
+        "![f](https://example.invalid/x.png)\n\nFigure 1. f"
+    )
     assert checks.check(body, ["https://a"], base_dir=tmp_path).passed
 
 
@@ -138,9 +149,9 @@ def test_the_doctrine_row_is_absent_when_the_flag_is_off():
 def test_the_paper_gate_requires_done_then_cost_then_max_turns_in_figure_one():
     body = (
         "# T\n\n## Control\n\n"
-        "The paper exits on done, then cost, then max turns [1].\n\n"
+        "The paper exits on done, then cost, then max turns [1]. Figure 1 shows the same order.\n\n"
         "![Figure 1: done, then cost, then max turns](exits_imagen.png)\n\n"
-        "Figure 1 shows done, then cost, then max turns."
+        "Figure 1. done, then cost, then max turns."
     )
     score = checks.check(
         body,
@@ -154,9 +165,9 @@ def test_the_paper_gate_requires_done_then_cost_then_max_turns_in_figure_one():
 def test_the_exit_order_may_live_in_the_caption_after_a_block_image():
     body = (
         "# T\n\n## Control\n\n"
-        "The paper exits on done, then cost, then max turns [1].\n\n"
+        "The paper exits on done, then cost, then max turns [1]. Figure 1 shows the same order.\n\n"
         "![Figure 1: control loop](exits_imagen.png)\n\n"
-        "Figure 1 shows done, then cost, then max turns."
+        "Figure 1. done, then cost, then max turns."
     )
     score = checks.check(
         body,
@@ -170,9 +181,9 @@ def test_the_exit_order_may_live_in_the_caption_after_a_block_image():
 def test_the_paper_gate_rejects_whichever_fires_first_and_blog_references():
     body = (
         "# T\n\n## Control\n\n"
-        "The loop has five exits and stops whichever fires first [1].\n\n"
+        "The loop has five exits and stops whichever fires first [1]. Figure 1 shows the cap.\n\n"
         "![Figure 1: budget and attempt cap](exits_imagen.png)\n\n"
-        "Figure 1 shows budget and an attempt cap."
+        "Figure 1. budget and an attempt cap."
     )
     score = checks.check(
         body,

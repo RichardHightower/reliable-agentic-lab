@@ -1227,11 +1227,13 @@ def do_charts(run: Run) -> dict:
         # its caption failed `evidenced` against the body, on two attempts the
         # writer could not fix because assembly appends the chart regardless.
         if len(rows) < CHART_MIN_ROWS:
-            run.log(
-                f"    skipping chart {name!r}: "
-                + ("no data" if not rows else f"{len(rows)} value, a sentence, not a chart")
-            )
-            skipped.append(name)
+            reason = "no data" if not rows else f"{len(rows)} value, a sentence, not a chart"
+            run.log(f"    skipping chart {name!r}: {reason}")
+            # #386, #464. A skip is the product, not a phase-skip log line
+            # nobody reads: `section` and `reason` travel with the name so
+            # `assemble` can name both under the section a reader expects
+            # this chart to sit in.
+            skipped.append({"name": name, "section": figure.get("section") or "", "reason": reason})
             continue
         spec = {}
         if hasattr(run.turns, "chart_spec"):
@@ -1795,6 +1797,12 @@ def assemble(run: Run) -> dict:
     flags: list[dict] = []
     glossary: dict[str, str] = {}
     used_diagrams: set[str] = set()
+    # #464. One counter, spent as charts and diagrams are placed, body
+    # order, contiguous from one. A chart and a diagram share the same
+    # sequence: a reader counts figures on the page, not by kind.
+    figure_number = 0
+    skipped_charts = _skipped_charts(run)
+    noted_skips: set[int] = set()
     # P7, #472. `write_abstract` writes this from the assembled body, after
     # every section, so it is preferred over the outline's own thesis line,
     # which was written before any section existed. It is not a section
@@ -1852,7 +1860,8 @@ def assemble(run: Run) -> dict:
             rel = f"charts/{Path(chart['path']).name}"
             caption = chart.get("caption") or chart.get("name") or rel
             if rel not in text:
-                parts += [f"![{caption}]({rel})", ""]
+                figure_number += 1
+                parts += [f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""]
         # Charts already had a placement helper. Diagrams were rendered, judged,
         # and left on disk: the first assembled paper had a 597 KB PNG and no
         # markdown link (#370). Deep Agents inserts at assemble; copy that.
@@ -1860,9 +1869,19 @@ def assemble(run: Run) -> dict:
             rel = _diagram_rel(figure)
             caption = figure.get("caption") or figure.get("name") or rel
             if rel and rel not in text and Path(rel).name not in text:
-                parts += [f"![{caption}]({rel})", ""]
+                figure_number += 1
+                parts += [f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""]
             if rel:
                 used_diagrams.add(_diagram_key(figure))
+        # #386, #464. A skip is not silence: it is named, with its reason,
+        # under the section that asked for it. A blockquote so `cited`
+        # never reads it as an unsourced claim, the same free ride an
+        # image's own caption paragraph already gets.
+        for skip in skipped_charts:
+            if skip["section"] != section["id"] or id(skip) in noted_skips:
+                continue
+            noted_skips.add(id(skip))
+            parts += [f"> {skip['name']} was not charted: {skip['reason']}.", ""]
     for figure in _rendered_diagrams(run):
         if _diagram_key(figure) in used_diagrams:
             continue
@@ -1872,8 +1891,16 @@ def assemble(run: Run) -> dict:
         caption = figure.get("caption") or figure.get("name") or rel
         if "## Figures" not in parts:
             parts += ["## Figures", ""]
-        parts += [f"![{caption}]({rel})", ""]
+        figure_number += 1
+        parts += [f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""]
         used_diagrams.add(_diagram_key(figure))
+    # A skip with no owning section (an empty `section`, or one that never
+    # matched a planned section id) still gets a note, not silence, just
+    # not one a specific section can claim.
+    for skip in skipped_charts:
+        if id(skip) in noted_skips:
+            continue
+        parts += [f"> {skip['name']} was not charted: {skip['reason']}.", ""]
     # No captured term means no section, not an empty one. Alphabetical, case
     # insensitive, so "Loop" and "loop" do not sort by accident of case.
     if glossary:
@@ -1962,6 +1989,37 @@ def _rendered_charts(run: Run) -> list[dict]:
     except (OSError, json.JSONDecodeError):
         return []
     return [item for item in payload.get("charts") or [] if item.get("path")]
+
+
+def _skipped_charts(run: Run) -> list[dict]:
+    """Every skipped chart, `{"name", "section", "reason"}`, section-owned.
+
+    An older `charts.json` recorded a bare name list (`["a-chart"]`, pre
+    #464). That still loads: a bare name becomes `reason: "no data"`
+    (the only reason a run without `CHART_MIN_ROWS`'s N-value branch ever
+    logged) with an empty `section`, so `assemble` still has a name and a
+    reason to write, only no section to own it.
+    """
+    path = run.file("charts.json")
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    out = []
+    for item in payload.get("skipped") or []:
+        if isinstance(item, dict):
+            out.append(
+                {
+                    "name": str(item.get("name") or ""),
+                    "section": str(item.get("section") or ""),
+                    "reason": str(item.get("reason") or "no data"),
+                }
+            )
+        else:
+            out.append({"name": str(item), "section": "", "reason": "no data"})
+    return out
 
 
 def corpus_for(run: Run) -> str:
@@ -2054,6 +2112,7 @@ def check(run: Run) -> dict:
         claims=claims,
         charts=_rendered_charts(run),
         diagrams=_rendered_diagrams(run),
+        skipped_charts=_skipped_charts(run),
     )
     run.write_json("check.json", score.to_dict())
     return score.to_dict()
@@ -2122,24 +2181,37 @@ def edit_whole_paper(run: Run, repeats: list[dict], figures: list | None = None)
     the section files and the stamped abstract (`_persist_trim`), not only
     to `paper.md`, so a later `assemble` reproduces it instead of rebuilding
     the untrimmed body from disk. `new_claims` still has the last word: a
-    specific the evidence never retrieved reverts the whole edit. `figures`
-    is P10's parameter, unused until that unit lands. #477.
+    specific the evidence never retrieved reverts the whole edit. #477.
+
+    `figures` (#464) is `checks.placed_figures(before)`: every figure the
+    body already carries a `Figure N.` caption for, its number, and its
+    owning section. The same turn that cuts a repeat also names any of
+    those numbers the owning section's prose does not yet mention, one
+    sentence each. A figure with no number here -- skipped, dropped, or
+    never rendered -- is never asked for, the same way `figure_referenced`
+    never grades one.
 
     Collapses a stacked identical back reference after the turn returns,
     whether the turn was a model or the offline twin: a model-written pass
     can stack the same pointer just as easily as the deterministic one.
-    #521.
+    #521. And drops any mention of a figure number no longer in `figures`:
+    a live image backend can fail a render between the mention landing and
+    this run's own attempt to fix it (#514, #531), and a stale "Figure N"
+    is worse than none.
     """
     path = run.file("paper.md")
     before = path.read_text(encoding="utf-8")
+    figures = figures or []
     if hasattr(run.turns, "edit_whole_paper"):
-        after = run.turns.edit_whole_paper(before, repeats, figures or [])
+        after = run.turns.edit_whole_paper(before, repeats, figures)
     else:
         after = before
     after = (after or before).strip()
     if not after:
         return {"trimmed": False, "reverted": []}
     after = checks.collapse_repeated_back_references(after)
+    valid_numbers = {f["number"] for f in figures if f.get("number")}
+    after = checks.drop_dangling_figure_mentions(after, valid_numbers)
     novel = checks.new_claims(before, after)
     evidence = corpus_for(run)
     invented = [token for token in novel if token.lower() not in evidence.lower()]
@@ -2334,7 +2406,12 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
             run.state.mark(name, "running")
             run.state.save(work)
             meta = phase(run)
-            if name == "check" and "caveat_once" in (meta.get("signature") or []):
+            signature = meta.get("signature") or []
+            # #464. `figure_referenced` joins `caveat_once` as a trigger: a
+            # run with no repeat at all still has to run this pass once for
+            # every figure `assemble` just placed and numbered, because the
+            # writer was never asked to name one during write (E7).
+            if name == "check" and ("caveat_once" in signature or "figure_referenced" in signature):
                 # D1, #477. Python caught a repeat, so a per-section retry
                 # cannot fix it: no writer turn sees more than one section.
                 # One whole-paper pass runs here, then `check` runs again,
@@ -2344,11 +2421,11 @@ def run_paper(run: Run) -> dict:  # noqa: PLR0915  (the phase order, in order)
                 # reintroduce a repeat the earlier pass already cleared, and
                 # only this attempt's own check result decides whether the
                 # pass is needed again.
-                repeats = checks.repeat_shingles(
-                    checks.top_level_sections(run.file("paper.md").read_text(encoding="utf-8"))
-                )
+                assembled_body = run.file("paper.md").read_text(encoding="utf-8")
+                repeats = checks.repeat_shingles(checks.top_level_sections(assembled_body))
+                figures = checks.placed_figures(assembled_body)
                 trim_before = run.state.total_usd
-                trim_meta = edit_whole_paper(run, repeats)
+                trim_meta = edit_whole_paper(run, repeats, figures)
                 run.state.mark("trim", "complete", usd=round(run.state.total_usd - trim_before, 4), **trim_meta)
                 run.state.save(work)
                 run.log(f"  6b trim     {trim_meta}")

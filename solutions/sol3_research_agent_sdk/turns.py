@@ -865,23 +865,38 @@ class SdkTurns(Turns):
 
     def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
         """P9. One turn sees the whole body, because the defect is a repeat
-        across sections and no single-section turn can see it.
+        across sections and no single-section turn can see it. #464 adds a
+        second job to the same turn: name every figure `figures` lists in
+        its own owning section.
         """
+        figure_note = (
+            (
+                "\n\nEach entry below also names a figure the paper already "
+                "carries a caption for: its number, its owning section, and "
+                "its caption. If that section's own prose does not yet name "
+                "the figure, add one short sentence there that does, for "
+                "example \"Figure 2 shows the retry sequence.\" Do not "
+                "renumber a figure or move its image or caption line.\n\n"
+                f"Figures:\n{json.dumps(figures, indent=2)[:4000]}"
+            )
+            if figures
+            else ""
+        )
         result = self._ask(
             "research-writer",
             "This is the whole-paper pass. Each entry below names a sentence "
             "and the other sections that restate it. Keep the first "
             "statement, in full, with its numbers and units, exactly where "
             "it already is. Replace every later restatement with one "
-            "sentence of twelve words or fewer that opens with one of these "
-            "four phrases and names the section where the finding first "
-            "appears: \"As stated in\", \"As noted in\", \"As shown in\", or "
+            "sentence of 24 words or fewer that opens with one of these "
+            "four phrases and names one of the paper's own `##` headings: "
+            "\"As stated in\", \"As noted in\", \"As shown in\", or "
             "\"See\". For example: \"As stated in the Approach, this finding "
             "also applies here.\" Do not simply delete a repeat; a reader "
             "needs the pointer, and a paragraph must never end up as only a "
             "citation marker with no sentence. Add no facts. Keep every "
             "heading and every figure line exactly as it is. Return the "
-            "whole edited body.\n\n"
+            f"whole edited body.{figure_note}\n\n"
             f"Repeats:\n{json.dumps(repeats, indent=2)[:6000]}\n\n"
             f"The paper body, already assembled:\n{whole(body)}",
         )
@@ -1461,9 +1476,38 @@ class OfflineTurns(Turns):
                 reference = f"As stated in {source}, this point also holds here."
                 segment = segment.replace(sentence, reference, 1)
                 body = body[:start] + segment + body[end:]
+        # #464. No model, so no paraphrase here either: one plain sentence
+        # naming the figure, added to the end of the last prose paragraph
+        # before the image, for any figure that section's prose does not
+        # already mention. Joined onto that paragraph, not a new one after
+        # it: a standalone sentence after the image's own caption would
+        # read as an uncited claim, and the paragraph it joins already
+        # carries the citation this figure is illustrating.
+        for figure in figures or []:
+            section = figure.get("section")
+            number = figure.get("number")
+            if not section or not number:
+                continue
+            span = checks.top_level_section_spans(body).get(section)
+            if span is None:
+                continue
+            start, end = span
+            segment = body[start:end]
+            mention = f"Figure {number}"
+            if mention in segment:
+                continue
+            image_match = re.search(r"^!\[", segment, re.M)
+            cut = image_match.start() if image_match else len(segment)
+            prose, tail = segment[:cut].rstrip(), segment[cut:]
+            sentence = f"{mention} illustrates this point."
+            prose = f"{prose} {sentence}" if prose else sentence
+            segment = prose + ("\n\n" + tail if tail else "\n\n")
+            body = body[:start] + segment + body[end:]
         # #521. Pointing two repeats in the same paragraph at the same
         # source leaves the identical pointer sentence stacked once per
-        # repeat; a reader needs it once.
+        # repeat; a reader needs it once. A dangling "Figure N" left from an
+        # earlier pass is `paper.edit_whole_paper`'s own cleanup (#464), run
+        # after this returns so it also catches a model-written reply.
         body = checks.collapse_repeated_back_references(body)
         return re.sub(r"\n{3,}", "\n\n", body)
 
