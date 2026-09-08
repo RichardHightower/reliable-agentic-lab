@@ -144,6 +144,27 @@ class ReferenceBackend(Backend):
         return DoerResult(wrote=wrote, output=f"copied {len(wrote)} files from {ref}")
 
 
+class JudgeSaysNoBackend(Backend):
+    """Any backend, with a judge that refuses. Green rubric plus this is escalate.
+
+    A wrapper, not a `ReferenceBackend` subclass: `ReferenceBackend` needs a
+    `known-good` git ref, and a fixture repo built for these tests has none. A
+    subclass would raise `RefNotFound` on every run; wrapping any backend does
+    not.
+    """
+
+    name = "judge-no"
+
+    def __init__(self, inner: Backend | None = None):
+        self.inner = inner or NoneBackend()
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
+        return self.inner.run(repo=repo, prompt=prompt, allow=allow)
+
+    def judge(self, *, repo: Path, prompt: str) -> DoerResult:
+        return DoerResult(output='{"done": false, "why": "fixture judge refuses"}')
+
+
 class CliBackend(Backend):
     """Shells out to a coding agent. The attendee picks which one."""
 
@@ -183,4 +204,6 @@ def build(spec: str | Backend) -> Backend:
     if spec.startswith("reference"):
         _, _, ref = spec.partition(":")
         return ReferenceBackend(ref or "known-good")
+    if spec == "judge-no":
+        return JudgeSaysNoBackend(ReferenceBackend())
     return CliBackend(spec)
