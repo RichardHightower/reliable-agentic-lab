@@ -564,6 +564,45 @@ def test_sections_sha_is_not_recorded_with_no_renderer(work, turns, monkeypatch)
     assert "sections_sha" not in recorded
 
 
+def test_a_backend_skip_never_sets_dropped_and_keeps_its_earned_attempts(work, turns, monkeypatch):
+    """#482 follow-up: a backend failure is not a label failure. The Deep
+    Agents port once set `dropped` on this path, which (with its durable
+    budget check gated on `dropped`) permanently disqualified a figure
+    that already earned its labels. This port never has, and this locks
+    it in: `dropped` stays false, and the one attempt a backend skip spent
+    carries forward exactly, not reset and not exhausted."""
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run, monkeypatch)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+
+    budgets = []
+
+    def fake_draw(
+        turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None,
+        max_attempts=diagrams.MAX_ATTEMPTS,
+    ):
+        budgets.append(max_attempts)
+        return diagrams.Figure(
+            name=name, section=section, path="", attempts=1, dropped=False,
+            misses=["image backend unavailable: every approved image backend failed"],
+        )
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    assert budgets == [diagrams.MAX_ATTEMPTS]
+    recorded = json.loads((Path(work) / "diagrams.json").read_text())
+    assert recorded["figures"][0]["dropped"] is False
+    assert recorded["figures"][0]["attempts"] == 1
+
+    (Path(work) / "sections" / "s1.md").write_text(
+        "Body text, rewritten.\n", encoding="utf-8"
+    )
+    paper.diagram(run)
+    assert budgets == [diagrams.MAX_ATTEMPTS, diagrams.MAX_ATTEMPTS - 1], (
+        "the backend skip's one attempt must carry forward, not reset and not exhaust"
+    )
+
+
 # -- the whole run ----------------------------------------------------------
 
 
