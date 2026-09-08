@@ -880,13 +880,16 @@ def assemble(
     """Stitch the paper. Pure Python, deterministic, no model call.
 
     Figures land under the section that asked for them, after its prose. The
-    references section is generated from the ledger, never written by the model,
-    because a generated bibliography cannot cite a source that was not retrieved.
+    glossary and the references section are both generated, never written by
+    the model: a generated bibliography cannot cite a source that was not
+    retrieved, and a generated glossary cannot list a term the body never
+    marked.
     """
     _, urls = numbering(ledger)
     by_name = {figure.name: figure for figure in figures}
     used_figures: set[str] = set()
     charts = [item for item in (charts or []) if item.get("path")]
+    glossary: dict[str, str] = {}
 
     parts = [f"# {plan.get('title', 'Untitled')}", ""]
     for section in outline.get("sections", []):
@@ -896,6 +899,12 @@ def assemble(
         parts.append(f"## {heading}")
         parts.append("")
         body = written.get(heading, "").strip()
+        # First use wins. A term marked twice keeps the sentence that
+        # introduced it, not a later restatement.
+        body, term_hits = paper_check.take_terms(body)
+        body = body.strip()
+        for term, definition in term_hits:
+            glossary.setdefault(term, definition)
         if body:
             parts.append(body)
             parts.append("")
@@ -926,6 +935,15 @@ def assemble(
             parts.append(figure_block(figure))
             parts.append("")
 
+    # No captured term means no section, not an empty one. Alphabetical, case
+    # insensitive, so "Loop" and "loop" do not sort by accident of case.
+    if glossary:
+        parts.append("## Glossary")
+        parts.append("")
+        for term in sorted(glossary, key=str.casefold):
+            parts.append(f"**{term}.** {glossary[term]}")
+            parts.append("")
+
     parts.append(references_block(urls, ledger.bibliography()))
     return "\n".join(parts).replace("\n\n\n", "\n\n")
 
@@ -945,6 +963,7 @@ def assemble_gate(
         ledger=ledger,
         charts=charts,
         allowed_domains=allowed_domains,
+        enforce_structure=True,
         located=[source.url for source in ledger.bibliography() if source.located_from],
         loop_doctrine=loop_doctrine,
     )

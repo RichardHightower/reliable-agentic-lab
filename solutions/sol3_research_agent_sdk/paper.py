@@ -1405,10 +1405,12 @@ def write_sections(run: Run) -> dict:
 
 
 def assemble(run: Run) -> dict:
-    """Stitch the sections and append the reference list.
+    """Stitch the sections, append the glossary, then the reference list.
 
     Deterministic. Asking a model to re-emit the whole paper to join it is how
-    a paper loses a section between two model calls.
+    a paper loses a section between two model calls. The writer is denied both
+    trailing headings for the same reason: two glossaries or two reference
+    lists is a harness that let the model do assembly's job.
     """
     planned = outlines.plan_view(approved_outline(run))
     claims = run.read_json("claims.json")["claims"]
@@ -1419,6 +1421,7 @@ def assemble(run: Run) -> dict:
     if planned.get("abstract") or planned.get("thesis"):
         parts += ["## Abstract", "", (planned.get("abstract") or planned.get("thesis") or "").strip(), ""]
     flags: list[dict] = []
+    glossary: dict[str, str] = {}
     used_diagrams: set[str] = set()
     for section in planned["sections"]:
         path = run.file("sections") / f"{section['id']}.md"
@@ -1429,6 +1432,11 @@ def assemble(run: Run) -> dict:
         text = checks.drop_owned_headings(path.read_text(encoding="utf-8"))
         text, found = checks.take_flags(text)
         flags += [{"section": section["id"], "flag": flag} for flag in found]
+        # First use wins. A term marked twice keeps the sentence that
+        # introduced it, not a later restatement.
+        text, term_hits = checks.take_terms(text)
+        for term, definition in term_hits:
+            glossary.setdefault(term, definition)
         text = _resolve_markers(text, numbers)
         # Assembly owns the section heading. Two of three writers headed their
         # section with its key questions and never wrote the outline heading,
@@ -1478,6 +1486,12 @@ def assemble(run: Run) -> dict:
             parts += ["## Figures", ""]
         parts += [f"![{caption}]({rel})", ""]
         used_diagrams.add(_diagram_key(figure))
+    # No captured term means no section, not an empty one. Alphabetical, case
+    # insensitive, so "Loop" and "loop" do not sort by accident of case.
+    if glossary:
+        parts += ["## Glossary", ""]
+        for term in sorted(glossary, key=str.casefold):
+            parts += [f"**{term}.** {glossary[term]}", ""]
     if references:
         parts += ["## References", ""]
         parts += [
@@ -1493,7 +1507,12 @@ def assemble(run: Run) -> dict:
     # Always written, empty list included, so a reader can tell "no flags" from
     # "this run never looked".
     run.write_json("unresolved.json", {"flags": flags})
-    return {"bytes": len(body), "references": len(references), "flags": len(flags)}
+    return {
+        "bytes": len(body),
+        "references": len(references),
+        "flags": len(flags),
+        "glossary": len(glossary),
+    }
 
 
 def _charts_for(run: Run, section_id: str) -> list[dict]:
@@ -1624,6 +1643,7 @@ def check(run: Run) -> dict:
         # judge it. The `sources` row still counts every reference.
         host_sources=[ref["url"] for ref in refs if ref.get("origin") != "corpus"],
         enforce_loop_doctrine=run.enforce_loop_doctrine,
+        enforce_structure=run.enforce_research_policy,
         min_words=checks.MIN_WORDS if run.enforce_research_policy else 0,
         min_section_words=checks.MIN_SECTION_WORDS if run.enforce_research_policy else 0,
         ledger=_ledger(run) if run.enforce_research_policy else None,

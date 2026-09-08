@@ -264,6 +264,60 @@ def test_assembly_writes_the_section_heading_the_writer_left_out(work, turns, no
     assert "\n## A sub-point\n" not in body
 
 
+def test_a_term_marker_is_harvested_and_stripped(work, turns, no_renderer):
+    """The writer's `TERM` marker never reaches the reader, and its term
+    reaches the glossary assembly writes."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    section = sorted((Path(work) / "sections").glob("*.md"))[0]
+    text = section.read_text(encoding="utf-8")
+    section.write_text(
+        text + "\n<!-- TERM: orchestrator: the process that sequences roles -->\n",
+        encoding="utf-8",
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert "TERM" not in body
+    assert "**orchestrator.** the process that sequences roles" in body
+
+
+def test_assemble_writes_a_glossary_before_references(work, turns, no_renderer):
+    """Heading order: the last prose section, then Glossary, then References.
+    The writer is denied both trailing headings."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    outline = json.loads((Path(work) / "outline.approved.json").read_text())
+    outline = outline.get("outline", outline)
+    heading = outline["sections"][0]["heading"]
+    section = sorted((Path(work) / "sections").glob("*.md"))[0]
+    text = section.read_text(encoding="utf-8")
+    section.write_text(
+        text + "\n<!-- TERM: orchestrator: the process that sequences roles -->\n",
+        encoding="utf-8",
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    section_at = body.index(f"## {heading}")
+    glossary_at = body.index("## Glossary")
+    references_at = body.index("## References")
+    assert section_at < glossary_at < references_at, body
+
+
+def test_no_glossary_heading_when_no_term_was_captured(work, turns, no_renderer):
+    """No marker, no section. A Glossary with zero entries is not written."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert "## Glossary" not in body
+
+
 def test_a_failed_rewrite_keeps_the_stamped_section_it_was_replacing(work, turns, no_renderer):
     """`write_sections` unlinked the draft and called the writer with no copy kept.
 

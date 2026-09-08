@@ -444,3 +444,124 @@ def test_the_recorded_fixture_paper_passes_the_person_and_marketing_rows(tmp_pat
     body = (work / "paper.md").read_text(encoding="utf-8")
     assert checks.person_violations(body) == []
     assert checks.marketing_violations(body) == []
+
+
+def test_a_leverage_ratio_is_not_a_marketing_verb():
+    """Follow-up from the P2 judge: a finance section may name a leverage
+    ratio without tripping the marketing row. `leveraging`/`leveraged` are
+    still banned outright."""
+    ok = checks.check("The bank's leverage ratio fell in the quarter [1].", ["https://a"])
+    assert "marketing" not in ok.signature(), ok.report()
+    bad = checks.check("We leverage the SDK for every call [1].", ["https://a"])
+    assert "marketing" in bad.signature(), bad.report()
+
+
+def test_an_inline_url_is_not_body_prose_for_person_or_marketing():
+    """Follow-up from the P2 judge: a citation URL outside the reference list
+    must not fabricate a hit on a path segment."""
+    ok = checks.check("See https://example.org/your-account for the record [1].", ["https://a"])
+    assert "person" not in ok.signature(), ok.report()
+    bad = checks.check("See the record at your account page [1].", ["https://a"])
+    assert "person" in bad.signature(), bad.report()
+
+
+# -- P3, the glossary ----------------------------------------------------
+
+
+def test_a_defined_term_missing_from_the_glossary_fails():
+    """`glossary_complete` fires when a captured term never reached the
+    glossary. Production strips every marker at assembly, so this row is a
+    defence: a marker that survives into the body is itself the defect."""
+    body = (
+        "The orchestrator sequences roles [1]. "
+        "<!-- TERM: orchestrator: the process that sequences roles -->"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "glossary_complete" in score.signature(), score.report()
+
+
+def test_a_glossary_only_term_fails():
+    """`glossary_exact` fires on a glossary entry the body prose never uses."""
+    body = (
+        "A point [1].\n\n"
+        "## Glossary\n\n"
+        "**widget.** A term the body never uses.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "glossary_exact" in score.signature(), score.report()
+
+
+def test_a_search_host_in_the_glossary_fails():
+    """`glossary_exact` also fires on a search-host name, even one the body
+    prose does use, because a host is a place the run searched, not a term
+    about the subject."""
+    body = (
+        "This paper names docs.langchain.com as a retrieved source [1].\n\n"
+        "## Glossary\n\n"
+        "**docs.langchain.com.** A vendor documentation site.\n\n"
+        "## References\n\n1. https://docs.langchain.com/x\n"
+    )
+    score = checks.check(body, ["https://docs.langchain.com/x"], enforce_structure=True)
+    assert "glossary_exact" in score.signature(), score.report()
+
+
+def test_structural_rows_are_off_by_default():
+    """`enforce_structure` defaults false, so a body carrying both glossary
+    defects passes when the caller does not opt in, and an existing narrow
+    snippet's signature is unchanged."""
+    body = (
+        "A point [1].\n\n"
+        "## Glossary\n\n"
+        "**widget.** A term the body never uses.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    off = checks.check(body, ["https://a"])
+    assert "glossary_complete" not in off.signature()
+    assert "glossary_exact" not in off.signature()
+
+    corpus = "we retrieved arXiv:2401.00001 and it says things"
+    unrelated = "A real point [1].\n\nAnother point, see arXiv:2999.99999 [1]."
+    assert checks.check(unrelated, ["https://a"], corpus=corpus).signature() == ("sourced",)
+
+
+def test_no_terms_means_no_glossary_and_both_rows_pass():
+    """No captured term means nothing missing and nothing extra. The row
+    exists and passes, it does not simply stay absent."""
+    score = checks.check("A point [1].", ["https://a"], enforce_structure=True)
+    names = {c.name for c in score.checks}
+    assert {"glossary_complete", "glossary_exact"} <= names
+    assert score.passed, score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_glossary_rows(tmp_path):
+    """The paper `task demo` writes carries no leftover TERM marker and no
+    glossary section, since the recorded writer never marks a term. Both rows
+    still run, under the harness's own `enforce_research_policy=True`, and
+    both pass on the empty set. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`.
+    """
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    assert "TERM" not in body
+    report = json.loads((work / "check.json").read_text(encoding="utf-8"))
+    names = {row["name"] for row in report["checks"]}
+    assert "glossary_complete" in names
+    assert "glossary_exact" in names
+    assert report["passed"], report

@@ -83,6 +83,14 @@ SENTENCE_END = re.compile(r"(?<!e\.g\.)(?<!i\.e\.)(?<!etc\.)(?<=[.!?])\s+", re.I
 REFERENCES_HEADING = re.compile(r"^#{1,6}\s+references?\s*$", re.I | re.M)
 LIST_ITEM = re.compile(r"^\d+[.)]\s")
 
+# P3, first-use glossary terms. The writer marks a term in the section that
+# first uses it, `<!-- TERM: orchestrator: the process that sequences roles -->`,
+# and assembly harvests and strips the mark. Copied from the SDK port's
+# `NEEDS_SOURCE` and `take_flags` mechanism at `checks.py`, not imported.
+TERM_MARKER = re.compile(r"<!--\s*TERM:\s*(.*?)\s*-->", re.S)
+# The glossary entry assembly writes for each captured term: `**term.** text`.
+GLOSSARY_ENTRY = re.compile(r"^\*\*(.+?)\.\*\*\s*(.+)$", re.M)
+
 # STE-S5, no noun stack longer than three. There is no part-of-speech tagger
 # in this codebase and this unit may not add one, so a token counts as a noun
 # candidate only when it is not one of these function words and does not carry
@@ -167,9 +175,23 @@ def _mask_code(text: str) -> str:
     return CODE_SPAN.sub(lambda m: " " * len(m.group(0)), text)
 
 
+INLINE_URL = re.compile(r"https?://\S+")
+
+
+def _mask_urls(text: str) -> str:
+    """Blank an inline URL, through the next whitespace.
+
+    A citation URL outside the reference list is not body prose either. A
+    `your-account` path segment fabricated a `person` hit, and `unlock-guide`
+    fabricated a `marketing` hit, both from a link a reader never reads as
+    English. Copied from the SDK port, not imported.
+    """
+    return INLINE_URL.sub(lambda m: " " * len(m.group(0)), text)
+
+
 def _mask_for_ste(text: str) -> str:
-    """Code and references, gone. Everything else is body prose."""
-    return _mask_references(_mask_code(text))
+    """Code, an inline URL, and references, gone. Everything else is body prose."""
+    return _mask_urls(_mask_references(_mask_code(text)))
 
 
 def _prose_sentences(text: str) -> list[str]:
@@ -268,8 +290,15 @@ def person_violations(body: str) -> list[str]:
 # P2, the marketing lexicon. `\w*` covers the inflections a writer reaches
 # for: leverages, unlocked, empowering, revolutionizes, seamlessly,
 # robustness.
+#
+# `leverage`/`leverages` alone is exempt when the next word is `ratio(s)` or
+# `buyout(s)`: a finance section naming a bank's leverage ratio is not the
+# harness's marketing verb. `leveraging`/`leveraged` carry no such reading and
+# stay banned outright. Copied from the SDK port, not imported.
 MARKETING_VERB = re.compile(
-    r"\b(leverag\w*|unlock\w*|empower\w*|revolutioniz\w*|seamless\w*|robust\w*)\b",
+    r"\bleverages?\b(?!\s+(?:ratios?|buyouts?)\b)"
+    r"|\bleverag(?:ing|ed)\w*\b"
+    r"|\b(?:unlock\w*|empower\w*|revolutioniz\w*|seamless\w*|robust\w*)\b",
     re.I,
 )
 
@@ -282,6 +311,101 @@ def marketing_violations(body: str) -> list[str]:
     """
     masked = _mask_for_ste(body)
     return [sentence[:160] for sentence in _prose_sentences(masked) if MARKETING_VERB.search(sentence)]
+
+
+def take_terms(body: str) -> tuple[str, list[tuple[str, str]]]:
+    """Pull every TERM marker out of the text, and return both.
+
+    The marker names a term and its first-use definition, separated by the
+    first colon. A marker with no definition half is dropped rather than
+    guessed at.
+    """
+    terms: list[tuple[str, str]] = []
+    for payload in TERM_MARKER.findall(body):
+        term, _, definition = payload.partition(":")
+        term = term.strip()
+        definition = definition.strip()
+        if term and definition:
+            terms.append((term, definition))
+    return TERM_MARKER.sub("", body), terms
+
+
+def _mask_section(text: str, name: str) -> str:
+    """Blank one named heading's own text, keeping every other character offset.
+
+    Grading whether a glossary term is used elsewhere in the body must not
+    credit the glossary's own entry as that use.
+    """
+    matches = list(SECTION_HEADING.finditer(text))
+    for index, match in enumerate(matches):
+        if match.group(2).strip().lower() != name:
+            continue
+        level = len(match.group(1))
+        end = len(text)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        start = match.start()
+        return text[:start] + " " * (end - start) + text[end:]
+    return text
+
+
+def glossary_terms(body: str) -> dict[str, str]:
+    """The term-to-definition map assembly wrote into `## Glossary`.
+
+    Empty when the paper carries no Glossary heading: no captured term means
+    no section, not a missing one.
+    """
+    matches = list(SECTION_HEADING.finditer(body))
+    for index, match in enumerate(matches):
+        if match.group(2).strip().lower() != "glossary":
+            continue
+        level = len(match.group(1))
+        end = len(body)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        section = body[match.end() : end]
+        return {m.group(1).strip(): m.group(2).strip() for m in GLOSSARY_ENTRY.finditer(section)}
+    return {}
+
+
+def glossary_incomplete(body: str) -> list[str]:
+    """A term marked for capture that never reached the glossary.
+
+    Assembly strips every `TERM` marker before it writes the paper, so a
+    marker surviving into the body handed to this row is itself the defect. A
+    body with no marker at all has nothing captured and passes by
+    construction.
+    """
+    _, captured = take_terms(body)
+    glossary = {term.lower() for term in glossary_terms(body)}
+    return [term for term, _ in captured if term.lower() not in glossary]
+
+
+def glossary_host_terms(terms, allowed_domains=None) -> list[str]:
+    """Glossary entries that are a search host, not a term.
+
+    The reference list may name `docs.langchain.com`. The glossary may not: it
+    is prose about the subject, not a map of where the run went looking.
+    """
+    hosts = {
+        str(entry).strip().lower()
+        for entry in (tuple(source_policy.SEED_ALLOWLIST) + tuple(allowed_domains or ()))
+        if str(entry).strip()
+    }
+    return [term for term in terms if term.strip().lower().split("/")[0] in hosts or term.strip().lower() in hosts]
+
+
+def glossary_unused(body: str) -> list[str]:
+    """Glossary entries for a term the body never uses outside the glossary."""
+    terms = glossary_terms(body)
+    if not terms:
+        return []
+    prose = FENCE.sub(lambda m: " " * len(m.group(0)), _mask_section(body, "glossary"))
+    return [term for term in terms if not re.search(r"\b" + re.escape(term) + r"\b", prose, re.I)]
 
 
 @dataclass
@@ -573,6 +697,7 @@ def check(
     allowed_domains=None,
     located: list[str] | None = None,
     loop_doctrine: bool = True,
+    enforce_structure: bool = False,
 ) -> PaperScore:
     """Score a white paper. Every check here is arithmetic."""
     words_needed = MIN_WORDS if min_words is None else min_words
@@ -680,6 +805,35 @@ def check(
             else f"marketing verb in: {marketing_hits[0]!r}",
         )
     )
+
+    if enforce_structure:
+        # Every row below is opt-in behind this one keyword, the house pattern
+        # `loop_doctrine` already sets. A clean snippet with no glossary at
+        # all passes both rows by construction: no captured term means
+        # nothing missing, and no glossary entry means nothing unused.
+        incomplete = glossary_incomplete(body)
+        checks.append(
+            Check(
+                "glossary_complete",
+                not incomplete,
+                "every first-use term reached the glossary"
+                if not incomplete
+                else f"missing from glossary: {incomplete[:3]}",
+            )
+        )
+        terms = glossary_terms(body)
+        unused = glossary_unused(body)
+        host_hits = glossary_host_terms(terms, allowed_domains)
+        exact_bad = sorted(set(unused) | set(host_hits))
+        checks.append(
+            Check(
+                "glossary_exact",
+                not exact_bad,
+                "every glossary entry is a term the body uses"
+                if not exact_bad
+                else f"glossary-only or search-host term: {exact_bad[:3]}",
+            )
+        )
 
     rows = reference_rows(body)
     checks.append(
@@ -989,6 +1143,36 @@ def demo() -> None:
     assert marketing_violations("## References\n\n1. https://example.com/unlock-guide\n") == [], (
         "the references section is masked"
     )
+
+    # Follow-up from the P2 judge: a finance term is not the marketing verb.
+    assert marketing_violations("The bank's leverage ratio fell in the quarter.") == []
+    assert marketing_violations("The fund's leverages ratios stayed flat.") == []
+    assert marketing_violations("We leverage the SDK for every call.")
+    assert marketing_violations("The design was leveraged to cut costs.")
+
+    # Follow-up from the P2 judge: an inline URL is not body prose either.
+    assert person_violations("See https://example.org/your-account for the record.") == []
+    assert person_violations("See the record at your account page.")
+    assert marketing_violations("See https://example.com/unlock-guide for the record.") == []
+
+    body, terms = take_terms("A point. <!-- TERM: orchestrator: sequences roles --> More.")
+    assert terms == [("orchestrator", "sequences roles")]
+    assert "TERM" not in body
+    assert take_terms("no markers")[1] == []
+
+    glossed = "## Glossary\n\n**orchestrator.** Sequences roles.\n\n**widget.** Unused elsewhere.\n"
+    assert glossary_terms(glossed) == {"orchestrator": "Sequences roles.", "widget": "Unused elsewhere."}
+    assert glossary_terms("## Body\n\nno glossary here") == {}
+
+    marked = "The orchestrator runs first. <!-- TERM: orchestrator: sequences roles -->"
+    assert glossary_incomplete(marked) == ["orchestrator"], "no glossary section, nothing captured it"
+    assert glossary_incomplete(marked + "\n\n" + glossed) == []
+    assert glossary_incomplete("no marker at all") == []
+
+    assert glossary_unused("The orchestrator runs first.\n\n" + glossed) == ["widget"]
+    assert glossary_unused("## Glossary\n\n**widget.** Unused.\n") == ["widget"]
+    assert glossary_unused("## Body\n\nno glossary here") == []
+    assert glossary_host_terms(["docs.langchain.com", "widget"]) == ["docs.langchain.com"]
 
     print("paper_check: all demo assertions passed")
 
