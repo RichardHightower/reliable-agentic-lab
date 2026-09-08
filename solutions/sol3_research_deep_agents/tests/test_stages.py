@@ -352,6 +352,238 @@ def test_record_findings_fetches_a_url_only_once_per_run(monkeypatch):
     assert calls == ["https://docs.claude.com/x"], calls
 
 
+# -- 2c. attribution: the verifier checks the cited source says the claim. -
+# #471
+
+
+def _fetch_with_text(text):
+    def fake_fetch(url, backend, *, model_title=""):
+        return {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": text}
+
+    return fake_fetch
+
+
+def test_a_quote_absent_from_the_source_loses_the_binding(monkeypatch):
+    """`attributed()` drops the binding, and the drop is logged as a gap."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        _fetch_with_text("This page discusses guanidinoacetic acid, not creatine monohydrate."),
+    )
+    led = evidence.Ledger("/nonexistent")
+    finding = stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {
+                    "text": 'The trial reports "a 42 percent reduction in creatine monohydrate '
+                    'clearance", which no source here backs.',
+                    "source_urls": ["https://docs.claude.com/x"],
+                }
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    assert led.claims == {}
+    assert any("dropped" in gap for gap in finding.gaps), finding.gaps
+
+
+def test_two_urls_in_one_reply_stay_single_source(monkeypatch):
+    """Corroboration counts attributed bindings, not URLs in one reply.
+
+    Neither source here was fetched (no backend), so both bindings are kept
+    unattributed. Two raw source ids from one reply must not read as two
+    independent looks.
+    """
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [
+                {"title": "a", "url": "https://docs.claude.com/a"},
+                {"title": "b", "url": "https://docs.claude.com/b"},
+            ],
+            "claims": [{"text": "a fact", "source_urls": []}],
+        },
+    )
+    claim = next(iter(led.claims.values()))
+    assert len(claim.source_ids) == 2
+    assert claim.truth_state == evidence.SINGLE_SOURCE
+    assert claim.attributed_source_ids == []
+
+
+def test_a_numeric_unimportant_claim_still_reaches_attribution(monkeypatch):
+    """The `important` flag never gates attribution; only `verify_batch`'s
+    model turn is capped by it. An unimportant numeric claim whose cited
+    source lacks that number still loses its binding.
+    """
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        _fetch_with_text("The cohort included far fewer participants than reported elsewhere."),
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q", "important": False},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {
+                    "text": "The cohort included 214 participants.",
+                    "source_urls": ["https://docs.claude.com/x"],
+                }
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    assert led.claims == {}, "the miss was checked despite important=False"
+
+
+def test_a_claim_with_no_attributed_binding_is_dropped_and_logged(monkeypatch):
+    """A claim whose only source fails `attributed()` never reaches the
+    ledger, and the finding's gaps say why."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        _fetch_with_text("Nothing on this page mentions that number."),
+    )
+    led = evidence.Ledger("/nonexistent")
+    finding = stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {"text": "The response rate was 87 percent.", "source_urls": ["https://docs.claude.com/x"]}
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    assert led.claims == {}
+    assert any("87 percent" in gap or "dropped" in gap for gap in finding.gaps), finding.gaps
+
+
+def test_an_unfetched_source_keeps_the_binding_and_notes_it_unattributed():
+    """No backend, no fetch, no text: nothing to contradict, so the binding
+    survives and the claim says attribution was never checked."""
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [{"text": "A claim with a number, 42.", "source_urls": ["https://docs.claude.com/x"]}],
+        },
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.source_ids, "the binding survived"
+    assert claim.note == "unattributed: attribution not checked"
+
+
+def test_record_findings_carries_the_study_object_onto_the_claim():
+    """Unused until #478's study table; `record_findings` only has to keep
+    what the researcher reported."""
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {
+                    "text": "The trial enrolled 120 adults.",
+                    "source_urls": ["https://docs.claude.com/x"],
+                    "study": {"design": "RCT", "n": 120},
+                }
+            ],
+        },
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.study == {"design": "RCT", "n": 120}
+
+
+def test_not_found_writes_the_queries_into_the_note():
+    """Silence is not a result. #471"""
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(evidence.Claim(text="x", subject="s", source_ids=["a"], important=True))
+    stages.apply_verification(
+        led,
+        {
+            "checked": [
+                {
+                    "claim_id": claim.id,
+                    "corroborate_status": "not_found",
+                    "queries_used": ["x alternate wording", "x site:example.org"],
+                }
+            ]
+        },
+    )
+    assert "x alternate wording" in claim.note
+    assert "x site:example.org" in claim.note
+
+
+def test_not_found_with_no_reported_queries_still_names_the_claim():
+    """A verifier that reports no queries at all still leaves a real note,
+    not a blank one."""
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(evidence.Claim(text="creatine preserves lean mass", subject="s"))
+    stages.apply_verification(
+        led, {"checked": [{"claim_id": claim.id, "corroborate_status": "not_found"}]}
+    )
+    assert "creatine preserves lean mass" in claim.note
+
+
+def test_agreed_second_source_fetches_its_metadata(monkeypatch):
+    """Folded finding: the verifier's second source used to be titled from
+    sixty characters of its own quote, with no metadata fetch, and that
+    fragment could reach `references_block`. It now goes through the same
+    record as any other source. #471
+    """
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "The Real Title of the Second Source",
+            "authors": ["A. Author"],
+            "year": "2020",
+            "venue": "A Journal",
+            "note": "",
+            "text": "",
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(evidence.Claim(text="x", subject="s", source_ids=["a"], important=True))
+    stages.apply_verification(
+        led,
+        {
+            "checked": [
+                {
+                    "claim_id": claim.id,
+                    "second_source_url": "https://c.example",
+                    "corroborate_status": "agreed",
+                    "quote": "a fragment nobody should render as a title",
+                }
+            ]
+        },
+        backend=_FakeBackend(),
+    )
+    source = led.source_for_url("https://c.example")
+    assert source.title == "The Real Title of the Second Source"
+    assert source.authors == ["A. Author"]
+    assert source.year == "2020"
+    assert stages.render_reference(source).startswith("A. Author (2020)")
+
+
 def test_search_gate_fails_with_no_claims():
     with pytest.raises(GateFailed):
         stages.search_gate(evidence.Ledger("/nonexistent"), plan())
@@ -370,7 +602,14 @@ def test_search_gate_fails_when_an_important_question_found_nothing():
 
 
 def test_agreement_adds_a_source_and_corroborates():
+    """#471: corroboration now needs two *attributed* bindings. `ledger_with`
+    gives the claim two raw source ids from one reply, which is single-source
+    on its own; seed one of them as already attributed (the researcher's
+    citation, checked against its fetched text) and the verifier's own
+    independently found second source is the one that promotes the claim.
+    """
     led, claims = ledger_with(truth=evidence.PROPOSED)
+    claims[0].attributed_source_ids = [claims[0].source_ids[0]]
     counts = stages.apply_verification(
         led,
         {
@@ -988,7 +1227,12 @@ def test_verification_marks_the_claims_it_reported_on():
 
 
 def test_a_source_count_is_not_a_second_look():
-    """Two URLs inside one search answer are two sources and one look."""
+    """Two URLs inside one search answer are two sources and one look.
+
+    #471: `corroborate()` used to count raw source ids, so this claim came
+    back corroborated despite nobody having checked either binding. It now
+    stays single-source until each source is actually attributed.
+    """
     led = evidence.Ledger("/nonexistent")
     a = led.add_source(evidence.SourceDocument(title="a", url="https://a.example", subject="s"))
     b = led.add_source(evidence.SourceDocument(title="b", url="https://b.example", subject="s"))
@@ -996,7 +1240,7 @@ def test_a_source_count_is_not_a_second_look():
         evidence.Claim(text="x", subject="s", source_ids=[a.id, b.id], important=True)
     )
     evidence.corroborate(claim)
-    assert claim.truth_state == evidence.CORROBORATED
+    assert claim.truth_state == evidence.SINGLE_SOURCE
     assert claim.cross_checked is False
     assert led.unchecked() == [claim]
 def test_plan_requires_the_repo_exit_order_question_first():

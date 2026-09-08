@@ -1,7 +1,11 @@
 {
   "_comment": "esummary reply for https://pubmed.ncbi.nlm.nih.gov/12345678/, recorded for tests/test_metadata.py",
   "title": "The Interplay Between Physical Activity, Protein Consumption, and Sleep Quality in Muscle Protein Synthesis",
-  "authors": ["Nakamura K", "Ortiz L"],
+  "authors": [
+    "Nakamura K",
+    "Ortiz L"
+  ],
   "year": "2022",
-  "venue": "Journal of Applied Physiology"
+  "venue": "Journal of Applied Physiology",
+  "text": "This randomized trial enrolled 42 adults and found a 15 percent improvement in muscle protein synthesis when resistance training, adequate protein consumption, and at least 7 hours of nightly sleep were combined."
 }

@@ -321,6 +321,14 @@ def record_findings(
     which is what replaces the model's word with the record's. Leaving it
     `None`, as every test that does not care about metadata does, skips the
     fetch entirely and keeps the model's title exactly as before. #470
+
+    A claim is also checked here against the text that fetch retrieved:
+    `evidence.attributed()` requires the claim's quote or its numbers to
+    appear in it. A binding whose source text says something else is
+    dropped; a claim left with no binding is dropped and recorded as a gap.
+    A source with no fetched text (no `backend`, or the fetch found nothing)
+    keeps every binding and the claim is noted `unattributed`, because there
+    is nothing here to contradict, only nothing checked. #471
     """
     subject = question.get("subject", "topic")
     supplied_urls = [str(item.get("url", "")) for item in reply.get("sources", [])]
@@ -374,6 +382,7 @@ def record_findings(
                 year=fetched.get("year") or "",
                 venue=fetched.get("venue") or "",
                 note=fetched.get("note") or "",
+                text=fetched.get("text") or "",
             )
         )
         source_ids.append(source.id)
@@ -402,15 +411,39 @@ def record_findings(
         ]
         if not ids:
             continue
-        claim = ledger.add_claim(
-            evidence.Claim(
-                text=text,
-                subject=subject,
-                source_ids=ids,
-                confidence=float(item.get("confidence", 0.5)),
-                important=bool(question.get("important")),
-            )
+        claim = evidence.Claim(
+            text=text,
+            subject=subject,
+            source_ids=list(ids),
+            confidence=float(item.get("confidence", 0.5)),
+            important=bool(question.get("important")),
+            study=item.get("study") or {},
         )
+        # #471: a binding is only as good as the text fetched for its source.
+        # A source with no fetched text (no backend, or the fetch found
+        # nothing) keeps its binding unchecked rather than dropped.
+        kept_ids: list[str] = []
+        attributed_ids: list[str] = []
+        unattributed_kept = False
+        for sid in ids:
+            source_text = ledger.sources[sid].text
+            if not source_text:
+                kept_ids.append(sid)
+                unattributed_kept = True
+            elif evidence.attributed(claim, source_text):
+                kept_ids.append(sid)
+                attributed_ids.append(sid)
+            # else: the source text does not back this claim. The binding is
+            # dropped, silently at the binding level; only a claim left with
+            # no binding at all is logged, below.
+        if not kept_ids:
+            gaps.append(f"dropped, no source attributes this claim: {text[:80]}")
+            continue
+        claim.source_ids = kept_ids
+        claim.attributed_source_ids = attributed_ids
+        if unattributed_kept:
+            claim.note = "unattributed: attribution not checked"
+        ledger.add_claim(claim)
         evidence.corroborate(claim)
         claim_ids.append(claim.id)
 
@@ -461,6 +494,11 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
 # Twenty-four is a working default, not a discovered constant. Raise it with
 # `--max-verify` when a paper genuinely rests on more than that many load-bearing
 # facts, and expect the bill to scale with it.
+#
+# This cap bounds the model verifier turn only. `attributed()` in
+# `record_findings` runs on every claim, `important` or not, because it is a
+# fetch and a substring check, not a search: the creatine bug's references 18
+# and 20 were `important: false` and never reached this list at all. #471
 MAX_VERIFY_CLAIMS = 24
 
 
@@ -528,12 +566,19 @@ def resolve_placeholders(data, ledger: evidence.Ledger):
 # -- 3. verify ------------------------------------------------------------
 
 
-def apply_verification(ledger: evidence.Ledger, report: dict) -> dict:
+def apply_verification(ledger: evidence.Ledger, report: dict, *, backend=None) -> dict:
     """Fold the verifier's report into truth states. Python counts, not the model.
 
     The verifier says `agreed`, `disagreed`, or `not_found`. This function turns
-    that into a truth state by counting distinct source ids, which is why a
-    verifier that says `agreed` twice about the same URL cannot promote a claim.
+    that into a truth state by counting attributed source ids (`corroborate()`,
+    #471), which is why a verifier that says `agreed` twice about the same URL
+    cannot promote a claim.
+
+    `backend` is the run's research backend, the same object `stage_search`
+    already passes to `record_findings`. An `agreed` verdict's second source
+    is fetched through it, same as any other source, so its title, authors,
+    year, and venue come from the record rather than sixty characters of the
+    verifier's own quote. Leaving it `None` keeps the old behaviour. #471
     """
     counts = {"corroborated": 0, "single_source": 0, "contradicted": 0, "unknown": 0}
     for row in report.get("checked", []):
@@ -546,21 +591,44 @@ def apply_verification(ledger: evidence.Ledger, report: dict) -> dict:
         if status == "agreed":
             url = str(row.get("second_source_url", "")).strip()
             if url.lower().startswith(("http://", "https://")):
-                source = ledger.add_source(
-                    evidence.SourceDocument(
-                        title=row.get("quote", "")[:60] or url,
-                        url=url,
-                        subject=claim.subject or "verification",
-                        body=row.get("quote", ""),
+                source = ledger.source_for_url(url)
+                if source is None:
+                    model_title = row.get("quote", "")[:60] or url
+                    fetched = (
+                        metadata.fetch_record(url, backend, model_title=model_title)
+                        if backend is not None
+                        else {}
                     )
-                )
+                    source = ledger.add_source(
+                        evidence.SourceDocument(
+                            title=fetched.get("title") or model_title,
+                            url=url,
+                            subject=claim.subject or "verification",
+                            body=row.get("quote", ""),
+                            authors=fetched.get("authors") or [],
+                            year=fetched.get("year") or "",
+                            venue=fetched.get("venue") or "",
+                            note=fetched.get("note") or "",
+                            text=fetched.get("text") or "",
+                        )
+                    )
                 if source.id not in claim.source_ids:
                     claim.source_ids.append(source.id)
+                # The verifier independently searched for and quoted this
+                # source. That is the second, independent look `attributed()`
+                # exists to stand in for when nobody else already gave one.
+                if source.id not in claim.attributed_source_ids:
+                    claim.attributed_source_ids.append(source.id)
             evidence.corroborate(claim)
         elif status == "disagreed":
             claim.note = row.get("quote", "a second source disagreed")
             evidence.corroborate(claim, contradicted=True)
         else:
+            # Silence is not a result. `not_found` still names what was
+            # tried, so a reader sees a search happened rather than nothing
+            # at all. #471
+            queries = list(row.get("queries_used") or []) or [claim.text[:80]]
+            claim.note = f"not_found: the verifier searched {queries} and found no second source."
             evidence.corroborate(claim)
         counts[claim.truth_state] = counts.get(claim.truth_state, 0) + 1
     return counts

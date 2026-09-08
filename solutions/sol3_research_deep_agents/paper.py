@@ -1602,11 +1602,14 @@ class Paper:
             f"Cross-check each claim below against a second, independent source.\n{extra}\n\n"
             f"{listing}\n\n"
             'Return JSON: {"checked": [{"claim_id": "...", "second_source_url": "...", '
-            '"corroborate_status": "agreed|disagreed|not_found", "quote": "..."}]}',
+            '"corroborate_status": "agreed|disagreed|not_found", "quote": "...", '
+            '"queries_used": ["..."]}]}. On `not_found`, report every query you tried; '
+            "silence is not a result.",
         )
         counts = stages.apply_verification(
             self.ledger,
             stages.resolve_placeholders(self._json_reply("verifier", reply), self.ledger),
+            backend=self.backend,
         )
         stages.verify_gate(self.ledger)
         self.ledger.write()

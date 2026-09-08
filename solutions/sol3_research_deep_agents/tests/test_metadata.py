@@ -134,3 +134,16 @@ def test_a_pmc_id_resolves_from_either_host_form(monkeypatch):
     new_host = metadata.fetch_record("https://pmc.ncbi.nlm.nih.gov/articles/PMC7654321/", LiveBackend())
     assert old_host["title"] == "A PMC Paper"
     assert new_host["title"] == "A PMC Paper"
+
+
+def test_the_fetched_record_also_carries_the_source_text():
+    """#471: `attributed()` reads this text, not the model's own quote."""
+    doi = metadata.fetch_record(DOI_URL, FixtureBackend())
+    assert "creatine monohydrate" in doi["text"]
+
+    pubmed = metadata.fetch_record(PUBMED_URL, FixtureBackend())
+    assert "42 adults" in pubmed["text"]
+
+    # A url with no recorded reply carries no text either.
+    miss = metadata.fetch_record("https://example.invalid/nothing-here", FixtureBackend())
+    assert miss["text"] == ""

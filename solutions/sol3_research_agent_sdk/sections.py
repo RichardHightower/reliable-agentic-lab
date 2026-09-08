@@ -165,6 +165,10 @@ def _finding_from_claim(claim: dict, section_id: str, question: str, index: int)
         "numbers": claim.get("numbers") or [],
         "origin": "corpus" if kind == "corpus" else "web",
         "epistemic": claim.get("epistemic") or "",
+        # Population, design, and sample size, when the model reported one.
+        # Unused until #478's study table; carried here only so it survives
+        # to `claims.json`. #471
+        "study": claim.get("study") or {},
     }
 
 

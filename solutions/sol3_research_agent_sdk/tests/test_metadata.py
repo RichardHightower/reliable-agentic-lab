@@ -102,6 +102,18 @@ def test_a_url_with_no_backend_information_keeps_the_model_title():
     assert record["title"] == "Untouched"
 
 
+def test_the_fetched_record_also_carries_the_source_text():
+    """#471: `paper.attributed()` reads this text, not the model's own quote."""
+    doi = metadata.fetch_record(DOI_URL, FixtureBackend())
+    assert "creatine monohydrate" in doi["text"]
+
+    pubmed = metadata.fetch_record(PUBMED_URL, FixtureBackend())
+    assert "42 adults" in pubmed["text"]
+
+    miss = metadata.fetch_record("https://example.invalid/nothing-here", FixtureBackend())
+    assert miss["text"] == ""
+
+
 def test_cached_fetch_pays_for_a_url_once_per_work_directory(tmp_path, monkeypatch):
     calls = []
     real_fetch = metadata.fetch_record

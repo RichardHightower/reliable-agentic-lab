@@ -190,6 +190,22 @@ def test_findings_from_research_names_every_finding_itself():
     assert [f["id"] for f in out] == ["s1-f1", "s1-f2"]
 
 
+def test_finding_from_claim_carries_the_study_object():
+    """#471: unused until #478, and only has to survive to the finding."""
+    finding = sections._finding_from_claim(
+        {"text": "A fact.", "source_url": "https://a.invalid", "study": {"design": "RCT", "n": 40}},
+        "s1",
+        "q1",
+        1,
+    )
+    assert finding["study"] == {"design": "RCT", "n": 40}
+
+
+def test_finding_from_claim_with_no_study_defaults_empty():
+    finding = sections._finding_from_claim({"text": "A fact.", "source_url": "https://a.invalid"}, "s1", "q1", 1)
+    assert finding["study"] == {}
+
+
 def test_enrich_source_metadata_with_no_run_keeps_the_model_title():
     """The default. Every caller that predates #470 must see no change."""
     findings = [

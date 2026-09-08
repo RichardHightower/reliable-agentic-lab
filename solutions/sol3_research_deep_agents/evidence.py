@@ -13,9 +13,11 @@ later with no conversion step. Three record types and one edge:
     Finding          a group of claims, linked by `asserts`
 
 The important rule is arithmetic, not judgment. A claim is `corroborated` only
-when two distinct source ids support it. One source is `single_source`, and the
-paper has to say so out loud. That check is in `corroborate()`, it is four lines,
-and no model gets a vote on it.
+when two distinct source ids each pass `attributed()`, the check that the text
+`metadata.fetch_record` retrieved for that source actually backs the claim.
+Two URLs in one reply are not two attributed bindings until each is checked.
+One attributed source is `single_source`, and the paper has to say so out
+loud. That check is in `corroborate()`, and no model gets a vote on it. #471
 """
 
 from __future__ import annotations
@@ -214,6 +216,13 @@ class SourceDocument:
     # a SourceDocument, only `stages.claim_brief`'s numbers, so this is safe
     # to carry all the way to the report without leaking into the paper. #470
     note: str = ""
+    # The abstract or page text `metadata.fetch_record` retrieved, independent
+    # of anything the model said. `attributed()` reads this, never `body`,
+    # because `body` is the researcher's own quote and checking a model's
+    # claim against the model's own quote proves nothing. Empty means the
+    # fetch failed or returned no text; a claim bound to this source then
+    # keeps its binding unattributed rather than dropped. #471
+    text: str = ""
 
     def __post_init__(self) -> None:
         self.id = self.id or f"source.{slug(self.subject, 40)}.{new_id()}"
@@ -239,6 +248,7 @@ class SourceDocument:
                 "year": self.year or None,
                 "venue": self.venue or None,
                 "note": self.note or None,
+                "fetched_text": self.text or None,
             }
         )
         return f"{head}\n\n{self.body or self.url}\n"
@@ -260,6 +270,17 @@ class Claim:
     # are two sources and one look, and a reader is entitled to know which
     # claims nobody went back and checked.
     cross_checked: bool = False
+    # The subset of `source_ids` that passed `attributed()`, or that a real
+    # independent verifier turn confirmed directly (`apply_verification`'s
+    # `agreed` branch). `corroborate()` counts this, not `source_ids`, which
+    # is the fix for #471: two URLs in one researcher reply are two sources
+    # and zero attributed bindings until each is actually checked against the
+    # text `metadata.fetch_record` retrieved for it.
+    attributed_source_ids: list[str] = field(default_factory=list)
+    # Population, design, and sample size, when the researcher reported one.
+    # Unused until #478's study table; carried here only so it survives a
+    # ledger round trip. #471
+    study: dict = field(default_factory=dict)
     id: str = ""
     as_of: str = ""
 
@@ -294,6 +315,8 @@ class Claim:
                 "truth_state": self.truth_state,
                 "important": self.important,
                 "cross_checked": self.cross_checked,
+                "attributed_source_ids": self.attributed_source_ids,
+                "study": json.dumps(self.study, sort_keys=True) if self.study else None,
                 "links": [{"rel": "sourced_from", "target": sid} for sid in self.source_ids],
             }
         )
@@ -335,16 +358,52 @@ class Finding:
         return f"{head}\n\n{self.summary or self.question}\n"
 
 
-def corroborate(claim: Claim, *, contradicted: bool = False) -> Claim:
-    """Set the truth state from the source count. No model call.
+_QUOTED = re.compile(r'"([^"]{6,})"')
+_NUMBER = re.compile(r"\d[\d,.]*\d|\d")
 
-    Distinct source ids, not source count. Asking the same page twice is one
-    source, and a loop that cannot tell the difference will report every claim
-    as corroborated by lunchtime.
+
+def _numbers(text: str) -> set[str]:
+    return {token.replace(",", "") for token in _NUMBER.findall(text or "")}
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").lower()).strip()
+
+
+def attributed(claim: Claim, source_text: str) -> bool:
+    """Does the text #470 fetched for a source actually back this claim?
+
+    A literal quoted phrase inside the claim's own text (the researcher
+    sometimes reproduces the source's wording) must appear in `source_text`,
+    or one of the claim's numbers must. Neither present is not a failure: a
+    purely qualitative claim carries nothing this cheap, model-free check can
+    contradict, and dropping it here would be inventing evidence of a
+    mismatch that was never checked. That claim's binding is only as good as
+    whatever verified it elsewhere. #471
     """
+    quote_match = _QUOTED.search(claim.text or "")
+    quote = quote_match.group(1) if quote_match else ""
+    numbers = _numbers(claim.text)
+    if not quote and not numbers:
+        return True
+    normalized_source = _normalize(source_text)
+    if quote and _normalize(quote) in normalized_source:
+        return True
+    return bool(numbers and numbers & _numbers(source_text))
+
+
+def corroborate(claim: Claim, *, contradicted: bool = False) -> Claim:
+    """Set the truth state from attributed sources. No model call.
+
+    Distinct *attributed* source ids, not raw source count. Two URLs a
+    researcher lists in one reply are two sources and, until each is checked
+    against the text `metadata.fetch_record` retrieved for it, zero attributed
+    bindings. #471
+    """
+    attributed_now = set(claim.attributed_source_ids) & set(claim.source_ids)
     if contradicted:
         claim.truth_state = CONTRADICTED
-    elif len(set(claim.source_ids)) >= CORROBORATION_MIN:
+    elif len(attributed_now) >= CORROBORATION_MIN:
         claim.truth_state = CORROBORATED
     elif claim.source_ids:
         claim.truth_state = SINGLE_SOURCE
@@ -490,6 +549,7 @@ class Ledger:
                         year=str(fields.get("year") or ""),
                         venue=fields.get("venue", "") or "",
                         note=fields.get("note", "") or "",
+                        text=fields.get("fetched_text", "") or "",
                     )
                 )
             elif kind == "Claim":
@@ -503,6 +563,8 @@ class Ledger:
                         confidence=float(fields.get("confidence", 0.5)),
                         important=bool(fields.get("important", False)),
                         cross_checked=bool(fields.get("cross_checked", False)),
+                        attributed_source_ids=list(fields.get("attributed_source_ids") or []),
+                        study=json.loads(fields["study"]) if fields.get("study") else {},
                         id=fields["id"],
                         as_of=fields.get("as_of", ""),
                     )
@@ -548,7 +610,14 @@ def demo() -> None:  # noqa: PLR0915  (one assertion per rule, deliberately flat
     corroborate(claim)
     assert claim.truth_state == SINGLE_SOURCE, "asking one page twice is one source"
 
+    # #471: two raw source ids are not two attributed bindings. A claim built
+    # from two URLs in one search answer stays single-source until each
+    # binding is actually checked.
     claim.source_ids = [one.id, two.id]
+    corroborate(claim)
+    assert claim.truth_state == SINGLE_SOURCE, "two urls in one reply is not corroboration"
+
+    claim.attributed_source_ids = [one.id, two.id]
     corroborate(claim)
     assert claim.truth_state == CORROBORATED
 
@@ -561,6 +630,17 @@ def demo() -> None:  # noqa: PLR0915  (one assertion per rule, deliberately flat
     # two sources and one look.
     corroborate(claim)
     assert claim.truth_state == CORROBORATED
+
+    # attributed(): a quote the source text does not carry loses the check; a
+    # number it does carry passes it; nothing to check passes by default. #471
+    quoted = Claim(text='The paper reports "a 42 percent reduction in error rate".', subject="dt")
+    assert not attributed(quoted, "The paper found no significant change in error rate.")
+    assert attributed(quoted, 'Results show "a 42 percent reduction in error rate" overall.')
+    numeric = Claim(text="The cohort included 214 participants.", subject="dt")
+    assert attributed(numeric, "Of the 214 participants enrolled, most completed the study.")
+    assert not attributed(numeric, "The cohort included far fewer participants than planned.")
+    plain = Claim(text="Creatine is widely studied.", subject="dt")
+    assert attributed(plain, "This page is about something else entirely.")
     assert claim.cross_checked is False
     fields, _ = parse_front_matter(claim.to_markdown())
     assert fields["cross_checked"] is False
@@ -614,6 +694,33 @@ def demo() -> None:  # noqa: PLR0915  (one assertion per rule, deliberately flat
         assert reloaded.year == meta.year, reloaded
         assert reloaded.venue == meta.venue, reloaded
         assert reloaded.note == meta.note, reloaded
+        assert reloaded.text == "", reloaded
+
+    # Fetched page text round-trips too, and a `study` object survives a
+    # claim's round trip through the ledger, unused until #478. #471
+    with tempfile.TemporaryDirectory() as tmp:
+        texty = SourceDocument(
+            title="A Study",
+            url="https://text.example/paper",
+            subject="dt",
+            text="This trial enrolled 214 participants over 12 weeks.",
+        )
+        studied = Claim(
+            text="The trial enrolled 214 participants.",
+            subject="dt",
+            source_ids=[texty.id],
+            attributed_source_ids=[texty.id],
+            study={"design": "RCT", "n": 214, "weeks": 12},
+        )
+        study_ledger = Ledger(tmp)
+        study_ledger.add_source(texty)
+        study_ledger.add_claim(studied)
+        study_ledger.write()
+        reloaded_ledger = Ledger(tmp).load()
+        assert reloaded_ledger.source_for_url(texty.url).text == texty.text
+        reloaded_claim = reloaded_ledger.claim(studied.id)
+        assert reloaded_claim.study == studied.study, reloaded_claim.study
+        assert reloaded_claim.attributed_source_ids == [texty.id]
 
     # A source nobody cited stays out of the bibliography.
     ledger.add_source(two)

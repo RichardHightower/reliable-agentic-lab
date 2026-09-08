@@ -12,6 +12,13 @@ the writer typed. `fetch_record(url, backend)` resolves:
 One attempt, a 10 second timeout, no retry. A failed or timed-out fetch keeps
 the model's title and writes a note; it never raises and never blocks the run.
 
+The same fetch also keeps whatever abstract or summary the record carried:
+the esummary abstract when PubMed or PMC report one, the arXiv summary, the
+Crossref abstract when present, else the page's meta description or its
+first text block. Capped at `TEXT_CAP` characters. #471's `attributed()`
+reads this text, never the model's own quote, to check a claim against the
+source it names.
+
 The offline switch: when `backend` is the fixture backend (`backend.name ==
 "fixture"`), this reads a recorded reply under `fixtures/metadata/` and never
 touches the network. Every other backend resolves for real. No new CLI flag,
@@ -30,6 +37,9 @@ from xml.etree import ElementTree
 HERE = Path(__file__).resolve().parent
 FIXTURE_DIR = HERE / "fixtures" / "metadata"
 TIMEOUT_S = 10.0
+# A sensible size for an abstract or a page's opening text. Big enough to hold
+# a real abstract, small enough that the ledger's front matter stays readable.
+TEXT_CAP = 4000
 
 _PUBMED = re.compile(r"pubmed\.ncbi\.nlm\.nih\.gov/(\d+)", re.I)
 # The old host (ncbi.nlm.nih.gov/pmc/articles/...) and the canonical one PMC
@@ -82,6 +92,9 @@ def _from_pubmed(pubmed_id: str) -> dict:
         "authors": authors,
         "year": str(result.get("pubdate") or "")[:4],
         "venue": result.get("fulljournalname") or result.get("source") or "",
+        # esummary does not normally carry an abstract; a small number of
+        # NCBI mirrors do, so take it when it is there rather than assume.
+        "text": result.get("abstract") or "",
     }
 
 
@@ -98,6 +111,7 @@ def _from_pmc(pmc_id: str) -> dict:
         "authors": authors,
         "year": str(result.get("pubdate") or "")[:4],
         "venue": result.get("fulljournalname") or result.get("source") or "",
+        "text": result.get("abstract") or "",
     }
 
 
@@ -114,11 +128,13 @@ def _from_arxiv(arxiv_id: str) -> dict:
         for author in entry.findall("a:author", ns)
     ]
     published = entry.findtext("a:published", default="", namespaces=ns) or ""
+    summary = " ".join((entry.findtext("a:summary", default="", namespaces=ns) or "").split())
     return {
         "title": title,
         "authors": [a for a in authors if a],
         "year": published[:4],
         "venue": "arXiv",
+        "text": summary,
     }
 
 
@@ -137,11 +153,15 @@ def _from_crossref(doi: str) -> dict:
             year = str(parts[0][0])
             break
     venue = (message.get("container-title") or [""])[0]
+    abstract = re.sub(r"<[^>]+>", " ", message.get("abstract") or "")
     return {
         "title": titles[0] if titles else "",
         "authors": [a for a in authors if a],
         "year": year,
         "venue": venue,
+        # Crossref's abstract, when a publisher supplied one, arrives as
+        # JATS XML. Strip tags rather than parse a schema nobody asked for.
+        "text": " ".join(abstract.split()),
     }
 
 
@@ -161,7 +181,20 @@ def _from_page(url: str) -> dict:
     if not title:
         found = re.search(r"<title[^>]*>([^<]*)</title>", html, re.I)
         title = found.group(1).strip() if found else ""
-    return {"title": title, "authors": authors, "year": dates[0][:4] if dates else "", "venue": ""}
+    description = meta_all("description") or meta_all("og:description")
+    text = description[0] if description else ""
+    if not text:
+        # No description meta tag. The first paragraph is a weak substitute
+        # for an abstract, but a weak substitute beats an empty one.
+        found = re.search(r"<p[^>]*>(.*?)</p>", html, re.I | re.S)
+        text = re.sub(r"<[^>]+>", " ", found.group(1)) if found else ""
+    return {
+        "title": title,
+        "authors": authors,
+        "year": dates[0][:4] if dates else "",
+        "venue": "",
+        "text": " ".join(text.split()),
+    }
 
 
 def _resolve_live(url: str) -> dict:
@@ -188,17 +221,20 @@ def fetch_record(url: str, backend, *, model_title: str = "") -> dict:
     reads `fixtures/metadata/<sha1-of-url>.json`, or reports the miss. Any
     other backend resolves for real, one attempt, 10 seconds, no retry.
 
-    Returns `{"title", "authors", "year", "venue", "note"}`. `title` is the
-    fetched title, or `model_title` when nothing was fetched. `note` carries a
-    `title_mismatch: ...` message when a fetched title disagrees with
-    `model_title` by more than a third of their tokens, or a fetch-failure
-    message when the record could not be resolved. Never raises.
+    Returns `{"title", "authors", "year", "venue", "note", "text"}`. `title`
+    is the fetched title, or `model_title` when nothing was fetched. `text` is
+    the abstract or page text the record carried, capped at `TEXT_CAP`
+    characters, or empty when none was found; `attributed()` in `evidence.py`
+    reads it. `note` carries a `title_mismatch: ...` message when a fetched
+    title disagrees with `model_title` by more than a third of their tokens,
+    or a fetch-failure message when the record could not be resolved. Never
+    raises.
 
     Only an `http://` or `https://` url is ever fetched. A `file://` url read
     the caller's disk instead of a page; the scheme is checked here too, so no
     caller can bypass it by skipping its own guard.
     """
-    record = {"title": model_title, "authors": [], "year": "", "venue": "", "note": ""}
+    record = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
     if not url or not url.lower().startswith(("http://", "https://")):
         if url:
             record["note"] = f"metadata fetch: not an http(s) url: {url}"
@@ -219,6 +255,7 @@ def fetch_record(url: str, backend, *, model_title: str = "") -> dict:
     record["authors"] = list((fetched or {}).get("authors") or [])
     record["year"] = str((fetched or {}).get("year") or "")
     record["venue"] = str((fetched or {}).get("venue") or "")
+    record["text"] = str((fetched or {}).get("text") or "").strip()[:TEXT_CAP]
     if fetched_title:
         record["title"] = fetched_title
         if model_title and title_mismatch(model_title, fetched_title):
@@ -255,6 +292,35 @@ def demo() -> None:
 
     # No url, no crash.
     assert fetch_record("", Fixture())["title"] == ""
+
+    # Text is capped, never grown past TEXT_CAP. #471
+    def _long(_url: str) -> bytes:
+        long_description = "x" * (TEXT_CAP * 2)
+        return (
+            f'<html><head><meta name="description" content="{long_description}">'
+            "</head><body></body></html>"
+        ).encode()
+
+    globals()["_get"] = _long
+    try:
+        record = fetch_record("https://docs.example.com/long", Live())
+        assert len(record["text"]) == TEXT_CAP, len(record["text"])
+    finally:
+        globals()["_get"] = original
+
+    # The page's meta description is the text, when there is one.
+    def _described(_url: str) -> bytes:
+        return (
+            b'<html><head><meta name="description" content="A page about creatine.">'
+            b"</head><body></body></html>"
+        )
+
+    globals()["_get"] = _described
+    try:
+        record = fetch_record("https://docs.example.com/described", Live())
+        assert record["text"] == "A page about creatine.", record
+    finally:
+        globals()["_get"] = original
 
     # A close title is not a mismatch; a distant one is.
     assert not title_mismatch("A Study of Creatine and Muscle Loss", "A Study of Creatine and Muscle Loss")

@@ -49,6 +49,7 @@ import charts
 import corpus
 import diagrams
 import gates
+import metadata
 import outline as outlines
 import publish as publisher
 import research
@@ -93,6 +94,37 @@ OUTLINE_JUDGE_ROUNDS = int(os.environ.get("SOL3_OUTLINE_JUDGE_ROUNDS", "14"))
 # with a number, a version, or a date is the one most worth a second look: it is
 # the kind that goes stale, and the kind a reader can check and find wrong.
 NUMERIC = re.compile(r"\d")
+
+# #471: the claim's own quote, or its numbers, must appear in the text
+# `metadata.fetch_record` retrieved for the source it names.
+_NUMBER = re.compile(r"\d[\d,.]*\d|\d")
+
+
+def _numbers(text: str) -> set[str]:
+    return {token.replace(",", "") for token in _NUMBER.findall(text or "")}
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").lower()).strip()
+
+
+def attributed(claim: dict, source_text: str) -> bool:
+    """Does the text fetched for a claim's own cited source back it?
+
+    The claim's own `quote` (the researcher's excerpt, or a phrase the writer
+    is expected to cite) must appear in `source_text`, or one of the claim's
+    numbers must. Neither present is not a failure: a purely qualitative
+    claim carries nothing this cheap, model-free check can contradict, and
+    dropping it here would invent a mismatch that was never checked. #471
+    """
+    quote = str(claim.get("quote") or "").strip()
+    numbers = _numbers(claim.get("text") or "")
+    if not quote and not numbers:
+        return True
+    normalized_source = _normalize(source_text)
+    if quote and _normalize(quote) in normalized_source:
+        return True
+    return bool(numbers and numbers & _numbers(source_text))
 
 
 def _section_instruction(section: dict, notes: str = "") -> str:
@@ -948,7 +980,8 @@ def to_verify(claims: list[dict], limit: int) -> list[dict]:
 
 
 def verify(run: Run) -> dict:
-    """Check each claim against a source the verifier finds on its own.
+    """Check each claim against a source the verifier finds on its own,
+    after first checking the source the researcher actually cited.
 
     The verifier is given the claim text and nothing else. Handing it the
     researcher's source turns an independent check into a reading-comprehension
@@ -956,8 +989,37 @@ def verify(run: Run) -> dict:
 
     There is no arbiter. A disputed claim in a white paper is a claim you
     soften, not one you settle with a third opinion.
+
+    Before any of that: `attributed()` checks the claim against the text
+    `metadata.fetch_record` retrieved for the researcher's own `source_url`.
+    A claim whose cited source does not say what the claim says is dropped
+    here and logged, whatever its position in the verify budget -- that
+    budget caps the model turn below, not this fetch. A source with no
+    fetched text (no `backend` on `run.turns`, or nothing came back) keeps
+    its claim and gets an `unattributed` note instead: nothing here
+    contradicts it, only nothing was checked. #471
     """
     claims = run.read_json("claims.json")["claims"]
+    backend = getattr(getattr(run, "turns", None), "backend", None)
+    dropped: list[dict] = []
+    if backend is not None:
+        survivors = []
+        for claim in claims:
+            url = claim.get("source_url") or ""
+            source_text = ""
+            if url:
+                fetched = metadata.cached_fetch(
+                    run.work_dir, url, backend, model_title=claim.get("title") or ""
+                )
+                source_text = fetched.get("text") or ""
+            if source_text and not attributed(claim, source_text):
+                dropped.append({"claim_id": claim.get("id"), "reason": "the cited source does not say this"})
+                continue
+            if not source_text:
+                claim["note"] = "unattributed: attribution not checked"
+            survivors.append(claim)
+        claims = survivors
+
     chosen = {id(claim) for claim in to_verify(claims, run.max_claims)}
     verdicts = []
     stopped = None
@@ -995,7 +1057,13 @@ def verify(run: Run) -> dict:
             # names it. Only the verifier holds one, so the claim goes.
             status = "disputed" if claim.get("quote") else "contradicted"
         else:
+            # Silence is not a result. A `not_found`-shaped verdict still
+            # names what the verifier tried, so the record shows a search
+            # happened rather than nothing at all. #471
             status = "unverified"
+            if not verdict.get("excerpt"):
+                queries = list(verdict.get("queries_used") or []) or [claim["text"][:80]]
+                verdict["excerpt"] = f"not_found: searched {queries}"
 
         claim["status"] = status
         claim["verifier_url"] = verdict.get("source_url", "")
@@ -1004,7 +1072,7 @@ def verify(run: Run) -> dict:
             {"claim_id": claim["id"], "status": status, "verdict": verdict.get("verdict")}
         )
 
-    run.write_json("claims.json", {"claims": claims})
+    run.write_json("claims.json", {"claims": claims, "dropped": dropped} if dropped else {"claims": claims})
     run.write_json("verdicts.json", {"verdicts": verdicts})
     counts: dict[str, int] = {}
     for verdict in verdicts:
@@ -1013,6 +1081,8 @@ def verify(run: Run) -> dict:
         counts["stopped"] = stopped
     if skipped:
         counts["past_budget"] = skipped
+    if dropped:
+        counts["dropped"] = len(dropped)
     return counts
 
 
@@ -1207,6 +1277,9 @@ def do_sections(run: Run) -> dict:
                         "year": (finding.get("source") or {}).get("year") or "",
                         "venue": (finding.get("source") or {}).get("venue") or "",
                         "note": (finding.get("source") or {}).get("note") or "",
+                        # Unused until #478; carried so it survives to
+                        # claims.json the same way the metadata fields do. #471
+                        "study": finding.get("study") or {},
                     }
                 )
             if url and url not in seen:
