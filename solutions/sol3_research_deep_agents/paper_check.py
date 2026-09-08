@@ -557,6 +557,31 @@ def _section_text(body: str, name: str) -> str:
     return ""
 
 
+def question_headings(body: str, outline: dict | None = None) -> list[str]:
+    """H2/H3 headings that are pasted questions, not the answers to them.
+
+    A heading that ends in a question mark reads as a slide prompt, not a
+    finding. A heading that repeats an outline key question verbatim is the
+    same defect with the question mark trimmed off. Copied from the SDK
+    `checks.py` row of the same name, never imported. #385.
+    """
+    wanted = set()
+    for section in (outline or {}).get("sections") or []:
+        for item in section.get("key_questions") or []:
+            text = outlines.question_text(item).strip().lower()
+            if text:
+                wanted.add(text)
+                wanted.add(text.rstrip("?").strip())
+    bad = []
+    for match in SECTION_HEADING.finditer(body):
+        if len(match.group(1)) not in (2, 3):
+            continue
+        heading = match.group(2).strip()
+        if heading.endswith("?") or heading.lower() in wanted:
+            bad.append(heading)
+    return bad
+
+
 @dataclass
 class Check:
     name: str
@@ -847,6 +872,7 @@ def check(
     located: list[str] | None = None,
     loop_doctrine: bool = True,
     enforce_structure: bool = False,
+    outline: dict | None = None,
 ) -> PaperScore:
     """Score a white paper. Every check here is arithmetic."""
     words_needed = MIN_WORDS if min_words is None else min_words
@@ -952,6 +978,20 @@ def check(
             "no marketing verb in body prose"
             if not marketing_hits
             else f"marketing verb in: {marketing_hits[0]!r}",
+        )
+    )
+
+    # Unconditional: a heading ending in "?" is checked with no outline at
+    # all. A clean paper has no interrogative heading, so this never fires
+    # on a snippet the outline was never handed. #385 #463.
+    bad_headings = question_headings(body, outline)
+    checks.append(
+        Check(
+            "question_heading",
+            not bad_headings,
+            "no heading is a pasted question"
+            if not bad_headings
+            else f"heading is a question: {bad_headings[0]!r}",
         )
     )
 

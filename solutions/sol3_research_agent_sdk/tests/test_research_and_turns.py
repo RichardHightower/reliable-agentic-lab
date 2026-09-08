@@ -340,6 +340,36 @@ def test_the_live_edit_prompt_carries_the_writers_contract(work):
     assert "knowledge:claim.x.01M0" not in prompt, prompt
 
 
+def test_the_writer_contract_drops_the_exact_string_rule(work):
+    """#385: the writer could not both paraphrase, which failed `coverage`,
+    and paste the question, which made it a heading. Neither turn's prompt,
+    nor the writer card, demands the question as an exact string any more."""
+    section = {
+        "id": "s1",
+        "heading": "Stopping",
+        "objective": "Say when the loop stops.",
+        "key_questions": ["What stops the loop?"],
+        "word_target": 200,
+    }
+    write_backend = Backend([result(output="a section")])
+    t.SdkTurns(backend=write_backend, work_dir=work).write(
+        section, [{"number": 1, "text": "A thing."}], [], "", path="sections/s1.md"
+    )
+    write_prompt = write_backend.prompts[0][0]
+    assert "exact string" not in write_prompt
+    assert "as that string" not in write_prompt
+
+    edit_backend = Backend([result(output="an edited section")])
+    t.SdkTurns(backend=edit_backend, work_dir=work).edit_section(
+        section, "old body", {"failed_rows": ["coverage"]}
+    )
+    edit_prompt = edit_backend.prompts[0][0]
+    assert "exact string" not in edit_prompt
+
+    card = Path(__file__).resolve().parents[1] / "plugin" / "agents" / "research-writer.md"
+    assert "exact string" not in card.read_text(encoding="utf-8")
+
+
 def test_the_judge_prompt_carries_the_number_to_source_map(work):
     """The judge received raw findings while everyone else held numbered claims.
 

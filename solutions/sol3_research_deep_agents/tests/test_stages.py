@@ -852,6 +852,59 @@ def test_assemble_gate_passes_the_doctrine_flag_through_to_paper_check(monkeypat
     assert seen["loop_doctrine"] is True
 
 
+def test_assemble_gate_fails_a_heading_that_pastes_a_key_question(monkeypatch):
+    """#463: `assemble_gate` hands its `outline` argument through to
+    `paper_check.check`, so `question_heading` can also grade a heading
+    against the plan's `key_questions`, not only against a heading ending
+    in `?`. The H3 below drops the question mark, so it passes with no
+    outline; handed the outline, its text still equals a key question and
+    it fails."""
+    import paper_check  # noqa: PLC0415
+
+    monkeypatch.setattr(paper_check, "MIN_WORDS", 0)
+    monkeypatch.setattr(paper_check, "MIN_SECTION_WORDS", 5)
+    led = evidence.Ledger("/nonexistent")
+    a = led.add_source(
+        evidence.SourceDocument(title="a", url="https://docs.langchain.com/one", subject="exits")
+    )
+    b = led.add_source(
+        evidence.SourceDocument(title="b", url="https://docs.claude.com/two", subject="exits")
+    )
+    led.add_claim(
+        evidence.Claim(
+            text="Three exits cover the observed cases.", subject="exits", source_ids=[a.id, b.id]
+        )
+    )
+    body = (
+        "# Exit conditions\n\n"
+        "## Abstract\n\nA loop without an exit spends until someone notices. [1]\n\n"
+        "## Introduction\n\n"
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
+        "### What stops the loop from running forever\n\n"
+        "A rubric computed in code decides when the loop stops. [1]\n\n"
+        "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
+        "## Next step\n\n"
+        "- Evaluate the three exits on a live ticket before adopting them.\n"
+        "- Run the fixture with --backend fixture, then again with a live backend.\n"
+        "- Compare this port against the sibling runtime on the same topic.\n\n"
+        "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
+    )
+    outline = {
+        "sections": [
+            {
+                "heading": "Introduction",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+
+    assert "question_heading" not in stages.assemble_gate(body, led, loop_doctrine=False).signature()
+
+    with pytest.raises(GateFailed) as exc:
+        stages.assemble_gate(body, led, loop_doctrine=False, outline=outline)
+    assert "question_heading" in exc.value.signature
+
+
 # -- the verification cap --------------------------------------------------
 
 

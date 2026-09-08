@@ -772,3 +772,88 @@ def test_the_recorded_fixture_paper_passes_the_next_step_rows(run_dir, stub_rend
     assert "next_step" in names
     assert "cta_language" in names
     assert score.passed, score.report()
+
+
+# -- P5, headings are answers -------------------------------------------------
+
+
+def test_a_raw_key_question_as_a_heading_fails():
+    """A section that pastes its outline key question as an H3 fails
+    `question_heading`, and the detail names the offending heading."""
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = (
+        "# Title\n\n"
+        "## One\n\n"
+        "### What stops the loop from running forever?\n\n"
+        "A rubric computed in code, not left to the model, stops it. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = gate(body, urls=["https://a"], outline=outline)
+    assert "question_heading" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "question_heading")
+    assert "What stops the loop from running forever?" in row.detail
+
+
+def test_a_heading_ending_in_a_question_mark_fails():
+    """The row is unconditional: a heading ending in `?` fails with no
+    outline handed to `check` at all."""
+    body = (
+        "# Title\n\n"
+        "## Is the harness safe to run unattended?\n\n"
+        "A rubric computed in code stops it, not a model's own judgment. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = gate(body, urls=["https://a"])
+    assert "question_heading" in score.signature(), score.report()
+
+
+def test_a_clean_heading_passes_question_heading():
+    """A heading that answers the question, rather than asking it, passes."""
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = (
+        "# Title\n\n"
+        "## One\n\n"
+        "### A rubric in code stops the loop\n\n"
+        "The rubric decides when the loop stops, never a model's own "
+        "judgment. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = gate(body, urls=["https://a"], outline=outline)
+    assert "question_heading" not in score.signature(), score.report()
+
+
+def test_a_clean_paper_passes_question_heading():
+    """`GOOD` has no interrogative heading and no outline is handed to it,
+    so the row passes by construction."""
+    assert "question_heading" not in gate(GOOD, URLS).signature()
+
+
+def test_the_recorded_fixture_paper_passes_question_heading(run_dir, stub_renderer):
+    """`task paper` assembles a paper with no heading that pastes a
+    question, under `assemble_gate`'s own production call."""
+    from conftest import build_run  # noqa: PLC0415
+    import stages  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    assert run.run() == 0, "the recorded fixture must still assemble and pass its gate"
+    body = run.paper_path.read_text(encoding="utf-8")
+    score = stages.assemble_gate(
+        body, run.ledger, allowed_domains=run.allowed_domains, loop_doctrine=run.loop_doctrine
+    )
+    names = {c.name for c in score.checks}
+    assert "question_heading" in names
+    assert score.passed, score.report()

@@ -1005,6 +1005,7 @@ def assemble_gate(
     allowed_domains: tuple[str, ...] | None = None,
     *,
     loop_doctrine: bool = True,
+    outline: dict | None = None,
 ) -> paper_check.PaperScore:
     _, urls = numbering(ledger)
     score = paper_check.check(
@@ -1016,6 +1017,12 @@ def assemble_gate(
         enforce_structure=True,
         located=[source.url for source in ledger.bibliography() if source.located_from],
         loop_doctrine=loop_doctrine,
+        # The plan carries `key_questions` per section, the same shape the
+        # SDK's `approved_outline(run)` hands to `checks.check`. #463: with
+        # no outline, `question_heading` only catches a heading ending in
+        # "?"; this lets it also catch a heading that repeats a key
+        # question verbatim without the question mark.
+        outline=outline,
     )
     if not score.passed:
         raise GateFailed(
