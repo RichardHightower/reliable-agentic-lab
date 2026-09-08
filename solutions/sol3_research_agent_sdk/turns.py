@@ -29,6 +29,7 @@ from load_agents import (
     CHART_SCHEMA,
     DIAGRAM_SCHEMA,
     FINDINGS_SCHEMA,
+    FOLLOW_SCHEMA,
     GROUNDING,
     LEDGER_SCHEMA,
     LOCATE_SCHEMA,
@@ -295,6 +296,15 @@ class Turns:
         text = question if isinstance(question, str) else question.get("text") or ""
         listed = ", ".join(previous_queries[:8])
         return self.research(text, f"{note}\nPrevious queries: {listed}")
+
+    def follow_primary(self, claim: str, source_title: str, source_tier: str) -> dict:
+        """Find the primary study a review, preprint, or compilation cites.
+
+        Default: a miss. #473, matching `locate`'s "cannot search, reports a
+        miss" default: a runtime with no way to look reports nothing found
+        rather than inventing a URL nobody retrieved.
+        """
+        return {"found": False, "url": "", "title": "", "quote": ""}
 
     def judge_section(self, section: dict, body: str, findings: list, note: str = "") -> dict:
         return {"passed": True, "failed_rows": [], "notes": []}
@@ -585,6 +595,23 @@ class SdkTurns(Turns):
             "If you find nothing, return `unclear` and list every query you "
             "tried in `queries_used`. Silence is not a result.",
             VERIFY_SCHEMA,
+        )
+
+    def follow_primary(self, claim: str, source_title: str, source_tier: str) -> dict:
+        """Ask for the primary study behind a claim only a summary carries.
+
+        No `search_domain_filter`: the primary this claim traces to may live
+        on a host the run's allowlist never admitted for its own topic
+        search, e.g. PubMed for a paper whose allowlist is arXiv. #473
+        """
+        return self._json(
+            "research-researcher",
+            f"This numeric claim rests only on a {source_tier or 'summary'}, "
+            f"{source_title or 'an unnamed source'}, not the primary study: "
+            f"{claim}\n\nFind the primary study that source cites for this "
+            "number. Search once. `found: false` if you cannot, rather than "
+            "naming a source you did not open.",
+            FOLLOW_SCHEMA,
         )
 
     def locate(self, title: str, vendor: str, claim_head: str) -> dict:

@@ -164,6 +164,12 @@ def main(argv: list[str] | None = None) -> int:
         "--max-claims", type=int, default=None, help="cap on how many claims get a second opinion"
     )
     parser.add_argument(
+        "--max-follow",
+        type=int,
+        default=None,
+        help="cap on how many secondary-tier claims get a follow turn for the primary, per run",
+    )
+    parser.add_argument(
         "--word-target",
         type=int,
         default=None,
@@ -290,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         max_questions=profile["max_questions"],
         max_diagrams=profile["max_diagrams"],
         max_claims=profile["max_claims"],
+        max_follow=args.max_follow if args.max_follow is not None else paper.MAX_FOLLOW,
         word_target_total=profile["word_target_total"],
         brief=brief,
         should_publish=args.publish,

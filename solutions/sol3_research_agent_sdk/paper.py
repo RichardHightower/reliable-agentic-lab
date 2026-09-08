@@ -77,6 +77,11 @@ MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
 MAX_CLAIMS = 40
 MAX_WORDS = 2000
+# #473. How many secondary-tier numeric claims get a follow turn asking for
+# the primary study, per run, not per section: the ticket asked for a cap
+# per section, and eight sections at six each would roughly double a run.
+# Mirrors `MAX_CLAIMS`'s role for the verifier turn.
+MAX_FOLLOW = 6
 # Every other budget in this port is a flag. The Deep Agents twin defaults
 # this to 14. Three rounds was enough for a four-row judge on a fixture, and
 # not enough once the live judge was scoring eleven rows a paper rubric owns.
@@ -222,6 +227,14 @@ class Run:
     max_questions: int = MAX_QUESTIONS
     max_diagrams: int = MAX_DIAGRAMS
     max_claims: int = MAX_CLAIMS
+    # #473. Bounds the follow-turn pass across the whole run, not per section:
+    # `follow_used` below is the running count `sections.follow_primary_sources`
+    # checks and increments on every call, so section eight cannot spend the
+    # same budget section one already did. Not persisted to disk, the same
+    # simplification `max_claims`'s per-section reset already lives with; a
+    # resumed run in a new process starts the count over.
+    max_follow: int = MAX_FOLLOW
+    follow_used: int = field(default=0, init=False)
     word_target_total: int = MAX_WORDS
     theme: str = diagrams.DEFAULT_THEME
     brain: Path | None = BRAIN
@@ -1226,6 +1239,8 @@ def do_sections(run: Run) -> dict:
                         # Unused until #478; carried so it survives to
                         # claims.json the same way the metadata fields do. #471
                         "study": finding.get("study") or {},
+                        # From `source_policy.tier_for()`, not the model. #473
+                        "evidence_tier": (finding.get("source") or {}).get("evidence_tier") or "",
                     }
                 )
             if url and url not in seen:
@@ -1239,6 +1254,7 @@ def do_sections(run: Run) -> dict:
                         "year": src.get("year") or "",
                         "venue": src.get("venue") or "",
                         "note": src.get("note") or "",
+                        "evidence_tier": src.get("evidence_tier") or "",
                     }
                 )
         for gap in payload.get("coverage_gaps") or []:
@@ -1376,6 +1392,10 @@ def _numbered(
                 "year": claim.get("year") or "",
                 "venue": claim.get("venue") or "",
                 "note": claim.get("note") or "",
+                # From `source_policy.tier_for()`. Carried here so
+                # `citations.render_reference` and the study table (#478)
+                # have it once they need it. #473
+                "evidence_tier": claim.get("evidence_tier") or "",
             }
         claim["number"] = _cite_number(url, registry, sources)
     refs = []
@@ -1394,6 +1414,7 @@ def _numbered(
                 "year": meta.get("year") or "",
                 "venue": meta.get("venue") or "",
                 "note": meta.get("note") or "",
+                "evidence_tier": meta.get("evidence_tier") or "",
             }
         )
     return usable, refs

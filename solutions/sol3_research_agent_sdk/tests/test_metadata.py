@@ -97,6 +97,32 @@ def test_an_arxiv_id_and_a_doi_resolve_through_their_apis():
     assert doi["venue"] == "International Journal of Sports Nutrition"
 
 
+def test_the_record_carries_its_raw_publication_type():
+    """#473: `source_policy.tier_for()` reads these, `metadata.py` never
+    interprets them."""
+    pubmed = metadata.fetch_record(PUBMED_URL, FixtureBackend())
+    assert pubmed["pubtype"] == ["Journal Article", "Randomized Controlled Trial"]
+
+    arxiv = metadata.fetch_record(ARXIV_URL, FixtureBackend())
+    assert arxiv["category"] == "cs.MA"
+
+    doi = metadata.fetch_record(DOI_URL, FixtureBackend())
+    assert doi["crossref_type"] == "journal-article"
+
+    miss = metadata.fetch_record("https://example.invalid/nothing-here", FixtureBackend())
+    assert miss["pubtype"] == [] and miss["category"] == "" and miss["crossref_type"] == ""
+
+
+def test_a_position_stand_title_tiers_correctly_from_a_doi_alone():
+    """#473 item 6: Crossref's `type` has no guideline value, so the
+    recorded DOI fixture, a `journal-article`, needs the title match to
+    reach `position_stand_or_guideline`."""
+    import source_policy  # noqa: PLC0415
+
+    doi = metadata.fetch_record(DOI_URL, FixtureBackend())
+    assert source_policy.tier_for(doi) == "position_stand_or_guideline"
+
+
 def test_a_url_with_no_backend_information_keeps_the_model_title():
     record = metadata.fetch_record("", FixtureBackend(), model_title="Untouched")
     assert record["title"] == "Untouched"

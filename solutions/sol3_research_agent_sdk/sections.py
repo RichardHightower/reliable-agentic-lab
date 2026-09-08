@@ -26,6 +26,7 @@ import locate
 import metadata
 import outline as outlines
 import rkc
+import source_policy
 from turns import Escalate, TurnFailed
 
 LIVE_SEARCHES_PER_QUESTION = 2
@@ -223,6 +224,11 @@ def enrich_source_metadata(findings: list[dict], run) -> None:
         # The abstract or page text the fetch carried. #471's `attributed()`
         # reads this, never the researcher's own quote.
         source["text"] = fetched.get("text") or ""
+        # A dict lookup on the record's own publication type, never the
+        # model's opinion. Named `evidence_tier`, not `tier`: this schema
+        # already carries a numeric `tier` (a corpus-vs-web citation weight,
+        # `_finding_from_claim` above), and the two are unrelated. #473
+        source["evidence_tier"] = source_policy.tier_for(fetched)
         finding["source"] = source
 
 
@@ -292,6 +298,127 @@ def attribute_findings(run, findings: list[dict], sid: str) -> list[dict]:
     return kept
 
 
+# #473. A preprint's number is the least trustworthy citation in the paper; a
+# systematic review's is closest to a primary trial's own. Lower sorts first,
+# so a run past `--max-follow` spends its turns on the shakiest claims.
+_FOLLOW_ORDER = {
+    "preprint_or_compilation": 0,
+    "narrative_review": 1,
+    "meta_analysis_or_systematic_review": 2,
+}
+
+
+def _follow_candidates(findings: list[dict]) -> list[dict]:
+    """Numeric findings bound only to a review, a preprint, or a compilation."""
+    candidates = [
+        finding
+        for finding in findings
+        if _numbers(finding.get("claim") or "")
+        and (finding.get("source") or {}).get("evidence_tier") in source_policy.SECONDARY_TIERS
+    ]
+    candidates.sort(
+        key=lambda f: (
+            _FOLLOW_ORDER.get((f.get("source") or {}).get("evidence_tier"), 9),
+            float(f.get("evidence_strength") or 0.5),
+        )
+    )
+    return candidates
+
+
+def _apply_follow_result(run, finding: dict, result: dict) -> bool:
+    """Rebind a finding to the primary a follow turn found, or mark it secondary.
+
+    A hit only counts when the found source's own tier is not itself
+    secondary: the same review answering twice, or a different review, must
+    not clear the caveat (#473 item 2). A hit whose fetched text contradicts
+    the claim is treated the same as a miss: a primary study's own URL is
+    not a licence to skip the check #471 already runs on every other
+    binding.
+
+    The original review survives under `finding["via"]`, not discarded
+    (item 5): the paper can still say the number arrived through it. The
+    new source's own `note` is computed fresh, including the same
+    `unattributed: attribution not checked` marker `attribute_findings`
+    writes, so a rebind to a record with no fetched text is never carried
+    as if it had been attributed (item 4).
+    """
+    url = str(result.get("url") or "").strip()
+    if result.get("found") and url.lower().startswith(("http://", "https://")):
+        backend = run.turns.backend
+        model_title = result.get("title") or url
+        fetched = metadata.cached_fetch(run.work_dir, url, backend, model_title=model_title)
+        tier = source_policy.tier_for(fetched)
+        if tier not in source_policy.SECONDARY_TIERS:
+            quote = str(result.get("quote") or "")
+            fetched_text = fetched.get("text") or ""
+            probe = {"quote": quote, "claim": finding.get("claim") or ""}
+            if not fetched_text or attributed(probe, fetched_text):
+                note = fetched.get("note") or ""
+                if not fetched_text:
+                    marker = "unattributed: attribution not checked"
+                    note = f"{note}; {marker}" if note else marker
+                finding["via"] = finding.get("source") or {}
+                finding["source"] = {
+                    "kind": "web",
+                    "ref": url,
+                    "title": fetched.get("title") or model_title,
+                    "url_or_path": url,
+                    "vendor": "",
+                    "tier": 1,
+                    "evidence_tier": tier,
+                    "authors": fetched.get("authors") or [],
+                    "year": fetched.get("year") or "",
+                    "venue": fetched.get("venue") or "",
+                    "note": note,
+                    "text": fetched_text,
+                }
+                if quote:
+                    finding["quote"] = quote
+                finding["secondary"] = False
+                return True
+    finding["secondary"] = True
+    return False
+
+
+def follow_primary_sources(run, findings: list[dict], sid: str) -> None:
+    """One follow turn per shaky numeric claim, capped at `run.max_follow`
+    across the whole run. #473
+
+    A claim whose only bound source is a review, a preprint, or a
+    compilation is asked once for the primary study behind its number. A hit
+    rebinds the finding to that primary; a miss is recorded, `secondary`, so
+    the writer is told outright rather than left to infer it, and the brief
+    says "as summarized by [n]" (`_claims_for_writer`).
+
+    The cap is per run, not per section: `run.follow_used` is the running
+    count across every section's call, the field `--max-follow` bounds.
+
+    Gated the same way `attribute_findings` is: a `run.turns` with no
+    `backend` attribute at all (every pre-#470 test double) is a no-op.
+    """
+    if not hasattr(getattr(run, "turns", None), "backend"):
+        return
+    candidates = _follow_candidates(findings)
+    if not candidates:
+        return
+    remaining = max(0, run.max_follow - run.follow_used)
+    followed = candidates[:remaining]
+    run.log(
+        f"    {sid} follow: {len(followed)} of {len(candidates)} candidate(s), "
+        f"{run.follow_used + len(followed)}/{run.max_follow} used this run"
+    )
+    for finding in followed:
+        source = finding.get("source") or {}
+        try:
+            result = run.turns.follow_primary(
+                finding.get("claim") or "", source.get("title") or "", source.get("evidence_tier") or ""
+            )
+        except (TurnFailed, Escalate):
+            result = {"found": False}
+        _apply_follow_result(run, finding, result)
+        run.follow_used += 1
+
+
 # A claim describes the world. These phrases describe the search instead, and
 # a claim built out of one is a narrated retrieval miss, not a finding. The
 # creatine paper this ticket names put two such sentences in the body, each
@@ -355,18 +482,30 @@ def _claims_for_writer(
         status = (verdicts.get(finding["id"]) or {}).get("state") or "unverified"
         if status == "contradicted":
             continue
-        url = (finding.get("source") or {}).get("url_or_path") or ""
+        source = finding.get("source") or {}
+        url = source.get("url_or_path") or ""
         cite = number if numbers is None else numbers.get(url, 0)
+        text = finding.get("claim") or ""
+        if finding.get("secondary"):
+            # #473. `follow_primary_sources` left this bound to the review or
+            # preprint it started with; the writer is told so outright,
+            # deterministically, rather than trusted to infer it from a
+            # status value it was never taught.
+            text = f"{text} (as summarized by [{cite}])."
         usable.append(
             {
                 "id": finding["id"],
-                "text": finding.get("claim") or "",
+                "text": text,
                 "source_url": url,
                 "quote": finding.get("quote") or "",
                 "question_id": finding.get("answers_question") or "",
                 "section": section_id,
                 "status": status,
                 "number": cite,
+                # Read by `checks.section_check`'s `guideline_cited` row, not
+                # sent to the writer: `WRITER_CLAIM_FIELDS` in `turns.py`
+                # still names only `id, number, text, status`. #473
+                "tier": source.get("evidence_tier") or "",
             }
         )
         number += 1
@@ -780,6 +919,11 @@ def run_section(run, section: dict) -> dict:
     # its claim says is dropped here, before it is written to disk, so
     # `do_sections`'s aggregation downstream never sees it. #471
     findings = attribute_findings(run, findings, sid)
+
+    # 3c-quater follow. A numeric finding bound only to a review, a preprint,
+    # or a compilation gets one turn asking for the primary study behind its
+    # number, before verify spends its own turns on the same findings. #473
+    follow_primary_sources(run, findings, sid)
 
     payload = {
         "section_id": sid,
