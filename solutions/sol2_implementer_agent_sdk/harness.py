@@ -73,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--doer", default="reference", help="reference | sdk | none")
     parser.add_argument("--budget", type=int, default=None)
     parser.add_argument("--table-only", action="store_true")
+    parser.add_argument(
+        "--cleanup", action="store_true", help="remove the worktree after the run"
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -90,11 +93,14 @@ def main(argv: list[str] | None = None) -> int:
     doer = args.doer
     if doer == "sdk":
         doer = backend(contract)
-    trace = implementer.run(repo=args.repo, ticket_id=args.ticket, doer=doer, budget=args.budget)
+    trace = implementer.run(
+        repo=args.repo, ticket_id=args.ticket, doer=doer, budget=args.budget, cleanup=args.cleanup
+    )
     print(trace.get("rubric", ""))
     print()
     print(f"gate: {trace['gate']}")
     print(f"reason: {trace['reason']}")
+    implementer._print_worktree_status(trace)
     return 0 if trace["gate"] == "pass" else 1
 
 
