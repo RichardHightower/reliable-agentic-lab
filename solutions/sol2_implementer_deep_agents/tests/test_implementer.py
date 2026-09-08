@@ -190,39 +190,130 @@ state: ready
     return test_path, backend_path, form_path
 
 
-def test_red_gate_escalates_when_nothing_new_fails(tmp_path, monkeypatch):
+def test_red_gate_escalates_after_two_silent_test_turns(tmp_path, monkeypatch):
+    """A3 (#436). A silent test phase retries inside the budget (here 3, from
+    LOOP_YML), and two attempts that touch the same files never diverge, so
+    the loop stops as a stable failure rather than spending the whole budget."""
     repo = _git_repo(tmp_path / "repo")
     baseline = _run(passed=("tests/test_health.py::test_health",))
     still_green = _run(passed=("tests/test_health.py::test_health",))
     _patch_runs(monkeypatch, [baseline, still_green])
 
+    backend = ScriptedBackend([])
     trace = implementer.run(
         repo=repo,
         ticket_id="T001",
-        doer=ScriptedBackend([]),
+        doer=backend,
         write_trace=True,
     )
 
     assert trace["gate"] == "escalate"
-    assert "red gate" in trace["reason"]
+    assert "not converging" in trace["reason"]
     assert trace["red_ids"] == []
     assert "test_phase" in trace
+    assert backend.calls == 2
     assert (repo / ".harness" / "last-implementer.json").exists()
 
 
+def test_red_gate_escalates_with_the_old_wording_at_budget_one(tmp_path, monkeypatch):
+    """A3 (#436). Budget 1 behaves exactly as it did before this unit: one
+    silent attempt, the same gate, the same reason wording."""
+    repo = _git_repo(tmp_path / "repo")
+    baseline = _run(passed=("tests/test_health.py::test_health",))
+    still_green = _run(passed=("tests/test_health.py::test_health",))
+    _patch_runs(monkeypatch, [baseline, still_green])
+
+    backend = ScriptedBackend([])
+    trace = implementer.run(
+        repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True
+    )
+
+    assert trace["gate"] == "escalate"
+    assert "red gate: no new test was observed failing" in trace["reason"]
+    assert trace["red_ids"] == []
+    assert backend.calls == 1
+
+
+def test_a_silent_test_turn_then_a_failing_test_passes_the_red_gate(tmp_path, monkeypatch):
+    """A3 (#436). Turn 1 is silent. Turn 2 writes a failing test. Budget 2 is
+    enough to reach it, and the red gate is satisfied rather than escalated."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    backend = ScriptedBackend(
+        [
+            [],
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=2, write_trace=True)
+
+    assert trace["gate"] == "pass"
+    assert trace["red_ids"] == [new_test]
+    assert backend.calls == 3
+
+
+def test_code_budget_is_not_spent_by_test_phase_retries(tmp_path, monkeypatch):
+    """A3 (#436). The test phase's attempt counter is local; `boss.start_iteration()`
+    is never called there, so a two-turn test phase leaves the code loop with
+    its full budget."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    still_red = _run(passed=(health,), failed=(new_test,))
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,)),
+            still_red,
+            still_red,
+            still_red,
+        ],
+    )
+    backend = ScriptedBackend(
+        [
+            [],
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [],
+            [],
+        ]
+    )
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=2, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert len(trace["iterations"]) == 2
+    assert backend.calls == 4
+
+
 def test_red_gate_keeps_a_test_phase_scope_violation(tmp_path, monkeypatch):
+    """A scope violation escalates on the turn it happens. Budget 3 is set so
+    a retry would be possible if the gate did not stop it, but it must not."""
     repo = _git_repo(tmp_path / "repo")
     baseline = _run(passed=("tests/test_health.py::test_health",))
     still_green = _run(passed=("tests/test_health.py::test_health",))
     _patch_runs(monkeypatch, [baseline, still_green])
 
     backend = ScriptedBackend([[("app/leaked.py", "leaked = True\n")]])
-    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, write_trace=True)
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=3, write_trace=True)
 
     assert trace["gate"] == "escalate"
     assert trace["test_phase"]["violations"]
     assert any("app/leaked.py" in item for item in trace["scope_violations"])
     assert (repo / "app" / "leaked.py").exists()
+    assert backend.calls == 1
 
 
 def test_happy_path_passes_the_rubric(tmp_path, monkeypatch):
