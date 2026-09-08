@@ -2239,6 +2239,11 @@ def test_a_529_is_retried(run_dir, stub_renderer, monkeypatch):
     is an `APIStatusError`, not an `APIConnectionError`, so the pre-#482
     tuple missed it."""
     pytest.importorskip("anthropic")
+    # `_overloaded_error` builds a fake response through `httpx2`, the name
+    # this machine's `anthropic` 1.4.0 vendors its `httpx` dependency
+    # under. A different `anthropic` build could name it `httpx` instead;
+    # skip cleanly rather than let that import error read as a failure.
+    pytest.importorskip("httpx2")
     from conftest import FIXTURES, build_run  # noqa: PLC0415
 
     monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
