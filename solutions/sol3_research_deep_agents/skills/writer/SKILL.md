@@ -16,7 +16,10 @@ not tone, it is what earns a sentence its place.
 Write:
 
 - precise technical explanation
-- explicit definitions on first use
+- explicit definitions on first use: a term a busy colleague outside this
+  seminar would not already treat as ordinary English gets defined in that
+  sentence, then marked once with `<!-- TERM: name: definition -->`. Assembly
+  builds the glossary from these marks and strips them from the page.
 - architecture reasoning, with the alternative named and the tradeoff stated
 - limitations, stated plainly, in their own section
 - a citation on every paragraph that asserts something

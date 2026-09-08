@@ -21,6 +21,7 @@ def gate(body, urls=URLS, **kwargs):
     """Structural checks keep the old short-paper floor."""
     kwargs.setdefault("min_words", 0)
     kwargs.setdefault("min_section_words", 5)
+    kwargs.setdefault("enforce_structure", False)
     return paper_check.check(body, urls, **kwargs)
 
 
@@ -495,3 +496,169 @@ def test_the_recorded_fixture_paper_passes_the_person_and_marketing_rows(run_dir
     body = run.paper_path.read_text(encoding="utf-8")
     assert paper_check.person_violations(body) == []
     assert paper_check.marketing_violations(body) == []
+
+
+def test_a_leverage_ratio_is_not_a_marketing_verb():
+    """Follow-up from the P2 judge: a finance section may name a leverage
+    ratio without tripping the marketing row. `leveraging`/`leveraged` are
+    still banned outright."""
+    ok = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "The bank's leverage ratio fell in the quarter. [2]",
+    )
+    assert "marketing" not in gate(ok, URLS).signature(), gate(ok, URLS).report()
+    bad = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "We leverage the SDK for every call. [2]",
+    )
+    assert "marketing" in gate(bad, URLS).signature(), gate(bad, URLS).report()
+
+
+def test_an_inline_url_is_not_body_prose_for_person_or_marketing():
+    """Follow-up from the P2 judge: a citation URL outside the reference list
+    must not fabricate a hit on a path segment."""
+    ok = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "See https://example.org/your-account for the record. [2]",
+    )
+    assert "person" not in gate(ok, URLS).signature(), gate(ok, URLS).report()
+    bad = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "See the record at your account page. [2]",
+    )
+    assert "person" in gate(bad, URLS).signature(), gate(bad, URLS).report()
+
+
+# -- P3, the glossary ----------------------------------------------------
+
+
+def test_a_defined_term_missing_from_the_glossary_fails():
+    """`glossary_complete` fires when a captured term never reached the
+    glossary. Production strips every marker at assembly, so this row is a
+    defence: a marker that survives into the body is itself the defect."""
+    body = GOOD.replace(
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]",
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2] "
+        "<!-- TERM: orchestrator: the process that sequences roles -->",
+    )
+    score = gate(body, enforce_structure=True)
+    assert "glossary_complete" in score.signature(), score.report()
+
+
+def test_a_glossary_only_term_fails():
+    """`glossary_exact` fires on a glossary entry the body prose never uses."""
+    body = GOOD.replace(
+        "## References",
+        "## Glossary\n\n**widget.** A term the body never uses.\n\n## References",
+    )
+    score = gate(body, enforce_structure=True)
+    assert "glossary_exact" in score.signature(), score.report()
+
+
+def test_a_search_host_in_the_glossary_fails():
+    """`glossary_exact` also fires on a search-host name, even one the body
+    prose does use, because a host is a place the run searched, not a term
+    about the subject."""
+    body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper measures two runtimes only, retrieved from docs.langchain.com. [2]",
+    ).replace(
+        "## References",
+        "## Glossary\n\n**docs.langchain.com.** A vendor documentation site.\n\n## References",
+    )
+    score = gate(body, enforce_structure=True)
+    assert "glossary_exact" in score.signature(), score.report()
+
+
+def test_a_plural_or_self_defined_term_does_not_fail_glossary_exact():
+    """Follow-up from the PR #499 judge: a literal phrase match rejected
+    "one exit criterion" for a glossary term used only in its plural. A
+    stemmed match counts, and so does a term repeated inside its own
+    definition, which is the writer's own marked sentence."""
+    plural_only = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper measures two runtimes only, across several workflows. [2]",
+    ).replace(
+        "## References",
+        "## Glossary\n\n**workflow.** A sequence of steps a run executes.\n\n## References",
+    )
+    assert "glossary_exact" not in gate(plural_only, enforce_structure=True).signature()
+
+    self_defined = GOOD.replace(
+        "## References",
+        "## Glossary\n\n**orchestrator.** The orchestrator sequences roles.\n\n## References",
+    )
+    assert "glossary_exact" not in gate(self_defined, enforce_structure=True).signature()
+
+
+def test_an_irregular_plural_matches_its_singular():
+    """Follow-up from the PR #499 judge: the regular suffix fold cannot turn
+    "criteria" into "criterion", since neither ends in s, es, or ies. A
+    fixed table of irregular pairs is checked first."""
+    body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper measures two runtimes only, against one exit criterion. [2]",
+    ).replace(
+        "## References",
+        "## Glossary\n\n**exit criteria.** What a run must clear before it stops.\n\n## References",
+    )
+    assert "glossary_exact" not in gate(body, enforce_structure=True).signature()
+
+
+def test_a_term_used_only_inside_inline_code_still_fails_glossary_exact():
+    """Finding #3: the SDK masks inline code before this search with
+    `_mask_code`. This port must too, so a term seen only inside a single
+    backtick span is not credited as used."""
+    body = GOOD.replace(
+        "This paper measures two runtimes only. [2]",
+        "This paper measures two runtimes only, per `workflow` config. [2]",
+    ).replace(
+        "## References",
+        "## Glossary\n\n**workflow.** A sequence of steps a run executes.\n\n## References",
+    )
+    score = gate(body, enforce_structure=True)
+    assert "glossary_exact" in score.signature(), score.report()
+
+
+def test_structural_rows_are_off_by_default():
+    """`enforce_structure` defaults false, so a body carrying both glossary
+    defects passes when the caller does not opt in, and an existing narrow
+    snippet's assertions are unchanged."""
+    body = GOOD.replace(
+        "## References",
+        "## Glossary\n\n**widget.** A term the body never uses.\n\n## References",
+    )
+    off = gate(body)
+    assert "glossary_complete" not in off.signature()
+    assert "glossary_exact" not in off.signature()
+    assert gate(GOOD, URLS).passed
+
+
+def test_no_terms_means_no_glossary_and_both_rows_pass():
+    """No captured term means nothing missing and nothing extra. The row
+    exists and passes, it does not simply stay absent."""
+    score = gate(GOOD, enforce_structure=True)
+    names = {c.name for c in score.checks}
+    assert {"glossary_complete", "glossary_exact"} <= names
+    assert score.passed, score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_glossary_rows(run_dir, stub_renderer):
+    """The paper `task paper` writes carries no leftover TERM marker and no
+    glossary section, since the recorded writer never marks a term. Both rows
+    still run, under `assemble_gate`'s own `enforce_structure=True`, and both
+    pass on the empty set."""
+    import stages  # noqa: PLC0415
+    from conftest import build_run  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    assert run.run() == 0, "the recorded fixture must still assemble and pass its gate"
+    body = run.paper_path.read_text(encoding="utf-8")
+    assert "TERM" not in body
+    score = stages.assemble_gate(
+        body, run.ledger, allowed_domains=run.allowed_domains, loop_doctrine=run.loop_doctrine
+    )
+    names = {c.name for c in score.checks}
+    assert "glossary_complete" in names
+    assert "glossary_exact" in names
+    assert score.passed, score.report()

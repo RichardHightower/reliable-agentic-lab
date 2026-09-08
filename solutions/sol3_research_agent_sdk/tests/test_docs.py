@@ -199,3 +199,12 @@ def test_the_spec_names_every_profile_the_code_has():
     for name, profile in loop.PROFILES.items():
         assert f"`--profile {name}`" in spec, f"SPEC.md does not name --profile {name}"
         assert str(profile["word_target_total"]) in spec, name
+
+
+def test_the_writer_card_and_the_grounding_contract_teach_the_term_marker():
+    """The Glossary has no producer without this. The writer must be told
+    the TERM marker syntax, once, both in its own card and in the grounding
+    contract every generating turn receives."""
+    card = (FOLDER / "plugin" / "agents" / "research-writer.md").read_text(encoding="utf-8")
+    assert card.count("TERM:") == 1
+    assert load_agents.GROUNDING.count("TERM:") == 1

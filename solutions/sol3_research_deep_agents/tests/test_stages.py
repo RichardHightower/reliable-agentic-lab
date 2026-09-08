@@ -786,6 +786,44 @@ def test_a_rendered_figure_the_outline_forgot_is_still_placed():
     assert "A diagram of orphan" in body
 
 
+def test_a_term_marker_is_harvested_and_stripped():
+    """The writer's `TERM` marker never reaches the reader, and its term
+    reaches the glossary assembly writes."""
+    led, claims = ledger_with()
+    body = stages.assemble(
+        plan(title="T"),
+        outline(claims[0].id),
+        {"Introduction": "A fact. [1][2] <!-- TERM: orchestrator: the process that sequences roles -->"},
+        [],
+        led,
+    )
+    assert "TERM" not in body
+    assert "**orchestrator.** the process that sequences roles" in body
+
+
+def test_assemble_writes_a_glossary_before_references():
+    """Heading order: the last prose section, then Glossary, then References.
+    The writer is denied both trailing headings."""
+    led, claims = ledger_with()
+    body = stages.assemble(
+        plan(title="T"),
+        outline(claims[0].id),
+        {"Introduction": "A fact. [1][2] <!-- TERM: orchestrator: the process that sequences roles -->"},
+        [],
+        led,
+    )
+    assert body.index("## Introduction") < body.index("## Glossary") < body.index("## References")
+
+
+def test_no_glossary_heading_when_no_term_was_captured():
+    """No marker, no section. A Glossary with zero entries is not written."""
+    led, claims = ledger_with()
+    body = stages.assemble(
+        plan(title="T"), outline(claims[0].id), {"Introduction": "A fact. [1][2]"}, [], led
+    )
+    assert "## Glossary" not in body
+
+
 def test_assemble_gate_raises_on_a_failing_paper():
     led, _ = ledger_with()
     with pytest.raises(GateFailed) as exc:

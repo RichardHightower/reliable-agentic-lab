@@ -418,6 +418,10 @@ GROUNDING = (
     "flag it with <!-- NEEDS-SOURCE: ... -->. Never guess a plausible-looking "
     "value. A fabricated citation or statistic is a critical failure, worse "
     "than a vaguer but true statement.\n"
+    "On the first use of a term a busy colleague outside this seminar would "
+    "not already treat as ordinary English, define it in that sentence, then "
+    "add <!-- TERM: name: definition --> once for that term. Assembly builds "
+    "the glossary from these marks and strips them from the page.\n"
     "</grounding_contract>"
 )
 
