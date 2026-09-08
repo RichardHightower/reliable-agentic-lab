@@ -617,6 +617,33 @@ def test_the_reviewer_skill_documents_the_paired_reply_shape():
     assert '"row"' in skill
 
 
+def test_stage_review_reads_a_recorded_paired_shape_reply(offline):
+    """#411 follow-up: the paired shape must reach `review_gate` from an
+    actual recorded reply through `_ask`/`_json_reply`, not only from a
+    hand-built dict passed straight to the gate."""
+    offline.run()
+    with pytest.raises(GateFailed) as exc:
+        offline.stage_review("PAIRED_SHAPE_PROBE")
+    assert exc.value.signature == ("no_filler",)
+    assert exc.value.score == 0.55
+
+
+def test_the_reviewer_schema_and_prompt_both_name_score_and_row():
+    """#411 follow-up: the schema `roles.REVIEWER_RESPONSE` admits and the
+    shape `stage_review` asks for must not silently drift apart again."""
+    import roles  # noqa: PLC0415  (sys.path is set by conftest first)
+
+    roles_src = Path(roles.__file__).read_text(encoding="utf-8")
+    schema = roles_src[roles_src.index("REVIEWER_RESPONSE = {") : roles_src.index("RESPONSE_FORMATS = {")]
+    assert '"score"' in schema
+    assert '"row"' in schema
+
+    paper_src = Path(paper.__file__).read_text(encoding="utf-8")
+    prompt = paper_src[paper_src.index("def stage_review(") : paper_src.index("def stage_assemble(")]
+    assert '"score"' in prompt
+    assert '"row"' in prompt
+
+
 def test_writer_heading_is_removed_before_the_citation_gate():
     assert paper.section_body("## Abstract\n\nGrounded summary. [1]", "Abstract") == "Grounded summary. [1]"
     assert paper.section_body("Abstract\n\nGrounded summary. [1]", "Abstract") == "Grounded summary. [1]"

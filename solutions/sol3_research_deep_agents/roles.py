@@ -182,8 +182,31 @@ REVIEWER_RESPONSE = {
         "Do not decide whether to ship. Do not decide whether to retry."
     ),
     "properties": {
-        "failed_rows": {"type": "array", "items": {"type": "string"}},
+        # A row name on its own (the legacy shape), or an object pairing the
+        # row with its own note (#411), so the two can never drift apart.
+        "failed_rows": {
+            "type": "array",
+            "items": {
+                "oneOf": [
+                    {"type": "string"},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "row": {"type": "string"},
+                            "note": {"type": "string"},
+                        },
+                        "required": ["row"],
+                        "additionalProperties": False,
+                    },
+                ]
+            },
+        },
+        # The legacy shape's parallel list, one sentence per `failed_rows` entry.
         "notes": {"type": "array", "items": {"type": "string"}},
+        # How close the draft is to passing every row. Optional: absent on a
+        # legacy reply, and `gates.decide`'s `progressed` check falls back to
+        # the failed-row count alone.
+        "score": {"type": "number", "minimum": 0, "maximum": 1},
     },
     "required": ["failed_rows"],
     "additionalProperties": False,

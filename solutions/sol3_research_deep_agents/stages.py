@@ -732,15 +732,28 @@ def _split_verdict(verdict: dict) -> tuple[list[str], list[str], float | None]:
     Legacy: `{"failed_rows": ["no_filler"], "notes": ["..."]}`, with no score.
     Still accepted, so an older recorded reply still parses.
     """
-    raw_rows = verdict.get("failed_rows") or []
+    raw_rows = verdict.get("failed_rows")
+    # A schema violation from a live model, not a Python type Python chose.
+    # Treat anything that is not a list as no failing rows rather than crash.
+    raw_rows = raw_rows if isinstance(raw_rows, list) else []
     score = verdict.get("score")
     try:
         score = None if score is None else max(0.0, min(1.0, float(score)))
     except (TypeError, ValueError):
         score = None
-    if raw_rows and isinstance(raw_rows[0], dict):
-        rows = [str(item.get("row", "")).strip() for item in raw_rows]
-        notes = [str(item.get("note", "")).strip() for item in raw_rows]
+    # Checked per item, not by peeking at the first one: a reviewer that
+    # names one row in the paired shape and one in the legacy shape in the
+    # same reply must not crash `_run_stage` with an `AttributeError` on the
+    # bare string or a `KeyError` on the dict.
+    if any(isinstance(item, dict) for item in raw_rows):
+        rows = [
+            str(item.get("row", "")).strip() if isinstance(item, dict) else str(item).strip()
+            for item in raw_rows
+        ]
+        notes = [
+            str(item.get("note", "")).strip() if isinstance(item, dict) else ""
+            for item in raw_rows
+        ]
         return rows, notes, score
     rows = [str(row) for row in raw_rows]
     notes = [str(note) for note in (verdict.get("notes") or []) if str(note).strip()]

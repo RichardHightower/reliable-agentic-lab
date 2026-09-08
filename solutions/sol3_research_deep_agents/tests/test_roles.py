@@ -210,7 +210,7 @@ def test_verifier_response_cannot_state_a_truth_state():
 
 def test_reviewer_response_cannot_state_a_verdict():
     props = roles.REVIEWER_RESPONSE["properties"]
-    assert set(props) == {"failed_rows", "notes"}
+    assert set(props) == {"failed_rows", "notes", "score"}
     assert "ship" not in props and "verdict" not in props
 
 
