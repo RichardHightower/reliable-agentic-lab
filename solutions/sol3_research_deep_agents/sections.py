@@ -24,10 +24,31 @@ CITATION = re.compile(r"\[(\d+)\]")
 EM_DASH = re.compile(r"\s*—\s*")
 SECOND_PERSON = re.compile(r"\b(you|your|yours)\b", re.I)
 RHETORICAL = re.compile(r"\?\s*$")
-STOP = {
-    "a", "an", "the", "is", "are", "of", "in", "on", "to", "and", "or", "for",
-    "what", "how", "why", "does", "do", "this", "that", "with", "from",
-}
+# #510. A judge on PR #508 scored the #385 gist question "Which trace
+# counts were reported by the MAST taxonomy paper?" as answered by a body
+# that shares only "paper" with it, because this list missed ordinary
+# function words: `was`, `were`, `which`, `when`, `has`, `not`, `also`,
+# `more`, `should`. `paper_check.STE_FUNCTION_WORDS` already names every
+# one of those.
+#
+# It also names `run`, `calls`, `names`, `uses`, and `holds`, the STE-S5
+# noun-stack row's own verb-suffix exceptions, not a question's function
+# words. This repo's own papers are about a loop that runs, a section that
+# calls a turn, a term a glossary names: a coverage row that stops those
+# words scores a question about them on almost nothing. A judge on PR #529
+# found exactly that on the SDK twin: "How many tool calls does a run use
+# before it holds?" fell to one content term. `_COVERAGE_VERB_EXCEPTIONS`
+# is that verb block, subtracted back out, so a domain verb stays a
+# content word here even though it is not one for the noun-stack row it
+# was written for. Copied from the SDK port, not imported.
+_COVERAGE_VERB_EXCEPTIONS = frozenset(
+    """
+    run runs use uses need needs want wants show shows name names hold holds
+    take takes give gives get gets know knows see sees say says call calls
+    make makes made
+    """.split()
+)
+STOP = paper_check.STE_FUNCTION_WORDS - _COVERAGE_VERB_EXCEPTIONS
 
 SLOT_BUDGETS = (
     ("register", 2500),
@@ -147,6 +168,22 @@ def _terms(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOP and len(w) > 2}
 
 
+def _coverage_needed(terms: set[str]) -> int:
+    """A third of the question's content terms, floored at two, and never
+    more than the question actually has to give. #510
+
+    A fifteen-term question used to need two incidental matches, the same
+    floor a two-term question needed. Scaling the requirement with the
+    question closes that gap while a short question still only has to name
+    what it actually asks: `min(2, len(terms))` was already the answer for
+    `len(terms) <= 2`, and stays that answer here. Copied from the SDK
+    port's `checks.py`, not imported.
+    """
+    if not terms:
+        return 0
+    return min(len(terms), max(2, -(-len(terms) // 3)))
+
+
 # #473. What names a section's own topic as safety, dosing, or protocol.
 GUIDELINE_TOPIC_WORDS = ("safety", "dosing", "protocol")
 
@@ -207,7 +244,7 @@ def section_check(
     body_terms = _terms(body)
     for question in questions:
         terms = _terms(question)
-        if terms and len(terms & body_terms) < min(2, len(terms)):
+        if terms and len(terms & body_terms) < _coverage_needed(terms):
             missing_q.append(question)
     checks.append(
         Check(

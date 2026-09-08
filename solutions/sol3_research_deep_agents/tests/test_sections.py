@@ -48,6 +48,112 @@ def test_section_check_style_still_flags_a_rhetorical_question_in_prose():
     assert any(c.name == "style" and not c.passed for c in score.checks)
 
 
+def _coverage_row(score):
+    return next(c for c in score.checks if c.name == "coverage")
+
+
+def test_a_long_question_needs_a_third_of_its_terms():
+    """#510. A judge on PR #508 found the #385 gist question "Which trace
+    counts were reported by the MAST taxonomy paper?" scored covered by
+    "This paper does not report any of it.", on the single incidental word
+    "paper". Scaling the requirement to a third of the question's content
+    terms, not a flat floor of two, closes that gap; a nine-term question
+    used to need the same two incidental matches a two-term question did.
+    """
+    mast_question = "Which trace counts were reported by the MAST taxonomy paper?"
+    section = {"heading": "One", "key_questions": [mast_question]}
+
+    unrelated = sections.section_check(
+        "This paper does not report any of it [1].", section=section
+    )
+    row = _coverage_row(unrelated)
+    assert not row.passed and mast_question in row.detail, row.detail
+
+    covering = sections.section_check(
+        "The section names the trace counts and cites the MAST taxonomy directly [1].",
+        section=section,
+    )
+    assert _coverage_row(covering).passed
+
+    long_question = (
+        "How does the retry ledger track a stale approval stamp across a "
+        "resumed run and an escalation boundary?"
+    )
+    long_section = {"heading": "One", "key_questions": [long_question]}
+    two_terms = sections.section_check(
+        "The retry path checks a stamp before it runs again [1].", section=long_section
+    )
+    row2 = _coverage_row(two_terms)
+    assert not row2.passed and long_question in row2.detail, row2.detail
+
+    three_terms = sections.section_check(
+        "The retry ledger checks a stamp before an escalation [1].", section=long_section
+    )
+    assert _coverage_row(three_terms).passed
+
+    # The stop-list growth on its own, isolated from the third-scaling: a
+    # question padded with words the old twenty-word list missed (`which`,
+    # `were`, `not`, `when`, `was`) has more raw tokens than content terms,
+    # and the extra tokens must not count against the body.
+    padded_question = "Which claims were not corroborated when the budget was capped?"
+    padded_section = {"heading": "One", "key_questions": [padded_question]}
+    padded = sections.section_check(
+        "The retry budget stayed capped for the whole run [1].", section=padded_section
+    )
+    assert _coverage_row(padded).passed
+
+
+def test_a_short_question_still_passes_on_two_terms():
+    """#510. The floor of two survives the scaling: a two-term question
+    still needs both of its terms, and passes once the body names both.
+    """
+    section = {"heading": "One", "key_questions": ["What blocks retries?"]}
+
+    one_term = sections.section_check("A stale lock blocks the writer today [1].", section=section)
+    assert not _coverage_row(one_term).passed
+
+    both_terms = sections.section_check(
+        "A stale lock blocks retries until it clears [1].", section=section
+    )
+    assert _coverage_row(both_terms).passed
+
+
+def test_a_question_worded_around_domain_verbs_keeps_its_content_terms():
+    """#529 judge finding 4. `paper_check.STE_FUNCTION_WORDS` stops `run`,
+    `calls`, `uses`, and `holds` for the noun-stack row; a coverage row
+    that inherited the same list scored this question on one leftover
+    term, `tool`, easier to satisfy than the old rule's two of seven.
+    """
+    question = "How many tool calls does a run use before it holds?"
+    assert len(sections._terms(question)) >= 4
+
+
+def test_a_fifteen_term_question_needs_a_third_not_two():
+    """#529 judge finding 5. The recorded fixtures top out at six content
+    terms per question, so the new threshold never actually raises the bar
+    there. This question, built for the test, has fifteen: two incidental
+    matches is not a third of them, and five is.
+    """
+    question = (
+        "Which trace counts, retry ledger entries, stale approval stamps, "
+        "escalation boundaries, and resumed verifier turns does the "
+        "harness report?"
+    )
+    section = {"heading": "One", "key_questions": [question]}
+
+    two_terms = sections.section_check(
+        "The dashboard shows a trace and files a report each night [1].", section=section
+    )
+    assert not _coverage_row(two_terms).passed
+
+    five_terms = sections.section_check(
+        "The dashboard shows a trace and files a report each night. "
+        "The ledger records stale stamps at each escalation [1].",
+        section=section,
+    )
+    assert _coverage_row(five_terms).passed
+
+
 def test_a_safety_section_without_a_position_stand_fails():
     """#473: a safety, dosing, or protocol section must cite every
     position-stand or guideline source it was handed. A section with no such

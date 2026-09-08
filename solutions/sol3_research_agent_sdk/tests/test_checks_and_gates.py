@@ -255,6 +255,242 @@ def test_has_body_counts_the_prose_under_a_sections_subheadings():
     assert sections_without_prose(body, 50) == []
 
 
+def test_a_heading_inside_a_fence_is_not_a_heading():
+    """#509. A `##` line inside a fenced code block is not paper structure,
+    in every row that scans headings: `question_heading`, `next_step`'s
+    own `last_prose_heading`, `outline_coverage`, `has_body`
+    (`sections_without_prose`), and `section_bodies`, the boundary helper
+    the others build on. The same line outside the fence still fails
+    `question_heading`.
+    """
+    from checks import (  # noqa: PLC0415
+        last_prose_heading,
+        outline_coverage_gaps,
+        question_headings,
+        section_bodies,
+        sections_without_prose,
+    )
+
+    fenced = (
+        "## Real heading\n\n"
+        "Real prose describes a heading question with a rubric here today [1].\n\n"
+        "## Another heading\n\n"
+        "More real prose closes the section out today [1].\n\n"
+        "```markdown\n"
+        "## Is this a heading?\n"
+        "more fence text\n"
+        "```\n"
+    )
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+
+    assert question_headings(fenced, outline) == []
+    assert set(section_bodies(fenced)) == {"real heading", "another heading"}
+    # The fence sits after "Another heading", so a heading scan that reads
+    # it unmasked would report the fenced line as the paper's last section,
+    # not "Another heading".
+    assert last_prose_heading(fenced) == "Another heading"
+    assert outline_coverage_gaps(fenced, outline) == []
+    assert sections_without_prose(fenced, 5) == []
+
+    unfenced = (
+        "## Real heading\n\n"
+        "Real prose describes a heading question with a rubric here today [1].\n\n"
+        "## Is this a heading?\n\n"
+        "more fence text\n\n"
+        "## Another heading\n\n"
+        "More real prose closes the section out today [1].\n"
+    )
+    assert "Is this a heading?" in question_headings(unfenced, outline)
+
+
+def test_a_fenced_heading_does_not_satisfy_the_complete_row():
+    """#509. A fenced markdown example naming a plan section must not let
+    `missing_sections` (`complete`) believe that section was actually
+    written.
+    """
+    from checks import missing_sections  # noqa: PLC0415
+
+    body = (
+        "## Abstract\n\nSummary text here today [1].\n\n"
+        "```markdown\n"
+        "## Introduction\n"
+        "example only\n"
+        "```\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert missing_sections(body, ["Abstract", "Introduction", "References"]) == ["Introduction"]
+
+
+def test_a_long_question_needs_a_third_of_its_terms():
+    """#510. A judge on PR #508 found the #385 gist question "Which trace
+    counts were reported by the MAST taxonomy paper?" scored covered by
+    "This paper does not report any of it.", on the single incidental word
+    "paper". Scaling the requirement to a third of the question's content
+    terms, not a flat floor of two, closes that gap; a nine-term question
+    used to need the same two incidental matches a two-term question did.
+    """
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    mast_question = "Which trace counts were reported by the MAST taxonomy paper?"
+    outline = {"sections": [{"heading": "One", "key_questions": [mast_question]}]}
+
+    unrelated = "## One\n\nThis paper does not report any of it [1].\n"
+    gaps = outline_coverage_gaps(unrelated, outline)
+    assert gaps and mast_question in gaps[0], gaps
+
+    covering = "## One\n\nThe section names the trace counts and cites the MAST taxonomy directly [1].\n"
+    assert outline_coverage_gaps(covering, outline) == []
+
+    long_question = (
+        "How does the retry ledger track a stale approval stamp across a "
+        "resumed run and an escalation boundary?"
+    )
+    outline2 = {"sections": [{"heading": "One", "key_questions": [long_question]}]}
+    two_terms = "## One\n\nThe retry path checks a stamp before it runs again [1].\n"
+    gaps2 = outline_coverage_gaps(two_terms, outline2)
+    assert gaps2 and long_question in gaps2[0], gaps2
+
+    three_terms = "## One\n\nThe retry ledger checks a stamp before an escalation [1].\n"
+    assert outline_coverage_gaps(three_terms, outline2) == []
+
+    # The stop-list growth on its own, isolated from the third-scaling: a
+    # question padded with words the old twenty-word list missed (`which`,
+    # `were`, `not`, `when`, `was`) has more raw tokens than content terms,
+    # and the extra tokens must not count against the body.
+    padded_question = "Which claims were not corroborated when the budget was capped?"
+    outline3 = {"sections": [{"heading": "One", "key_questions": [padded_question]}]}
+    padded_body = "## One\n\nThe retry budget stayed capped for the whole run [1].\n"
+    assert outline_coverage_gaps(padded_body, outline3) == []
+
+
+def test_a_short_question_still_passes_on_two_terms():
+    """#510. The floor of two survives the scaling: a two-term question
+    still needs both of its terms, and passes once the body names both.
+    """
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    question = "What blocks retries?"
+    outline = {"sections": [{"heading": "One", "key_questions": [question]}]}
+
+    one_term = "## One\n\nA stale lock blocks the writer today [1].\n"
+    gaps = outline_coverage_gaps(one_term, outline)
+    assert gaps and question in gaps[0], gaps
+
+    both_terms = "## One\n\nA stale lock blocks retries until it clears [1].\n"
+    assert outline_coverage_gaps(both_terms, outline) == []
+
+
+def test_a_fence_opener_with_trailing_whitespace_still_closes():
+    """#529 judge finding 2. `` ``` `` followed by a space is still a valid
+    opener; the old pattern required the newline right after the backticks
+    and silently paired with the next fence instead, hiding everything
+    between as masked code, including a real heading.
+    """
+    from checks import missing_sections  # noqa: PLC0415
+
+    body = (
+        "``` \ncode\n```\n\n"
+        "## Real heading\n\nprose [1].\n\n"
+        "```python\nx = 1\n```\n"
+    )
+    assert missing_sections(body, ["Real heading"]) == []
+
+
+def test_a_tilde_fence_masks_like_a_backtick_fence():
+    """#529 judge finding 3. A tilde fence is still a fence."""
+    from checks import question_headings  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "~~~markdown\n## Is this a heading?\nmore fence text\n~~~\n"
+    )
+    assert question_headings(body, outline) == []
+
+
+def test_a_hyphenated_info_string_still_opens_a_fence():
+    """#529 judge finding 3. An info string is not restricted to `\\w*`."""
+    from checks import question_headings  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```objective-c\n## Is this a heading?\nmore fence text\n```\n"
+    )
+    assert question_headings(body, outline) == []
+
+
+def test_an_unclosed_fence_masks_to_the_end_of_the_body():
+    """#529 judge finding 3. No closer means nothing after the opener is
+    prose either; the alternative, leaving it unmasked, reads a heading
+    inside an unterminated snippet as real structure.
+    """
+    from checks import question_headings  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```markdown\n## Is this a heading?\nmore fence text\n"
+    )
+    assert question_headings(body, outline) == []
+
+
+def test_a_heading_right_after_a_closing_fence_is_still_seen():
+    """#529 judge regression: the closer's trailing `(?:\\n|\\Z)` used to
+    consume the newline after `` ``` ``, so a heading on the very next
+    line, with no blank line between, lost its own leading newline to the
+    masked span and vanished from every row that scans headings.
+    """
+    from checks import last_prose_heading, missing_sections, section_bodies  # noqa: PLC0415
+
+    body = (
+        "## Abstract\n\nsummary [1].\n\n"
+        "```python\nx = 1\n```\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert missing_sections(body, ["Abstract", "References"]) == []
+    assert "references" in section_bodies(body)
+    assert last_prose_heading(body) == "Abstract"
+
+
+def test_a_question_worded_around_domain_verbs_keeps_its_content_terms():
+    """#529 judge finding 4. `STE_FUNCTION_WORDS` stops `run`, `calls`,
+    `uses`, and `holds` for the noun-stack row; a coverage row that
+    inherited the same list scored this question on one leftover term,
+    `tool`, easier to satisfy than the old rule's two of seven.
+    """
+    from checks import _coverage_terms  # noqa: PLC0415
+
+    question = "How many tool calls does a run use before it holds?"
+    assert len(_coverage_terms(question)) >= 4
+
+
+def test_a_fifteen_term_question_needs_a_third_not_two():
+    """#529 judge finding 5. The recorded fixtures top out at six content
+    terms per question, so the new threshold never actually raises the bar
+    there. This question, built for the test, has fifteen: two incidental
+    matches is not a third of them, and five is.
+    """
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    question = (
+        "Which trace counts, retry ledger entries, stale approval stamps, "
+        "escalation boundaries, and resumed verifier turns does the "
+        "harness report?"
+    )
+    outline = {"sections": [{"heading": "One", "key_questions": [question]}]}
+
+    two_terms = "## One\n\nThe dashboard shows a trace and files a report each night [1].\n"
+    gaps = outline_coverage_gaps(two_terms, outline)
+    assert gaps and question in gaps[0], gaps
+
+    five_terms = (
+        "## One\n\nThe dashboard shows a trace and files a report each night. "
+        "The ledger records stale stamps at each escalation [1].\n"
+    )
+    assert outline_coverage_gaps(five_terms, outline) == []
+
+
 def test_the_hosts_row_grades_only_the_references_the_caller_hands_it():
     """A located cabinet source is a public copy of a paper the brain held.
 
@@ -375,6 +611,16 @@ def test_the_recorded_fixture_paper_passes_the_ste_belt(tmp_path):
     assert checks.noun_stacks(body) == []
 
 
+# #524. The claim this recorded fixture's counter-evidence pass drives, by
+# id. `sections._shares_terms`'s coincidental overlap on the four-letter
+# word "paper" is what selects it today, between the "approach" section's
+# claim text and its own `claims_to_support` entry "The researcher cannot
+# write the paper." A future `fixtures/research.json` re-key can change
+# that coincidence without changing anything this test is meant to guard,
+# so the test below asserts on this id, not on the coincidence.
+PINNED_COUNTER_CLAIM_ID = "approach-f2"
+
+
 def test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass(tmp_path):
     """#474 follow-up F7: the counter-evidence pass runs for real against
     the recorded fixture, offline, no network. No claim's text in this
@@ -382,7 +628,14 @@ def test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass(tmp_pa
     finds comes from the SDK-only selection criterion,
     `generalizing_claims`'s sole-support-for-a-`claims_to_support`-item
     branch, in the "approach" section. `OfflineTurns` inherits the base
-    `counter_search` miss, so the candidate resolves to "miss", not "hit"."""
+    `counter_search` miss, so the candidate resolves to "miss", not "hit".
+
+    #524: pinned to a named claim id, not to whether the candidate set is
+    merely non-empty. `_shares_terms`'s own coincidental overlap picks this
+    claim today; the id is now the contract, not the coincidence, so a
+    `fixtures/research.json` re-key that swaps which claim happens to
+    share a word with its `claims_to_support` entry fails this test on the
+    row that actually matters."""
     import json  # noqa: PLC0415
     from pathlib import Path  # noqa: PLC0415
 
@@ -404,8 +657,28 @@ def test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass(tmp_pa
     for path in (work / "knowledge").glob("*/findings.json"):
         payload = json.loads(path.read_text(encoding="utf-8"))
         generalizing.extend(f for f in payload.get("findings") or [] if f.get("generalizing"))
-    assert generalizing, "no candidate was selected against the recorded fixture"
+    ids = {f.get("id") for f in generalizing}
+    assert PINNED_COUNTER_CLAIM_ID in ids, (
+        f"the pinned claim {PINNED_COUNTER_CLAIM_ID!r} is missing from the recorded "
+        f"fixture's generalizing candidates: {sorted(ids)}"
+    )
     assert all(f.get("counter") in ("hit", "miss", "capped") for f in generalizing)
+    named = next(f for f in generalizing if f.get("id") == PINNED_COUNTER_CLAIM_ID)
+    assert named.get("counter") == "miss"
+
+
+def test_the_counter_pass_fixture_test_names_its_claim():
+    """#524. The test above must assert on `PINNED_COUNTER_CLAIM_ID`, not on
+    whether the candidate set is merely non-empty: `assert generalizing`
+    would still pass against today's fixture, by the same coincidence #524
+    closes. This test inspects the other test's own source for the pinned
+    constant, rather than re-running the whole offline pipeline a second
+    time to say the same thing.
+    """
+    import inspect  # noqa: PLC0415
+
+    source = inspect.getsource(test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass)
+    assert "PINNED_COUNTER_CLAIM_ID" in source
 
 
 # -- P2, person and marketing verbs -------------------------------------------
