@@ -44,6 +44,17 @@ tasks:
           {{.PY}} -m pytest tests -q
         fi
 
+  test-live:
+    desc: The one live renderer test. Needs SOL3_LIVE_TESTS=1 and a real image backend key.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          SOL3_LIVE_TESTS=1 "{{.RUN_PY}}" -m pytest tests/test_diagrams.py::test_a_live_render_when_keys_are_present -q
+        else
+          SOL3_LIVE_TESTS=1 {{.PY}} -m pytest tests/test_diagrams.py::test_a_live_render_when_keys_are_present -q
+        fi
+
   table:
     desc: Print the role table and exit, with no SDK installed.
     dir: '{{.TASKFILE_DIR}}'
