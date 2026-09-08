@@ -173,6 +173,52 @@ def test_a_verifier_that_fails_leaves_the_claim_unverified(work, turns):
     assert "unavailable" in claims[0]["verifier_excerpt"]
 
 
+# -- attribution moved to the live path: see test_sections.py. `paper.verify`
+# is dead code no `LINEAR` or `CYCLE` stage calls; #471's checks live in
+# `sections.run_section`, where a real run actually records claims.
+
+
+def test_do_sections_carries_the_study_object_into_claims_json(work, turns, monkeypatch):
+    """The SDK schema equivalent of #471's ledger round trip: `study` is
+    unused until #478, and only has to survive to `claims.json`."""
+    import sections
+
+    approved = {"title": "T", "sections": [{"id": "s1", "heading": "One"}]}
+    monkeypatch.setattr(paper, "approved_outline", lambda run: approved)
+    monkeypatch.setattr(sections, "run_section", lambda run, section: {"section": section["id"]})
+
+    knowledge = Path(work) / "knowledge" / "s1"
+    knowledge.mkdir(parents=True)
+    (knowledge / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "s1-f1",
+                        "claim": "The trial enrolled 120 adults.",
+                        "quote": "",
+                        "answers_question": "q",
+                        "study": {"design": "RCT", "n": 120},
+                        "source": {"kind": "web", "url_or_path": "https://a.invalid"},
+                    }
+                ],
+                "coverage_gaps": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = paper.Run(
+        topic="t",
+        work_dir=work,
+        turns=turns(root=work),
+        state=paper.State.load_or_new(work, "t"),
+    )
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert claims[0]["study"] == {"design": "RCT", "n": 120}
+
+
 def test_a_contradicted_claim_never_reaches_the_writer(work, turns, no_renderer):
     claims = [{"text": "A thing is true.", "source_url": "https://e.invalid/d", "quote": ""}]
     run = prepared(work, turns(verdict="contradicts", claims=claims))

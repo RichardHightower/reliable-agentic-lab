@@ -400,6 +400,14 @@ def test_the_researcher_card_still_says_the_search_is_filtered():
     assert "corpus_search" in card and "source_urls" in card
 
 
+def test_the_researcher_card_asks_for_the_study_field():
+    """#471, finding 5: `record_findings` reads `study` off a reported claim
+    (unused until #478's study table), so the card that fills it in must
+    name it."""
+    card = (roles.SKILLS_DIR / "researcher" / "SKILL.md").read_text(encoding="utf-8")
+    assert "`study`" in card
+
+
 def test_corpus_search_prints_a_url_only_when_the_hit_has_one(fake_langchain, tmp_path):
     import corpus  # noqa: PLC0415
 

@@ -30,7 +30,64 @@ def test_corroboration_needs_two_distinct_sources():
     claim = evidence.Claim(text="x", subject="s", source_ids=["a", "a"])
     assert evidence.corroborate(claim).truth_state == evidence.SINGLE_SOURCE
     claim.source_ids = ["a", "b"]
+    # #471: two raw source ids are not two attributed bindings.
+    assert evidence.corroborate(claim).truth_state == evidence.SINGLE_SOURCE
+    claim.attributed_source_ids = ["a", "b"]
     assert evidence.corroborate(claim).truth_state == evidence.CORROBORATED
+
+
+def test_attributed_requires_the_quote_or_the_numbers_to_appear():
+    """#471: the two signals `attributed()` checks, and the default when a
+    claim carries neither. `quote` is the researcher's own excerpt for this
+    binding (`SourceDocument.body`), not a substring of `claim.text`."""
+    quoted = evidence.Claim(text="The page states that creatine improves lean mass.", subject="s")
+    assert evidence.attributed(
+        quoted, "A review notes creatine improves lean mass in trained adults.", quote="creatine improves lean mass"
+    )
+    assert not evidence.attributed(
+        quoted, "This page never mentions lean mass at all.", quote="creatine improves lean mass"
+    )
+
+    numeric = evidence.Claim(text="The study enrolled 42 participants.", subject="s")
+    assert evidence.attributed(numeric, "Of the 42 participants who enrolled, most finished.")
+    assert not evidence.attributed(numeric, "The study enrolled a different number of people.")
+
+    # Every one of the claim's numbers must appear, not just one. #471
+    dosage = evidence.Claim(text="Creatine adds 1.2 kg of lean mass over 12 weeks.", subject="s")
+    assert not evidence.attributed(dosage, "This was a 12 week study of resistance-trained adults.")
+    assert evidence.attributed(dosage, "Over 12 weeks, creatine added 1.2 kg of lean mass on average.")
+
+    plain = evidence.Claim(text="Creatine is widely studied.", subject="s")
+    assert evidence.attributed(plain, "This text is about something unrelated."), (
+        "nothing to check is not a failure"
+    )
+
+
+def test_a_study_object_survives_a_ledger_round_trip(tmp_path):
+    """Unused until #478's study table; the field only has to persist. #471"""
+    source = evidence.SourceDocument(title="A Study", url="https://study.example/x", subject="s")
+    claim = evidence.Claim(
+        text="The trial enrolled 120 adults over eight weeks.",
+        subject="s",
+        source_ids=[source.id],
+        attributed_source_ids=[source.id],
+        study={"design": "RCT", "n": 120, "weeks": 8},
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_source(source)
+    led.add_claim(claim)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load().claim(claim.id)
+    assert reloaded.study == claim.study
+    assert reloaded.attributed_source_ids == [source.id]
+
+
+def test_a_claim_with_no_study_writes_none(tmp_path):
+    """The common case: `study` is unused, and no key clutters the record."""
+    claim = evidence.Claim(text="x", subject="s")
+    fields, _ = evidence.parse_front_matter(claim.to_markdown())
+    assert "study" not in fields
 
 
 def test_an_uncited_claim_is_never_usable():
@@ -80,6 +137,7 @@ def test_front_matter_round_trips(tmp_path):
         text="A nullable column stores NULL.",
         subject="dt",
         source_ids=["source.a", "source.b"],
+        attributed_source_ids=["source.a", "source.b"],
         important=True,
         confidence=0.75,
     )
