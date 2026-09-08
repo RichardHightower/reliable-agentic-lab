@@ -421,10 +421,16 @@ def follow_primary_sources(run, findings: list[dict], sid: str) -> None:
 
 # #474. A generalizing claim ruled a lever out from one datapoint (#474's own
 # example: "protein alone did not prevent lean-mass loss" is true of one
-# no-training protocol, not the literature). Word-bounded so "alone" does not
-# fire on "alone time" and "always" does not fire on "almost always" reading
-# only its stem.
+# no-training protocol, not the literature). Word-bounded, so "alone" does
+# not fire inside "standalone" and "never" does not fire inside
+# "nevertheless": both words sit right against the boundary the regex
+# tests, with no space or punctuation to trip it, and both correctly stay
+# unmatched.
 GENERALIZING = re.compile(r"\b(did not|does not|alone|fails to|no effect|always|never)\b", re.I)
+
+# #474. What the writer's brief carries for a claim the counter-evidence
+# pass never reached because the run cap was already spent.
+CAPPED_NOTE = "counter-evidence not searched, run cap reached"
 
 
 def _shares_terms(a: str, b: str) -> bool:
@@ -442,6 +448,11 @@ def generalizing_claims(findings: list[dict], section: dict) -> list[dict]:
     or not the run cap below ends up spending a turn on it: a candidate the
     cap left unprocessed still has to fail `checks.section_check`'s
     `counterweighed` row, naming a claim nobody checked.
+
+    A finding that already carries a `counter` state ("hit", "miss", or
+    "capped") is excluded: the pass already reached a verdict on it, and a
+    resumed section reloading old findings must not spend a second turn
+    asking the same claim.
 
     "Bindings" has no per-finding analogue in this port: a finding carries
     exactly one source, where the Deep Agents twin's `Claim` can carry
@@ -463,7 +474,8 @@ def generalizing_claims(findings: list[dict], section: dict) -> list[dict]:
     candidates = [
         finding
         for finding in findings
-        if GENERALIZING.search(finding.get("claim") or "") or support_count.get(id(finding)) == 1
+        if not finding.get("counter")
+        and (GENERALIZING.search(finding.get("claim") or "") or support_count.get(id(finding)) == 1)
     ]
     for finding in candidates:
         finding["generalizing"] = True
@@ -483,11 +495,18 @@ def counter_evidence_pass(run, findings: list[dict], section: dict) -> None:
     A hit appends a new finding, `counterargument_to` pointing at the claim
     it contradicts, so the two reach the writer together
     (`_claims_for_writer`). A miss is recorded on the claim itself
-    (`counter_checked`), so `checks.section_check`'s `counterweighed` row can
-    tell "never checked" from "checked, found nothing", and the writer's
-    brief says "no contrary evidence found in this search".
+    (`finding["counter"] = "miss"`, never a free-text note), so
+    `checks.section_check`'s `counterweighed` row can tell "never checked"
+    from "checked, found nothing", and the writer's brief says "no contrary
+    evidence found in this search".
 
-    Gated and capped the same way `follow_primary_sources` is.
+    A candidate the cap does not reach this call is marked `"capped"`
+    immediately, deterministically, with no model turn:
+    `counterweighed` must find every generalizing claim in one of `hit`,
+    `miss`, or `capped` once this pass has run over it, and a `capped`
+    claim's brief tells the writer to hedge it like a single-source claim.
+
+    Gated the same way `follow_primary_sources` is.
     """
     if not hasattr(getattr(run, "turns", None), "backend"):
         return
@@ -497,6 +516,8 @@ def counter_evidence_pass(run, findings: list[dict], section: dict) -> None:
         return
     remaining = max(0, run.max_counter - run.counter_used)
     selected = candidates[:remaining]
+    for finding in candidates[remaining:]:
+        finding["counter"] = "capped"
     run.log(
         f"    {sid} counter: {len(selected)} of {len(candidates)} candidate(s), "
         f"{run.counter_used + len(selected)}/{run.max_counter} used this run"
@@ -507,10 +528,15 @@ def counter_evidence_pass(run, findings: list[dict], section: dict) -> None:
             result = run.turns.counter_search(finding.get("claim") or "")
         except (TurnFailed, Escalate):
             result = {"found": False}
-        finding["counter_checked"] = True
         url = str(result.get("url") or "").strip()
         counter_text = str(result.get("counter_claim") or "").strip()
-        if result.get("found") and counter_text and url.lower().startswith(("http://", "https://")):
+        hit = False
+        if (
+            result.get("found")
+            and counter_text
+            and not is_retrieval_claim(counter_text)
+            and url.lower().startswith(("http://", "https://"))
+        ):
             backend = run.turns.backend
             model_title = result.get("title") or url
             fetched = metadata.cached_fetch(run.work_dir, url, backend, model_title=model_title)
@@ -550,7 +576,8 @@ def counter_evidence_pass(run, findings: list[dict], section: dict) -> None:
                     }
                 )
                 finding["counter_url"] = url
-                next_index += 1
+                hit = True
+        finding["counter"] = "hit" if hit else "miss"
         run.counter_used += 1
 
 
@@ -611,15 +638,35 @@ def _claims_for_writer(
     `None` means the caller has no registry, which is the offline and unit-test
     path. The old local numbering stands in there.
     """
+    local_numbers: dict[str, int] = {}
+    if numbers is None:
+        # #474. A claim's own citation and its counter-evidence's citation
+        # can be numbered out of order: the counter finding a hit appends
+        # is reached later in this same loop than the claim it answers.
+        # Pre-number every kept, non-contradicted finding once, by url, so
+        # either citation can be resolved regardless of which is processed
+        # first. Fixes a bug where the fallback path cited the claim's own
+        # number in place of the counter finding's.
+        n = 1
+        for finding in findings:
+            status = (verdicts.get(finding["id"]) or {}).get("state") or "unverified"
+            if status == "contradicted":
+                continue
+            url = (finding.get("source") or {}).get("url_or_path") or ""
+            local_numbers[url] = n
+            n += 1
+
+    def cite_for(url: str) -> int:
+        return local_numbers.get(url, 0) if numbers is None else numbers.get(url, 0)
+
     usable = []
-    number = 1
     for finding in findings:
         status = (verdicts.get(finding["id"]) or {}).get("state") or "unverified"
         if status == "contradicted":
             continue
         source = finding.get("source") or {}
         url = source.get("url_or_path") or ""
-        cite = number if numbers is None else numbers.get(url, 0)
+        cite = cite_for(url)
         text = finding.get("claim") or ""
         if finding.get("secondary"):
             # #473. `follow_primary_sources` left this bound to the review or
@@ -627,15 +674,18 @@ def _claims_for_writer(
             # deterministically, rather than trusted to infer it from a
             # status value it was never taught.
             text = f"{text} (as summarized by [{cite}])."
-        counter_url = finding.get("counter_url") or ""
-        if counter_url:
+        counter = finding.get("counter") or ""
+        if counter == "hit":
             # #474. `counter_evidence_pass` found contrary evidence; point the
-            # writer at its citation number. The writer card carries the one
-            # instruction to state the condition, so it is not repeated here.
-            counter_cite = number if numbers is None else numbers.get(counter_url, 0)
+            # writer at its own citation number, not the claim's. The writer
+            # card carries the one instruction to state the condition, so it
+            # is not repeated here.
+            counter_cite = cite_for(finding.get("counter_url") or "")
             text = f"{text} Contrary evidence in [{counter_cite}]."
-        elif finding.get("counter_checked"):
+        elif counter == "miss":
             text = f"{text} (no contrary evidence found in this search)."
+        elif counter == "capped":
+            text = f"{text} ({CAPPED_NOTE}; hedge like a single source)."
         usable.append(
             {
                 "id": finding["id"],
@@ -653,11 +703,10 @@ def _claims_for_writer(
                 # Read by `checks.section_check`'s `counterweighed` row, same
                 # reason. #474
                 "generalizing": bool(finding.get("generalizing")),
-                "counter_checked": bool(finding.get("counter_checked")),
+                "counter": counter,
                 "counterargument_to": finding.get("counterargument_to") or "",
             }
         )
-        number += 1
     return usable
 
 

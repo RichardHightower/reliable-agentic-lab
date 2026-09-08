@@ -102,7 +102,9 @@ holds, not a flat assertion.
 
 Each section names the claim ids it may use. Use those and no others. A fact you
 know but that no claim supports does not go in the paper. That rule is what
-makes the citation count mean something.
+makes the citation count mean something. The one exception: a number named in
+a bound claim's own brief line, including its contrary evidence, is citable
+even when that number belongs to a claim outside this section's own ids.
 
 ## Figures
 

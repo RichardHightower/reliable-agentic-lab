@@ -1250,6 +1250,12 @@ def do_sections(run: Run) -> dict:
                         "study": finding.get("study") or {},
                         # From `source_policy.tier_for()`, not the model. #473
                         "evidence_tier": (finding.get("source") or {}).get("evidence_tier") or "",
+                        # `_apply_follow_result` keeps the review a rebound
+                        # claim came from under `finding["via"]`, so the
+                        # report can still say the number arrived through
+                        # it (#473 item 5). This is the only reader: written
+                        # once, otherwise dead. #474 item 10
+                        "via_title": (finding.get("via") or {}).get("title") or "",
                     }
                 )
             if url and url not in seen:

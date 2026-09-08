@@ -284,6 +284,13 @@ class Claim:
     # and zero attributed bindings until each is actually checked against the
     # text `metadata.fetch_record` retrieved for it.
     attributed_source_ids: list[str] = field(default_factory=list)
+    # The source ids already bound to this claim the moment a follow hit
+    # appended a primary study (`apply_follow_result`), the review or
+    # preprint the primary summarizes. A dedicated field, not `note`, the
+    # SDK twin's `finding["via"]` under a name `corroborate()` can read: a
+    # primary and the review it was found to summarize are one
+    # investigation, not two independent sources. #474 item 10
+    via_source_ids: list[str] = field(default_factory=list)
     # Population, design, and sample size, when the researcher reported one.
     # Unused until #478's study table; carried here only so it survives a
     # ledger round trip. #471
@@ -300,6 +307,16 @@ class Claim:
     # counter-evidence hit; empty on every other claim, including the one it
     # points at. `""` for a claim retrieved before this ticket. #474
     counterargument_to: str = ""
+    # The counter-evidence pass's own outcome for this claim: "" (never a
+    # generalizing candidate), "hit", "miss", or "capped" (a candidate the
+    # run cap reached before its turn). A dedicated field, not `note`, for
+    # the same reason `secondary` is: `apply_verification` never touches it.
+    # #474
+    counter: str = ""
+    # The text `claim_brief` shows for a `counter` of "miss" or "capped".
+    # Empty for "hit" (the contrary claim itself carries the text) and for
+    # "" (never checked). #474
+    counter_note: str = ""
     id: str = ""
     as_of: str = ""
 
@@ -335,9 +352,12 @@ class Claim:
                 "important": self.important,
                 "cross_checked": self.cross_checked,
                 "attributed_source_ids": self.attributed_source_ids,
+                "via_source_ids": self.via_source_ids,
                 "secondary": self.secondary,
                 "study": json.dumps(self.study, sort_keys=True) if self.study else None,
                 "counterargument_to": self.counterargument_to or None,
+                "counter": self.counter or None,
+                "counter_note": self.counter_note or None,
                 "links": [{"rel": "sourced_from", "target": sid} for sid in self.source_ids],
             }
         )
@@ -424,11 +444,19 @@ def corroborate(claim: Claim, *, contradicted: bool = False) -> Claim:
     researcher lists in one reply are two sources and, until each is checked
     against the text `metadata.fetch_record` retrieved for it, zero attributed
     bindings. #471
+
+    A source that is only there because a follow hit appended the primary
+    study it summarizes does not count on its own: `claim.via_source_ids`
+    names it, and it is dropped from the independent count when the primary
+    it routes to is also attributed. A claim bound to one review and the
+    primary it summarizes stays single-source; a review plus a genuinely
+    unrelated primary, bound some other way, still corroborates. #474 item 10
     """
     attributed_now = set(claim.attributed_source_ids) & set(claim.source_ids)
+    independent = attributed_now - set(claim.via_source_ids)
     if contradicted:
         claim.truth_state = CONTRADICTED
-    elif len(attributed_now) >= CORROBORATION_MIN:
+    elif len(independent) >= CORROBORATION_MIN:
         claim.truth_state = CORROBORATED
     elif claim.source_ids:
         claim.truth_state = SINGLE_SOURCE
@@ -590,9 +618,12 @@ class Ledger:
                         important=bool(fields.get("important", False)),
                         cross_checked=bool(fields.get("cross_checked", False)),
                         attributed_source_ids=list(fields.get("attributed_source_ids") or []),
+                        via_source_ids=list(fields.get("via_source_ids") or []),
                         secondary=bool(fields.get("secondary", False)),
                         study=json.loads(fields["study"]) if fields.get("study") else {},
                         counterargument_to=fields.get("counterargument_to", "") or "",
+                        counter=fields.get("counter", "") or "",
+                        counter_note=fields.get("counter_note", "") or "",
                         id=fields["id"],
                         as_of=fields.get("as_of", ""),
                     )

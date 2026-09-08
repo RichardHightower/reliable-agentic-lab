@@ -751,6 +751,68 @@ def test_a_numeric_preprint_claim_gets_one_follow_turn(monkeypatch):
     assert stages.claims_needing_a_primary(led) == []
 
 
+def test_a_follow_hit_and_its_own_review_stay_single_source(monkeypatch):
+    """#474 item 10: a claim attributed by one review, then rebound to the
+    primary that review summarizes, stays single-source. Before
+    `via_source_ids`, `evidence.corroborate` counted the review and the
+    very primary it cites as two independent sources."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent, per the primary trial",
+            "pubtype": ["Review"],
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "A Review", "url": "https://docs.claude.com/review"}],
+            "claims": [
+                {"text": "The dose increased 42 percent.", "source_urls": ["https://docs.claude.com/review"]}
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    review = led.source_for_url("https://docs.claude.com/review")
+    assert review.id in claim.attributed_source_ids
+    assert claim.truth_state == evidence.SINGLE_SOURCE, claim.truth_state
+
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "The Primary Trial",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent",
+            "pubtype": ["Randomized Controlled Trial"],
+        },
+    )
+    hit = stages.apply_follow_result(
+        led,
+        claim,
+        {"found": True, "url": "https://docs.claude.com/primary", "title": "The Primary Trial", "quote": ""},
+        backend=_FakeBackend(),
+    )
+    assert hit
+    assert claim.via_source_ids == [review.id]
+    assert claim.truth_state == evidence.SINGLE_SOURCE, (
+        "a review and the very primary it summarizes is one source, not two"
+    )
+
+
 def test_a_rebind_keeps_a_corroborating_secondary_corroborated(monkeypatch):
     """#473 item 5: a claim two secondary sources already corroborated stays
     corroborated after a follow hit, since the primary is appended rather
@@ -1067,8 +1129,8 @@ def test_a_generalizing_claim_gets_one_counter_turn(run_dir):
 
 
 def test_a_counter_miss_passes_and_the_brief_says_so(monkeypatch):
-    """A miss is appended to the claim's own note, and the writer's brief
-    carries "no contrary evidence found in this search"."""
+    """A miss is recorded on the claim's own `counter` field, and the
+    writer's brief carries "no contrary evidence found in this search"."""
     monkeypatch.setattr(
         stages.metadata,
         "fetch_record",
@@ -1080,7 +1142,7 @@ def test_a_counter_miss_passes_and_the_brief_says_so(monkeypatch):
     )
     hit = stages.apply_counter_result(led, claim, {"found": False}, backend=_FakeBackend())
     assert not hit
-    assert stages.counter_checked(led, claim)
+    assert claim.counter == "miss"
 
     index, _ = stages.numbering(led)
     brief = stages.claim_brief(led, claim.id, index)
@@ -1120,10 +1182,11 @@ def test_a_counter_hit_binds_the_contrary_claim_and_the_brief_carries_both(monke
         backend=_FakeBackend(),
     )
     assert hit
+    assert claim.counter == "hit"
     countered = stages.counter_evidence_for(led, claim.id)
     assert countered is not None
     assert countered.counterargument_to == claim.id
-    assert not str(claim.note or "").startswith("secondary:")
+    assert not claim.secondary
     assert claim.source_ids == [], "the original claim is not rebound, only evidenced against"
 
     index, _ = stages.numbering(led)
@@ -1132,20 +1195,210 @@ def test_a_counter_hit_binds_the_contrary_claim_and_the_brief_carries_both(monke
     assert "Longland 2016" in brief
 
 
+def test_a_retrieval_narrated_counter_claim_is_a_miss(monkeypatch):
+    """#474 follow-up F3: the model's own `counter_claim` is screened with
+    `is_retrieval_claim`, the same screen #469 runs on the research path. A
+    narrated retrieval miss is not evidence about the subject."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {"title": "T", "text": "irrelevant"},
+    )
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(
+        evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    )
+    hit = stages.apply_counter_result(
+        led,
+        claim,
+        {
+            "found": True,
+            "counter_claim": "No source was found that addresses this directly.",
+            "url": "https://docs.claude.com/nothing",
+            "title": "T",
+            "quote": "",
+        },
+        backend=_FakeBackend(),
+    )
+    assert not hit
+    assert claim.counter == "miss"
+    assert stages.counter_evidence_for(led, claim.id) is None
+
+
 def test_the_counter_pass_stops_at_the_run_cap(run_dir):
-    """Seven generalizing claims, `--max-counter 6`, six turns."""
+    """Seven generalizing claims, `--max-counter 6`, six turns. The seventh
+    is `capped`, `counterweighed` still passes it, and its brief carries the
+    cap sentence with the hedge instruction. #474 decision item 3"""
     run = build_run(run_dir, runner=_CountingRunner())
     logs: list[str] = []
     run.say = logs.append
-    for i in range(7):
+    claims = [
         run.ledger.add_claim(
             evidence.Claim(text=f"The result never changed by more than {i} percent.", subject="s")
         )
+        for i in range(7)
+    ]
 
     run._counter_evidence()
 
     assert run.runner.prompts and len(run.runner.prompts) == run.max_counter == 6
-    assert any("counter" in line and "cap 6" in line for line in logs), logs
+    assert any("counter" in line and "6/6 used this run" in line for line in logs), logs
+    states = [c.counter for c in claims]
+    assert states.count("capped") == 1
+    assert set(states) <= {"miss", "capped"}
+
+    capped = next(c for c in claims if c.counter == "capped")
+    index, _ = stages.numbering(run.ledger)
+    brief = stages.claim_brief(run.ledger, capped.id, index)
+    assert "counter-evidence not searched, run cap reached" in brief
+    assert "hedge" in brief.lower()
+
+
+def test_a_stage_retry_does_not_exceed_max_counter_in_total(run_dir):
+    """#474 decision item 2: `stage_search` retries a `search_gate` failure
+    by re-entering `_counter_evidence` from the top. `self.counter_used`,
+    persisted in `state.counter_used`, must keep a second call from getting
+    a fresh slice of `max_counter`, and `generalizing_claims` must not
+    re-select a claim `apply_counter_result` already resolved."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    first_batch = [
+        run.ledger.add_claim(
+            evidence.Claim(text=f"The result never changed by more than {i} percent.", subject="s")
+        )
+        for i in range(4)
+    ]
+
+    run._counter_evidence()
+    assert len(run.runner.prompts) == 4
+    assert run.counter_used == 4
+    assert run.state.counter_used == 4
+    assert all(c.counter == "miss" for c in first_batch)
+
+    # A fresh batch surfaces on the retry, as a re-searched question's new
+    # claims would; the first batch must not be asked a second time.
+    second_batch = [
+        run.ledger.add_claim(
+            evidence.Claim(text=f"The rate always settled at {20 + i} percent.", subject="s")
+        )
+        for i in range(4)
+    ]
+    run._counter_evidence()
+
+    assert len(run.runner.prompts) == run.max_counter == 6, run.runner.prompts
+    assert run.counter_used == 6
+    assert run.state.counter_used == 6
+    assert all(c.counter == "miss" for c in first_batch), "the first batch was asked again"
+    assert [c.counter for c in second_batch].count("capped") == 2
+
+    # A resumed run in a new process reads the same total back.
+    reloaded = state.PaperState.load_or_create(run.work_dir)
+    assert reloaded.counter_used == 6
+
+
+class _SearchThenCounterThenVerifyRunner(paper.Runner):
+    """Answers the researcher for search and counter, then the verifier.
+
+    Mirrors `_SearchThenVerifyRunner` above, the pattern the E4 fix used to
+    prove `apply_verification` cannot erase `secondary`. #474's own
+    live-path proof: `claim.counter` must survive `stage_verify` the same
+    way.
+    """
+
+    name = "scripted"
+
+    def __init__(self):
+        self.verify_claim_id: str | None = None
+
+    def ask(self, role, prompt):
+        if role == "researcher" and "This claim generalizes" in prompt:
+            return paper.Reply(data={"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""})
+        if role == "researcher":
+            return paper.Reply(
+                data={
+                    "answer": "a",
+                    "sources": [{"title": "A Review", "url": "https://docs.claude.com/review"}],
+                    "claims": [
+                        {
+                            "text": "The effect always held regardless of the protocol.",
+                            "source_urls": ["https://docs.claude.com/review"],
+                        }
+                    ],
+                }
+            )
+        if role == "verifier":
+            return paper.Reply(
+                data={
+                    "checked": [
+                        {
+                            "claim_id": self.verify_claim_id,
+                            "second_source_url": "",
+                            "corroborate_status": "not_found",
+                            "quote": "",
+                            "queries_used": ["q"],
+                        }
+                    ]
+                }
+            )
+        return paper.Reply(data={})
+
+
+def test_a_counter_miss_survives_verify_on_the_live_stage_order(run_dir, monkeypatch):
+    """#474 blocking item 1: `apply_verification`'s `not_found` branch
+    overwrites `claim.note`. `claim.counter` is a dedicated field it never
+    touches, so the brief the writer reads still says "no contrary evidence
+    found in this search" after `stage_verify` runs, the live `STAGE_ORDER`
+    path between the counter pass and the brief."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "category": "cs.AI",
+        },
+    )
+    runner = _SearchThenCounterThenVerifyRunner()
+    run = build_run(run_dir, runner=runner, loop_doctrine=False)
+    run.plan = {
+        "title": "T",
+        "questions": [{"id": "q1", "subject": "s1", "question": "why?", "check": "a URL", "important": True}],
+        "sections": ["Abstract", "Introduction", "References"],
+        "diagrams": [],
+    }
+
+    run.stage_search()
+    claim = next(iter(run.ledger.claims.values()))
+    assert claim.counter == "miss"
+
+    runner.verify_claim_id = claim.id
+    run.stage_verify()
+
+    assert claim.counter == "miss", "apply_verification must never touch this field"
+    index, _ = stages.numbering(run.ledger)
+    brief = stages.claim_brief(run.ledger, claim.id, index)
+    assert "no contrary evidence found in this search" in brief
+
+
+def test_the_fixture_pipeline_runs_a_generalizing_claim_through_the_counter_pass(run_dir):
+    """#474 follow-up F7: the recorded fixture is patched with one
+    generalizing claim ("A checker alone does not catch an error the
+    maker's own tool output already hid.", under the "maker and checker
+    split" researcher reply) and a matching counter-turn reply (a miss), so
+    the counter pass runs for real against `FixtureRunner`/`FixtureBackend`,
+    offline, no network. Reason the fixture changed: neither original
+    recorded reply contained a generalizing claim, so the pass had never
+    actually executed against the fixture at all."""
+    run = build_run(run_dir)
+    run.stage_plan()
+    run.stage_search()
+
+    generalizing = [c for c in run.ledger.claims.values() if stages.GENERALIZING.search(c.text)]
+    assert generalizing, "the patched fixture claim did not survive record_findings"
+    assert all(c.counter in ("hit", "miss", "capped") for c in generalizing)
 
 
 def test_search_gate_fails_with_no_claims():

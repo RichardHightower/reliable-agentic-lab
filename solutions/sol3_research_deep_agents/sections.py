@@ -327,14 +327,17 @@ def section_check(
     )
 
     # #474. `findings_from_claims` below sets `generalizing` from
-    # `stages.GENERALIZING`, and `counter_checked` from `stages.counter_checked`
-    # (a hit or a miss). A finding left with neither, and no
-    # `counterargument_to` of its own, is a generalizing claim nobody looked
-    # for the other side of.
+    # `stages.GENERALIZING`, and `counter` from `claim.counter`: "hit",
+    # "miss", or "capped", the counter-evidence pass's own three possible
+    # outcomes. A finding left with none of those, and no
+    # `counterargument_to` of its own, is a generalizing claim the pass
+    # never reached at all, not one the run cap simply priced out. A
+    # `capped` claim passes: the pass did look at it, and its brief
+    # (`stages.claim_brief`) already tells the writer to hedge it.
     uncountered = [
         f.get("claim") or f.get("id") or ""
         for f in findings
-        if f.get("generalizing") and not f.get("counterargument_to") and not f.get("counter_checked")
+        if f.get("generalizing") and not f.get("counter") and not f.get("counterargument_to")
     ]
     checks.append(
         Check(
@@ -389,7 +392,7 @@ def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
                 "evidence_tier": source.tier if source is not None else "",
                 # Read by `section_check`'s `counterweighed` row. #474
                 "generalizing": bool(stages_mod.GENERALIZING.search(claim.text)),
-                "counter_checked": stages_mod.counter_checked(paper.ledger, claim),
+                "counter": claim.counter,
                 "counterargument_to": claim.counterargument_to or "",
             }
         )

@@ -1180,8 +1180,8 @@ def test_a_sole_support_claim_is_a_generalizing_candidate():
 
 
 def test_a_generalizing_claim_with_no_counter_search_fails():
-    """`counterweighed` names the claim when a generalizing finding was
-    never checked for counter-evidence. A recorded miss passes."""
+    """`counterweighed` names the claim when a generalizing finding carries
+    no `counter` state at all. A recorded `hit`, `miss`, or `capped` passes."""
     generalizing = {
         "id": "s1-f1",
         "text": "Protein alone did not prevent lean-mass loss.",
@@ -1194,12 +1194,13 @@ def test_a_generalizing_claim_with_no_counter_search_fails():
     )
     assert "counterweighed" in missing.signature()
 
-    checked = checks.section_check(
-        "Protein alone did not prevent lean-mass loss [1].",
-        section=_section(),
-        findings=[{**generalizing, "counter_checked": True}],
-    )
-    assert "counterweighed" not in checked.signature()
+    for state in ("hit", "miss", "capped"):
+        checked = checks.section_check(
+            "Protein alone did not prevent lean-mass loss [1].",
+            section=_section(),
+            findings=[{**generalizing, "counter": state}],
+        )
+        assert "counterweighed" not in checked.signature(), state
 
 
 def test_a_counter_miss_passes_and_the_brief_says_so():
@@ -1211,7 +1212,7 @@ def test_a_counter_miss_passes_and_the_brief_says_so():
             "claim": "Protein alone did not prevent lean-mass loss.",
             "source": {"url_or_path": "https://example.invalid/no-training", "evidence_tier": "other"},
             "generalizing": True,
-            "counter_checked": True,
+            "counter": "miss",
         }
     ]
     bound = sections._claims_for_writer(findings, {}, "s1", {"https://example.invalid/no-training": 1})
@@ -1225,9 +1226,71 @@ def test_a_counter_miss_passes_and_the_brief_says_so():
     assert "counterweighed" not in passed.signature()
 
 
+def test_a_counter_hit_cites_its_own_number_not_the_claims(work):
+    """#474 follow-up F2: on the `numbers is None` fallback path (offline
+    and unit tests), a hit must cite the counter finding's own number, not
+    the claim's. `run_section` always passes `numbers`, so the bug was
+    invisible on the live path and only bit `paper._numbered`'s unit tests
+    and any offline reader of `_claims_for_writer` on its own."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "Protein alone did not prevent lean-mass loss.",
+            "source": {"url_or_path": "https://example.invalid/no-training"},
+            "counter": "hit",
+            "counter_url": "https://example.invalid/longland",
+        },
+        {
+            "id": "s1-cf1",
+            "claim": "Protein with resistance training preserved lean mass (Longland 2016).",
+            "source": {"url_or_path": "https://example.invalid/longland"},
+            "counterargument_to": "s1-f1",
+        },
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1")
+    original, counter = bound
+    assert original["number"] == 1
+    assert counter["number"] == 2
+    assert "Contrary evidence in [2]" in original["text"], original["text"]
+
+
+def test_a_capped_claim_passes_and_the_brief_says_so_and_hedges():
+    """#474 decision item 3: a candidate the run cap does not reach is
+    `capped`, not unchecked. `counterweighed` passes it, and the brief
+    tells the writer to hedge it like a single-source claim."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "Protein alone did not prevent lean-mass loss.",
+            "source": {"url_or_path": "https://example.invalid/no-training", "evidence_tier": "other"},
+            "generalizing": True,
+            "counter": "capped",
+        }
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1", {"https://example.invalid/no-training": 1})
+    assert "counter-evidence not searched, run cap reached" in bound[0]["text"]
+    assert "hedge" in bound[0]["text"].lower()
+
+    passed = checks.section_check(
+        f"{bound[0]['text']} [1].",
+        section=_section(),
+        findings=bound,
+    )
+    assert "counterweighed" not in passed.signature()
+
+
 def test_a_generalizing_claim_gets_one_counter_turn(work, turns, monkeypatch):
     """"protein alone did not prevent lean-mass loss" gets exactly one
-    counter turn, and the contrary finding binds with `counterargument_to`."""
+    counter turn, and the contrary finding binds with `counterargument_to`.
+
+    Also the live-path proof #474 blocking item 1 asked for: `run_section`
+    runs research, the counter pass, then verify, then the writer, in that
+    order (the live `STAGE_ORDER`-equivalent for one section). Unlike Deep
+    Agents, `finding["counter"]` cannot collide with verify's own state: the
+    verify loop below writes only into the separate `verdicts` dict, never
+    back onto the finding dict, so there is no shared field for it to erase.
+    The assertion on `verdicts.json` and the final written `body` (both
+    produced after verify runs) is the proof."""
     records = {
         "https://example.invalid/no-training": {"category": "cs.AI"},
         "https://example.invalid/longland": {
@@ -1282,6 +1345,12 @@ def test_a_generalizing_claim_gets_one_counter_turn(work, turns, monkeypatch):
     findings = json.loads((Path(work) / "knowledge/s1/findings.json").read_text())["findings"]
     counter_finding = next(f for f in findings if f.get("counterargument_to"))
     assert counter_finding["counterargument_to"] == "s1-f1"
+    original = next(f for f in findings if f["id"] == "s1-f1")
+    assert original["counter"] == "hit"
+    verdicts = json.loads((Path(work) / "knowledge/s1/verdicts.json").read_text())["verdicts"]
+    assert any(v["finding_id"] == counter_finding["id"] for v in verdicts), (
+        "verify never reached the counter finding"
+    )
     # The suffix and the counter finding both live in the writer's bound
     # list, not in `findings.json`'s raw `claim` text (the same place
     # `follow_primary_sources`'s "as summarized by" lives). The offline
@@ -1291,8 +1360,49 @@ def test_a_generalizing_claim_gets_one_counter_turn(work, turns, monkeypatch):
     assert "Longland 2016" in body
 
 
+def test_a_retrieval_narrated_counter_claim_is_a_miss(work):
+    """#474 follow-up F3: the model's own `counter_claim` is screened with
+    `is_retrieval_claim`, the same screen #469 runs on the research path. A
+    narrated retrieval miss is not evidence about the subject, and does not
+    become a citable body claim."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "Protein alone did not prevent lean-mass loss.",
+            "answers_question": "q",
+            "source": {"url_or_path": "https://example.invalid/no-training"},
+        }
+    ]
+
+    class Turns:
+        backend = _FakeBackend()
+
+        def counter_search(self, claim):
+            return {
+                "found": True,
+                "counter_claim": "No source was found that addresses this directly.",
+                "url": "https://example.invalid/nothing",
+                "title": "T",
+                "quote": "",
+            }
+
+    run = paper.Run(
+        topic="t",
+        work_dir=work,
+        turns=Turns(),
+        state=paper.State.load_or_new(work, "t"),
+        log=lambda *a: None,
+    )
+    section = _section()
+    sections.counter_evidence_pass(run, findings, section)
+    assert findings[0]["counter"] == "miss"
+    assert not any(f.get("counterargument_to") for f in findings), "no counter finding was appended"
+
+
 def test_the_counter_pass_stops_at_the_run_cap(work, turns, monkeypatch):
-    """Seven generalizing claims, `--max-counter 6`, six turns."""
+    """Seven generalizing claims, `--max-counter 6`, six turns. The seventh
+    is `capped`, the section still passes `counterweighed`, and its brief
+    carries the cap sentence with the hedge instruction. #474 decision item 3"""
     monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch(""))
     claims = [
         {
@@ -1327,6 +1437,18 @@ def test_the_counter_pass_stops_at_the_run_cap(work, turns, monkeypatch):
 
     assert len(counter_log) == run.max_counter == 6
     assert any("counter" in line and "6/6" in line for line in logs), logs
+
+    findings = json.loads((Path(work) / "knowledge/s1/findings.json").read_text())["findings"]
+    states = [f["counter"] for f in findings if f.get("generalizing")]
+    assert states.count("capped") == 1
+    assert set(states) <= {"miss", "capped"}
+
+    score = json.loads((Path(work) / "knowledge/s1/section-check.json").read_text())
+    assert "counterweighed" not in score["signature"]
+
+    body = (Path(work) / "sections/s1.md").read_text(encoding="utf-8")
+    assert "counter-evidence not searched, run cap reached" in body
+    assert "hedge" in body.lower()
 
 
 def test_attribute_findings_is_a_noop_with_no_backend():

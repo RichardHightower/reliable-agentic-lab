@@ -314,3 +314,51 @@ def test_an_older_evidence_md_with_no_counterargument_field_loads(tmp_path):
 
     reloaded = evidence.Ledger(root).load().claim(old.id)
     assert reloaded.counterargument_to == ""
+
+
+def test_a_via_route_source_does_not_count_as_independent():
+    """#474 item 10: a review that only survives as the route to the
+    primary study it summarizes is not a second independent source.
+    `evidence.corroborate` must not upgrade a claim past `SINGLE_SOURCE` by
+    counting a review and the very primary it cites as two."""
+    claim = evidence.Claim(
+        text="The dose increased 42 percent.",
+        subject="s",
+        source_ids=["review", "primary"],
+        attributed_source_ids=["review", "primary"],
+        via_source_ids=["review"],
+    )
+    evidence.corroborate(claim)
+    assert claim.truth_state == evidence.SINGLE_SOURCE
+
+
+def test_an_unrelated_second_source_still_corroborates():
+    """A review plus a genuinely unrelated, independently attributed
+    source, bound some other way than a follow hit, still corroborates:
+    `via_source_ids` names only the routes a follow hit actually recorded."""
+    claim = evidence.Claim(
+        text="The dose increased 42 percent.",
+        subject="s",
+        source_ids=["review", "unrelated_primary"],
+        attributed_source_ids=["review", "unrelated_primary"],
+    )
+    evidence.corroborate(claim)
+    assert claim.truth_state == evidence.CORROBORATED
+
+
+def test_via_source_ids_round_trips_through_evidence_md(tmp_path):
+    """#474 item 10: `Claim.via_source_ids` survives a `to_markdown` write
+    and a `load` back, the way `attributed_source_ids` already does."""
+    claim = evidence.Claim(
+        text="The dose increased 42 percent.",
+        subject="s",
+        source_ids=["review", "primary"],
+        attributed_source_ids=["review", "primary"],
+        via_source_ids=["review"],
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_claim(claim)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load().claim(claim.id)
+    assert reloaded.via_source_ids == ["review"]

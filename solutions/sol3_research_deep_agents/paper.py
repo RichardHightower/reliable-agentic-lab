@@ -486,9 +486,9 @@ class Paper:
     # #474. How many generalizing claims get a counter-evidence turn, per
     # run, for the same reason `max_follow` is per run: Open decision 4
     # asked for a cap per section, and eight sections at six each would
-    # roughly double a run. `_counter_evidence` runs once, at the end of
-    # `stage_search`, so a plain slice of the candidate list is already a
-    # whole-run cap.
+    # roughly double a run. `self.counter_used`, synced with
+    # `state.counter_used`, is the running count `_counter_evidence` checks
+    # and increments on every call, `stage_search` retries included.
     max_counter: int = 6
     attempts: int = DEFAULT_STAGE_ATTEMPTS
     theme: str = "spillwave-light"
@@ -518,6 +518,9 @@ class Paper:
     # `search_gate` retry re-entering `stage_search` sees what earlier
     # attempts already spent, not a fresh `max_follow`.
     follow_used: int = field(default=0, init=False)
+    # #474. Loaded from `state.counter_used` in `__post_init__`, the same way
+    # `follow_used` is.
+    counter_used: int = field(default=0, init=False)
     # Diagram names the complexity gate rejected, so a retry redraws only those.
     _redraw: set = field(default_factory=set, init=False)
     # The most expensive call seen per role. The budget check reads it as the
@@ -539,6 +542,7 @@ class Paper:
         self.budget.calls = self.state.search_calls
         self.budget.on_charge = self._reserve_search
         self.follow_used = self.state.follow_used
+        self.counter_used = self.state.counter_used
         self._load_allowlist()
 
     def _load_allowlist(self) -> None:
@@ -1582,8 +1586,15 @@ class Paper:
             # Persist per question. A stop between questions must not discard
             # the answers this run already paid for.
             self.ledger.write()
-        self._follow_primaries()
-        self._counter_evidence()
+        # Both return what they spent, added into this stage's own total.
+        # `_ask` already adds every call to `self.state.total_cost_usd`
+        # regardless; without this, `stage_search`'s `StageResult.usd` (what
+        # `mark_complete` records as this stage's `cost_usd`) undercounted
+        # by exactly what these two passes spent, and the invariant
+        # `state.total_cost_usd == sum(stage.cost_usd for every stage)`
+        # silently broke the moment either pass spent a real turn.
+        usd += self._follow_primaries()
+        usd += self._counter_evidence()
         stages.search_gate(self.ledger, self.plan)
         self.ledger.write()
         provider = self.backend.active_name
@@ -1603,7 +1614,7 @@ class Paper:
             ),
         )
 
-    def _follow_primaries(self) -> None:
+    def _follow_primaries(self) -> float:
         """One follow turn per shaky numeric claim, capped at `self.max_follow`
         across the whole run, not per `stage_search` attempt. #473
 
@@ -1617,16 +1628,23 @@ class Paper:
         failure by re-entering this same method from the top; without the
         persisted count, each retry saw a fresh `max_follow` and a run could
         spend `max_follow * attempts` turns rather than `max_follow`.
+
+        Returns what it spent, so `stage_search` can fold it into its own
+        `StageResult.usd`. `_ask` already adds every call to
+        `self.state.total_cost_usd` on its own; a caller that dropped this
+        return value undercounted the search stage's own recorded cost by
+        exactly this much. #474
         """
         candidates = stages.claims_needing_a_primary(self.ledger)
         if not candidates:
-            return
+            return 0.0
         remaining = max(0, self.max_follow - self.follow_used)
         followed = candidates[:remaining]
         self.say(
             f"    follow: {len(followed)} of {len(candidates)} candidate(s), "
             f"{self.follow_used + len(followed)}/{self.max_follow} used this run"
         )
+        spent = 0.0
         for claim in followed:
             self.budget.begin_request(max_calls=1, max_provider_calls=3)
             try:
@@ -1639,28 +1657,54 @@ class Paper:
                 )
             finally:
                 self.budget.end_request()
+            spent += reply.usd
             parsed = self._json_reply("researcher", reply)
             stages.apply_follow_result(self.ledger, claim, parsed, backend=self.backend)
             self.follow_used += 1
             self.state.follow_used = self.follow_used
             self.state.save()
+        return spent
 
-    def _counter_evidence(self) -> None:
+    def _counter_evidence(self) -> float:
         """One counter-evidence turn per generalizing claim, capped at
-        `self.max_counter`. #474
+        `self.max_counter` across the whole run, not per `stage_search`
+        attempt. #474
 
         A hit creates a new claim bound to its own source,
         `counterargument_to` pointing at the claim it contradicts. A miss is
-        recorded on the original claim's note, so `stages.counter_checked`
-        and `sections.section_check`'s `counterweighed` row can tell "never
-        checked" from "checked, found nothing", and `stages.claim_brief` can
-        say so.
+        recorded on the claim's own `counter` field ("hit", "miss"), never
+        `note`: `apply_verification` overwrites `note` on its `disagreed`
+        and `not_found` branches, and the verifier runs right after this
+        pass on the live `STAGE_ORDER`.
+
+        `self.counter_used`, loaded from `state.counter_used`, is the
+        running count across every call, the same way `follow_used` bounds
+        `_follow_primaries`. `stages.generalizing_claims` already excludes a
+        claim that already carries a `counter` state, so a retry does not
+        re-ask it.
+
+        A candidate the cap does not reach this call is marked `capped`
+        immediately, deterministically, with no model turn: `counterweighed`
+        must find every generalizing claim in one of `hit`, `miss`, or
+        `capped` once this pass has run, and a `capped` claim's brief tells
+        the writer to hedge it like a single source.
+
+        Returns what it spent, so `stage_search` can fold it into its own
+        `StageResult.usd`. #474
         """
         candidates = stages.generalizing_claims(self.ledger)
         if not candidates:
-            return
-        followed = candidates[: self.max_counter]
-        self.say(f"    counter: {len(followed)} of {len(candidates)} candidate(s), cap {self.max_counter}")
+            return 0.0
+        remaining = max(0, self.max_counter - self.counter_used)
+        followed = candidates[:remaining]
+        for claim in candidates[remaining:]:
+            claim.counter = "capped"
+            claim.counter_note = "counter-evidence not searched, run cap reached"
+        self.say(
+            f"    counter: {len(followed)} of {len(candidates)} candidate(s), "
+            f"{self.counter_used + len(followed)}/{self.max_counter} used this run"
+        )
+        spent = 0.0
         for claim in followed:
             self.budget.begin_request(max_calls=1, max_provider_calls=3)
             try:
@@ -1673,8 +1717,13 @@ class Paper:
                 )
             finally:
                 self.budget.end_request()
+            spent += reply.usd
             parsed = self._json_reply("researcher", reply)
             stages.apply_counter_result(self.ledger, claim, parsed, backend=self.backend)
+            self.counter_used += 1
+            self.state.counter_used = self.counter_used
+            self.state.save()
+        return spent
 
     # -- 3. verify ---------------------------------------------------------
 

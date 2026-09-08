@@ -120,8 +120,8 @@ def test_findings_from_claims_carries_the_tier_from_the_ledger():
 
 
 def test_a_generalizing_claim_with_no_counter_search_fails():
-    """`counterweighed` names the claim when a generalizing finding was
-    never checked for counter-evidence. A recorded miss passes."""
+    """`counterweighed` names the claim when a generalizing finding carries
+    no `counter` state at all. A recorded `hit`, `miss`, or `capped` passes."""
     generalizing = {
         "id": "s1-f1",
         "claim": "Protein alone did not prevent lean-mass loss.",
@@ -134,18 +134,19 @@ def test_a_generalizing_claim_with_no_counter_search_fails():
     )
     assert "counterweighed" in missing.signature()
 
-    checked = sections.section_check(
-        "Protein alone did not prevent lean-mass loss [1].",
-        section={"heading": "Findings"},
-        findings=[{**generalizing, "counter_checked": True}],
-    )
-    assert "counterweighed" not in checked.signature()
+    for state in ("hit", "miss", "capped"):
+        checked = sections.section_check(
+            "Protein alone did not prevent lean-mass loss [1].",
+            section={"heading": "Findings"},
+            findings=[{**generalizing, "counter": state}],
+        )
+        assert "counterweighed" not in checked.signature(), state
 
 
 def test_findings_from_claims_carries_the_counter_fields_from_the_ledger():
-    """#474: `generalizing`, `counter_checked`, and `counterargument_to`
-    survive from the ledger's `Claim`, which is what wires `counterweighed`
-    to a real run."""
+    """#474: `generalizing`, `counter`, and `counterargument_to` survive
+    from the ledger's `Claim`, which is what wires `counterweighed` to a
+    real run."""
     import evidence
     from types import SimpleNamespace
 
@@ -165,8 +166,12 @@ def test_findings_from_claims_carries_the_counter_fields_from_the_ledger():
 
     findings = sections.findings_from_claims(paper, section, {source.id: 1})
     assert findings[0]["generalizing"] is True
-    assert findings[0]["counter_checked"] is False
+    assert findings[0]["counter"] == ""
     assert findings[0]["counterargument_to"] == ""
+
+    claim.counter = "miss"
+    findings = sections.findings_from_claims(paper, section, {source.id: 1})
+    assert findings[0]["counter"] == "miss"
 
     counter = ledger.add_claim(
         evidence.Claim(
@@ -176,9 +181,6 @@ def test_findings_from_claims_carries_the_counter_fields_from_the_ledger():
             counterargument_to=claim.id,
         )
     )
-    findings = sections.findings_from_claims(paper, section, {source.id: 1})
-    assert findings[0]["counter_checked"] is True
-
     section["claim_ids"] = [counter.id]
     findings = sections.findings_from_claims(paper, section, {source.id: 1})
     assert findings[0]["counterargument_to"] == claim.id

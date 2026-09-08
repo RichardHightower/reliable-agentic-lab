@@ -1906,16 +1906,17 @@ def section_check(
     )
 
     # #474. `sections.generalizing_claims` tags a finding `generalizing` when
-    # it is selected for the counter-evidence pass, whether or not the run
-    # cap actually spent a turn on it. `counter_checked` (a hit or a miss) is
-    # this row's only way to tell "the pass ran out of budget before it got
-    # here" from "the pass looked and found nothing". A counter-finding
-    # itself carries `counterargument_to`, not `generalizing`, so it never
-    # needs a counter-search of its own.
+    # it is selected for the counter-evidence pass. `counter` ("hit", "miss",
+    # or "capped") is this row's only way to tell "the pass looked" from
+    # "nothing ever looked at this claim": a `capped` claim was selected but
+    # priced out by the run cap, and it passes, because the writer's brief
+    # already tells it to hedge that claim like a single source. A
+    # counter-finding itself carries `counterargument_to`, not
+    # `generalizing`, so it never needs a counter-search of its own.
     uncountered = [
         f.get("text") or f.get("id") or ""
         for f in findings
-        if f.get("generalizing") and not f.get("counterargument_to") and not f.get("counter_checked")
+        if f.get("generalizing") and not f.get("counterargument_to") and not f.get("counter")
     ]
     checks.append(
         Check(
