@@ -84,6 +84,48 @@ ALLOWED_TLDS = frozenset({".gov", ".edu", ".int"})
 # Below this many admitted hosts the run keeps the seed instead.
 MIN_ADMITTED = 3
 
+# The scout's own fallback when the model proposes no host at all. Distinct
+# from SEED_ALLOWLIST above, which is this workshop's own vendor-doc default
+# and never changes with the paper's topic. Before this, the scout forced
+# `arxiv.org` onto every field, including one that does not publish there: a
+# biomedical topic got an empty preprint search and the plan then treated
+# arxiv.org as the paper's only source boundary. `arxiv.org` may still be
+# proposed and admitted for any field; it is only the automatic seed for
+# software and physics. #469
+FIELD_SEEDS: dict[str, tuple[dict[str, str], ...]] = {
+    "software": ({"host": "arxiv.org", "org_type": "preprint"},),
+    "physics": ({"host": "arxiv.org", "org_type": "preprint"},),
+    "biomedical": (
+        {"host": "pubmed.ncbi.nlm.nih.gov", "org_type": "government"},
+        {"host": "pmc.ncbi.nlm.nih.gov", "org_type": "government"},
+        {"host": "doi.org", "org_type": "standards_body"},
+        {"host": "cochranelibrary.com", "org_type": "professional_society"},
+        {"host": "jissn.biomedcentral.com", "org_type": "peer_reviewed_publisher"},
+    ),
+}
+# A field the model names that has no specific list above, economics, law,
+# and general among them, still gets a general scholarly host rather than
+# nothing: doi.org resolves a paper in any field. This is never the vendor
+# doc SEED_ALLOWLIST above; that fallback belongs to a run whose librarian
+# also comes up short, and only on the software field.
+GENERAL_FIELD_SEED: tuple[dict[str, str], ...] = ({"host": "doi.org", "org_type": "standards_body"},)
+
+
+def seed_for_field(field: str) -> tuple[dict, ...]:
+    """The scout's own fallback proposal when the model names no host.
+
+    A blank or missing field seeds nothing: defaulting an undetermined field
+    to software's arxiv.org was the same field-blindness this ticket
+    reported, one layer up. A field the model does name gets FIELD_SEEDS's
+    own list when there is one, biomedical among them, and the general
+    scholarly seed otherwise. #469
+    """
+    key = str(field or "").strip().lower()
+    if not key:
+        return ()
+    return FIELD_SEEDS.get(key, GENERAL_FIELD_SEED)
+
+
 _GITHUB_ORGS = frozenset(
     entry.rsplit("/", 1)[1].lower() for entry in SEED_ALLOWLIST if entry.startswith("github.com/")
 )

@@ -295,6 +295,11 @@ class Finding:
     subject: str
     claim_ids: list[str] = field(default_factory=list)
     summary: str = ""
+    # A claim `record_findings` refused because its text was about the search,
+    # not the topic: "no source was found", not a fact. Recorded here instead
+    # of silently dropped, so a reader can see what this question still lacks
+    # rather than a paper claiming the absence of evidence as evidence. #469
+    gaps: list[str] = field(default_factory=list)
     id: str = ""
 
     def __post_init__(self) -> None:
@@ -309,6 +314,7 @@ class Finding:
                 "status": "draft",
                 "verified": False,
                 "generated": True,
+                "gaps": self.gaps,
                 "links": [{"rel": "asserts", "target": cid} for cid in self.claim_ids],
             }
         )
@@ -479,6 +485,7 @@ class Ledger:
                         subject="",
                         claim_ids=[ln["target"] for ln in links if ln["rel"] == "asserts"],
                         summary=body,
+                        gaps=list(fields.get("gaps") or []),
                         id=fields["id"],
                     )
                 )

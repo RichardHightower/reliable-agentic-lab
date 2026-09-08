@@ -418,6 +418,8 @@ def _write_briefing(work_dir: Path, payload: dict) -> None:
             lines += ["## Flagship titles", ""]
             lines += [f"- {item}" for item in titles]
             lines.append("")
+        if payload.get("seeded_by_field"):
+            lines += [f"Seeded by field: {payload.get('field')}.", ""]
         lines += [
             "This is a map, not evidence. The outline judge must not treat it as research.",
             "",
@@ -804,7 +806,7 @@ class Paper:
         packed = corpus_mod.pack(self.topic, list(self.brains), dest, limit=40)
         summary = (
             f"{len(packed.get('hits') or [])} hits, "
-            f"{packed.get('relevant', 0)} relevant, "
+            f"{packed['relevant']} relevant, "
             f"thin={packed.get('corpus_thin')}"
         )
         return StageResult(
@@ -855,10 +857,13 @@ class Paper:
                 "Return JSON with headings (5-8 standard section titles for this "
                 "kind of paper), domains (canonical hosts with org_type from "
                 f"{', '.join(source_policy.ORG_TYPES)}; at most "
-                f"{source_policy.MAX_PERPLEXITY_DOMAINS}), and titles (a few "
-                "flagship works, names only). Prefer arxiv.org, .gov, .edu, .int, "
-                "peer-reviewed publishers, and official documentation. Not blogs, "
-                "not encyclopedias, not cable news."
+                f"{source_policy.MAX_PERPLEXITY_DOMAINS}), titles (a few "
+                "flagship works, names only), and field (software, physics, "
+                "biomedical, economics, law, or general, naming this topic's "
+                "own research field). Name the hosts that field actually "
+                "publishes in. Prefer .gov, .edu, .int, peer-reviewed "
+                "publishers, and official documentation. Not blogs, not "
+                "encyclopedias, not cable news."
                 + extra,
             )
             usd = reply.usd
@@ -876,11 +881,25 @@ class Paper:
                 proposed.append({"host": item, "org_type": "preprint"})
             elif isinstance(item, dict):
                 proposed.append(item)
-        if not any(str(item.get("host") or "").lower() == "arxiv.org" for item in proposed):
-            proposed.append({"host": "arxiv.org", "org_type": "preprint"})
+        field = str(proposal.get("field") or "").strip().lower()
+        # A named field's seed is added on top of whatever the model itself
+        # proposed, never in place of it: an economics topic that named one
+        # real host still gets doi.org beside it, not instead of it. A blank
+        # field seeds nothing, so a scout that cannot yet name its field
+        # forces nothing onto the run. #469
+        existing_hosts = {str(item.get("host") or "").strip().lower() for item in proposed}
+        seed_hosts = [
+            seed
+            for seed in source_policy.seed_for_field(field)
+            if str(seed.get("host") or "").strip().lower() not in existing_hosts
+        ]
+        seeded_by_field = bool(seed_hosts)
+        proposed = proposed + seed_hosts
         decided = source_policy.admit(proposed)
         payload = {
             "skipped": False,
+            "field": field,
+            "seeded_by_field": seeded_by_field,
             "headings": [str(h) for h in (proposal.get("headings") or []) if str(h).strip()][:8],
             "titles": [str(t) for t in (proposal.get("titles") or []) if str(t).strip()][:8],
             "proposed": decided["proposed"],

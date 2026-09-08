@@ -526,6 +526,57 @@ def test_a_coverage_gap_is_recorded_when_a_question_has_no_finding(work, turns):
         assert payload["coverage_gaps"]
 
 
+def test_findings_from_research_drops_a_retrieval_claim():
+    """A claim about the search, not the topic, is not a finding. #469"""
+    result = {
+        "claims": [
+            {
+                "text": "No arxiv.org source was found that reports a specific rate.",
+                "source_url": "https://example.invalid/doc",
+            }
+        ]
+    }
+    assert sections.findings_from_research(result, "s1", "what is the rate?") == []
+
+
+def test_a_retrieval_claim_records_a_gap_not_a_claim(work, turns):
+    """A search miss narrated as a claim is refused; a gap is recorded
+    instead. #469"""
+
+    class RetrievalOnly(turns):
+        def research(self, question, note=""):
+            self.asked.append(("research", question, note))
+            return {
+                "answer": "",
+                "sources": [{"url": "https://example.invalid/doc", "title": "Doc"}],
+                "claims": [
+                    {
+                        "text": "No arxiv.org source was found that reports a specific rate.",
+                        "source_url": "https://example.invalid/doc",
+                    }
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=RetrievalOnly(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    try:
+        paper.do_sections(run)
+    except paper.RunFailed:
+        pass
+    path = Path(work) / "knowledge" / "s1" / "findings.json"
+    payload = json.loads(path.read_text())
+    assert not any("arxiv.org" in (f.get("claim") or "") for f in payload["findings"])
+    assert payload["coverage_gaps"]
+
+
 def test_the_section_loop_escalates_on_a_repeated_failing_verdict(work, turns):
     class Stuck(turns):
         def judge_section(self, section, body, findings, note=""):

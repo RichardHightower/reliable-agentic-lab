@@ -44,10 +44,14 @@ survive without. Other questions may still add context and references; they do
 not get to block the whole paper when an official source is silent. The gate
 allows at most six important questions.
 
-Plan only checks that the fixed source boundary can answer: this repository,
-official LangChain, Anthropic, OpenAI, Microsoft, Stripe, MCP, or Google SRE
-documentation and their approved GitHub organizations. Do not require
-OpenTelemetry, AutoGPT, arXiv, a blog, or a postmortem host outside that list.
+A `check` never names a host. The source boundary is Python's admitted
+allowlist, decided by the scout and the librarian after this plan exists, and
+it changes with the topic's field: a biomedical paper searches PubMed and
+PMC, a software paper searches vendor docs and arXiv. Write the observable
+fact a citation must support instead of the host that must supply it. Good:
+"a version number and a URL on an official docs page." Bad: "a URL on
+docs.claude.com" or "a citation to arXiv." A check that names a host is
+rejected, and the plan comes back naming which one.
 
 ## Shape a paper, not a brief
 

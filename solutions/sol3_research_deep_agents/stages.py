@@ -46,6 +46,28 @@ UNBOUND_SECTIONS = ("abstract", "references")
 FENCED_JSON = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 CITATION = re.compile(r"\[(\d+)\]")
 
+# A domain-shaped token inside a `check` string. Deliberately narrow: it wants
+# a compound host like `arxiv.org` or `pubmed.ncbi.nlm.nih.gov`, not an
+# abbreviation like `e.g.` or a version number. #469
+HOST_LIKE = re.compile(
+    r"\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\."
+    r"(?:com|org|net|gov|edu|int|io|ai|co|biz|info)\b",
+    re.IGNORECASE,
+)
+
+
+def check_names_host(text: str) -> str:
+    """The host a `check` names, or "".
+
+    A `check` states the observable fact that answers a question. The source
+    boundary is Python's admitted allowlist, decided after the plan exists;
+    a `check` that names a host turns the plan into that boundary instead,
+    which is what let one scout's single admitted host become the paper's
+    only source. #469
+    """
+    match = HOST_LIKE.search(str(text or ""))
+    return match.group(0).rstrip(".").lower() if match else ""
+
 STAGE_ORDER = (
     "corpus",
     "scout",
@@ -163,6 +185,13 @@ def plan_gate(plan: dict, *, loop_doctrine: bool = True) -> None:
             misses.append(f"{label} has no question text.")
         if not question.get("check", "").strip():
             misses.append(f"{label} has no check. Name the observable fact that answers it.")
+        named_host = check_names_host(question.get("check", ""))
+        if named_host:
+            misses.append(
+                f"{label}'s check names {named_host!r}. A check may not name a host; the "
+                "source boundary is Python's admitted allowlist, decided after the plan "
+                "exists, never the plan itself."
+            )
         if label in seen:
             misses.append(f"{label} is used twice. Every question needs its own id.")
         seen.add(label)
@@ -252,6 +281,24 @@ def normalize_plan(plan: dict) -> dict:
 
 # -- 2. search ------------------------------------------------------------
 
+# A claim describes the world. These phrases describe the search instead, and
+# a claim built out of one is a narrated retrieval miss, not a finding. The
+# creatine paper this ticket names put two such sentences in the body, each
+# `important: true`: "No arxiv.org source was found that reports a specific
+# quantitative rate/magnitude of lean mass loss...". #469
+RETRIEVAL_PHRASES = (
+    "source was found",
+    "could not be located",
+    "via the search boundary",
+    "search protocol",
+)
+
+
+def is_retrieval_claim(text: str) -> bool:
+    """Whether a claim's text is about the search rather than the topic."""
+    lowered = str(text or "").lower()
+    return any(phrase in lowered for phrase in RETRIEVAL_PHRASES)
+
 
 def record_findings(
     ledger: evidence.Ledger,
@@ -305,9 +352,16 @@ def record_findings(
         source_ids.append(source.id)
 
     claim_ids = []
+    gaps: list[str] = []
     for item in reply.get("claims", []):
         text = str(item.get("text", "")).strip()
         if not text:
+            continue
+        if is_retrieval_claim(text):
+            # Refused, not carried forward as a single-source claim about
+            # nothing. The question this answer was for still has no finding,
+            # which is a coverage gap, not evidence. #469
+            gaps.append(text)
             continue
         # A claim may name its own subset of sources. When it names none, it
         # inherits every source this answer produced.
@@ -339,6 +393,7 @@ def record_findings(
             subject=subject,
             claim_ids=claim_ids,
             summary=reply.get("answer", ""),
+            gaps=gaps,
         )
     )
 
@@ -362,7 +417,8 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
     if missing:
         raise GateFailed(
             f"these important questions produced nothing: {missing}. "
-            "Search again with narrower wording, or report that no source exists.",
+            "Search again with narrower wording. A claim that no source exists "
+            "is refused; name the coverage gap instead.",
             ("unanswered_important",),
         )
 
