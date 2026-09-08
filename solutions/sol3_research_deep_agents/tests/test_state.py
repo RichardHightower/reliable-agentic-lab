@@ -111,3 +111,19 @@ def test_artifacts_are_recorded(tmp_path):
     st.save()
     again = pstate.PaperState.load_or_create(tmp_path)
     assert again.artifacts["paper"].endswith("whitepaper.md")
+
+
+def test_the_scout_retry_flag_and_shortfall_list_survive_a_reload(tmp_path):
+    """#475: state, never `claim.note`, records the one scout retry and
+    which questions already spent their one evidence_requirements turn."""
+    st = pstate.PaperState.load_or_create(tmp_path)
+    assert st.scout_retried is False
+    assert st.evidence_shortfall_asked == []
+
+    st.scout_retried = True
+    st.evidence_shortfall_asked = ["q1", "q3"]
+    st.save()
+
+    again = pstate.PaperState.load_or_create(tmp_path)
+    assert again.scout_retried is True
+    assert again.evidence_shortfall_asked == ["q1", "q3"]

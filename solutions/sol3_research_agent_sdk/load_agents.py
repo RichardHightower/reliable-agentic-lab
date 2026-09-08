@@ -46,6 +46,35 @@ def _schema(properties: dict, required: list[str]) -> dict:
 
 _STRINGS = {"type": "array", "items": {"type": "string"}}
 
+# #475. `study_types` is a closed set: `source_policy.STUDY_TYPES`, the same
+# vocabulary `tier_for()` assigns, so a planner cannot name a tier the run
+# will never produce.
+_EVIDENCE_REQUIREMENTS_SCHEMA = _schema(
+    {
+        "study_types": {
+            "type": "array",
+            "items": {"type": "string", "enum": list(source_policy.STUDY_TYPES)},
+        },
+        "min_count": {"type": "integer"},
+        "recency_years": {"type": "integer"},
+        "populations": _STRINGS,
+    },
+    ["study_types", "min_count", "recency_years", "populations"],
+)["schema"]
+
+# #475. A key question, structured so `evidence_requirements` is required on
+# every one, not a section-level afterthought a model could skip. `kind`
+# already existed as an unenforced convention `outline.question_kind` read
+# off a hand-built dict; this is the first schema that actually asks for it.
+_QUESTION_SCHEMA = _schema(
+    {
+        "text": {"type": "string"},
+        "kind": {"type": "string", "enum": ["fact", "mechanism", "comparison", "data"]},
+        "evidence_requirements": _EVIDENCE_REQUIREMENTS_SCHEMA,
+    },
+    ["text", "kind", "evidence_requirements"],
+)["schema"]
+
 # The old planner shape, kept so a reader comparing this port to an earlier
 # revision can see what the outliner replaced. Nothing calls it.
 PLAN_SCHEMA = _schema(
@@ -106,7 +135,7 @@ _SECTION_SCHEMA = _schema(
         "heading": {"type": "string"},
         "objective": {"type": "string"},
         "abstract": {"type": "string"},
-        "key_questions": _STRINGS,
+        "key_questions": {"type": "array", "items": _QUESTION_SCHEMA},
         "claims_to_support": _STRINGS,
         "required_evidence": _STRINGS,
         "word_target": {"type": "integer"},

@@ -292,3 +292,80 @@ def test_a_turns_with_no_scout_still_writes_the_briefing(work):
     payload = json.loads((work / "corpus" / "scout-briefing.json").read_text())
     # No turns.scout at all means no field either, so this seeds nothing. #469
     assert payload["admitted"] == []
+
+
+# -- #475: scout titles are mandatory retrieval targets ----------------------
+
+
+def test_an_empty_scout_is_retried_once_with_the_field_named(work):
+    """Headings but no titles: retried once, the missing field named in the
+    second prompt. A hit on retry replaces the proposal."""
+
+    class RetryScout:
+        def __init__(self):
+            self.asked = []
+
+        def scout(self, topic, note=""):
+            self.asked.append((topic, note))
+            if len(self.asked) == 1:
+                return {"headings": ["Epidemiology"], "domains": [], "titles": []}
+            return {"headings": ["Epidemiology"], "domains": [], "titles": ["A flagship"]}
+
+    turns = RetryScout()
+    run = make_run(work, turns)
+    run.write_json("corpus/brain-pack.json", {"corpus_thin": True, "hits": []})
+    paper.scout(run)
+
+    assert len(turns.asked) == 2, "one first pass, one retry, no more"
+    assert turns.asked[0][1] == ""
+    assert "titles" in turns.asked[1][1].lower()
+    payload = json.loads((work / "corpus" / "scout-briefing.json").read_text())
+    assert payload["titles"] == ["A flagship"]
+
+
+def test_a_full_scout_is_not_retried(work):
+    """Headings and titles both present: no second call."""
+    turns = ScoutTurns()
+    run = make_run(work, turns)
+    run.write_json("corpus/brain-pack.json", {"corpus_thin": True, "hits": []})
+    paper.scout(run)
+    assert turns.asked == [("scout", "a topic")]
+
+
+def test_a_retry_that_still_finds_no_titles_keeps_the_first_proposal(work):
+    class StillEmpty:
+        def __init__(self):
+            self.asked = []
+
+        def scout(self, topic, note=""):
+            self.asked.append((topic, note))
+            return {"headings": ["Epidemiology"], "domains": [proposal("cdc.gov")], "titles": []}
+
+    turns = StillEmpty()
+    run = make_run(work, turns)
+    run.write_json("corpus/brain-pack.json", {"corpus_thin": True, "hits": []})
+    paper.scout(run)
+    assert len(turns.asked) == 2
+    payload = json.loads((work / "corpus" / "scout-briefing.json").read_text())
+    assert payload["titles"] == []
+    assert "cdc.gov" in payload["admitted"]
+
+
+def test_an_old_style_scout_with_no_note_argument_is_not_retried_into_a_crash(work):
+    """A `turns.scout` still on the pre-#475 one-argument shape is retried
+    anyway, without the note, rather than crashing the run."""
+
+    class OldScout:
+        def __init__(self):
+            self.asked = []
+
+        def scout(self, topic):
+            self.asked.append(topic)
+            return {"headings": ["Background"], "domains": [], "titles": []}
+
+    turns = OldScout()
+    run = make_run(work, turns)
+    run.write_json("corpus/brain-pack.json", {"corpus_thin": True, "hits": []})
+    meta = paper.scout(run)
+    assert meta["skipped"] is False
+    assert len(turns.asked) == 2

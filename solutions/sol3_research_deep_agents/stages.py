@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import diagrams
@@ -55,6 +56,34 @@ HOST_LIKE = re.compile(
     r"(?:com|org|net|gov|edu|int|io|ai|co|biz|info)\b",
     re.IGNORECASE,
 )
+
+
+def _evidence_requirements_problem(reqs) -> str | None:
+    """What is wrong with a question's `evidence_requirements` block, or
+    `None`. Copied from the Agent SDK port's `outline._evidence_requirements_problem`,
+    never imported: two standalone folders. #475
+
+    Checked only when `plan_gate` is asked to enforce it: an older plan
+    that carries no block at all still parses here, it just names the
+    missing field, never a crash.
+    """
+    if not isinstance(reqs, dict) or not reqs:
+        return "is missing evidence_requirements (study_types, min_count, recency_years, populations)"
+    study_types = reqs.get("study_types")
+    if not isinstance(study_types, list) or not study_types:
+        return "evidence_requirements needs a non-empty study_types list"
+    unknown = [t for t in study_types if t not in source_policy.STUDY_TYPES]
+    if unknown:
+        return f"evidence_requirements study_types names unknown type(s) {unknown}"
+    min_count = reqs.get("min_count")
+    if not isinstance(min_count, int) or isinstance(min_count, bool) or min_count < 1:
+        return "evidence_requirements needs a positive integer min_count"
+    recency_years = reqs.get("recency_years")
+    if not isinstance(recency_years, int) or isinstance(recency_years, bool) or recency_years < 0:
+        return "evidence_requirements needs a non-negative integer recency_years"
+    if not isinstance(reqs.get("populations"), list):
+        return "evidence_requirements needs populations as an array of strings"
+    return None
 
 
 def check_names_host(text: str) -> str:
@@ -163,12 +192,17 @@ def reply_was_truncated(text: str) -> bool:
 # -- 1. plan --------------------------------------------------------------
 
 
-def plan_gate(plan: dict, *, loop_doctrine: bool = True) -> None:
+def plan_gate(
+    plan: dict, *, loop_doctrine: bool = True, require_evidence_requirements: bool = True
+) -> None:
     """Count what a plan must have. No opinion about whether it is a good plan.
 
     `loop_doctrine` is the seminar's own topic, not a property every paper has.
     Off, any topic's own first question is fine. On, question one is bound to
     this repository's exit order, unchanged from before the flag existed.
+
+    `require_evidence_requirements` names every important question missing
+    its `evidence_requirements` block. #475
     """
     misses = []
     questions = plan.get("questions") or []
@@ -211,6 +245,12 @@ def plan_gate(plan: dict, *, loop_doctrine: bool = True) -> None:
             f"{MAX_IMPORTANT_QUESTIONS} load-bearing questions important; the rest may still "
             "contribute sources without blocking the paper."
         )
+    if require_evidence_requirements:
+        for question in important:
+            label = question.get("id") or "an important question"
+            problem = _evidence_requirements_problem(question.get("evidence_requirements"))
+            if problem:
+                misses.append(f"{label} {problem}")
     if not plan.get("sections"):
         misses.append("the plan names no sections.")
     for figure in plan.get("diagrams") or []:
@@ -495,6 +535,81 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
             "is refused; name the coverage gap instead.",
             ("unanswered_important",),
         )
+    shortfalls = []
+    for question in important:
+        reason = evidence_shortfall(ledger, question)
+        if reason:
+            shortfalls.append(f"{question.get('id')}: {reason}")
+    if shortfalls:
+        raise GateFailed(
+            f"evidence_requirements shortfall: {'; '.join(shortfalls)}. "
+            "Search again for what is named missing.",
+            ("evidence_requirements_met",),
+        )
+
+
+# -- 1b. evidence requirements, graded against the bound sources ----------
+#
+# #475. `search_gate` names the shortfall; `Paper._research_shortfalls`
+# spends the one extra turn against it before the gate ever sees it.
+
+
+def evidence_shortfall(ledger: evidence.Ledger, question: dict) -> str:
+    """What a question's `evidence_requirements` block still needs against
+    its own bound sources, or `""` when it is met. #475
+
+    `study_types`/`min_count`: how many distinct sources bound to this
+    question's own claims carry a tier (`source.tier`, from
+    `source_policy.tier_for()`, never a note) in the required set.
+    `recency_years`, when given: a source with a year counts only inside
+    the window; a source with no year is neither counted nor penalized,
+    there is nothing here to check. `populations`: each named term must
+    appear, word-bounded, in the pooled text of this question's own bound
+    claims -- the ledger's own words, never a model's opinion.
+
+    An absent or empty block needs nothing: this is a grading function, not
+    the hard requirement, which is `plan_gate`'s job.
+    """
+    reqs = question.get("evidence_requirements") or {}
+    study_types = [str(t) for t in (reqs.get("study_types") or [])]
+    min_count = int(reqs.get("min_count") or 0)
+    if not study_types or min_count < 1:
+        return ""
+    subject = question.get("subject")
+    claim_ids = {
+        cid
+        for finding in ledger.findings.values()
+        if finding.subject == subject
+        for cid in finding.claim_ids
+    }
+    claims = [ledger.claims[cid] for cid in claim_ids if cid in ledger.claims]
+    source_ids = {sid for claim in claims for sid in claim.source_ids}
+    sources = [ledger.sources[sid] for sid in source_ids if sid in ledger.sources]
+
+    recency_years = reqs.get("recency_years")
+    this_year = datetime.now(timezone.utc).year
+
+    def counts(source: evidence.SourceDocument) -> bool:
+        if (source.tier or "") not in study_types:
+            return False
+        year = str(source.year or "").strip()
+        if recency_years and year.isdigit():
+            return int(year) >= this_year - int(recency_years)
+        return True
+
+    matched = [source for source in sources if counts(source)]
+    if len(matched) < min_count:
+        return f"needs {min_count} {'/'.join(sorted(set(study_types)))}, has {len(matched)}"
+
+    pooled = " ".join(claim.text for claim in claims)
+    missing_populations = [
+        population
+        for population in (reqs.get("populations") or [])
+        if not re.search(rf"\b{re.escape(str(population))}\b", pooled, re.I)
+    ]
+    if missing_populations:
+        return f"no evidence found for population(s): {', '.join(missing_populations)}"
+    return ""
 
 
 # -- 2b. follow the summary to its primary ---------------------------------

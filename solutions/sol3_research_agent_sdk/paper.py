@@ -270,6 +270,10 @@ class Run:
     # single-section outline stub that carries no next-step section. Only
     # `loop.py`'s real CLI run sets this one.
     require_next_step: bool = False
+    # #475. Same reason and same default as `require_next_step`: on for
+    # `loop.py`'s real CLI run, off for the many phase tests whose outline
+    # stubs carry no `evidence_requirements` block.
+    require_evidence_requirements: bool = False
     log: object = print
 
     # -- files -------------------------------------------------------------
@@ -507,6 +511,28 @@ def scout(run: Run) -> dict:
             raise
         except Exception as exc:
             run.log(f"    scout failed: {exc}; outlining from the topic")
+        # #475. A scout that named headings -- a literature exists -- but no
+        # flagship titles is retried once, the missing field named in the
+        # retry prompt. `scout` is a `LINEAR` phase, skipped on any resume
+        # once `corpus/scout-briefing.json` exists, so this can only ever
+        # fire once per run: a `TypeError` here means a `turns.scout` still
+        # on the pre-#475, one-argument shape, retried anyway with no note.
+        if proposal.get("headings") and not proposal.get("titles"):
+            try:
+                retry = ask(
+                    run.topic,
+                    note="The first pass named headings but no titles. Name "
+                    "titles: list a few flagship works for this field, by name.",
+                )
+            except TypeError:
+                retry = ask(run.topic)
+            except Escalate:
+                raise
+            except Exception as exc:
+                retry = {}
+                run.log(f"    scout retry failed: {exc}")
+            if retry and retry.get("titles"):
+                proposal = retry
     proposed = []
     for item in proposal.get("domains") or []:
         if isinstance(item, str):
@@ -596,6 +622,7 @@ def _call_outliner(run: Run, note: str) -> dict:
         word_target_total=run.word_target_total,
         corpus_keys=_pack_keys(run),
         require_next_step=run.require_next_step,
+        require_evidence_requirements=run.require_evidence_requirements,
     )
     if errors:
         raise RunFailed(outlines.retry_note(errors))
@@ -709,6 +736,7 @@ def _edit_outline(run: Run, current: dict, note: str, verdict: dict) -> dict:
             word_target_total=run.word_target_total,
             corpus_keys=_pack_keys(run),
             require_next_step=run.require_next_step,
+            require_evidence_requirements=run.require_evidence_requirements,
         )
         return revised if errors else merged
 
@@ -721,6 +749,7 @@ def _edit_outline(run: Run, current: dict, note: str, verdict: dict) -> dict:
             word_target_total=run.word_target_total,
             corpus_keys=_pack_keys(run),
             require_next_step=run.require_next_step,
+            require_evidence_requirements=run.require_evidence_requirements,
         )
         if errors:
             raise TurnFailed(outlines.retry_note(errors))
@@ -851,6 +880,7 @@ def do_outline(run: Run) -> dict:
             word_target_total=run.word_target_total,
             corpus_keys=_pack_keys(run),
             require_next_step=run.require_next_step,
+            require_evidence_requirements=run.require_evidence_requirements,
         )
         if errors:
             raise RunFailed(outlines.retry_note(errors))
@@ -1168,6 +1198,40 @@ def source_allowlist(run: Run) -> dict:
     }
 
 
+def _title_retrieved(title: str, sources: list[dict]) -> bool:
+    """Loose overlap: the scout's title shares a distinctive word with an
+    admitted source's own title. Word-length 4+ only, so a short common word
+    like "the" or "of" cannot count as a match. #475"""
+    wanted = {w for w in re.findall(r"[a-z]{4,}", str(title or "").lower())}
+    if not wanted:
+        return False
+    return any(
+        wanted & {w for w in re.findall(r"[a-z]{4,}", str(source.get("title") or "").lower())}
+        for source in sources
+    )
+
+
+def _scout_title_status(run: Run, sources: list[dict]) -> list[dict]:
+    """Each scout-briefing flagship title, retrieved or a named skip. #475
+
+    The scout's `titles` are a map, not evidence (`_write_briefing`'s own
+    docstring); this is what makes the map bind to something a reader can
+    open, or names why it does not.
+    """
+    briefing = _load_json(run, "corpus/scout-briefing.json")
+    out = []
+    for title in briefing.get("titles") or []:
+        retrieved = _title_retrieved(title, sources)
+        out.append(
+            {
+                "title": title,
+                "retrieved": retrieved,
+                "reason": "" if retrieved else "no admitted source matched this title",
+            }
+        )
+    return out
+
+
 def do_sections(run: Run) -> dict:
     """Forward-only section loop. Writes claims.json so assemble still reads it."""
     approved = approved_outline(run)
@@ -1277,7 +1341,17 @@ def do_sections(run: Run) -> dict:
 
     run.write_json(
         "sources.json",
-        {"findings": findings, "sources": sources, "failed": failed, "stopped": None},
+        {
+            "findings": findings,
+            "sources": sources,
+            "failed": failed,
+            "stopped": None,
+            # #475. Each scout-briefing flagship title, retrieved or a named
+            # skip. Recomputed here, not accumulated: `sources` only grows
+            # as this loop runs, so this is cheap to get from scratch every
+            # time and needs no cap or retry bookkeeping of its own.
+            "scout_titles": _scout_title_status(run, sources),
+        },
     )
     run.write_json("claims.json", {"claims": claims})
     run.write_json("verdicts.json", {"verdicts": verdicts})

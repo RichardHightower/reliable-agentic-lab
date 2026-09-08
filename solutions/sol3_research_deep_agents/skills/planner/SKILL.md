@@ -53,6 +53,18 @@ fact a citation must support instead of the host that must supply it. Good:
 docs.claude.com" or "a citation to arXiv." A check that names a host is
 rejected, and the plan comes back naming which one.
 
+## Evidence requirements
+
+Every important question also carries `evidence_requirements`: `study_types`
+(one or more of primary_trial, meta_analysis_or_systematic_review,
+position_stand_or_guideline, narrative_review, preprint_or_compilation,
+other), `min_count` (how many sources of those types the question needs),
+`recency_years` (how old a source may be and still count), and `populations`
+(who the evidence has to cover, an empty list when nothing narrower than the
+general case applies). A question with no block is rejected, the question
+named. A shortfall after search names what is still missing, for example
+"needs 2 primary_trial, has 1", and one more search is spent looking for it.
+
 ## Shape a paper, not a brief
 
 Aim for six to ten sections, including Abstract, Introduction, a mechanism or
@@ -96,7 +108,19 @@ Write `plan.json` exactly:
   "title": "the paper's working title",
   "audience": "who reads this and what they already know",
   "questions": [
-    {"id": "q1", "subject": "short-slug", "question": "...", "check": "...", "important": true}
+    {
+      "id": "q1",
+      "subject": "short-slug",
+      "question": "...",
+      "check": "...",
+      "important": true,
+      "evidence_requirements": {
+        "study_types": ["primary_trial"],
+        "min_count": 2,
+        "recency_years": 10,
+        "populations": []
+      }
+    }
   ],
   "sections": [
     {

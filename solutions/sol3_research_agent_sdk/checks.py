@@ -62,6 +62,7 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import outline as outlines
@@ -1915,6 +1916,56 @@ def _paragraphs(body: str) -> list[str]:
 GUIDELINE_TOPIC_WORDS = ("safety", "dosing", "protocol")
 
 
+def evidence_requirements_met(requirements: dict, findings: list[dict]) -> tuple[bool, str]:
+    """Grade a question's bound evidence against its own `evidence_requirements`
+    block. #475
+
+    `findings` is a flat `{"tier", "year", "text"}` shape both call sites
+    build: the pre-write research path (`sections.py`, from a finding's
+    nested `source`) and `section_check`'s post-write row (from the writer's
+    bound claims). `study_types`/`min_count`: how many findings carry a tier
+    in the required set. `recency_years`, when given: a finding with a year
+    counts only inside the window; a finding with no year is neither
+    counted nor penalized, there is nothing here to check. `populations`:
+    each named term must appear, word-bounded, in the pooled text -- the
+    ledger's own words, never a model's opinion.
+
+    Returns `(True, "")` when nothing is required, an absent or empty
+    block: this is a grading function, not the hard requirement, which is
+    `outline.validate`'s job.
+    """
+    requirements = requirements or {}
+    study_types = [str(t) for t in (requirements.get("study_types") or [])]
+    min_count = int(requirements.get("min_count") or 0)
+    if not study_types or min_count < 1:
+        return True, ""
+
+    recency_years = requirements.get("recency_years")
+    this_year = datetime.now(timezone.utc).year
+
+    def counts(finding: dict) -> bool:
+        if (finding.get("tier") or "") not in study_types:
+            return False
+        year = str(finding.get("year") or "").strip()
+        if recency_years and year.isdigit():
+            return int(year) >= this_year - int(recency_years)
+        return True
+
+    matched = [finding for finding in findings if counts(finding)]
+    if len(matched) < min_count:
+        return False, f"needs {min_count} {'/'.join(sorted(set(study_types)))}, has {len(matched)}"
+
+    pooled = " ".join(str(finding.get("text") or "") for finding in findings)
+    missing_populations = [
+        population
+        for population in (requirements.get("populations") or [])
+        if not re.search(rf"\b{re.escape(str(population))}\b", pooled, re.I)
+    ]
+    if missing_populations:
+        return False, f"no evidence found for population(s): {', '.join(missing_populations)}"
+    return True, ""
+
+
 def _is_guideline_topic(section: dict) -> bool:
     heading = str(section.get("heading") or "").lower()
     questions = " ".join(
@@ -1932,7 +1983,7 @@ def section_check(
     word_target: int = 0,
     figures_given: list | None = None,
 ) -> Score:
-    """Ten deterministic rows on one section, before any judge."""
+    """Eleven deterministic rows on one section, before any judge."""
     section = section or {}
     findings = findings or []
     checks: list[Check] = []
@@ -2123,6 +2174,34 @@ def section_check(
             "every generalizing claim was checked for counter-evidence"
             if not uncountered
             else f"missing: {uncountered[:2]}",
+        )
+    )
+
+    # #475. Each key question's own `evidence_requirements` block, graded
+    # against the findings this call was handed that answer it -- the
+    # writer's bound claims, not a whole-run source ledger this function has
+    # no access to. A question with no block (an older outline, or a section
+    # a test built directly) passes trivially: `outline.validate` is where a
+    # missing block is a hard failure, not here. `question_id` on a bound
+    # finding is the question's own text (`sections._finding_from_claim`'s
+    # `answers_question`), never a synthesized id, so this matches on text.
+    shortfalls = []
+    for question in section.get("key_questions") or []:
+        requirements = outlines.question_evidence_requirements(question)
+        if not requirements:
+            continue
+        text = outlines.question_text(question)
+        bound = [f for f in findings if (f.get("question_id") or "") == text]
+        met, reason = evidence_requirements_met(requirements, bound)
+        if not met:
+            shortfalls.append(f"{text!r}: {reason}")
+    checks.append(
+        Check(
+            "evidence_requirements_met",
+            not shortfalls,
+            "every question's evidence_requirements is met"
+            if not shortfalls
+            else "; ".join(shortfalls[:2]),
         )
     )
     return Score(checks=checks)
