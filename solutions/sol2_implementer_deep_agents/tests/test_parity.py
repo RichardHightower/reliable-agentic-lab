@@ -82,20 +82,24 @@ def test_main_exit_codes_are_0_pass_2_escalate_1_crash(monkeypatch):
     monkeypatch.setattr(
         implementer, "run", lambda **_kw: {"rubric": "", "gate": "pass", "reason": "ok"}
     )
-    assert implementer.main(["--repo", "unused", "--doer", "none"]) == 0
+    assert implementer.main(["--repo", "unused", "--doer", "none"]) == 0, "gate pass must exit 0"
 
     monkeypatch.setattr(
         implementer,
         "run",
         lambda **_kw: {"rubric": "", "gate": "escalate", "reason": "red gate"},
     )
-    assert implementer.main(["--repo", "unused", "--doer", "none"]) == 2
+    assert implementer.main(["--repo", "unused", "--doer", "none"]) == 2, (
+        "gate escalate must exit 2"
+    )
 
     def fake_crash(**_kw):
         raise implementer.ContractError("boom")
 
     monkeypatch.setattr(implementer, "run", fake_crash)
-    assert implementer.main(["--repo", "unused", "--doer", "none"]) == 1
+    assert implementer.main(["--repo", "unused", "--doer", "none"]) == 1, (
+        "a ContractError must exit 1"
+    )
 
 
 # -- the judge prompt names a changed path (A1, #429) ------------------------
