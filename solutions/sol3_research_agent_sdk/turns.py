@@ -1507,15 +1507,16 @@ class OfflineTurns(Turns):
                 continue
             start, end = span
             segment = body[start:end]
-            mention = f"Figure {number}"
             image_match = re.search(r"^!\[", segment, re.M)
             cut = image_match.start() if image_match else len(segment)
             prose, tail = segment[:cut].rstrip(), segment[cut:]
             # The `Figure N.` caption line itself always names the figure;
             # it lives in `tail`, never in `prose`. Checking `segment` as a
             # whole read the caption as an existing mention and skipped
-            # every figure whose image already carried one. #464.
-            if mention in prose:
+            # every figure whose image already carried one. #464. Word-
+            # bounded, so "Figure 1" is not satisfied by a "Figure 12"
+            # mention already in the prose. #464 F1.
+            if checks.mentions_figure(prose, number):
                 continue
             sentence = _figure_mention_sentence(number, figure.get("caption") or "")
             prose = f"{prose} {sentence}" if prose else sentence

@@ -287,3 +287,137 @@ def test_an_old_bare_name_skip_list_still_loads(work, turns):
     )
     skipped = paper._skipped_charts(run)
     assert skipped == [{"name": "token-cost-multipliers", "section": "", "reason": "no data"}]
+
+
+# -- PR #534 judge follow-ups ------------------------------------------
+
+
+def test_numbering_stays_contiguous_after_a_persisted_caption(work, turns):
+    """#464 B2. `_persist_trim` writes a section's own image and caption
+    line back into its file. A later `assemble` that reads that file must
+    still charge that figure its number, or the next figure reuses it.
+    """
+    run = _run(work, turns)
+    (Path(work) / "diagrams.json").write_text(
+        json.dumps(
+            {
+                "figures": [
+                    {
+                        "name": "fig-a",
+                        "section": "discussion",
+                        "path": "diagrams/fig-a_imagen.png",
+                        "caption": "Figure A.",
+                    },
+                    {
+                        "name": "fig-b",
+                        "section": "limitations",
+                        "path": "diagrams/fig-b_imagen.png",
+                        "caption": "Figure B.",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text(encoding="utf-8")
+    assert [f["number"] for f in checks.placed_figures(body)] == [1, 2]
+
+    # Simulate `_persist_trim`: the "Discussion" section's own file now
+    # carries its image and `Figure 1.` caption line, exactly as
+    # `edit_whole_paper` would have written it back.
+    discussion_block = checks.top_level_sections(body)["discussion"].strip()
+    (Path(work) / "sections" / "discussion.md").write_text(discussion_block + "\n", encoding="utf-8")
+
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text(encoding="utf-8")
+    placed = checks.placed_figures(body)
+    assert [f["number"] for f in placed] == [1, 2], placed
+    assert not checks.captioned_violations(body)
+
+
+def test_captioned_fails_a_duplicate_figure_number():
+    body = (
+        "# T\n\n## Discussion\n\nA point [1].\n\n"
+        "![a](diagrams/a_imagen.png)\n\nFigure 1. a\n\n"
+        "## Limitations\n\nA different point [1].\n\n"
+        "![b](diagrams/b_imagen.png)\n\nFigure 1. b\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "captioned" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "captioned")
+    assert "not contiguous" in row.detail
+
+
+def test_figure_referenced_mention_is_word_bounded():
+    body = (
+        "# T\n\n## Discussion\n\nSee Figure 12 for context. [1]\n\n"
+        "![a](diagrams/a_imagen.png)\n\nFigure 1. a\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "figure_referenced" in score.signature(), score.report()
+
+
+def test_drop_dangling_figure_mentions_preserves_a_same_block_figure_line():
+    """#464 F2. The same block-flattening defect item (d) fixed elsewhere:
+    dropping a dangling sentence must not sweep a same-block image line
+    into the join.
+    """
+    body = (
+        "# T\n\n## Discussion\n\nA point about the loop. Figure 3 shows this.\n"
+        "![fig](diagrams/fig_imagen.png)\n"
+    )
+    result = checks.drop_dangling_figure_mentions(body, valid_numbers=set())
+    discussion = checks.top_level_sections(result)["discussion"]
+    lines = [line for line in discussion.splitlines() if line.strip()]
+    assert lines[-1] == "![fig](diagrams/fig_imagen.png)"
+    assert "Figure 3" not in discussion
+
+
+def test_skip_noted_grades_the_reason_and_the_section():
+    body = (
+        "# T\n\n## Discussion\n\nA point [1].\n\n> token-cost was not shown: no data.\n\n"
+        "## Limitations\n\nA different point [1].\n"
+    )
+    # The name is on the page, under the right section, but the recorded
+    # reason does not match what is actually printed.
+    score = checks.check(
+        body,
+        ["https://a"],
+        skipped_figures=[{"name": "token-cost", "section": "discussion", "reason": "a different reason"}],
+    )
+    assert "skip_noted" in score.signature(), score.report()
+    # Named on the page, but recorded under a section that never carries it.
+    score = checks.check(
+        body,
+        ["https://a"],
+        skipped_figures=[{"name": "token-cost", "section": "limitations", "reason": "no data"}],
+    )
+    assert "skip_noted" in score.signature(), score.report()
+
+
+def test_a_caption_and_a_skip_note_do_not_count_toward_length_or_has_body():
+    # "T" and "Discussion" are the only two words that are not inside a
+    # caption or a skip note: the title and the section heading.
+    body = (
+        "# T\n\n## Discussion\n\nFigure 1. A description of the loop with plenty of words in it.\n\n"
+        "> a-chart was not shown: no data.\n"
+    )
+    assert checks.word_count(body) == 2
+    assert checks.sections_without_prose(body, min_words=1) == ["Discussion (0 words)"]
+
+
+def test_a_back_reference_matches_the_whole_heading():
+    """#464 F6. A substring match let a short heading ("AB") claim the
+    exemption from inside an unrelated longer word ("Cable"): a sentence
+    naming "Cable Routing", not a real heading, still repeats.
+    """
+    caveat = "This exact same specific finding restates fully across sections."
+    body = (
+        "# On a topic\n\n"
+        "## AB\n\nAn unrelated finding here. [1]\n\n"
+        f"## Limitations\n\nAs stated in Cable Routing, {caveat} [1]\n\n"
+        f"## Conclusion\n\nAs stated in Cable Routing, {caveat} [1]\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "caveat_once" in score.signature(), score.report()

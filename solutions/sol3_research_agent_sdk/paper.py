@@ -1803,13 +1803,35 @@ def assemble(run: Run) -> dict:
     parts = [f"# {planned['title']}", ""]
     flags: list[dict] = []
     glossary: dict[str, str] = {}
-    used_diagrams: set[str] = set()
     # #464. One counter, spent as charts and diagrams are placed, body
     # order, contiguous from one. A chart and a diagram share the same
     # sequence: a reader counts figures on the page, not by kind.
     figure_number = 0
     skipped_figures = _skipped_figures(run)
     noted_skips: set[int] = set()
+    # #464 B1. A section a rendered diagram names but the outline no longer
+    # carries, or whose own file never got written, can never receive an
+    # in-text mention: the whole-paper pass only edits a planned section's
+    # own file. That figure is a named skip, not an orphan `## Figures`
+    # block the pass cannot write into. Attributed to the first planned
+    # section this run actually wrote, or "methods" when none did.
+    matchable_sections = {
+        section["id"]
+        for section in planned["sections"]
+        if (run.file("sections") / f"{section['id']}.md").exists()
+    }
+    fallback_section = next(
+        (s["id"] for s in planned["sections"] if s["id"] in matchable_sections), "methods"
+    )
+    for figure in _rendered_diagrams(run):
+        if figure.get("section") not in matchable_sections:
+            skipped_figures.append(
+                {
+                    "name": figure.get("name") or "figure",
+                    "section": fallback_section,
+                    "reason": "no owning section",
+                }
+            )
     # P7, #472. `write_abstract` writes this from the assembled body, after
     # every section, so it is preferred over the outline's own thesis line,
     # which was written before any section existed. It is not a section
@@ -1866,8 +1888,12 @@ def assemble(run: Run) -> dict:
         for chart in _charts_for(run, section["id"]):
             rel = f"charts/{Path(chart['path']).name}"
             caption = chart.get("caption") or chart.get("name") or rel
+            # #464 B2. The number is spent for every placed figure, whether
+            # this call writes the image line fresh or the line already
+            # sits in `text` from a persisted trim: a slot the counter does
+            # not charge is a slot the next figure duplicates.
+            figure_number += 1
             if rel not in text:
-                figure_number += 1
                 parts += [f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""]
         # Charts already had a placement helper. Diagrams were rendered, judged,
         # and left on disk: the first assembled paper had a 597 KB PNG and no
@@ -1875,11 +1901,10 @@ def assemble(run: Run) -> dict:
         for figure in _diagrams_for(run, section["id"]):
             rel = _diagram_rel(figure)
             caption = figure.get("caption") or figure.get("name") or rel
-            if rel and rel not in text and Path(rel).name not in text:
-                figure_number += 1
-                parts += [f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""]
             if rel:
-                used_diagrams.add(_diagram_key(figure))
+                figure_number += 1
+                if rel not in text and Path(rel).name not in text:
+                    parts += [f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""]
         # #386, #464. A skip is not silence: it is named, with its reason,
         # under the section that asked for it. A blockquote so `cited`
         # never reads it as an unsourced claim, the same free ride an
@@ -1889,18 +1914,6 @@ def assemble(run: Run) -> dict:
                 continue
             noted_skips.add(id(skip))
             parts += [f"> {skip['name']} was not shown: {skip['reason']}.", ""]
-    for figure in _rendered_diagrams(run):
-        if _diagram_key(figure) in used_diagrams:
-            continue
-        rel = _diagram_rel(figure)
-        if not rel:
-            continue
-        caption = figure.get("caption") or figure.get("name") or rel
-        if "## Figures" not in parts:
-            parts += ["## Figures", ""]
-        figure_number += 1
-        parts += [f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""]
-        used_diagrams.add(_diagram_key(figure))
     # A skip with no owning section (an empty `section`, or one that never
     # matched a planned section id) still gets a note, not silence, just
     # not one a specific section can claim.
@@ -1958,10 +1971,6 @@ def _diagram_rel(figure: dict) -> str:
         return ""
     name = Path(path).name
     return path if "/" in path.replace("\\", "/") else f"diagrams/{name}"
-
-
-def _diagram_key(figure: dict) -> str:
-    return str(figure.get("name") or "") or _diagram_rel(figure)
 
 
 def _load_diagrams(run: Run) -> list[dict]:
