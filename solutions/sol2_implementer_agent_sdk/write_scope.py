@@ -157,7 +157,12 @@ class Orchestrator(Role):
         if usd is None:
             self.unknown_spend_turns += 1
             return
-        self.spent_usd += usd
+        # #546. The SDK has never reported a negative cost, but nothing
+        # stops a malformed one from arriving; a bare `+=` would let it walk
+        # `spent_usd` backwards and loosen `usd_left` below. `max(usd, 0.0)`
+        # is the same clamp `AgentSdkE2EBackend._bookkeep` already carries in
+        # e2e_t001.py, one level up from this backend-agnostic role.
+        self.spent_usd += max(usd, 0.0)
 
     @property
     def exhausted(self) -> bool:

@@ -86,6 +86,11 @@ class AgentSdkE2EBackend(doers.Backend):
         self.max_total_usd = max_total_usd
         self.calls: list[Call] = []
         self.spent_usd = 0.0
+        # #546. A count of turns whose cost came back `None`, so a reader of
+        # the summary can tell `spent_usd` is a floor, not a total, the same
+        # signal `Orchestrator.unknown_spend_turns` already carries one
+        # level up.
+        self.unknown_spend_turns = 0
 
     @property
     def query_failed(self) -> bool:
@@ -102,6 +107,11 @@ class AgentSdkE2EBackend(doers.Backend):
         """
         raw_usd = getattr(result, "usd", None)
         usd = None if raw_usd is None else float(raw_usd)
+        # #546. Counted here, not derived later from `self.calls`, so it
+        # stays in lockstep with the same call this method is already
+        # bookkeeping.
+        if usd is None:
+            self.unknown_spend_turns += 1
         # #539, follow-up 5. The SDK has never emitted a negative cost, but a
         # bare `+=` would let one walk `spent_usd` backwards and loosen the
         # `max_total_usd` gate above; `max(usd, 0.0)` is the guard the old
@@ -293,6 +303,9 @@ def _write_extras(
         f"gate: {trace.get('gate', 'missing')}",
         f"reason: {trace.get('reason', 'missing')}",
         f"spent_usd: {backend.spent_usd:.4f}",
+        # #546. Echoed next to `spent_usd` so a reader of this file can tell
+        # it is a floor, not a total, without opening `.harness/state.json`.
+        f"unknown_spend_turns: {backend.unknown_spend_turns}",
         # #539(e). The cap this run actually applied, not a number a status
         # note has to guess or invent after the fact.
         f"cap_usd: {backend.max_total_usd:.2f}",

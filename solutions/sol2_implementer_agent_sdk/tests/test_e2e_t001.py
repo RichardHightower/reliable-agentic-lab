@@ -337,6 +337,8 @@ def test_a_timed_out_call_reports_usd_as_none_not_zero(tmp_path):
     assert wrapper.calls[0].usd is None
     assert wrapper.spent_usd == 0.0
     assert wrapper.query_failed
+    # #546. The count that says `spent_usd` is a floor, not a total.
+    assert wrapper.unknown_spend_turns == 1
 
 
 def test_a_budget_exhausted_call_reports_a_known_zero_not_unknown(tmp_path):
@@ -394,6 +396,9 @@ def test_the_summary_reports_the_cap_it_applied_and_keeps_the_raw_event_log(
     summary = (worktree / ".harness" / "last-sdk-e2e.md").read_text(encoding="utf-8")
     assert "cap_usd: 2.00" in summary
     assert "usd=unknown" in summary
+    # #546. `TimedOutBackend` answers `usd=None` on its one call, so the
+    # summary has to say `spent_usd` is a floor, not a total.
+    assert "unknown_spend_turns: 1" in summary
     raw = worktree / ".harness" / "last-sdk-e2e-raw-0-test.txt"
     assert raw.is_file()
     assert "some tool call" in raw.read_text(encoding="utf-8")
