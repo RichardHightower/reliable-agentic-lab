@@ -2317,6 +2317,14 @@ class Paper:
                     if lowered in blocks:
                         self.written[heading] = blocks[lowered].strip()
 
+        # #521. Pointing two repeats in the same section at the same
+        # source leaves the identical pointer sentence stacked once per
+        # repeat, whichever branch above wrote it; a reader needs it once.
+        for heading in self.written:
+            self.written[heading] = paper_check.collapse_repeated_back_references(
+                self.written[heading]
+            )
+
         before_blob = "\n\n".join(before.values())
         after_blob = "\n\n".join(self.written.values())
         evidence_blob = "\n".join(

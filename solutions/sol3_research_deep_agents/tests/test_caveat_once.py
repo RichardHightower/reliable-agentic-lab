@@ -72,6 +72,52 @@ def test_a_back_reference_is_not_a_repeat():
     assert "caveat_once" not in score.signature(), score.report()
 
 
+def test_a_fourteen_word_back_reference_is_not_a_repeat():
+    """#521. The exemption used to cap at 12 words. The pass's own fixed
+    frame around the source section's name is already 8 words, so naming
+    a five-word heading produced a 13-to-14-word sentence that failed the
+    very row the pass was written to clear, on a live model-written
+    outline whose headings run longer than the offline fixtures' one or
+    two words. The cue still carries the exemption; the cap is 24 now.
+    """
+    heading = "Independent Verification Under Bounded Budgets"
+    reference = f"As stated in {heading}, this specific point still applies here."
+    assert len(paper_check.WORD.findall(reference)) == 14
+    body = (
+        "# On a topic\n\n"
+        f"## Discussion\n\n{CAVEAT} [1]\n\n"
+        "## Limitations\n\n"
+        f"{reference} [1]\n\n"
+        "## Conclusion\n\n"
+        f"{reference} [1]\n"
+    )
+    score = paper_check.check(body, ["https://a"])
+    assert "caveat_once" not in score.signature(), score.report()
+
+
+def test_top_level_section_spans_ignores_subheadings():
+    """`top_level_section_spans` shares `top_level_sections`' own fix: only
+    a `##` heading opens a new span, so a `###` key-question sub-heading
+    stays inside its `##` parent's span rather than closing it early. No
+    revert-matrix row named this function until #521.
+    """
+    body = (
+        "# On a topic\n\n"
+        "## Introduction\n\n"
+        "Three exits cover the observed cases. [1]\n\n"
+        "### What stops the loop from running forever\n\n"
+        "A rubric computed in code decides when the loop stops. [1]\n\n"
+        "## Limitations\n\n"
+        "This paper measures two runtimes only. [1]\n"
+    )
+    spans = paper_check.top_level_section_spans(body)
+    sections = paper_check.top_level_sections(body)
+    assert set(spans) == {"introduction", "limitations"}
+    for name, (start, end) in spans.items():
+        assert body[start:end] == sections[name]
+    assert "### What stops the loop from running forever" in body[slice(*spans["introduction"])]
+
+
 def test_the_abstract_may_restate_a_finding_but_two_body_sections_may_not():
     body = (
         "# On a topic\n\n"
@@ -240,6 +286,37 @@ def test_the_fixture_backend_trims_without_a_model(run_dir):
         + "\n"
     )
     assert not paper_check.caveat_once_violations(combined)
+
+
+def test_stacked_identical_back_references_collapse_to_one(run_dir):
+    """#521. Two different sentences in Discussion are both restated, word
+    for word, in Conclusion. Each becomes its own back reference to
+    Discussion; pointed at the same source, the two pointers read
+    identically, so the trim collapses the stack to the one pointer a
+    reader needs. Covers both branches of `stage_trim`: the fixture branch
+    edits each match in place, same as the SDK's offline twin.
+    """
+    caveat_two = (
+        "The observed effect held for one cohort only and may not generalize."
+    )
+
+    class Fixture:
+        name = "fixture"
+
+        def ask(self, role, prompt):
+            raise AssertionError("the fixture branch must not call a model")
+
+    run = _paper(run_dir, Fixture())
+    run.written = {
+        "Discussion": f"{CAVEAT} {caveat_two} [1]",
+        "Conclusion": f"{CAVEAT} {caveat_two} [1]",
+    }
+
+    result = run.stage_trim()
+    assert result.artifacts["trimmed"] is True
+
+    pointer = "As stated in Discussion, this point also holds here."
+    assert run.written["Conclusion"].count(pointer) == 1
 
 
 def test_the_whole_paper_pass_reverts_an_invented_specific(run_dir):

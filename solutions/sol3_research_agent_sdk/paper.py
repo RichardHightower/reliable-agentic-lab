@@ -1926,6 +1926,11 @@ def edit_whole_paper(run: Run, repeats: list[dict], figures: list | None = None)
     the untrimmed body from disk. `new_claims` still has the last word: a
     specific the evidence never retrieved reverts the whole edit. `figures`
     is P10's parameter, unused until that unit lands. #477.
+
+    Collapses a stacked identical back reference after the turn returns,
+    whether the turn was a model or the offline twin: a model-written pass
+    can stack the same pointer just as easily as the deterministic one.
+    #521.
     """
     path = run.file("paper.md")
     before = path.read_text(encoding="utf-8")
@@ -1936,6 +1941,7 @@ def edit_whole_paper(run: Run, repeats: list[dict], figures: list | None = None)
     after = (after or before).strip()
     if not after:
         return {"trimmed": False, "reverted": []}
+    after = checks.collapse_repeated_back_references(after)
     novel = checks.new_claims(before, after)
     evidence = corpus_for(run)
     invented = [token for token in novel if token.lower() not in evidence.lower()]

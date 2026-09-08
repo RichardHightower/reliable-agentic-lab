@@ -120,6 +120,87 @@ def test_a_back_reference_is_not_a_repeat():
     assert "caveat_once" not in score.signature(), score.report()
 
 
+def test_a_fourteen_word_back_reference_is_not_a_repeat():
+    """#521. The exemption used to cap at 12 words. The pass's own fixed
+    frame around the source section's name is already 8 words, so naming
+    a five-word heading produced a 13-to-14-word sentence that failed the
+    very row the pass was written to clear, on a live model-written
+    outline whose headings run longer than the offline fixtures' one or
+    two words. The cue still carries the exemption; the cap is 24 now.
+    """
+    heading = "Independent Verification Under Bounded Budgets"
+    reference = f"As stated in {heading}, this specific point still applies here."
+    assert len(checks.WORD.findall(reference)) == 14
+    body = (
+        "# On a topic\n\n"
+        "## Discussion\n\n"
+        "A single non-arxiv source reported this finding and it should not "
+        "be generalized. [1]\n\n"
+        "## Limitations\n\n"
+        f"{reference} [1]\n\n"
+        "## Conclusion\n\n"
+        f"{reference} [1]\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "caveat_once" not in score.signature(), score.report()
+
+
+def test_top_level_section_spans_ignores_subheadings():
+    """`top_level_section_spans` shares `top_level_sections`' own fix: only
+    a `##` heading opens a new span, so a `###` key-question sub-heading
+    stays inside its `##` parent's span rather than closing it early. No
+    revert-matrix row named this function until #521.
+    """
+    body = (
+        "# On a topic\n\n"
+        "## Introduction\n\n"
+        "Three exits cover the observed cases. [1]\n\n"
+        "### What stops the loop from running forever\n\n"
+        "A rubric computed in code decides when the loop stops. [1]\n\n"
+        "## Limitations\n\n"
+        "This paper measures two runtimes only. [1]\n"
+    )
+    spans = checks.top_level_section_spans(body)
+    sections = checks.top_level_sections(body)
+    assert set(spans) == {"introduction", "limitations"}
+    for name, (start, end) in spans.items():
+        assert body[start:end] == sections[name]
+    assert "### What stops the loop from running forever" in body[slice(*spans["introduction"])]
+
+
+def test_stacked_identical_back_references_collapse_to_one():
+    """#521. Two different sentences in Discussion are both restated, word
+    for word, in Conclusion. Each becomes its own back reference to
+    Discussion; pointed at the same source, the two pointers read
+    identically, so the deterministic trim collapses the stack to the one
+    pointer a reader needs.
+    """
+    import turns as turns_mod  # noqa: PLC0415
+
+    caveat_one = (
+        "A single non-arxiv source reported this finding and it should not "
+        "be generalized."
+    )
+    caveat_two = (
+        "The observed effect held for one cohort only and may not generalize."
+    )
+    body = (
+        "# On a topic\n\n"
+        f"## Discussion\n\n{caveat_one} {caveat_two} [1]\n\n"
+        f"## Conclusion\n\n{caveat_one} {caveat_two} [1]\n"
+    )
+    repeats = checks.repeat_shingles(checks.top_level_sections(body))
+    assert len(repeats) == 2, "the fixture must repeat two distinct sentences, or this test proves nothing"
+
+    offline = turns_mod.OfflineTurns(backend=None)
+    edited = offline.edit_whole_paper(body, repeats)
+
+    conclusion = checks.top_level_sections(edited)["conclusion"]
+    pointer = "As stated in discussion, this point also holds here."
+    assert conclusion.count(pointer) == 1
+    assert not checks.caveat_once_violations(edited)
+
+
 def test_the_offline_dedup_keeps_the_first_and_never_leaves_a_bare_marker():
     """B4, #477. Three sections restate the same sentence. The first stays,
     in full, exactly where it was; the other two become a back reference,
@@ -224,6 +305,34 @@ def test_a_whole_paper_pass_clears_caveat_once(work, turns):
     assert "## Discussion" in seen_body and "## Conclusion" in seen_body
     assert seen_repeats == repeats
     assert seen_figures == []
+
+
+def test_the_whole_paper_pass_collapses_a_model_returned_stack(work, turns):
+    """#521. The offline twin dedupes a stacked pointer itself, but a
+    model-written pass is not guaranteed to; `edit_whole_paper` collapses
+    a stacked identical back reference after the turn returns, whichever
+    turn wrote it.
+    """
+    original = _original_body()
+    pointer = "As stated in Discussion, this point also holds here."
+
+    class Trimmer(turns):
+        def edit_whole_paper(self, body, repeats, figures=None):
+            return body.replace(
+                f"## Conclusion\n\n{CAVEAT} [1]",
+                f"## Conclusion\n\n{pointer} {pointer} [1]",
+                1,
+            )
+
+    (Path(work) / "paper.md").write_text(original, encoding="utf-8")
+    run = _run(work, Trimmer)
+    repeats = checks.repeat_shingles(checks.top_level_sections(original))
+
+    result = paper.edit_whole_paper(run, repeats)
+    assert result == {"trimmed": True, "reverted": []}
+
+    conclusion = (Path(work) / "sections" / "conclusion.md").read_text(encoding="utf-8")
+    assert conclusion.count(pointer) == 1
 
 
 def test_the_pass_persists_so_assemble_keeps_the_trim(work, turns):

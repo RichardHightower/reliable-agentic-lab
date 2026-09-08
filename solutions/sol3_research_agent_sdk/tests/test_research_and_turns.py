@@ -60,6 +60,36 @@ def test_a_missing_fixture_is_unavailable_not_a_crash(tmp_path):
     assert not research.FixtureBackend(tmp_path / "nope.json").available()
 
 
+def test_every_recorded_fixture_key_is_reachable():
+    """#521. A recorded entry that no outline question ever routes to, by
+    exact match or by `FixtureBackend.search`'s own word-overlap fallback,
+    is dead: nothing exercises the source it cites, and a resume can carry
+    it for releases without anyone noticing. #519 fixed one such entry in
+    the e2e fixture; this guards both fixture files going forward.
+    """
+    offline = t.OfflineTurns(backend=None)
+    outline = offline.outline("a topic", "")
+    questions = [
+        question
+        for section in outline["sections"]
+        for question in section["key_questions"]
+    ]
+    for path in (FIXTURE, FIXTURE.parent / "loop-engineering-e2e.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        keys = {
+            key for key, value in data.items() if isinstance(value, dict) and not key.startswith("_")
+        }
+        backend = research.FixtureBackend(path)
+        reached = set()
+        for question in questions:
+            finding = backend.search(question)
+            for key, value in data.items():
+                if isinstance(value, dict) and value.get("answer") == finding.answer:
+                    reached.add(key)
+                    break
+        assert reached == keys, f"{path.name}: {keys - reached} unreachable from the fixture outline"
+
+
 # -- perplexity -------------------------------------------------------------
 
 
