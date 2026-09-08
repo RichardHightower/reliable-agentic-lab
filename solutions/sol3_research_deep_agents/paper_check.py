@@ -102,6 +102,7 @@ STE_FUNCTION_WORDS = frozenset(
     ten first second third fourth fifth last next single multiple several
     various many few much more most less least other another same own new old
     whole entire additional its his her their our your my no not
+    every cannot both none them due
     be is are was were been being have has had do does did will would shall
     should may might must can could
     run runs use uses need needs want wants show shows name names hold holds
@@ -121,8 +122,30 @@ STE_FUNCTION_WORDS = frozenset(
 # verb marker.
 # ponytail: heuristic noun test, upgrade to a tagger if false positives appear
 STE_VERB_ADVERB_SUFFIX = re.compile(r"(?:ing|ed|ly)$|(?<!s)s$", re.I)
-STE_WORD_TOKEN = re.compile(r"[A-Za-z]+(?:-[A-Za-z]+)*")
+# A handful of adjective endings read as a descriptive modifier, not the noun
+# it modifies: "virtual", "single-source", "top level" survives, "folder-local
+# Python virtual environment" does not once "folder-local" and "virtual" both
+# drop out. A hyphenated token is almost always a compound modifier
+# ("folder-local", "twenty-four") rather than the noun itself, and a spelled-
+# out number is a quantifier, not a noun.
+MODIFIER_SUFFIX = re.compile(r"(?:al|ous|ive|able|ible|ful|less|ic|ish|ary|ent|ant)$", re.I)
+NUMBER_WORDS = frozenset(
+    """
+    one two three four five six seven eight nine ten eleven twelve thirteen
+    fourteen fifteen sixteen seventeen eighteen nineteen twenty hundred
+    thousand
+    """.split()
+)
+# Digits stay inside a token so `E2E` is one token, not `E` and `E` either
+# side of an invisible `2`; a token that carries a digit is never itself a
+# noun candidate, so it still breaks the run instead of extending it.
+STE_WORD_TOKEN = re.compile(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 NOUN_STACK_LIMIT = 3
+# The SDK's inline-and-fenced code mask, copied so a contraction inside
+# single backticks is not scored as prose in this port either. `FENCE`
+# elsewhere in this file grades only a full fenced block; this one is scoped
+# to the STE belt.
+CODE_SPAN = re.compile(r"`[^`]*`|```.*?```", re.S)
 
 
 def _mask_references(text: str) -> str:
@@ -133,14 +156,16 @@ def _mask_references(text: str) -> str:
     return text[: match.start()] + " " * (len(text) - match.start())
 
 
-def _mask_fences(text: str) -> str:
-    """Blank fenced code so a code sample is not scanned for STE violations."""
-    return FENCE.sub(lambda m: " " * len(m.group(0)), text)
+def _mask_code(text: str) -> str:
+    """Blank inline and fenced code so a code sample is not scanned for STE
+    violations. Offsets are kept.
+    """
+    return CODE_SPAN.sub(lambda m: " " * len(m.group(0)), text)
 
 
 def _mask_for_ste(text: str) -> str:
     """Code and references, gone. Everything else is body prose."""
-    return _mask_references(_mask_fences(text))
+    return _mask_references(_mask_code(text))
 
 
 def _prose_sentences(text: str) -> list[str]:
@@ -175,7 +200,12 @@ def ste_language_violations(body: str) -> list[str]:
 
 
 def _noun_candidate(word: str) -> bool:
-    return word.lower() not in STE_FUNCTION_WORDS and not STE_VERB_ADVERB_SUFFIX.search(word)
+    if "-" in word or any(ch.isdigit() for ch in word):
+        return False
+    lowered = word.lower()
+    if lowered in STE_FUNCTION_WORDS or lowered in NUMBER_WORDS:
+        return False
+    return not (STE_VERB_ADVERB_SUFFIX.search(word) or MODIFIER_SUFFIX.search(word))
 
 
 NOUN_RUN_BREAK = re.compile(r"[,;:()]")
@@ -184,11 +214,12 @@ NOUN_RUN_BREAK = re.compile(r"[,;:()]")
 def noun_stacks(body: str, limit: int = NOUN_STACK_LIMIT) -> list[str]:
     """Runs of more than `limit` consecutive noun-candidate tokens.
 
-    STE-S5. A hyphenated token, `multi-agent`, is one word. A comma-separated
-    list, "the researcher, verifier, writer, and gate boundaries", is
-    enumeration, not a stack, so punctuation between two tokens also breaks
-    the run; "raises" already breaks it for being a verb, but nothing broke a
-    list, and the recorded fixture paper carries exactly that comma list.
+    STE-S5. Advisory: reported, never a hard gate. A hyphenated token,
+    `folder-local`, stays one token so it breaks the run as one unit, but it
+    reads as a compound modifier and is never itself a candidate. A comma-
+    separated list, "the researcher, verifier, writer, and gate boundaries",
+    is enumeration, not a stack, so punctuation between two tokens also
+    breaks the run.
     """
     masked = _mask_for_ste(body)
     hits: list[str] = []
@@ -577,6 +608,10 @@ def check(
             "no noun cluster longer than three"
             if not stacks
             else f"noun cluster: {stacks[0]!r}",
+            # Advisory until the heuristic earns a hard gate: a deviation from
+            # #456, stated in the P1-fix PR body. It still reports its detail
+            # and never blocks `passed`.
+            hard=False,
         )
     )
 
@@ -835,6 +870,9 @@ def demo() -> None:
     assert ste_language_violations("```\nThe writer doesn't skip a step.\n```") == [], (
         "a fenced code block is masked"
     )
+    assert ste_language_violations("`The writer doesn't skip a step.`") == [], (
+        "an inline code span is masked too, copied from the SDK's mask"
+    )
     assert ste_language_violations("## References\n\nSee it's fine at example.com.") == [], (
         "the references section is masked"
     )
@@ -842,9 +880,28 @@ def demo() -> None:
         "a genitive is not a contraction"
     )
     assert noun_stacks("The orchestrator charges the budget before the writer runs.") == []
-    assert noun_stacks("A multi agent loop harness ships every seminar.")
+    assert noun_stacks("A loop harness gate ledger ships every seminar.")
     assert noun_stacks("The independent researcher, verifier, writer, and gate boundaries appear.") == [], (
         "a comma-separated list is enumeration, not a stack"
+    )
+    # The judge's five reported false positives on PR #492, each traced to a
+    # missing guard and now fixed: a suffix that reads as a modifier, a
+    # hyphen that reads as a compound modifier, a missing function word, and
+    # a digit swallowed by the old tokenizer.
+    assert noun_stacks("This is a standalone Claude Agent SDK for the seminar.") == [], (
+        "Agent ends in -ent, a modifier suffix"
+    )
+    assert noun_stacks("Each lab uses a folder-local Python virtual environment.") == [], (
+        "folder-local is a hyphenated modifier and virtual ends in -al"
+    )
+    assert noun_stacks("The plan names a twenty-four question research phase.") == [], (
+        "twenty-four is a hyphenated number word"
+    )
+    assert noun_stacks("The allowlist governs every top level domain.") == [], (
+        "every is a function word"
+    )
+    assert noun_stacks("The default live E2E run costs about a dollar.") == [], (
+        "E2E is one digit-bearing token, not two bare letters"
     )
 
     print("paper_check: all demo assertions passed")

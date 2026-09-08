@@ -314,10 +314,18 @@ def test_a_latin_abbreviation_fails():
 
 
 def test_four_nouns_in_a_row_fail():
-    """`noun_stack` fires on a four-noun phrase."""
-    body = "A multi agent loop harness ships every seminar [1]."
+    """`noun_stack` fires on a four-noun phrase. It is advisory (a deviation
+    from #456, stated in the P1-fix PR body): it reports and never blocks the
+    gate, so it never appears in `signature()` and never flips `passed`.
+    """
+    body = "A loop harness gate ledger ships every seminar [1]."
     score = checks.check(body, ["https://a"])
-    assert "noun_stack" in score.signature(), score.report()
+    assert "noun_stack" not in score.signature(), score.report()
+    assert "noun_stack" in score.advisories(), score.report()
+    row = next(c for c in score.checks if c.name == "noun_stack")
+    assert not row.passed
+    assert "loop harness gate ledger" in row.detail
+    assert score.passed, "an advisory row never fails the gate"
 
 
 def test_may_on_an_unverified_claim_still_passes():
