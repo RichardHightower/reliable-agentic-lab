@@ -23,6 +23,7 @@ import asyncio
 import dataclasses
 import os
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,10 +33,32 @@ from write_scope import WriteScope
 _TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
 _COST_STOP = {"error_max_budget_usd", "error_max_budget"}
 
+
+def _timeout_env(name: str, default: int) -> int:
+    """Read an integer timeout from the environment, never raising at import.
+
+    #541. A bad value here used to raise `ValueError` at import time and take
+    the whole module down with it. A logged fallback keeps the process alive,
+    the same way a missing dependency reports as a result, not a traceback.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        print(
+            f"[sol4] {name}={raw!r} is not an integer; using the default {default}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        return default
+
+
 # #541, matching #301 (sol3) and #539 (sol2). A ceiling nobody can reach is
 # the bug, not a safety net. Read at import so a test can still patch the
 # module attribute directly.
-QUERY_TIMEOUT_SECONDS = int(os.environ.get("SOL4_QUERY_TIMEOUT_SECONDS", "900"))
+QUERY_TIMEOUT_SECONDS = _timeout_env("SOL4_QUERY_TIMEOUT_SECONDS", 900)
 
 
 @dataclass

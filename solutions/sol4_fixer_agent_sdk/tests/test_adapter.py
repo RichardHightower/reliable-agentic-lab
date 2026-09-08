@@ -199,6 +199,14 @@ def test_a_failed_backend_never_crashes_the_money_gate(fake_sdk, repo):
     assert boss.spent_usd == 0.0
 
 
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#541. A non-integer value must not raise at import and kill the run."""
+    assert adapter._timeout_env("SOL4_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL4_QUERY_TIMEOUT_SECONDS_TEST", "not-a-number")
+    assert adapter._timeout_env("SOL4_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "not-a-number" in capsys.readouterr().err
+
+
 def test_it_reads_structured_output(fake_sdk, repo):
     fake_sdk(
         [
