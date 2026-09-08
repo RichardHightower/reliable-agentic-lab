@@ -1160,6 +1160,159 @@ def test_the_follow_pass_stops_at_the_run_cap(work, turns, monkeypatch):
     assert any("follow" in line and "6/6" in line for line in logs), logs
 
 
+# -- #474: the counter-evidence pass -----------------------------------------
+
+
+def test_a_generalizing_claim_with_no_counter_search_fails():
+    """`counterweighed` names the claim when a generalizing finding was
+    never checked for counter-evidence. A recorded miss passes."""
+    generalizing = {
+        "id": "s1-f1",
+        "text": "Protein alone did not prevent lean-mass loss.",
+        "generalizing": True,
+    }
+    missing = checks.section_check(
+        "Protein alone did not prevent lean-mass loss [1].",
+        section=_section(),
+        findings=[generalizing],
+    )
+    assert "counterweighed" in missing.signature()
+
+    checked = checks.section_check(
+        "Protein alone did not prevent lean-mass loss [1].",
+        section=_section(),
+        findings=[{**generalizing, "counter_checked": True}],
+    )
+    assert "counterweighed" not in checked.signature()
+
+
+def test_a_counter_miss_passes_and_the_brief_says_so():
+    """A recorded miss carries "no contrary evidence found in this search"
+    in the writer's brief, and `counterweighed` passes."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "Protein alone did not prevent lean-mass loss.",
+            "source": {"url_or_path": "https://example.invalid/no-training", "evidence_tier": "other"},
+            "generalizing": True,
+            "counter_checked": True,
+        }
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1", {"https://example.invalid/no-training": 1})
+    assert "no contrary evidence found in this search" in bound[0]["text"]
+
+    passed = checks.section_check(
+        f"{bound[0]['text']} [1].",
+        section=_section(),
+        findings=bound,
+    )
+    assert "counterweighed" not in passed.signature()
+
+
+def test_a_generalizing_claim_gets_one_counter_turn(work, turns, monkeypatch):
+    """"protein alone did not prevent lean-mass loss" gets exactly one
+    counter turn, and the contrary finding binds with `counterargument_to`."""
+    records = {
+        "https://example.invalid/no-training": {"category": "cs.AI"},
+        "https://example.invalid/longland": {
+            "title": "Longland 2016",
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "protein with resistance training preserved lean mass",
+        },
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    counter_log: list[str] = []
+
+    class WithCounter(turns):
+        backend = _FakeBackend()
+
+        def counter_search(self, claim):
+            counter_log.append(claim)
+            return {
+                "found": True,
+                "counter_claim": "Protein with resistance training preserved lean mass (Longland 2016).",
+                "url": "https://example.invalid/longland",
+                "title": "Longland 2016",
+                "quote": "protein with resistance training preserved lean mass",
+            }
+
+    claims = [
+        {
+            "text": "Protein alone did not prevent lean-mass loss.",
+            "source_url": "https://example.invalid/no-training",
+            "quote": "",
+        }
+    ]
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithCounter(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert len(counter_log) == 1, "exactly one counter turn for the one candidate"
+    findings = json.loads((Path(work) / "knowledge/s1/findings.json").read_text())["findings"]
+    counter_finding = next(f for f in findings if f.get("counterargument_to"))
+    assert counter_finding["counterargument_to"] == "s1-f1"
+    # The suffix and the counter finding both live in the writer's bound
+    # list, not in `findings.json`'s raw `claim` text (the same place
+    # `follow_primary_sources`'s "as summarized by" lives). The offline
+    # writer renders every bound claim's `text` straight into the body.
+    body = (Path(work) / "sections/s1.md").read_text(encoding="utf-8")
+    assert "Contrary evidence in [" in body
+    assert "Longland 2016" in body
+
+
+def test_the_counter_pass_stops_at_the_run_cap(work, turns, monkeypatch):
+    """Seven generalizing claims, `--max-counter 6`, six turns."""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch(""))
+    claims = [
+        {
+            "text": f"The result never changed by more than {i} percent.",
+            "source_url": f"https://example.invalid/c{i}",
+            "quote": "",
+        }
+        for i in range(7)
+    ]
+
+    counter_log: list[str] = []
+
+    class WithCounter(turns):
+        backend = _FakeBackend()
+
+        def counter_search(self, claim):
+            counter_log.append(claim)
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+    logs: list[str] = []
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithCounter(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=logs.append,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert len(counter_log) == run.max_counter == 6
+    assert any("counter" in line and "6/6" in line for line in logs), logs
+
+
 def test_attribute_findings_is_a_noop_with_no_backend():
     """A `run.turns` with no `backend` attribute at all (every pre-#471 test
     double) is untouched, so old behaviour is unchanged byte for byte."""

@@ -585,6 +585,111 @@ def apply_follow_result(ledger: evidence.Ledger, claim: evidence.Claim, result: 
     return False
 
 
+# -- 2c. the counter-evidence pass ------------------------------------------
+#
+# #474. A lever was ruled out from one datapoint (#474's own example:
+# "protein alone did not prevent lean-mass loss" is true of one no-training
+# protocol, not the literature). Word-bounded so "alone" does not fire on
+# "alone time" and "always" does not fire on "almost always" reading only
+# its stem.
+GENERALIZING = re.compile(r"\b(did not|does not|alone|fails to|no effect|always|never)\b", re.I)
+
+
+def generalizing_claims(ledger: evidence.Ledger) -> list[evidence.Claim]:
+    """Claims whose text generalizes, shakiest first. #474
+
+    Single-source and secondary-tier claims sort first, then by fewest
+    bindings (`len(claim.source_ids)`), the measure `verify_batch` already
+    uses for its own shakiest-first order.
+
+    No `claims_to_support` cross-reference here: this pass runs during
+    `stage_search`, before the outline -- and its section-level
+    `claims_to_support` -- exists. Port asymmetry, stated not hidden: the
+    SDK twin runs its counter-evidence pass after its outline is approved
+    and adds that second selection criterion, a claim that is the sole
+    support for one of its section's `claims_to_support` entries.
+    """
+    candidates = [claim for claim in ledger.claims.values() if GENERALIZING.search(claim.text)]
+
+    def sort_key(claim: evidence.Claim) -> tuple:
+        single = claim.truth_state == evidence.SINGLE_SOURCE
+        tiers = [ledger.sources[sid].tier for sid in claim.source_ids if sid in ledger.sources]
+        secondary = bool(tiers) and all(tier in source_policy.SECONDARY_TIERS for tier in tiers)
+        return (0 if single else 1, 0 if secondary else 1, len(set(claim.source_ids)))
+
+    return sorted(candidates, key=sort_key)
+
+
+def counter_evidence_for(ledger: evidence.Ledger, claim_id: str) -> evidence.Claim | None:
+    """The claim that contradicts `claim_id`, or `None` when no counter
+    turn found one. #474"""
+    return next(
+        (claim for claim in ledger.claims.values() if claim.counterargument_to == claim_id), None
+    )
+
+
+def counter_checked(ledger: evidence.Ledger, claim: evidence.Claim) -> bool:
+    """Whether a counter-evidence turn already ran for this claim, hit or
+    miss. #474"""
+    if counter_evidence_for(ledger, claim.id) is not None:
+        return True
+    return "counter_checked:" in str(claim.note or "")
+
+
+def apply_counter_result(
+    ledger: evidence.Ledger, claim: evidence.Claim, result: dict, *, backend=None
+) -> bool:
+    """Record a counter-evidence turn's outcome. #474
+
+    A hit adds a new claim, bound to its own source, `counterargument_to`
+    pointing at the claim it contradicts. The original claim is left exactly
+    as it stood: this is evidence for a condition, not a rebinding of it, the
+    way `apply_follow_result` rebinds a claim to a primary it found.
+
+    A hit whose fetched text does not back the model's own contrary claim is
+    treated as a miss, the same reasoning `apply_follow_result` applies to a
+    fetched page that contradicts the primary it named.
+
+    A miss is appended to the original claim's own note, never overwriting a
+    `secondary:` marker `apply_follow_result` may already have written.
+    """
+    url = str(result.get("url") or "").strip()
+    counter_text = str(result.get("counter_claim") or "").strip()
+    if result.get("found") and counter_text and url.lower().startswith(("http://", "https://")):
+        source = ledger.source_for_url(url)
+        if source is None:
+            model_title = result.get("title") or url
+            fetched = metadata.fetch_record(url, backend, model_title=model_title) if backend is not None else {}
+            source = ledger.add_source(
+                evidence.SourceDocument(
+                    title=fetched.get("title") or model_title,
+                    url=url,
+                    subject=claim.subject,
+                    body=result.get("quote", ""),
+                    authors=fetched.get("authors") or [],
+                    year=fetched.get("year") or "",
+                    venue=fetched.get("venue") or "",
+                    note=fetched.get("note") or "",
+                    text=fetched.get("text") or "",
+                    tier=source_policy.tier_for(fetched),
+                )
+            )
+        counter_claim = evidence.Claim(
+            text=counter_text,
+            subject=claim.subject,
+            source_ids=[source.id],
+            counterargument_to=claim.id,
+        )
+        if not source.text or evidence.attributed(counter_claim, source.text, quote=result.get("quote", "")):
+            counter_claim.attributed_source_ids = [source.id] if source.text else []
+            ledger.add_claim(counter_claim)
+            evidence.corroborate(counter_claim)
+            return True
+    note = "counter_checked: no contrary evidence found in this search"
+    claim.note = f"{claim.note}; {note}" if claim.note else note
+    return False
+
+
 # How many claims one verify stage will cross-check.
 #
 # The verifier searches for each claim it is handed, so the size of this list is
@@ -900,6 +1005,16 @@ def claim_brief(ledger: evidence.Ledger, claim_id: str, index: dict[str, int]) -
         # bound here, not the primary study's own report. A dedicated field,
         # not `note`: `apply_verification` still owns that one.
         caveat += f"  (as summarized by {markers}. Say so in the paragraph that uses this.)"
+    # #474. A hit names the contrary claim and its own numbers, so the
+    # writer sees claim and counter-evidence together in one brief line; a
+    # miss says so outright. The writer card carries the one instruction to
+    # state the condition, so it is not repeated here.
+    countered = counter_evidence_for(ledger, claim.id)
+    if countered is not None:
+        counter_markers = "".join(f"[{index[sid]}]" for sid in countered.source_ids if sid in index)
+        caveat += f"  (Contrary evidence {counter_markers}: {countered.text})"
+    elif "counter_checked:" in str(claim.note or ""):
+        caveat += "  (no contrary evidence found in this search.)"
     return f"- {claim.id}: {claim.text} {markers}{caveat}"
 
 

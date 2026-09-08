@@ -95,6 +95,9 @@ Never cite a number you were not given. A dangling `[9]` fails the build.
 When a claim carries only one source, say so in that paragraph: "on a single
 source", or "not corroborated". Do not quietly upgrade it.
 
+A claim paired with contrary evidence states the condition under which it
+holds, not a flat assertion.
+
 ## Use only your bound claims
 
 Each section names the claim ids it may use. Use those and no others. A fact you

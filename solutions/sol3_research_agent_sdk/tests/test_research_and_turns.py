@@ -519,6 +519,51 @@ def test_the_default_follow_primary_is_a_miss_and_the_live_one_asks(work):
     assert output_format is FOLLOW_SCHEMA
 
 
+def test_the_default_counter_search_is_a_miss_and_the_live_one_asks(work):
+    """#474. Default: a miss, the same as `follow_primary`'s. The live turn
+    asks the researcher agent with `COUNTER_SCHEMA`."""
+    from load_agents import COUNTER_SCHEMA  # noqa: PLC0415
+
+    miss = {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+    assert t.Turns().counter_search("a claim") == miss
+
+    backend = Backend([result(structured=miss)])
+    t.SdkTurns(backend=backend, work_dir=work).counter_search(
+        "Protein alone did not prevent lean-mass loss."
+    )
+    prompt, _allow, output_format = backend.prompts[0]
+    assert prompt.startswith("Use the research-researcher agent.")
+    assert "Protein alone did not prevent lean-mass loss." in prompt
+    assert output_format is COUNTER_SCHEMA
+
+
+def test_the_writer_prompt_carries_claim_and_counter_together(work):
+    """#474. The claim and its counter-evidence reach the writer as two
+    bound entries in the same delegation message."""
+    section = {"id": "s1", "heading": "Findings", "key_questions": [], "figures": [], "word_target": 200}
+    claims = [
+        {
+            "id": "s1-f1",
+            "number": 1,
+            "text": "Protein alone did not prevent lean-mass loss. Contrary evidence in [2].",
+            "status": "verified",
+        },
+        {
+            "id": "s1-cf1",
+            "number": 2,
+            "text": "Protein with resistance training preserved lean mass (Longland 2016).",
+            "status": "verified",
+        },
+    ]
+    backend = Backend([result(output="a section")])
+    turn = t.SdkTurns(backend=backend, work_dir=work)
+    turn.write(section, claims, [], "", path="sections/s1.md")
+    prompt = backend.prompts[0][0]
+    assert "Protein alone did not prevent lean-mass loss" in prompt
+    assert "Contrary evidence in [2]" in prompt
+    assert "Longland 2016" in prompt
+
+
 def test_a_generating_turn_carries_the_grounding_contract(work):
     backend = Backend([result(structured={"answer": "", "sources": [], "claims": []})])
     turns = t.SdkTurns(backend=backend, work_dir=work)

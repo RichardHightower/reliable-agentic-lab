@@ -483,6 +483,13 @@ class Paper:
     # count `_follow_primaries` checks and increments on every call,
     # `stage_search` retries included.
     max_follow: int = 6
+    # #474. How many generalizing claims get a counter-evidence turn, per
+    # run, for the same reason `max_follow` is per run: Open decision 4
+    # asked for a cap per section, and eight sections at six each would
+    # roughly double a run. `_counter_evidence` runs once, at the end of
+    # `stage_search`, so a plain slice of the candidate list is already a
+    # whole-run cap.
+    max_counter: int = 6
     attempts: int = DEFAULT_STAGE_ATTEMPTS
     theme: str = "spillwave-light"
     publish: bool = False
@@ -1576,6 +1583,7 @@ class Paper:
             # the answers this run already paid for.
             self.ledger.write()
         self._follow_primaries()
+        self._counter_evidence()
         stages.search_gate(self.ledger, self.plan)
         self.ledger.write()
         provider = self.backend.active_name
@@ -1636,6 +1644,37 @@ class Paper:
             self.follow_used += 1
             self.state.follow_used = self.follow_used
             self.state.save()
+
+    def _counter_evidence(self) -> None:
+        """One counter-evidence turn per generalizing claim, capped at
+        `self.max_counter`. #474
+
+        A hit creates a new claim bound to its own source,
+        `counterargument_to` pointing at the claim it contradicts. A miss is
+        recorded on the original claim's note, so `stages.counter_checked`
+        and `sections.section_check`'s `counterweighed` row can tell "never
+        checked" from "checked, found nothing", and `stages.claim_brief` can
+        say so.
+        """
+        candidates = stages.generalizing_claims(self.ledger)
+        if not candidates:
+            return
+        followed = candidates[: self.max_counter]
+        self.say(f"    counter: {len(followed)} of {len(candidates)} candidate(s), cap {self.max_counter}")
+        for claim in followed:
+            self.budget.begin_request(max_calls=1, max_provider_calls=3)
+            try:
+                reply = self._ask(
+                    "researcher",
+                    f"This claim generalizes: {claim.text}\n\nFind evidence that "
+                    "it is not the case, or holds only under conditions. Search "
+                    'once. Return JSON: {"found": true|false, "counter_claim": '
+                    '"...", "url": "...", "title": "...", "quote": "..."}.',
+                )
+            finally:
+                self.budget.end_request()
+            parsed = self._json_reply("researcher", reply)
+            stages.apply_counter_result(self.ledger, claim, parsed, backend=self.backend)
 
     # -- 3. verify ---------------------------------------------------------
 

@@ -295,6 +295,11 @@ class Claim:
     # follow pass, so a text marker in `note` was gone before the writer
     # ever saw it. `apply_verification` never touches this field.
     secondary: bool = False
+    # The id of the claim this one contradicts, or under-cuts to a condition.
+    # Set only on the new claim `stages.apply_counter_result` creates from a
+    # counter-evidence hit; empty on every other claim, including the one it
+    # points at. `""` for a claim retrieved before this ticket. #474
+    counterargument_to: str = ""
     id: str = ""
     as_of: str = ""
 
@@ -332,6 +337,7 @@ class Claim:
                 "attributed_source_ids": self.attributed_source_ids,
                 "secondary": self.secondary,
                 "study": json.dumps(self.study, sort_keys=True) if self.study else None,
+                "counterargument_to": self.counterargument_to or None,
                 "links": [{"rel": "sourced_from", "target": sid} for sid in self.source_ids],
             }
         )
@@ -586,6 +592,7 @@ class Ledger:
                         attributed_source_ids=list(fields.get("attributed_source_ids") or []),
                         secondary=bool(fields.get("secondary", False)),
                         study=json.loads(fields["study"]) if fields.get("study") else {},
+                        counterargument_to=fields.get("counterargument_to", "") or "",
                         id=fields["id"],
                         as_of=fields.get("as_of", ""),
                     )

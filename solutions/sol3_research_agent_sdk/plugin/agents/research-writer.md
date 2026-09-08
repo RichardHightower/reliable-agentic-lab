@@ -85,6 +85,9 @@ write them:
   are writing from memory, which is the failure this whole pipeline exists to
   prevent.
 
+A claim paired with contrary evidence states the condition under which it
+holds, not a flat assertion.
+
 ## Never write about the run
 
 The reader is reading about the subject, not about how the paper was made. Do

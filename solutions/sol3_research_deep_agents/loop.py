@@ -80,6 +80,7 @@ def run_paper(args) -> int:
         max_usd=args.max_usd,
         max_verify=args.max_verify,
         max_follow=args.max_follow,
+        max_counter=args.max_counter,
         attempts=args.attempts,
         theme=args.theme,
         publish=args.publish,
@@ -122,6 +123,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=6,
         help="how many secondary-tier claims get a follow turn for the primary, per run",
+    )
+    paper_args.add_argument(
+        "--max-counter",
+        type=int,
+        default=6,
+        help="how many generalizing claims get a counter-evidence turn, per run",
     )
     paper_args.add_argument("--theme", default="spillwave-light")
     paper_args.add_argument("--publish", action="store_true", help="push to a secret gist")

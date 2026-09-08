@@ -1035,6 +1035,106 @@ def test_a_stage_retry_does_not_exceed_max_follow_in_total(run_dir):
     assert reloaded.follow_used == 6
 
 
+# -- 2c. the counter-evidence pass. #474 -------------------------------------
+
+
+def test_a_generalizing_claim_gets_one_counter_turn(run_dir):
+    """"protein alone did not prevent lean-mass loss" gets exactly one
+    counter turn, and the contrary claim binds with `counterargument_to`."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    original = evidence.Claim(
+        text="Protein alone did not prevent lean-mass loss.", subject="creatine"
+    )
+    run.ledger.add_claim(original)
+
+    run._counter_evidence()
+
+    assert len(run.runner.prompts) == 1, "exactly one counter turn for the one candidate"
+    assert "Protein alone did not prevent lean-mass loss." in run.runner.prompts[0]
+
+
+def test_a_counter_miss_passes_and_the_brief_says_so(monkeypatch):
+    """A miss is appended to the claim's own note, and the writer's brief
+    carries "no contrary evidence found in this search"."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {},
+    )
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(
+        evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    )
+    hit = stages.apply_counter_result(led, claim, {"found": False}, backend=_FakeBackend())
+    assert not hit
+    assert stages.counter_checked(led, claim)
+
+    index, _ = stages.numbering(led)
+    brief = stages.claim_brief(led, claim.id, index)
+    assert "no contrary evidence found in this search" in brief
+
+
+def test_a_counter_hit_binds_the_contrary_claim_and_the_brief_carries_both(monkeypatch):
+    """A hit creates a new claim, `counterargument_to` pointing at the
+    original, and the writer's brief for the original names it. #474"""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "Longland 2016",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "protein with resistance training preserved lean mass",
+            "pubtype": ["Randomized Controlled Trial"],
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(
+        evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    )
+    hit = stages.apply_counter_result(
+        led,
+        claim,
+        {
+            "found": True,
+            "counter_claim": "Protein with resistance training preserved lean mass (Longland 2016).",
+            "url": "https://docs.claude.com/longland",
+            "title": "Longland 2016",
+            "quote": "protein with resistance training preserved lean mass",
+        },
+        backend=_FakeBackend(),
+    )
+    assert hit
+    countered = stages.counter_evidence_for(led, claim.id)
+    assert countered is not None
+    assert countered.counterargument_to == claim.id
+    assert not str(claim.note or "").startswith("secondary:")
+    assert claim.source_ids == [], "the original claim is not rebound, only evidenced against"
+
+    index, _ = stages.numbering(led)
+    brief = stages.claim_brief(led, claim.id, index)
+    assert "Contrary evidence" in brief
+    assert "Longland 2016" in brief
+
+
+def test_the_counter_pass_stops_at_the_run_cap(run_dir):
+    """Seven generalizing claims, `--max-counter 6`, six turns."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    logs: list[str] = []
+    run.say = logs.append
+    for i in range(7):
+        run.ledger.add_claim(
+            evidence.Claim(text=f"The result never changed by more than {i} percent.", subject="s")
+        )
+
+    run._counter_evidence()
+
+    assert run.runner.prompts and len(run.runner.prompts) == run.max_counter == 6
+    assert any("counter" in line and "cap 6" in line for line in logs), logs
+
+
 def test_search_gate_fails_with_no_claims():
     with pytest.raises(GateFailed):
         stages.search_gate(evidence.Ledger("/nonexistent"), plan())

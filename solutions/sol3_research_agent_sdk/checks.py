@@ -1734,7 +1734,7 @@ def section_check(
     word_target: int = 0,
     figures_given: list | None = None,
 ) -> Score:
-    """Nine deterministic rows on one section, before any judge."""
+    """Ten deterministic rows on one section, before any judge."""
     section = section or {}
     findings = findings or []
     checks: list[Check] = []
@@ -1902,6 +1902,28 @@ def section_check(
             "guideline_cited",
             not missing_guideline,
             "every position stand is cited" if not missing_guideline else f"missing: {missing_guideline}",
+        )
+    )
+
+    # #474. `sections.generalizing_claims` tags a finding `generalizing` when
+    # it is selected for the counter-evidence pass, whether or not the run
+    # cap actually spent a turn on it. `counter_checked` (a hit or a miss) is
+    # this row's only way to tell "the pass ran out of budget before it got
+    # here" from "the pass looked and found nothing". A counter-finding
+    # itself carries `counterargument_to`, not `generalizing`, so it never
+    # needs a counter-search of its own.
+    uncountered = [
+        f.get("text") or f.get("id") or ""
+        for f in findings
+        if f.get("generalizing") and not f.get("counterargument_to") and not f.get("counter_checked")
+    ]
+    checks.append(
+        Check(
+            "counterweighed",
+            not uncountered,
+            "every generalizing claim was checked for counter-evidence"
+            if not uncountered
+            else f"missing: {uncountered[:2]}",
         )
     )
     return Score(checks=checks)

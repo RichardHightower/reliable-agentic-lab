@@ -419,6 +419,141 @@ def follow_primary_sources(run, findings: list[dict], sid: str) -> None:
         run.follow_used += 1
 
 
+# #474. A generalizing claim ruled a lever out from one datapoint (#474's own
+# example: "protein alone did not prevent lean-mass loss" is true of one
+# no-training protocol, not the literature). Word-bounded so "alone" does not
+# fire on "alone time" and "always" does not fire on "almost always" reading
+# only its stem.
+GENERALIZING = re.compile(r"\b(did not|does not|alone|fails to|no effect|always|never)\b", re.I)
+
+
+def _shares_terms(a: str, b: str) -> bool:
+    """Loose overlap: at least one word of length 4+ in common."""
+    left = {w for w in re.findall(r"[a-z]{4,}", (a or "").lower())}
+    right = {w for w in re.findall(r"[a-z]{4,}", (b or "").lower())}
+    return bool(left & right)
+
+
+def generalizing_claims(findings: list[dict], section: dict) -> list[dict]:
+    """Findings whose claim generalizes, or is the sole support for a
+    `claims_to_support` item, shakiest first. #474
+
+    Every qualifying finding is tagged `generalizing: True` in place, whether
+    or not the run cap below ends up spending a turn on it: a candidate the
+    cap left unprocessed still has to fail `checks.section_check`'s
+    `counterweighed` row, naming a claim nobody checked.
+
+    "Bindings" has no per-finding analogue in this port: a finding carries
+    exactly one source, where the Deep Agents twin's `Claim` can carry
+    several. The nearest signal available is how many findings back the same
+    `claims_to_support` assertion; a claim not tied to any assertion is not
+    thin by that measure, so it sorts after every claim that is. Port
+    asymmetry, stated not hidden: the Deep Agents twin runs its
+    counter-evidence pass during `stage_search`, before its outline (and its
+    section-level `claims_to_support`) exists, so it selects by the regex
+    alone.
+    """
+    to_support = section.get("claims_to_support") or []
+    support_count: dict[int, int] = {}
+    for target in to_support:
+        supporters = [f for f in findings if _shares_terms(f.get("claim") or "", target)]
+        for finding in supporters:
+            support_count[id(finding)] = len(supporters)
+
+    candidates = [
+        finding
+        for finding in findings
+        if GENERALIZING.search(finding.get("claim") or "") or support_count.get(id(finding)) == 1
+    ]
+    for finding in candidates:
+        finding["generalizing"] = True
+
+    def sort_key(finding: dict) -> tuple:
+        tier = (finding.get("source") or {}).get("evidence_tier") or ""
+        bindings = support_count.get(id(finding), 99)
+        return (0 if bindings == 1 else 1, 0 if tier in source_policy.SECONDARY_TIERS else 1, bindings)
+
+    return sorted(candidates, key=sort_key)
+
+
+def counter_evidence_pass(run, findings: list[dict], section: dict) -> None:
+    """One counter-evidence turn per generalizing claim, capped at
+    `run.max_counter` across the whole run. #474
+
+    A hit appends a new finding, `counterargument_to` pointing at the claim
+    it contradicts, so the two reach the writer together
+    (`_claims_for_writer`). A miss is recorded on the claim itself
+    (`counter_checked`), so `checks.section_check`'s `counterweighed` row can
+    tell "never checked" from "checked, found nothing", and the writer's
+    brief says "no contrary evidence found in this search".
+
+    Gated and capped the same way `follow_primary_sources` is.
+    """
+    if not hasattr(getattr(run, "turns", None), "backend"):
+        return
+    sid = section.get("id") or ""
+    candidates = generalizing_claims(findings, section)
+    if not candidates:
+        return
+    remaining = max(0, run.max_counter - run.counter_used)
+    selected = candidates[:remaining]
+    run.log(
+        f"    {sid} counter: {len(selected)} of {len(candidates)} candidate(s), "
+        f"{run.counter_used + len(selected)}/{run.max_counter} used this run"
+    )
+    next_index = len(findings) + 1
+    for finding in selected:
+        try:
+            result = run.turns.counter_search(finding.get("claim") or "")
+        except (TurnFailed, Escalate):
+            result = {"found": False}
+        finding["counter_checked"] = True
+        url = str(result.get("url") or "").strip()
+        counter_text = str(result.get("counter_claim") or "").strip()
+        if result.get("found") and counter_text and url.lower().startswith(("http://", "https://")):
+            backend = run.turns.backend
+            model_title = result.get("title") or url
+            fetched = metadata.cached_fetch(run.work_dir, url, backend, model_title=model_title)
+            quote = str(result.get("quote") or "")
+            probe = {"quote": quote, "claim": counter_text}
+            # A hit whose fetched text does not back the model's own contrary
+            # claim is treated as a miss, the same way `_apply_follow_result`
+            # treats a fetched page that contradicts the primary it named.
+            if not fetched.get("text") or attributed(probe, fetched.get("text") or ""):
+                findings.append(
+                    {
+                        "id": f"{sid}-cf{next_index}",
+                        "section_id": sid,
+                        "answers_question": finding.get("answers_question") or "",
+                        "claim": counter_text,
+                        "quote": quote,
+                        "source": {
+                            "kind": "web",
+                            "ref": url,
+                            "title": fetched.get("title") or model_title,
+                            "url_or_path": url,
+                            "vendor": "",
+                            "tier": 1,
+                            "evidence_tier": source_policy.tier_for(fetched),
+                            "authors": fetched.get("authors") or [],
+                            "year": fetched.get("year") or "",
+                            "venue": fetched.get("venue") or "",
+                            "note": fetched.get("note") or "",
+                            "text": fetched.get("text") or "",
+                        },
+                        "evidence_strength": 0.5,
+                        "counterargument_to": finding.get("id") or "",
+                        "numbers": [],
+                        "origin": "web",
+                        "epistemic": "",
+                        "study": {},
+                    }
+                )
+                finding["counter_url"] = url
+                next_index += 1
+        run.counter_used += 1
+
+
 # A claim describes the world. These phrases describe the search instead, and
 # a claim built out of one is a narrated retrieval miss, not a finding. The
 # creatine paper this ticket names put two such sentences in the body, each
@@ -492,6 +627,15 @@ def _claims_for_writer(
             # deterministically, rather than trusted to infer it from a
             # status value it was never taught.
             text = f"{text} (as summarized by [{cite}])."
+        counter_url = finding.get("counter_url") or ""
+        if counter_url:
+            # #474. `counter_evidence_pass` found contrary evidence; point the
+            # writer at its citation number. The writer card carries the one
+            # instruction to state the condition, so it is not repeated here.
+            counter_cite = number if numbers is None else numbers.get(counter_url, 0)
+            text = f"{text} Contrary evidence in [{counter_cite}]."
+        elif finding.get("counter_checked"):
+            text = f"{text} (no contrary evidence found in this search)."
         usable.append(
             {
                 "id": finding["id"],
@@ -506,6 +650,11 @@ def _claims_for_writer(
                 # sent to the writer: `WRITER_CLAIM_FIELDS` in `turns.py`
                 # still names only `id, number, text, status`. #473
                 "tier": source.get("evidence_tier") or "",
+                # Read by `checks.section_check`'s `counterweighed` row, same
+                # reason. #474
+                "generalizing": bool(finding.get("generalizing")),
+                "counter_checked": bool(finding.get("counter_checked")),
+                "counterargument_to": finding.get("counterargument_to") or "",
             }
         )
         number += 1
@@ -924,6 +1073,11 @@ def run_section(run, section: dict) -> dict:
     # or a compilation gets one turn asking for the primary study behind its
     # number, before verify spends its own turns on the same findings. #473
     follow_primary_sources(run, findings, sid)
+
+    # 3c-quinquies counter. A generalizing claim gets one turn asking for
+    # evidence it is not the case, or holds only under conditions, still
+    # before verify spends its own turns on the same findings. #474
+    counter_evidence_pass(run, findings, section)
 
     payload = {
         "section_id": sid,

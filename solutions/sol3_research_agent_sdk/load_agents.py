@@ -249,6 +249,21 @@ FOLLOW_SCHEMA = _schema(
     ["found", "url", "title", "quote"],
 )
 
+# #474. A hit names a counterargument to a generalizing claim, with the
+# contrary claim's own text, not only a URL: the writer needs a sentence to
+# state, not a citation to reason from on its own. A miss is a first-class
+# answer, the same as `found: false` above.
+COUNTER_SCHEMA = _schema(
+    {
+        "found": {"type": "boolean"},
+        "counter_claim": {"type": "string"},
+        "url": {"type": "string"},
+        "title": {"type": "string"},
+        "quote": {"type": "string"},
+    },
+    ["found", "counter_claim", "url", "title", "quote"],
+)
+
 DIAGRAM_SCHEMA = _schema(
     {
         "language": {"type": "string", "enum": ["mermaid", "plantuml"]},

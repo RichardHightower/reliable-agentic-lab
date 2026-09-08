@@ -279,3 +279,38 @@ def test_tier_survives_a_ledger_round_trip(tmp_path):
 
     reloaded = evidence.Ledger(tmp_path / "evidence").load().source_for_url(tiered.url)
     assert reloaded.tier == "position_stand_or_guideline"
+
+
+def test_counterargument_round_trips_through_evidence_md(tmp_path):
+    """#474: `Claim.counterargument_to` survives a `to_markdown` write and a
+    `load` back, the way `tier` already does for `SourceDocument`."""
+    original = evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    counter = evidence.Claim(
+        text="Protein with resistance training preserved lean mass (Longland 2016).",
+        subject="creatine",
+        counterargument_to=original.id,
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_claim(original)
+    led.add_claim(counter)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load()
+    assert reloaded.claim(counter.id).counterargument_to == original.id
+    assert reloaded.claim(original.id).counterargument_to == ""
+
+
+def test_an_older_evidence_md_with_no_counterargument_field_loads(tmp_path):
+    """A claim written before #474 carries no `counterargument_to` line at
+    all: an empty field is already omitted by `render_front_matter`, the
+    same shape an older file has. `load()` defaults it to empty rather than
+    raising."""
+    root = tmp_path / "evidence"
+    root.mkdir()
+    old = evidence.Claim(text="An old claim.", subject="creatine")
+    text = old.to_markdown()
+    assert "counterargument_to" not in text
+    (root / f"{old.id}.md").write_text(text, encoding="utf-8")
+
+    reloaded = evidence.Ledger(root).load().claim(old.id)
+    assert reloaded.counterargument_to == ""

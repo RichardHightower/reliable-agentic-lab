@@ -116,6 +116,74 @@ def test_findings_from_claims_carries_the_tier_from_the_ledger():
     assert findings[0]["evidence_tier"] == "position_stand_or_guideline"
 
 
+# -- #474: the counter-evidence pass -----------------------------------------
+
+
+def test_a_generalizing_claim_with_no_counter_search_fails():
+    """`counterweighed` names the claim when a generalizing finding was
+    never checked for counter-evidence. A recorded miss passes."""
+    generalizing = {
+        "id": "s1-f1",
+        "claim": "Protein alone did not prevent lean-mass loss.",
+        "generalizing": True,
+    }
+    missing = sections.section_check(
+        "Protein alone did not prevent lean-mass loss [1].",
+        section={"heading": "Findings"},
+        findings=[generalizing],
+    )
+    assert "counterweighed" in missing.signature()
+
+    checked = sections.section_check(
+        "Protein alone did not prevent lean-mass loss [1].",
+        section={"heading": "Findings"},
+        findings=[{**generalizing, "counter_checked": True}],
+    )
+    assert "counterweighed" not in checked.signature()
+
+
+def test_findings_from_claims_carries_the_counter_fields_from_the_ledger():
+    """#474: `generalizing`, `counter_checked`, and `counterargument_to`
+    survive from the ledger's `Claim`, which is what wires `counterweighed`
+    to a real run."""
+    import evidence
+    from types import SimpleNamespace
+
+    ledger = evidence.Ledger("/nonexistent")
+    source = ledger.add_source(
+        evidence.SourceDocument(title="A Review", url="https://a.example/review", subject="s")
+    )
+    claim = ledger.add_claim(
+        evidence.Claim(
+            text="Protein alone did not prevent lean-mass loss.",
+            subject="s",
+            source_ids=[source.id],
+        )
+    )
+    paper = SimpleNamespace(ledger=ledger)
+    section = {"heading": "Findings", "claim_ids": [claim.id]}
+
+    findings = sections.findings_from_claims(paper, section, {source.id: 1})
+    assert findings[0]["generalizing"] is True
+    assert findings[0]["counter_checked"] is False
+    assert findings[0]["counterargument_to"] == ""
+
+    counter = ledger.add_claim(
+        evidence.Claim(
+            text="Protein with resistance training preserved lean mass.",
+            subject="s",
+            source_ids=[source.id],
+            counterargument_to=claim.id,
+        )
+    )
+    findings = sections.findings_from_claims(paper, section, {source.id: 1})
+    assert findings[0]["counter_checked"] is True
+
+    section["claim_ids"] = [counter.id]
+    findings = sections.findings_from_claims(paper, section, {source.id: 1})
+    assert findings[0]["counterargument_to"] == claim.id
+
+
 def test_offline_run_writes_section_files_and_ledger(finished_paper: Path):
     assert (finished_paper / "paper_ledger.json").exists()
     entries = json.loads((finished_paper / "paper_ledger.json").read_text())["entries"]

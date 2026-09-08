@@ -27,6 +27,7 @@ import research
 import source_policy
 from load_agents import (
     CHART_SCHEMA,
+    COUNTER_SCHEMA,
     DIAGRAM_SCHEMA,
     FINDINGS_SCHEMA,
     FOLLOW_SCHEMA,
@@ -305,6 +306,16 @@ class Turns:
         rather than inventing a URL nobody retrieved.
         """
         return {"found": False, "url": "", "title": "", "quote": ""}
+
+    def counter_search(self, claim: str) -> dict:
+        """Search for evidence that a generalizing claim is not the case, or
+        holds only under conditions.
+
+        Default: a miss, the same as `follow_primary`'s: a runtime with no
+        way to look reports nothing found rather than inventing a
+        counterargument nobody retrieved. #474
+        """
+        return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
 
     def judge_section(self, section: dict, body: str, findings: list, note: str = "") -> dict:
         return {"passed": True, "failed_rows": [], "notes": []}
@@ -612,6 +623,22 @@ class SdkTurns(Turns):
             "number. Search once. `found: false` if you cannot, rather than "
             "naming a source you did not open.",
             FOLLOW_SCHEMA,
+        )
+
+    def counter_search(self, claim: str) -> dict:
+        """Ask whether a generalizing claim holds only under conditions.
+
+        No `search_domain_filter`, the same reasoning as `follow_primary`:
+        counterevidence may live on a host the run's own topic search never
+        admitted. #474
+        """
+        return self._json(
+            "research-researcher",
+            f"This claim generalizes: {claim}\n\nFind evidence that it is "
+            "not the case, or holds only under conditions. Search once. "
+            "`found: false` if you cannot, rather than inventing a "
+            "counterargument you did not open.",
+            COUNTER_SCHEMA,
         )
 
     def locate(self, title: str, vendor: str, claim_head: str) -> dict:

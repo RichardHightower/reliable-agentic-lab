@@ -168,7 +168,7 @@ def section_check(
     evidence_blob: str = "",
     word_target: int = 0,
 ) -> PaperScore:
-    """Nine deterministic rows on one section, before any judge.
+    """Ten deterministic rows on one section, before any judge.
 
     `stub` is hard. Length, coverage, and figures are recorded but soft on
     this port so the existing writer fixtures still finish; the SDK port
@@ -325,11 +325,33 @@ def section_check(
             "every position stand is cited" if not missing_guideline else f"missing: {missing_guideline}",
         )
     )
+
+    # #474. `findings_from_claims` below sets `generalizing` from
+    # `stages.GENERALIZING`, and `counter_checked` from `stages.counter_checked`
+    # (a hit or a miss). A finding left with neither, and no
+    # `counterargument_to` of its own, is a generalizing claim nobody looked
+    # for the other side of.
+    uncountered = [
+        f.get("claim") or f.get("id") or ""
+        for f in findings
+        if f.get("generalizing") and not f.get("counterargument_to") and not f.get("counter_checked")
+    ]
+    checks.append(
+        Check(
+            "counterweighed",
+            not uncountered,
+            "every generalizing claim was checked for counter-evidence"
+            if not uncountered
+            else f"missing: {uncountered[:2]}",
+        )
+    )
     return PaperScore(checks=checks)
 
 
 def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
     """Turn the section's bound claims into the finding shape the writer already cites."""
+    import stages as stages_mod  # noqa: PLC0415  (avoids a sections<->stages cycle)
+
     claim_ids = list(section.get("claim_ids") or [])
     heading = (section.get("heading") or "").lower()
     if heading in ("abstract", "references"):
@@ -365,6 +387,10 @@ def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
                 # already means "corpus vs web citation weight" and predates
                 # this ticket. Read by `section_check`'s `guideline_cited` row.
                 "evidence_tier": source.tier if source is not None else "",
+                # Read by `section_check`'s `counterweighed` row. #474
+                "generalizing": bool(stages_mod.GENERALIZING.search(claim.text)),
+                "counter_checked": stages_mod.counter_checked(paper.ledger, claim),
+                "counterargument_to": claim.counterargument_to or "",
             }
         )
         number += 1
