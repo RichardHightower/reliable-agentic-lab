@@ -2342,3 +2342,58 @@ def test_resume_loads_the_saved_plan_and_never_replans(tmp_path, monkeypatch):
     # evidence and re-saves. The ids proving no renumbering happened are
     # what a resume actually has to protect.
     assert _step_ids(worktree / "steps.jsonl") == saved_ids
+
+
+# -- #545 follow-up 1: the judge's own probe, landed as a permanent test ---
+
+
+def test_a_live_sdk_backend_write_reaches_the_red_gate_and_the_clone_stays_clean(
+    tmp_path, monkeypatch, fake_sdk
+):
+    """#545 follow-up 1, judge of PR #545. `tests/test_adapter.py`'s
+    write-location test stops at `result.wrote` and never drives
+    `implementer.run`, so a future change that re-derives the worktree path
+    in `harness` rather than `roles` could slip past it. This is the
+    judge's own probe shape: build the doer through
+    `harness.backend(contract, "T001")`, run the loop against a real git
+    clone, and read `red_ids`, the test phase's own files, and the clone's
+    `git status --porcelain` back."""
+    import harness  # noqa: PLC0415  (only this test needs the live backend)
+    from conftest import FakeResultMessage  # noqa: PLC0415
+
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_due.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+        ],
+    )
+
+    module = fake_sdk()
+
+    async def query(*, prompt, options):
+        target = Path(options.cwd) / "tests" / "test_due.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("def test_AC_1():\n    assert False\n", encoding="utf-8")
+        yield FakeResultMessage(result="wrote a test", total_cost_usd=0.01)
+
+    module.query = query
+    contract_obj = contract_mod.Contract(repo)
+    backend = harness.backend(contract_obj, "T001")
+
+    trace = implementer.run(
+        repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=False
+    )
+
+    assert trace["red_ids"] == [new_test]
+    assert trace["test_phase"]["files"] == ["tests/test_due.py"]
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert status.stdout == ""
