@@ -657,6 +657,36 @@ def test_evaluate_x_on_a_live_ticket_passes():
     assert "cta_language" not in score.signature(), score.report()
 
 
+def test_a_figures_appendix_after_next_step_still_passes():
+    """A rendered figure no section claimed lands in an orphan `## Figures`
+    appendix between the last body section and Glossary. That appendix is
+    assembled, not written, so it must not read as the paper's last prose
+    section."""
+    body = (
+        "A point [1].\n\n"
+        "## Next step\n\n"
+        "- Evaluate X on a live ticket.\n\n"
+        "## Figures\n\n"
+        "![orphan](diagrams/orphan_imagen.png)\n\n"
+        "## Glossary\n\n**widget.** A term the body uses.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "next_step" not in score.signature(), score.report()
+
+
+def test_the_rest_of_the_460_ban_list_fails_in_the_next_step_section():
+    """Ticket #460 also names these four; `CTA_PHRASE` was missing them."""
+    for phrase in ("subscribe", "get started", "only solution", "contact sales"):
+        body = (
+            "A point [1].\n\n"
+            f"## Next step\n\n- {phrase.capitalize()} today.\n\n"
+            "## References\n\n1. https://a\n"
+        )
+        score = checks.check(body, ["https://a"], enforce_structure=True)
+        assert "cta_language" in score.signature(), (phrase, score.report())
+
+
 def test_a_step_over_twenty_words_fails():
     """Each step in the next-step section is 20 words or fewer."""
     long_step = "- " + " ".join(["evaluate"] * 21) + "."

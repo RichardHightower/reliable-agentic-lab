@@ -316,10 +316,13 @@ def marketing_violations(body: str) -> list[str]:
 
 # P4, the next-step section may use imperative CTA steps, but it may not sell.
 # `unlock`, `revolutionize`, and the rest of the marketing lexicon are already
-# banned everywhere by `MARKETING_VERB`; this phrase list is the handful of
-# CTA words that are not marketing verbs on their own. Copied from the SDK
-# port, not imported.
-CTA_PHRASE = re.compile(r"\b(buy|sign up|transform your|contact us)\b", re.I)
+# banned everywhere by `MARKETING_VERB`; this phrase list is the CTA ban list
+# ticket #460 names, minus those two, which are not marketing verbs on their
+# own. Copied from the SDK port, not imported.
+CTA_PHRASE = re.compile(
+    r"\b(buy|sign up|subscribe|get started|only solution|contact sales|transform your|contact us)\b",
+    re.I,
+)
 
 
 def _cta_steps(text: str) -> list[str]:
@@ -518,7 +521,9 @@ def glossary_unused(body: str) -> list[str]:
 
 # P4. Glossary and References are assembled, never written by a model, so the
 # last heading a writer could have produced is the last one before them.
-NON_PROSE_TRAILING = {"glossary", "references"}
+# Figures is assembled too, an orphan appendix for a diagram no section
+# claimed, so it is not a prose section either.
+NON_PROSE_TRAILING = {"glossary", "references", "figures"}
 
 
 def last_prose_heading(body: str) -> str | None:
