@@ -229,6 +229,99 @@ def judge(source: Path, png: Path) -> dict:
         return {"pass": False, "misses": ["the judge returned no JSON"], "nodes": [], "edges": 0}
 
 
+# -- #476: a label must agree with the section's claims -----------------------
+
+# Mermaid: `A["Label"]`, `A(Label)`, `A{Label}`, `A>Label]`. PlantUML: a
+# quoted or bare name after a node keyword. Good enough to grade a label's
+# words; not a full grammar for either language.
+MERMAID_NODE = re.compile(
+    r'(?:\[\s*"?(.*?)"?\s*\]|\(\s*"?(.*?)"?\s*\)|\{\s*"?(.*?)"?\s*\}|>\s*"?(.*?)"?\s*\])'
+)
+PUML_NODE = re.compile(
+    r'^\s*(?:participant|actor|component|class|node|rectangle|database|queue|state|usecase)\s+'
+    r'(?:"([^"]+)"|(\w+))',
+    re.M,
+)
+
+# Word-bounded so "alone" does not fire on "alone time" and "increase" does not
+# fire on "increases" (also listed) reading only its stem. Three buckets, the
+# real defect this ticket names: two arms both labeled a gain, an ending
+# labeled a preservation the body refuses to claim.
+OUTCOME_WORD = re.compile(
+    r"\b(gain|loss|preservation|preserve|increase|decrease|improve|improves|"
+    r"prevent|prevents|reduce|reduces)\b",
+    re.I,
+)
+_DIRECTION_OF = {
+    "gain": "gain",
+    "increase": "gain",
+    "improve": "gain",
+    "improves": "gain",
+    "loss": "loss",
+    "decrease": "loss",
+    "reduce": "loss",
+    "reduces": "loss",
+    "preservation": "preservation",
+    "preserve": "preservation",
+    "prevent": "preservation",
+    "prevents": "preservation",
+}
+
+
+def label_direction(label: str) -> str | None:
+    """Which outcome direction a label or a claim's text asserts, or `None`.
+
+    First outcome word wins. A label naming two directions in one clause is
+    rare, and untangling it is the caption's job, not this gate's.
+    """
+    match = OUTCOME_WORD.search(label or "")
+    return _DIRECTION_OF[match.group(1).lower()] if match else None
+
+
+def node_labels(source: str, language: str = "mermaid") -> list[str]:
+    """The node labels a diagram source names, for `figure_claims` to grade."""
+    labels: list[str] = []
+    if language == "plantuml":
+        for match in PUML_NODE.finditer(source or ""):
+            label = (match.group(1) or match.group(2) or "").strip()
+            if label:
+                labels.append(label)
+        return labels
+    for match in MERMAID_NODE.finditer(source or ""):
+        label = next((group for group in match.groups() if group), "").strip().replace("\\n", " ")
+        if label:
+            labels.append(label)
+    return labels
+
+
+def figure_claims(labels: list[str], claims: list[str]) -> list[str]:
+    """Node labels no claim in `claims` backs, direction by direction.
+
+    A label whose direction (gain, loss, or preservation) no claim in this
+    section asserts fails outright: the GitHub issue this ticket answers is
+    a figure ending on "Lean mass preservation" for a section that refuses
+    to make that claim. When exactly one claim backs a direction -- this
+    section's sole support for it -- the label must say "reported"; stated
+    plainly, it reads as a settled fact only one source made.
+    """
+    supports: dict[str, int] = {}
+    for text in claims:
+        direction = label_direction(text)
+        if direction:
+            supports[direction] = supports.get(direction, 0) + 1
+    mismatches = []
+    for label in labels:
+        direction = label_direction(label)
+        if direction is None:
+            continue
+        count = supports.get(direction, 0)
+        if count == 0:
+            mismatches.append(label)
+        elif count == 1 and "reported" not in label.lower():
+            mismatches.append(label)
+    return mismatches
+
+
 def draw(  # noqa: PLR0913  (every one of these is a distinct render input)
     turns,
     *,
@@ -239,22 +332,33 @@ def draw(  # noqa: PLR0913  (every one of these is a distinct render input)
     out_dir: Path,
     theme: str = DEFAULT_THEME,
     max_attempts: int = MAX_ATTEMPTS,
+    claims: list[str] | None = None,
 ) -> Figure:
-    """Draw one figure, simplifying on every judged miss."""
+    """Draw one figure, simplifying on every judged miss.
+
+    `claims` grounds the diagrammer in what this section's ledger entries
+    actually assert, and is graded against every rendered attempt by
+    `figure_claims`. `None` or `[]` (no claims known for this section, the
+    path every caller took before #476) skips that grading rather than
+    failing every outcome-shaped label against zero support.
+    """
     figure = Figure(name=name, section=section)
     out_dir = Path(out_dir)
+    claims = list(claims or [])
 
     if not available():
         figure.misses = ["the renderer is not installed. Run `task setup`."]
         return figure
 
     feedback = ""
+    claim_mismatch = False
     for attempt in range(1, max_attempts + 1):
         figure.attempts = attempt
-        drawn = turns.diagram(name, concept, feedback)
+        drawn = turns.diagram(name, concept, feedback, claims=claims)
         figure.caption = drawn.get("caption", "")
         figure.source = drawn.get("source", "")
-        suffix = SUFFIX.get(drawn.get("language", "mermaid"), ".mmd")
+        language = drawn.get("language", "mermaid")
+        suffix = SUFFIX.get(language, ".mmd")
 
         out_dir.mkdir(parents=True, exist_ok=True)
         source_path = out_dir / f"{name}{suffix}"
@@ -269,15 +373,30 @@ def draw(  # noqa: PLR0913  (every one of these is a distinct render input)
 
         verdict = judge(source_path, png)
         if verdict.get("pass"):
-            figure.path = str(png.relative_to(out_dir.parent))
-            figure.misses = []
-            return figure
+            mismatches = figure_claims(node_labels(figure.source, language), claims) if claims else []
+            if not mismatches:
+                figure.path = str(png.relative_to(out_dir.parent))
+                figure.misses = []
+                return figure
+            claim_mismatch = True
+            figure.misses = [f"{label!r} does not match this section's claims" for label in mismatches]
+            feedback = "; ".join(figure.misses)
+            continue
 
+        claim_mismatch = False
         figure.misses = list(verdict.get("misses", []))
         feedback = "; ".join(figure.misses)
 
-    # Out of attempts. Keep the last image and record what it lost, so the
-    # check report says the figure is imperfect instead of pretending it is not.
+    if claim_mismatch:
+        # Three mismatches. The figure is dropped: no orphan image file, and
+        # an empty `path` keeps assembly from placing a dangling reference.
+        png.unlink(missing_ok=True)
+        figure.path = ""
+        return figure
+
+    # Out of attempts on rendering alone. Keep the last image and record what
+    # it lost, so the check report says the figure is imperfect instead of
+    # pretending it is not.
     figure.path = str(
         (out_dir / f"{name}{suffix}").with_name(f"{name}_imagen.png").relative_to(out_dir.parent)
     )

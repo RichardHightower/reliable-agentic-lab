@@ -256,7 +256,7 @@ class Turns:
         """
         return {"url": "", "supports": False, "excerpt": ""}
 
-    def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
+    def diagram(self, name: str, concept: str, feedback: str = "", claims: list[str] | None = None) -> dict:
         raise NotImplementedError
 
     def chart_spec(self, figure: dict, rows: list, note: str = "") -> dict:
@@ -665,7 +665,12 @@ class SdkTurns(Turns):
             LOCATE_SCHEMA,
         )
 
-    def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
+    def diagram(self, name: str, concept: str, feedback: str = "", claims: list[str] | None = None) -> dict:
+        grounding = (
+            "\n\nClaims this section may draw on:\n" + "\n".join(f"- {c}" for c in claims)
+            if claims
+            else ""
+        )
         again = (
             f"\n\nThe last render lost these: {feedback}. Merge nodes or shorten "
             "labels until it fits. Do not render the same source again."
@@ -674,7 +679,7 @@ class SdkTurns(Turns):
         )
         return self._json(
             "research-diagrammer",
-            f"Draw the figure named {name}. It shows: {concept}{again}",
+            f"Draw the figure named {name}. It shows: {concept}{grounding}{again}",
             DIAGRAM_SCHEMA,
             allow=[f"diagrams/{name}.mmd", f"diagrams/{name}.puml"],
         )
@@ -1278,7 +1283,7 @@ class OfflineTurns(Turns):
     # the offline twin wants exactly the base class's miss. Restating it would
     # be a hunk no test could tell from its parent.
 
-    def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
+    def diagram(self, name: str, concept: str, feedback: str = "", claims: list[str] | None = None) -> dict:
         if name == "trust-boundary":
             source = (
                 "flowchart LR\n"

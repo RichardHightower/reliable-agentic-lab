@@ -351,6 +351,34 @@ def test_matching_accepted_hash_reuses_the_plugin_png(monkeypatch, tmp_path):
     assert reused.note == "unchanged, reused"
 
 
+# -- #476: a label must agree with the section's claims -----------------------
+
+
+def test_label_direction_reads_the_three_outcome_buckets():
+    assert diagrams.label_direction("Reported strength increase") == "gain"
+    assert diagrams.label_direction("True fat-free loss") == "loss"
+    assert diagrams.label_direction("Lean mass preservation") == "preservation"
+    assert diagrams.label_direction("Corrected comparison") is None
+
+
+def test_a_label_that_contradicts_the_section_claims_fails():
+    labels = ["Lean mass preservation", "Search"]
+    claims = ["The trial could not distinguish water retention from tissue."]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass preservation"]
+
+
+def test_a_single_source_label_needs_the_word_reported():
+    labels = ["True fat-free gain", "Reported fat-free gain"]
+    claims = ["One small trial reported a fat-free mass gain."]
+    assert diagrams.figure_claims(labels, claims) == ["True fat-free gain"]
+
+
+def test_two_claims_backing_a_direction_need_no_hedge():
+    labels = ["Lean mass gain"]
+    claims = ["One trial found a lean mass gain.", "A second trial also found a gain."]
+    assert diagrams.figure_claims(labels, claims) == []
+
+
 def test_main_returns_two_for_a_missing_backend(monkeypatch, tmp_path):
     source = tmp_path / "figure.mmd"
     source.write_text(SIMPLE)

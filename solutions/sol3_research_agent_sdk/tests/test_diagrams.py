@@ -9,12 +9,19 @@ import pytest
 
 
 class Drawer:
-    def __init__(self):
+    def __init__(self, source=None):
         self.calls = []
+        self.claims_seen = []
+        self.source = source
 
-    def diagram(self, name, concept, feedback=""):
+    def diagram(self, name, concept, feedback="", claims=None):
         self.calls.append(feedback)
-        return {"language": "mermaid", "source": f"flowchart LR\n  A[{name}]", "caption": "Cap."}
+        self.claims_seen.append(list(claims or []))
+        return {
+            "language": "mermaid",
+            "source": self.source or f"flowchart LR\n  A[{name}]",
+            "caption": "Cap.",
+        }
 
 
 @pytest.fixture
@@ -65,6 +72,100 @@ def test_it_stops_after_three_attempts_and_records_the_miss(renderer, tmp_path):
     assert figure.attempts == diagrams.MAX_ATTEMPTS
     assert figure.misses == ["crowded"]
     assert figure.rendered, "the last image is kept, imperfect and labelled"
+
+
+# -- #476: a label must agree with the section's claims -----------------------
+
+
+def test_label_direction_reads_the_three_outcome_buckets():
+    assert diagrams.label_direction("Reported lean mass gain") == "gain"
+    assert diagrams.label_direction("True fat-free loss") == "loss"
+    assert diagrams.label_direction("Lean mass preservation") == "preservation"
+    assert diagrams.label_direction("Corrected comparison") is None
+    assert diagrams.label_direction("A reported strength increase") == "gain"
+
+
+def test_a_label_that_contradicts_the_section_claims_fails():
+    labels = ["Lean mass preservation", "Search"]
+    claims = ["The trial could not distinguish water retention from tissue."]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass preservation"]
+
+
+def test_a_single_source_label_needs_the_word_reported():
+    labels = ["True fat-free gain", "Reported fat-free gain"]
+    claims = ["One small trial reported a fat-free mass gain."]
+    assert diagrams.figure_claims(labels, claims) == ["True fat-free gain"]
+
+
+def test_two_claims_backing_a_direction_need_no_hedge():
+    labels = ["Lean mass gain"]
+    claims = ["One trial found a lean mass gain.", "A second trial also found a gain."]
+    assert diagrams.figure_claims(labels, claims) == []
+
+
+def test_a_third_mismatch_drops_the_figure_and_the_image(renderer, tmp_path):
+    """Three attempts, a mismatch every time: no image, no dangling reference."""
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer(source='flowchart LR\n  A["Lean mass preservation"]')
+    out_dir = tmp_path / "diagrams"
+    figure = diagrams.draw(
+        drawer,
+        name="f",
+        concept="c",
+        section="s",
+        topic="t",
+        out_dir=out_dir,
+        claims=["The trial could not distinguish water retention from tissue."],
+    )
+    assert figure.attempts == diagrams.MAX_ATTEMPTS
+    assert not figure.rendered, "a claims mismatch is dropped, not kept imperfect"
+    assert figure.path == ""
+    assert not (out_dir / "f_imagen.png").exists(), "no orphan image file is left behind"
+
+
+def test_a_changed_claim_recommissions_a_previously_dropped_label(renderer, tmp_path):
+    """The same label passes once two independent claims back its direction."""
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer(source='flowchart LR\n  A["Lean mass preservation"]')
+    figure = diagrams.draw(
+        drawer,
+        name="f",
+        concept="c",
+        section="s",
+        topic="t",
+        out_dir=tmp_path / "diagrams",
+        claims=[
+            "One trial found a lean mass preservation across both arms.",
+            "A second trial also found a lean mass preservation.",
+        ],
+    )
+    assert figure.rendered
+    assert figure.path == "diagrams/f_imagen.png"
+
+
+def test_no_claims_known_skips_the_gate(renderer, tmp_path):
+    """A caller with nothing bound yet (legacy call sites) is not penalized."""
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer(source='flowchart LR\n  A["Lean mass preservation"]')
+    figure = diagrams.draw(
+        drawer, name="f", concept="c", section="s", topic="t", out_dir=tmp_path / "diagrams"
+    )
+    assert figure.rendered
+
+
+def test_the_diagrammer_receives_the_sections_claims(renderer, tmp_path):
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer()
+    diagrams.draw(
+        drawer,
+        name="f",
+        concept="c",
+        section="s",
+        topic="t",
+        out_dir=tmp_path / "diagrams",
+        claims=["Creatine increased fat-free mass."],
+    )
+    assert drawer.claims_seen == [["Creatine increased fat-free mass."]]
 
 
 def test_no_image_backend_stops_immediately(renderer, tmp_path):

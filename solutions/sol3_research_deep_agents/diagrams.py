@@ -167,6 +167,76 @@ def ordered_exit_checks(source: str) -> bool:
     return bool(done and cost and turns and cost in edges.get(done, ()) and turns in edges.get(cost, ()))
 
 
+# -- #476: a label must agree with the section's claims -----------------------
+
+# Three attempts at a label the claims support, then the figure is dropped.
+# Distinct from the plugin's own render/fidelity retry, which is driven by
+# `GateFailed` at the stage level: a claims mismatch on one figure must not
+# escalate the whole stage, it drops that one figure and moves on.
+MAX_LABEL_ATTEMPTS = 3
+
+# Word-bounded so "alone" does not fire on "alone time" and "increase" does not
+# fire on "increases" reading only its stem. Three buckets: the real defect
+# this ticket names is two arms both labeled a gain, and an ending labeled a
+# preservation the body refuses to claim.
+OUTCOME_WORD = re.compile(
+    r"\b(gain|loss|preservation|preserve|increase|decrease|improve|improves|"
+    r"prevent|prevents|reduce|reduces)\b",
+    re.I,
+)
+_DIRECTION_OF = {
+    "gain": "gain",
+    "increase": "gain",
+    "improve": "gain",
+    "improves": "gain",
+    "loss": "loss",
+    "decrease": "loss",
+    "reduce": "loss",
+    "reduces": "loss",
+    "preservation": "preservation",
+    "preserve": "preservation",
+    "prevent": "preservation",
+    "prevents": "preservation",
+}
+
+
+def label_direction(label: str) -> str | None:
+    """Which outcome direction a label or a claim's text asserts, or `None`.
+
+    First outcome word wins. A label naming two directions in one clause is
+    rare, and untangling it is the caption's job, not this gate's.
+    """
+    match = OUTCOME_WORD.search(label or "")
+    return _DIRECTION_OF[match.group(1).lower()] if match else None
+
+
+def figure_claims(labels: list[str], claims: list[str]) -> list[str]:
+    """Node labels no claim in `claims` backs, direction by direction.
+
+    A label whose direction (gain, loss, or preservation) no claim in this
+    section asserts fails outright. When exactly one claim backs a
+    direction -- this section's sole support for it -- the label must say
+    "reported"; stated plainly, it reads as a settled fact only one source
+    made.
+    """
+    supports: dict[str, int] = {}
+    for text in claims:
+        direction = label_direction(text)
+        if direction:
+            supports[direction] = supports.get(direction, 0) + 1
+    mismatches = []
+    for label in labels:
+        direction = label_direction(label)
+        if direction is None:
+            continue
+        count = supports.get(direction, 0)
+        if count == 0:
+            mismatches.append(label)
+        elif count == 1 and "reported" not in label.lower():
+            mismatches.append(label)
+    return mismatches
+
+
 def simplify_instruction(inv: Inventory) -> str:
     surplus = inv.labels[MAX_NODES:]
     return (
@@ -428,6 +498,21 @@ def demo() -> None:
     assert figure.best == Path("loop_imagen.png")
     figure.png = Path("loop.png")
     assert figure.best is None, "a non-plugin PNG must never become the published figure"
+
+    # #476: a node label must agree with the section's claims.
+    assert label_direction("Lean mass preservation") == "preservation"
+    assert label_direction("Corrected comparison") is None
+    mismatch = figure_claims(
+        ["Lean mass preservation"],
+        ["The trial could not distinguish water retention from tissue."],
+    )
+    assert mismatch == ["Lean mass preservation"]
+    assert figure_claims(
+        ["Reported fat-free gain"], ["One small trial reported a fat-free mass gain."]
+    ) == []
+    assert figure_claims(
+        ["Fat-free gain"], ["One small trial reported a fat-free mass gain."]
+    ) == ["Fat-free gain"], "a sole-support claim needs the word reported"
 
 
 def main(argv: list[str] | None = None) -> int:

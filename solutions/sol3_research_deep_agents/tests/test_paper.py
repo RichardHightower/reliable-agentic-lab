@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import ClassVar
 
+import diagrams as diagrams_mod
 import paper
 import pytest
 import stages
@@ -901,10 +902,25 @@ def test_a_fenced_diagram_reply_is_unfenced():
     assert paper._strip_fence("flowchart LR\n  A --> B") == "flowchart LR\n  A --> B\n"
 
 
+def _run_up_to_write(run) -> None:
+    """Drive the fixture-backed pipeline through `write`, with the default
+    runner, so `diagram` (which now runs after it, #476) has bound claims
+    and written sections to commission from."""
+    run.stage_corpus()
+    run.stage_scout()
+    run.stage_plan()
+    run.stage_sources()
+    run.stage_search()
+    run.stage_verify()
+    run.stage_outline()
+    run.stage_charts()
+    run.stage_write()
+
+
 def test_the_live_diagrammer_file_is_not_replaced_by_its_tool_receipt(
     offline, run_dir, stub_renderer
 ):
-    offline.stage_plan()
+    _run_up_to_write(offline)
 
     class FileDiagrammer:
         name = "deep_agents"
@@ -929,6 +945,85 @@ def test_the_live_diagrammer_file_is_not_replaced_by_its_tool_receipt(
 
     assert (run_dir / "diagrams" / "three-exits.mmd").read_text().startswith("flowchart")
     assert (run_dir / "diagrams" / "maker-checker.puml").read_text().startswith("@startuml")
+
+
+def test_a_third_mismatch_drops_the_figure_and_the_image(offline, run_dir, stub_renderer):
+    """#476: three claims mismatches, then the figure is dropped. No source,
+    no image, and no dangling reference in the assembled paper."""
+    _run_up_to_write(offline)
+    inner = offline.runner
+
+    class MismatchedDiagrammer:
+        name = "fixture"
+
+        def __init__(self, inner):
+            self.inner = inner
+            self.calls = 0
+
+        def ask(self, role, prompt):
+            if role != "diagrammer" or "three-exits" not in prompt:
+                return self.inner.ask(role, prompt)
+            self.calls += 1
+            return paper.Reply(text='flowchart LR\n  A["Lean mass preservation"]\n')
+
+    fake = MismatchedDiagrammer(inner)
+    offline.runner = fake
+    result = offline.stage_diagram()
+
+    assert fake.calls == diagrams_mod.MAX_LABEL_ATTEMPTS
+    assert result.artifacts["dropped"] == ["three-exits"]
+    assert not (run_dir / "diagrams" / "three-exits.mmd").exists(), "no orphan source file"
+    assert not any(
+        p.name.startswith("three-exits") for p in (run_dir / "figures").glob("*")
+    ), "no orphan image file"
+
+    body = stages.assemble(
+        offline.plan, offline.outline, offline.written, offline.figures, offline.ledger
+    )
+    assert "three-exits" not in body, "no dangling reference to the dropped figure"
+
+
+def test_a_second_write_attempt_does_not_recommission_a_figure(offline, run_dir, stub_renderer):
+    """#476's `sections_sha` guard: one diagrammer turn across two calls to
+    `stage_diagram`, when the written sections have not changed between them."""
+    _run_up_to_write(offline)
+    real_ask = offline.runner.ask
+    calls = {"n": 0}
+
+    def counting(role, prompt):
+        if role == "diagrammer":
+            calls["n"] += 1
+        return real_ask(role, prompt)
+
+    offline.runner.ask = counting
+    offline.stage_diagram()
+    first = calls["n"]
+    assert first > 0
+
+    offline.stage_diagram()
+    assert calls["n"] == first, "an unchanged sections_sha must not recommission a figure"
+
+
+def test_a_changed_section_recommissions_its_figure(offline, run_dir, stub_renderer):
+    """The `sections_sha` guard is not a permanent skip."""
+    _run_up_to_write(offline)
+    offline.stage_diagram()
+
+    real_ask = offline.runner.ask
+    calls = {"n": 0}
+
+    def counting(role, prompt):
+        if role == "diagrammer":
+            calls["n"] += 1
+        return real_ask(role, prompt)
+
+    offline.runner.ask = counting
+    heading = next(iter(offline.written))
+    offline.written[heading] += "\nAn added sentence changes the section body."
+    offline._save_sections()
+
+    offline.stage_diagram()
+    assert calls["n"] > 0, "a changed section must recommission its figure"
 
 
 # -- the cost cap ----------------------------------------------------------
@@ -997,7 +1092,9 @@ def test_the_writer_was_actually_reached(run_dir, stub_renderer):
     run = priced_run(run_dir, 3.00)
     run.run()
     done = [n for n, s in run.state.stages.items() if s.status == pstate.COMPLETE]
-    assert done == ["corpus", "scout", "plan", "sources", "search", "verify", "outline", "diagram", "charts"], done
+    # #476: `diagram` moved after `write`, so a run that stalls at `write`
+    # never reaches it.
+    assert done == ["corpus", "scout", "plan", "sources", "search", "verify", "outline", "charts"], done
 
 
 def test_the_run_says_which_call_it_could_not_afford(run_dir, stub_renderer, capsys):
