@@ -2509,6 +2509,33 @@ def test_assemble_inserts_a_python_written_introduction_when_missing():
     assert not paper_check.brief.uncited_claims(body), paper_check.brief.uncited_claims(body)
 
 
+def test_assemble_stubs_an_introduction_the_outline_names_but_never_wrote():
+    """#566 C1. The heading exists in the outline, but `written` carries no
+    entry for it: a partial write, or a `sections.json` persisted before
+    this section existed. `Paper._need_written` only requires `written` to
+    be non-empty, never that it covers every outline section, so this is
+    reachable on a resumed run, not only the fully-missing-heading case
+    `test_assemble_inserts_a_python_written_introduction_when_missing`
+    already covers. Left unhandled this rendered a bare `## Introduction`
+    at 0 words and failed `has_body`; the stub now fills it instead."""
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[0].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(plan(title="T"), out, {"Body": "Body text. [1]"}, [], led)
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    thin = paper_check.sections_without_prose(body, paper_check.MIN_SECTION_WORDS)
+    assert not any(row.startswith("Introduction") for row in thin), thin
+    assert not paper_check.brief.uncited_claims(body), paper_check.brief.uncited_claims(body)
+
+
 def test_assemble_moves_an_out_of_order_methods_after_introduction():
     """#566. The same move rule PR #564 gave Introduction, for Methods.
     Ticket's own outline: Abstract, Introduction, The problem, Methods,

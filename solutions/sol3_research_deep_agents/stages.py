@@ -1707,6 +1707,20 @@ def assemble(
         intro_section = sections[intro_at[0]]
         sections = [entry for index, entry in enumerate(sections) if index not in intro_at]
         lowered = [heading for index, heading in enumerate(lowered) if index not in intro_at]
+        # #566 C1. The heading can be present with no prose behind it: a
+        # partial write, or a `sections.json` persisted before this section
+        # existed (`Paper._need_written` only requires `written` to be
+        # non-empty, never that it covers every outline section). Left
+        # alone this rendered a bare `## Introduction` at 0 words and
+        # `has_body` failed the run. Same backstop as the missing-heading
+        # branch below, keyed by this section's own heading text (its
+        # original casing, since that is the key the render loop below
+        # reads `written` by), the same test the Agent SDK's own
+        # `_render_planned_section` already runs: whether there is prose,
+        # not merely whether the outline names the section.
+        heading_text = str(intro_section.get("heading", "")).strip()
+        if not written.get(heading_text, "").strip():
+            written[heading_text] = _introduction_stub(plan)
     else:
         # #560. The same backstop the Agent SDK's `assemble` inserts for the
         # identical case (`paper.py`'s `_introduction_stub`), copied rather
