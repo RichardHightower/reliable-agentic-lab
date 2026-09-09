@@ -370,6 +370,11 @@ class AgentSdkBackend(Backend):
             progress = {"started": time.monotonic(), "events": 0, "last": "-", "usd": None}
 
             async def collect() -> tuple[str, float, bool, dict | None, bool, str | None, int, int]:
+                """#578 follow-up. A deferring task stuck with no
+                `terminal_reason` reads to the `QUERY_TIMEOUT_SECONDS`
+                ceiling instead of returning early, an inherited SDK limit
+                until the CLI sends its own run-boundary signal.
+                """
                 result_text = ""
                 usd = 0.0
                 reported = False
