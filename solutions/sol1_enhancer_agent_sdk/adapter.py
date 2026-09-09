@@ -246,6 +246,11 @@ class AgentSdkBackend(Backend):
                 options = dataclasses.replace(options, **overlay)
 
             async def collect() -> tuple[str, float | None, dict | None, bool, str | None, str]:
+                """#578 follow-up. A deferring task stuck with no
+                `terminal_reason` reads to the `QUERY_TIMEOUT_SECONDS`
+                ceiling instead of returning early, an inherited SDK limit
+                until the CLI sends its own run-boundary signal.
+                """
                 result_text = ""
                 subagent_tickets: list[str] = []
                 usd = None
