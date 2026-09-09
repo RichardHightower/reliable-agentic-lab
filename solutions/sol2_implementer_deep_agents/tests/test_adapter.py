@@ -549,6 +549,24 @@ def test_the_running_total_accumulates_across_every_call_on_one_backend(tmp_path
     assert backend.spent_usd == 1.0
 
 
+def test_the_judge_call_is_guarded_by_the_loop_budget_too(tmp_path):
+    """#577, judge of PR #584. `_budget_stop()` guards `run()` and `judge()`
+    alike; a judge call the remaining loop budget cannot cover must refuse
+    before ever reaching the graph, reporting the same controlled stop
+    `run()`'s own guard does, not a crash."""
+    judge_agent = FakeAgent("should not run", usd=0.0)
+    backend = adapter.DeepAgentsBackend(
+        FakeAgent(), judge_agent=judge_agent, max_call_usd=0.66, loop_budget_usd=2.00
+    )
+    backend.spent_usd = 1.50
+
+    result = backend.judge(repo=tmp_path, prompt="grade this")
+
+    assert not result.ok
+    assert result.stop_reason == "cost budget spent"
+    assert judge_agent.calls == []
+
+
 def test_a_judge_that_raises_reports_usd_as_none(tmp_path):
     result = adapter.DeepAgentsBackend(
         FakeAgent(), judge_agent=RaisingAgent(RuntimeError("judge boom"))

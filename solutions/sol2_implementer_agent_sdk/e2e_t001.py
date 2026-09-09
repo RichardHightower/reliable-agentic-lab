@@ -146,17 +146,29 @@ class AgentSdkE2EBackend(doers.Backend):
         )
         return usd
 
-    def run(self, *, repo: Path, prompt: str, allow: list[str]):
-        phase, agent = _phase(allow)
+    def _budget_stop(self, *, phase: str, agent: str) -> doers.DoerResult | None:
+        """#577, judge of PR #584. The same pre-call check for every call
+        this wrapper makes, `judge()` included: the judge call was the one
+        place a live run could still spend past the loop's own budget with
+        nothing here to stop it. `None` means there is room, or neither
+        budget figure was given at all -- the behavior before #577.
+        """
         if self.spent_usd >= self.max_total_usd:
             # #539, follow-up 4. This call never reaches the backend, so its
             # cost is known to be exactly zero, not unknown. `usd=None` here
             # would be the mirror of the defect this ticket exists to fix:
             # reporting a known number as unreported.
+            #
+            # #577, judge of PR #584. `stop_reason` set here, not left at the
+            # dataclass default of `None`: `_ask_judge` and the code loop
+            # alike read this field to tell a controlled stop from a call
+            # that never answered, and a `None` here used to make a
+            # budget-blocked judge call read as the second, not the first.
             result = doers.DoerResult(
                 ok=False,
                 usd=0.0,
                 output=f"Agent SDK E2E budget exhausted at ${self.spent_usd:.2f}",
+                stop_reason="cost budget spent",
             )
             self.calls.append(Call(phase, agent, [], 0.0, False, "cost budget spent"))
             return result
@@ -169,7 +181,11 @@ class AgentSdkE2EBackend(doers.Backend):
             # loop's own `.loop.yml` budget; a single call that spends up to
             # the per-query slice can still carry the tighter number past
             # its ceiling, the exact 4.4% overrun a round-5 trace measured.
-            # Stop before that call instead of after it.
+            # Stop before that call instead of after it. A residual overrun
+            # still survives in general: this check bounds the *next* call
+            # from starting, not a call already in flight that spends past
+            # its own slice (round 4 measured 12% over on exactly that
+            # shape). Named as a known ceiling, not closed here.
             remaining = max(self.loop_budget_usd - self.spent_usd, 0.0)
             result = doers.DoerResult(
                 ok=False,
@@ -179,9 +195,17 @@ class AgentSdkE2EBackend(doers.Backend):
                     f"under the ${self.per_query_usd:.2f} per-query cap; "
                     f"${self.spent_usd:.2f} spent so far"
                 ),
+                stop_reason="cost budget spent",
             )
             self.calls.append(Call(phase, agent, [], 0.0, False, "cost budget spent"))
             return result
+        return None
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]):
+        phase, agent = _phase(allow)
+        stopped = self._budget_stop(phase=phase, agent=agent)
+        if stopped is not None:
+            return stopped
 
         instruction = f"Delegate only to {agent}. {prompt}" if agent else prompt
         result = self.backend.run(repo=repo, prompt=instruction, allow=allow)
@@ -197,6 +221,9 @@ class AgentSdkE2EBackend(doers.Backend):
         )
 
     def judge(self, *, repo: Path, prompt: str):
+        stopped = self._budget_stop(phase="judge", agent="implementer-judge")
+        if stopped is not None:
+            return stopped
         result = self.backend.judge(repo=repo, prompt=prompt)
         self._bookkeep(phase="judge", agent="implementer-judge", result=result)
         return result
@@ -361,6 +388,16 @@ def _write_extras(
         # explains why a run can spend under `cap_usd` and still overrun
         # `.loop.yml`'s own, tighter figure.
         f"loop_budget_usd: {'unset' if backend.loop_budget_usd is None else format(backend.loop_budget_usd, '.2f')}",
+        # #577, judge of PR #584. Named as a known ceiling, not closed by
+        # this ticket: the pre-call check above only refuses the *next*
+        # call from starting when the remaining loop budget cannot cover
+        # one; a call already in flight can still spend past its own
+        # per-query slice before the SDK's own budget ceiling ends it
+        # (round 4 measured 12% over on exactly that shape). Worst case is
+        # `loop_budget_usd` plus one call's own overshoot.
+        "known ceiling: a single in-flight call can still spend past its "
+        "own per-query slice; this check only stops the *next* call from "
+        "starting when it cannot afford one.",
         f"query_failed: {backend.query_failed}",
         "",
         "## Phases",

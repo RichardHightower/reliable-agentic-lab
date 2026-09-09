@@ -123,6 +123,17 @@ class FakeTaskNotification:
     subtype: str = "task_notification"
 
 
+@dataclass
+class FakeTaskUpdated:
+    """#577 follow-up (judge spot check at 1b8efe7). Stands in for
+    `TaskUpdatedMessage`: only a terminal `status` (`_TERMINAL_TASK_STATUSES`)
+    clears the task; anything else is a mid-run progress update."""
+
+    task_id: str = "t1"
+    status: str = "completed"
+    subtype: str = "task_updated"
+
+
 class FakeResultError(Exception):
     pass
 

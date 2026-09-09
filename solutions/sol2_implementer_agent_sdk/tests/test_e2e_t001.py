@@ -277,6 +277,26 @@ def test_a_call_that_fits_the_remaining_loop_budget_still_runs(tmp_path):
     assert delegate.calls == 1
 
 
+def test_the_judge_call_is_guarded_by_the_loop_budget_too(tmp_path):
+    """#577, judge of PR #584. `run()`'s pre-call check had no twin on
+    `judge()`, so a live run could still spend past the loop's own budget on
+    exactly the last call that decides pass or escalate. The delegate must
+    never be asked, and the stop must read as controlled, not a crashed
+    query."""
+    delegate = FakeAgentSdkBackend()
+    wrapper = e2e_t001.AgentSdkE2EBackend(
+        delegate, max_total_usd=3.96, loop_budget_usd=2.00, per_query_usd=0.66
+    )
+    wrapper.spent_usd = 1.50
+
+    result = wrapper.judge(repo=tmp_path, prompt="p")
+
+    assert not result.ok
+    assert result.stop_reason == "cost budget spent"
+    assert not wrapper.query_failed
+    assert wrapper.calls[-1].phase == "judge"
+
+
 def test_build_backend_threads_the_loop_budget_beside_the_wrapper_cap(tmp_path, fake_sdk):
     """#577. `_build_backend` already computes `per_query_usd` from
     `.loop.yml`'s own `budget.usd`; the wrapper it returns must carry both

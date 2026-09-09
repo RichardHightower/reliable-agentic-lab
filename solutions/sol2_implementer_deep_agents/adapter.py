@@ -435,7 +435,15 @@ class DeepAgentsBackend(Backend):
         cumulative loop budget past its own number, instead of only
         checking `max_call_usd` against that one call's own spend after the
         fact. `None` means there is room, or no loop budget was given at
-        all -- the behavior before this ticket.
+        all -- the behavior before this ticket. Guards `run()` and `judge()`
+        alike (judge of PR #584): a live run could still spend past the
+        loop's own budget on the last call that decides pass or escalate.
+
+        Known ceiling, not closed here: this only refuses the *next* call
+        from starting when the remaining budget cannot cover one. A call
+        already in flight can still spend past its own `max_call_usd` slice
+        before `_usage_callback`'s own `DeepAgentsBudgetExceeded` ends it.
+        Worst case is `loop_budget_usd` plus one call's own overshoot.
         """
         if self.loop_budget_usd is None or self.max_call_usd is None:
             return None
