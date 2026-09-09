@@ -2195,16 +2195,25 @@ def assemble(run: Run) -> dict:
     # searches every heading for "introduction" before deciding whether to
     # add one; the body-section loop below runs over what is left, so it
     # is never rendered twice.
+    #
+    # #559. An outline that carries two Introductions had only the first
+    # popped, so the second rode through the body-section loop untouched
+    # and the paper still closed with two `## Introduction` headings, the
+    # gap #557 closed on Deep Agents reopened here. Every matching index is
+    # collected and dropped from `body_sections`, first match kept as the
+    # one that gets rendered: the same duplicate-collapse `normalize_plan`
+    # already does (`stages.py` near line 355), copied rather than
+    # imported.
     body_sections = list(planned["sections"])
-    intro_index = next(
-        (
-            index
-            for index, section in enumerate(body_sections)
-            if str(section.get("heading") or "").strip().lower() == "introduction"
-        ),
-        None,
-    )
-    intro_section = body_sections.pop(intro_index) if intro_index is not None else None
+    intro_indexes = [
+        index
+        for index, section in enumerate(body_sections)
+        if str(section.get("heading") or "").strip().lower() == "introduction"
+    ]
+    intro_section = body_sections[intro_indexes[0]] if intro_indexes else None
+    body_sections = [
+        section for index, section in enumerate(body_sections) if index not in intro_indexes
+    ]
     if intro_section is None or not _render_planned_section(intro_section):
         # #538. No written Introduction: an outline that predates this
         # rule, or a caller that skips `outline.validate`'s
