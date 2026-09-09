@@ -2204,13 +2204,31 @@ def assemble(run: Run) -> dict:
     # one that gets rendered: the same duplicate-collapse `normalize_plan`
     # already does (`stages.py` near line 355), copied rather than
     # imported.
+    #
+    # #566. "First match" is not always the one worth keeping: an outliner
+    # that placed an empty-bodied Introduction first and a real, written
+    # one second left the real prose popped off `body_sections` along with
+    # the empty copy, then discarded outright when `_render_planned_section`
+    # reported no file for the first and the stub branch below ran instead.
+    # The first candidate whose own section file actually exists is kept;
+    # only when none of them do (every copy is unwritten) does the first
+    # stand in, exactly as before, so the stub branch still has a section
+    # to report as missing.
     body_sections = list(planned["sections"])
     intro_indexes = [
         index
         for index, section in enumerate(body_sections)
         if str(section.get("heading") or "").strip().lower() == "introduction"
     ]
-    intro_section = body_sections[intro_indexes[0]] if intro_indexes else None
+    intro_candidates = [body_sections[index] for index in intro_indexes]
+    intro_section = next(
+        (
+            section
+            for section in intro_candidates
+            if (run.file("sections") / f"{section['id']}.md").exists()
+        ),
+        intro_candidates[0] if intro_candidates else None,
+    )
     body_sections = [
         section for index, section in enumerate(body_sections) if index not in intro_indexes
     ]

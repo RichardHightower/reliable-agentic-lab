@@ -497,6 +497,74 @@ def test_assemble_collapses_a_duplicate_introduction(work, turns, no_renderer):
     assert "Second written introduction text" not in body, body
 
 
+def test_assemble_keeps_the_prose_bearing_duplicate_when_the_first_has_no_file(
+    work, turns, no_renderer
+):
+    """#566. The old collapse always kept `intro_indexes[0]`, whether or not
+    that copy ever got a written file. When the first duplicate's own
+    section file was never written (a resumed run whose write turn for it
+    never completed, or was dropped some other way) but a later duplicate
+    under a different id has real prose on disk, the old code still popped
+    both from `body_sections`, found no file for the first, and ran the
+    stub branch, discarding the second copy's real text along with it. The
+    first candidate that actually has a file is now kept, wherever it sits
+    among the duplicates."""
+
+    class TwoIntros(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            third = drafted["sections"][0]["word_target"] // 3
+            drafted["sections"][0]["word_target"] -= 2 * third
+            drafted["sections"].insert(
+                0,
+                {
+                    "id": "intro-first",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            drafted["sections"].append(
+                {
+                    "id": "intro-second",
+                    "heading": "Introduction",
+                    "objective": "Name the problem, again.",
+                    "abstract": "A second introduction section.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, TwoIntros())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    # The first duplicate never got a section file: no write turn for it
+    # completed, or it was removed some other way.
+    (Path(work) / "sections" / "intro-first.md").unlink(missing_ok=True)
+    (Path(work) / "sections" / "intro-second.md").write_text(
+        "Second written introduction text [1].\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "Second written introduction text" in introduction, introduction
+    assert "This paper's outline carried no Introduction" not in body, body
+
+
 def test_assemble_repairs_a_resumed_outline_with_no_introduction(work, turns, no_renderer):
     """#538, PR #554 judge finding F2. A resume whose `outline.approved.json`
     was stamped before this rule landed carries no Introduction section at
