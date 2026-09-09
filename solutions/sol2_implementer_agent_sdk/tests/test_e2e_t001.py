@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -181,6 +183,22 @@ def test_the_live_turn_ceiling_is_high_enough_for_a_green_run():
     assert e2e_t001.E2E_MAX_TURNS >= 12
 
 
+def test_the_dollar_cap_is_tunable_by_environment_variable():
+    """#444/#539. The cap a status note reports must be a cap an operator
+    actually chose. Read at import, the same as adapter.QUERY_TIMEOUT_SECONDS,
+    so this is a subprocess check, not a monkeypatch of the module attribute."""
+    env = {**os.environ, "SOL2_E2E_MAX_USD": "4"}
+    out = subprocess.run(
+        [sys.executable, "-c", "import e2e_t001; print(e2e_t001.MAX_TOTAL_USD)"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        env=env,
+        check=True,
+    )
+    assert out.stdout.strip() == "4.0"
+
+
 def test_a_controlled_sdk_turn_ceiling_is_not_a_failed_query(tmp_path):
     delegate = FakeAgentSdkBackend()
     original_run = delegate.run
@@ -319,6 +337,8 @@ def test_a_timed_out_call_reports_usd_as_none_not_zero(tmp_path):
     assert wrapper.calls[0].usd is None
     assert wrapper.spent_usd == 0.0
     assert wrapper.query_failed
+    # #546. The count that says `spent_usd` is a floor, not a total.
+    assert wrapper.unknown_spend_turns == 1
 
 
 def test_a_budget_exhausted_call_reports_a_known_zero_not_unknown(tmp_path):
@@ -376,10 +396,48 @@ def test_the_summary_reports_the_cap_it_applied_and_keeps_the_raw_event_log(
     summary = (worktree / ".harness" / "last-sdk-e2e.md").read_text(encoding="utf-8")
     assert "cap_usd: 2.00" in summary
     assert "usd=unknown" in summary
+    # #546. `TimedOutBackend` answers `usd=None` on its one call, so the
+    # summary has to say `spent_usd` is a floor, not a total.
+    assert "unknown_spend_turns: 1" in summary
     raw = worktree / ".harness" / "last-sdk-e2e-raw-0-test.txt"
     assert raw.is_file()
     assert "some tool call" in raw.read_text(encoding="utf-8")
     assert "raw: .harness/last-sdk-e2e-raw-0-test.txt" in summary
+
+
+def test_redact_widens_to_tilde_home_ghp_tokens_and_bearer_headers():
+    """#545 follow-up. The judge's own probe table showed a `~/`-shorthand
+    home path, a `ghp_...` token, and a `Bearer ...` header all passing
+    through `_redact` unchanged. Close the gap it measured."""
+    text = (
+        "cwd: ~/work/northwind-field-crm\n"
+        "token: ghp_abcdefghijklmnopqrstuvwxyz0123456789\n"
+        "Authorization: Bearer abc.def.ghi\n"
+    )
+
+    redacted = e2e_t001._redact(text)
+
+    assert "~/work" not in redacted
+    assert "<HOME>" in redacted
+    assert "ghp_" not in redacted
+    assert "<REDACTED-KEY>" in redacted
+    assert "Bearer abc.def.ghi" not in redacted
+    assert "Bearer <REDACTED-TOKEN>" in redacted
+
+
+def test_redact_strips_a_slugified_home_path_with_no_slashes():
+    """#444 step 2 finding. A live run's own tooling (Claude Code's own
+    transcript directory, a scratchpad tmp path) names the home directory
+    with `-` in place of `/`, e.g. `-Users-jdoe-work-crm`. The literal
+    `str(Path.home())` replace never matches that string; only the bare
+    account name is common to every encoding of the same path."""
+    name = e2e_t001.Path.home().name
+    text = f"output_file: /private/tmp/claude-501/-Users-{name}-clients-crm/tasks/x.output\n"
+
+    redacted = e2e_t001._redact(text)
+
+    assert name not in redacted
+    assert "<HOME>" in redacted
 
 
 def test_the_raw_log_survives_cleanup_via_raw_log_dir_with_secrets_stripped(

@@ -42,6 +42,16 @@ def backend(contract, ticket_id: str):
     # worktree need not exist yet, only by the time a live query actually runs.
     cwd = implementer._worktree_path(contract.repo, ticket_id)
 
+    # #549. Mirrors the SDK e2e script's own per_query_usd: the loop's whole
+    # dollar budget, sliced across the two implementation phases plus the
+    # judge and the planner, so one call cannot spend the entire budget
+    # before its own recursion limit ever fires. A live run spent $4.56
+    # against a $3.00 total cap on a single call before that structural
+    # ceiling stopped it.
+    iterations = int(contract.budget.get("iterations", 3))
+    total_usd = float(contract.budget.get("usd", 2.0))
+    max_call_usd = total_usd / (iterations + 2)
+
     # One graph per implementation phase. A test-phase graph has no code
     # implementer to delegate to, so the role split is structural rather than
     # a request the parent model can ignore.
@@ -67,6 +77,7 @@ def backend(contract, ticket_id: str):
         # live probe. It leaves time for the deterministic test/rubric pass and
         # receipt instead of letting the outer 420-second watchdog kill it.
         recursion_limit=LIVE_RECURSION_LIMIT,
+        max_call_usd=max_call_usd,
     )
 
 

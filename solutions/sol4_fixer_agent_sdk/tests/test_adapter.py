@@ -122,6 +122,91 @@ def test_a_hung_query_times_out(fake_sdk, repo, monkeypatch):
     assert "never reached" not in result.output
 
 
+# -- #541: a failure path never claims a silent 0.0 -------------------------
+
+
+def test_a_timed_out_query_reports_elapsed_events_and_spend_so_far(fake_sdk, repo, monkeypatch):
+    """A query that already told us it had spent something before it hung
+    must not lose that number just because the ceiling then cut it off."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result="progress", total_cost_usd=0.33, subtype="partial")
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached", total_cost_usd=0.99)
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 0.05)
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert not result.ok
+    assert result.stop_reason == "query timeout"
+    assert result.usd == 0.33
+    assert "elapsed=" in result.output
+    assert "events=1" in result.output
+    assert "usd=0.3300" in result.output
+
+
+def test_a_timed_out_query_with_no_cost_message_reports_usd_as_none(fake_sdk, repo, monkeypatch):
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached")
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 0.05)
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert result.usd is None
+    assert "usd=unknown" in result.output
+
+
+def test_a_message_with_no_cost_field_reports_usd_as_none_not_zero(fake_sdk, repo):
+    """`total_cost_usd=None` is "the SDK never told us", not "this was free"."""
+    fake_sdk([FakeResultMessage(result="x", total_cost_usd=None)])
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert result.usd is None
+
+
+def test_a_backend_that_raises_after_spending_reports_the_spend(fake_sdk, repo, monkeypatch):
+    """A crash after the query answered must not erase what it already cost."""
+    fake_sdk([FakeResultMessage(result="x", total_cost_usd=0.77)])
+    calls = {"n": 0}
+    real_changed_files = adapter._changed_files
+
+    def flaky(target_repo):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_changed_files(target_repo)
+        raise RuntimeError("boom after spend")
+
+    monkeypatch.setattr(adapter, "_changed_files", flaky)
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert not result.ok
+    assert result.usd == 0.77
+    assert "boom after spend" in result.output
+
+
+def test_a_failed_backend_never_crashes_the_money_gate(fake_sdk, repo):
+    """`fixer.py` calls `boss.spend(result.usd)` unconditionally. `spend`
+    must tolerate the `None` a failed turn now reports instead of raising."""
+    import write_scope as roles  # noqa: PLC0415
+
+    boss = roles.Orchestrator(name="orchestrator", repo=repo)
+    fake_sdk([])
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert result.usd is None
+    boss.spend(result.usd)  # must not raise
+    assert boss.spent_usd == 0.0
+
+
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#541. A non-integer value must not raise at import and kill the run."""
+    assert adapter._timeout_env("SOL4_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL4_QUERY_TIMEOUT_SECONDS_TEST", "not-a-number")
+    assert adapter._timeout_env("SOL4_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "not-a-number" in capsys.readouterr().err
+
+
 def test_it_reads_structured_output(fake_sdk, repo):
     fake_sdk(
         [

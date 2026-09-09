@@ -59,6 +59,13 @@ HARNESS_DIR = ".harness/"
 _STATE_FILE = HARNESS_DIR + "state.json"
 _LAST_TRACE_FILE = HARNESS_DIR + "last-implementer.json"
 
+# #546. A backend can set `ok=False` on purpose: the SDK's own subtype named
+# a ceiling ("max turns", "cost budget spent") instead of staying silent.
+# `stop_reason` in this set means the backend told us why, on purpose; a
+# bare exception or a timeout (`stop_reason` is `None` or "query timeout")
+# is still a genuine non-answer and keeps the older wording.
+_CONTROLLED_STOP_REASONS = frozenset({"max turns", "cost budget spent"})
+
 # The loop's own named outputs, never a role's. Not "everything under
 # .harness/": that used to admit any file a doer chose to plant there,
 # including an overwrite of state.json or the receipt themselves. Judge of
@@ -866,9 +873,15 @@ def run(  # noqa: PLR0915
                 # an edge case. Reordering below it would make the whole
                 # #539 fix unreachable there.
                 if not test_result.ok:
-                    trace["reason"] = (
-                        f"the test implementer backend did not answer: {test_result.output}"
-                    )
+                    if test_result.stop_reason in _CONTROLLED_STOP_REASONS:
+                        trace["reason"] = (
+                            "the test implementer backend stopped on purpose "
+                            f"({test_result.stop_reason}): {test_result.output}"
+                        )
+                    else:
+                        trace["reason"] = (
+                            f"the test implementer backend did not answer: {test_result.output}"
+                        )
                 # A stop here is otherwise a stable failure, the money budget,
                 # or the iteration budget. The first two name a real reason
                 # worth keeping (the money one is a fold-in fix from A5:
@@ -1051,7 +1064,13 @@ def run(  # noqa: PLR0915
     # which on a code-phase failure to run at all is otherwise indistinguishable
     # from an honest, converging miss.
     if decision.gate != gates.PASS and not code_result.ok:
-        trace["reason"] = f"the code implementer backend did not answer: {code_result.output}"
+        if code_result.stop_reason in _CONTROLLED_STOP_REASONS:
+            trace["reason"] = (
+                "the code implementer backend stopped on purpose "
+                f"({code_result.stop_reason}): {code_result.output}"
+            )
+        else:
+            trace["reason"] = f"the code implementer backend did not answer: {code_result.output}"
     else:
         trace["reason"] = decision.reason
     trace["plan"] = plan.summary()

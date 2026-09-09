@@ -339,18 +339,6 @@ def test_a_recursion_failure_after_reported_usage_returns_the_spend_not_none(tmp
     not the generic "never answered" `None` #539 reserved for a truly empty
     turn."""
 
-    class FakeMessage:
-        def __init__(self, usage_metadata):
-            self.usage_metadata = usage_metadata
-
-    class FakeGeneration:
-        def __init__(self, message):
-            self.message = message
-
-    class FakeLLMResult:
-        def __init__(self, usage_metadata):
-            self.generations = [[FakeGeneration(FakeMessage(usage_metadata))]]
-
     class RaisesAfterUsageAgent:
         def invoke(self, payload, config=None):
             for callback in (config or {}).get("callbacks", []):
@@ -364,6 +352,83 @@ def test_a_recursion_failure_after_reported_usage_returns_the_spend_not_none(tmp
     assert not result.ok
     assert result.usd == 0.42
     assert "RuntimeError" in result.output
+
+
+class FakeMessage:
+    def __init__(self, usage_metadata):
+        self.usage_metadata = usage_metadata
+
+
+class FakeGeneration:
+    def __init__(self, message):
+        self.message = message
+
+
+class FakeLLMResult:
+    def __init__(self, usage_metadata):
+        self.generations = [[FakeGeneration(FakeMessage(usage_metadata))]]
+
+
+def _fire_llm_end(callback, usage_metadata):
+    """#549, judge of PR #552. `callback.on_llm_end(...)` directly bypasses
+    the callback manager LangChain actually puts between a model and a
+    handler in a real run, and that manager swallows a handler's exception
+    unless `raise_error` is set. Driving the fake agent through the real
+    `handle_event` is what proves the cutoff fires in production, not just
+    in a test that skips the one thing the judge found broken."""
+    from langchain_core.callbacks.manager import handle_event  # noqa: PLC0415
+
+    handle_event([callback], "on_llm_end", "ignore_llm", FakeLLMResult(usage_metadata))
+
+
+@NEEDS_LANGCHAIN
+def test_a_call_that_passes_its_dollar_cap_stops_with_budget_exhausted(tmp_path):
+    """#549. The Deep Agents twin of the SDK port's per-query
+    `asyncio.wait_for` timeout: a call that keeps spending past its own cap
+    stops mid-call and reports the spend so far, named `budget_exhausted`,
+    instead of running all the way to the recursion limit. A live run spent
+    $4.56 against a $3.00 cap before that structural ceiling ever fired."""
+
+    class MultiTurnAgent:
+        """Reports usage turn by turn, through the real callback manager,
+        the way a real graph's callback fires once per completed model
+        call, not once per invoke()."""
+
+        def invoke(self, payload, config=None):
+            callbacks = (config or {}).get("callbacks", [])
+            for cost in (0.5, 0.6):
+                for callback in callbacks:
+                    _fire_llm_end(callback, {"total_cost": cost})
+            return {"messages": [{"role": "assistant", "content": "should not get here"}]}
+
+    result = adapter.DeepAgentsBackend(MultiTurnAgent(), max_call_usd=1.0).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+
+    assert not result.ok
+    assert result.usd == 1.1
+    assert "budget_exhausted" in result.output
+    assert result.stop_reason == "cost budget spent"
+
+
+@NEEDS_LANGCHAIN
+def test_a_call_under_its_dollar_cap_answers_normally(tmp_path):
+    """The cutoff must not fire early. A call that never crosses its cap
+    answers the way it always did, driven through the real callback
+    manager the same as the test above."""
+
+    class OneTurnAgent:
+        def invoke(self, payload, config=None):
+            for callback in (config or {}).get("callbacks", []):
+                _fire_llm_end(callback, {"total_cost": 0.4})
+            return {"messages": [{"role": "assistant", "content": "done"}]}
+
+    result = adapter.DeepAgentsBackend(OneTurnAgent(), max_call_usd=1.0).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+
+    assert result.ok
+    assert result.output == "done"
 
 
 def test_a_judge_that_raises_reports_usd_as_none(tmp_path):
