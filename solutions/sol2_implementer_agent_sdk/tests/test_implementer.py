@@ -334,6 +334,76 @@ def test_spend_clamps_a_negative_provider_cost_to_zero():
     assert boss.spent_usd == 1.0
 
 
+class KillOnSecondCallBackend(doers.Backend):
+    """#562. Answers once, then raises -- a crash or an outer `timeout`
+    killing the process mid-turn, not a controlled non-answer like
+    `FailingBackend` above. Nothing in `implementer.run` catches this: it
+    propagates straight out, uncaught, the same way a `SIGKILL` stops the
+    process before it ever reaches `_finish`."""
+
+    name = "kill-on-second-call"
+
+    def __init__(self):
+        self.calls = 0
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+        self.calls += 1
+        if self.calls == 1:
+            target = repo / "tests" / "test_greet.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("def test_ac1():\n    assert False\n", encoding="utf-8")
+            return doers.DoerResult(wrote=["tests/test_greet.py"], usd=0.02)
+        raise RuntimeError("killed mid-turn")
+
+
+def test_a_run_killed_after_one_turn_leaves_that_turns_spend_on_disk(tmp_path, monkeypatch):
+    """#562. Found on the fourth live T001 run: an outer `timeout` stopped
+    the Agent SDK port after one completed attempt with a second in flight,
+    and no spend reached disk even though `boss.spent_usd` already had the
+    completed attempt's number. Only `_finish` ever wrote it out, and
+    `_finish` never runs when the process dies mid-loop.
+
+    The test phase's own turn (turn 1) completes and writes a new failing
+    test, satisfying the red gate; the code phase's first turn (turn 2)
+    raises before it ever reaches `boss.spend`. Turn 1's spend must already
+    be on disk by then."""
+    repo = _git_repo(tmp_path / "repo")
+    resolved_repo = repo.resolve()
+    worktree = resolved_repo.parent / f"{resolved_repo.name}.worktrees" / "T001"
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_ac1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+        ],
+    )
+
+    backend = KillOnSecondCallBackend()
+    with pytest.raises(RuntimeError, match="killed mid-turn"):
+        implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    assert backend.calls == 2
+    # `_finish` never ran: no trace, and last-implementer.json was never
+    # written this run, proving the assertions below read a mid-loop
+    # checkpoint, not the normal end-of-run write.
+    assert not (worktree / ".harness" / "last-implementer.json").exists()
+
+    state = json.loads((worktree / ".harness" / "state.json").read_text(encoding="utf-8"))
+    assert state["spent_usd"] == 0.02
+    assert state["unknown_spend_turns"] == 0
+    assert state["turns"] == 1
+
+    turns_log = (worktree / ".harness" / "turns.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(turns_log) == 1
+    row = json.loads(turns_log[0])
+    assert row["turn"] == 1
+    assert row["phase"] == "test"
+    assert row["usd"] == 0.02
+    assert row["spent_usd"] == 0.02
+
+
 class ControlledStopBackend(doers.Backend):
     """#546. A backend that returns `ok=False` on purpose: the SDK named a
     ceiling ("cost budget spent") instead of staying silent. Not the same
@@ -1321,10 +1391,11 @@ def test_worktree_plumbing_without_the_task_binary(tmp_path):
 # -- A5 (#432 #434). state.json and exit codes 0, 2, 1 --------------------
 
 
-def test_state_json_has_ten_keys_and_runs_increments(tmp_path, monkeypatch):
-    """Fields the Module 4 slides already name, plus the five A6 (#433) adds
-    for --resume. `runs` accumulates across two runs of the same ticket,
-    which reuse the same worktree."""
+def test_state_json_has_thirteen_keys_and_runs_increments(tmp_path, monkeypatch):
+    """Fields the Module 4 slides already name, the five A6 (#433) adds for
+    --resume, and the three #562 adds so a killed run's spend is not only in
+    memory. `runs` accumulates across two runs of the same ticket, which
+    reuse the same worktree."""
     repo = _git_repo(tmp_path / "repo")
     health = "tests/test_health.py::test_health"
     _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
@@ -1335,6 +1406,7 @@ def test_state_json_has_ten_keys_and_runs_increments(tmp_path, monkeypatch):
     assert set(state) == {
         "runs", "last_gate", "last_reason", "last_run_at", "loop",
         "phase", "red_ids", "preexisting", "test_phase_files", "test_phase_attempts",
+        "spent_usd", "unknown_spend_turns", "turns",
     }
     assert state["runs"] == 1
     assert state["last_gate"] == "escalate"
@@ -1344,11 +1416,18 @@ def test_state_json_has_ten_keys_and_runs_increments(tmp_path, monkeypatch):
     # checkpoint never flips to "code".
     assert state["phase"] == "test"
     assert state["red_ids"] == []
+    # #562. NoneBackend answers once, for free: one turn, no unknown cost.
+    assert state["spent_usd"] == 0.0
+    assert state["unknown_spend_turns"] == 0
+    assert state["turns"] == 1
 
     _patch_runs(monkeypatch, [_run(passed=(health,)), _run(passed=(health,))])
     implementer.run(repo=repo, ticket_id="T001", doer=doers.NoneBackend(), budget=1)
     state2 = json.loads(state_path.read_text(encoding="utf-8"))
     assert state2["runs"] == 2
+    # #562. Each run's own turn count, never accumulated across runs the way
+    # `runs` itself does: a fresh `Orchestrator` starts this run at zero.
+    assert state2["turns"] == 1
 
 
 def test_corrupt_state_json_exits_before_any_work(tmp_path, monkeypatch):
@@ -1565,6 +1644,47 @@ def test_a_code_turn_overwrite_of_steps_jsonl_stays_a_scope_violation(tmp_path, 
     assert "steps.jsonl" in trace["scope_violations"]
     # A second, clean code turn must not wash the violation away: every
     # iteration this run recorded still names write_scope as a failed row.
+    assert trace["iterations"], "the code loop never recorded an iteration"
+    assert all("write_scope" in it["failed"] for it in trace["iterations"])
+
+
+def test_a_code_turn_overwrite_of_turns_jsonl_stays_a_scope_violation(tmp_path, monkeypatch):
+    """#562, judge of PR #565. `_checkpoint_spend` checks `.harness/turns.jsonl`
+    against this run's own last legitimate append *before* it writes
+    anything, the same instant `state.json` is checked -- catching a doer's
+    overwrite here, not laundering it the way folding `turns.jsonl` into
+    `_HASHED_OUTPUTS` and refreshing the baseline right after the append
+    would (the judge's finding: that shape swallows the forgery instead of
+    catching it). `code_scope_violations` keeps the violation flagged for
+    the rest of the run, the same way the `steps.jsonl` case just above
+    does, at the shipped `.loop.yml` budget of 3 iterations."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    backend = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [
+                ("app/greet.py", "def greet():\n    return 'hello'\n"),
+                (".harness/turns.jsonl", '{"turn": "evil"}\n'),
+            ],
+            [],
+        ]
+    )
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=3, write_trace=True)
+
+    assert trace["gate"] != "pass"
+    assert ".harness/turns.jsonl" in trace["scope_violations"]
     assert trace["iterations"], "the code loop never recorded an iteration"
     assert all("write_scope" in it["failed"] for it in trace["iterations"])
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 
 import implementer
 import roleplan
@@ -34,7 +35,7 @@ def build(contract):
     return deep.subagents_for(contract, loop=LOOP)
 
 
-def backend(contract, ticket_id: str):
+def backend(contract, ticket_id: str, *, raw_log_dir: Path | None = None):
     from adapter import DeepAgentsBackend  # noqa: PLC0415
 
     # #543. `implementer.run` executes in this worktree, computed the same
@@ -78,6 +79,7 @@ def backend(contract, ticket_id: str):
         # receipt instead of letting the outer 420-second watchdog kill it.
         recursion_limit=LIVE_RECURSION_LIMIT,
         max_call_usd=max_call_usd,
+        raw_log_dir=raw_log_dir,
     )
 
 
@@ -121,6 +123,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="re-enter the last killed run from its own state.json, instead of starting over.",
     )
+    # #562. Mirrors the SDK e2e script's own `--raw-log-dir`: the worktree's
+    # own `.harness/` is cleaned up between runs by hand, so an operator who
+    # wants a durable, redacted copy of each call's usage_metadata and
+    # message sequence points this somewhere that survives that cleanup.
+    # Optional and off by default, the same as that script's own flag.
+    parser.add_argument(
+        "--raw-log-dir", default=os.environ.get("SOL2_E2E_RAW_LOG_DIR")
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -142,7 +152,10 @@ def main(argv: list[str] | None = None) -> int:
 
     doer = args.doer
     if doer == "deep":
-        doer = backend(contract, args.ticket)
+        raw_log_dir = (
+            Path(args.raw_log_dir).expanduser().resolve() if args.raw_log_dir else None
+        )
+        doer = backend(contract, args.ticket, raw_log_dir=raw_log_dir)
     try:
         trace = implementer.run(
             repo=args.repo,
