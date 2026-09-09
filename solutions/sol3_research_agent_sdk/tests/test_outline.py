@@ -100,6 +100,49 @@ def test_require_next_step_is_off_by_default():
     assert outlines.validate(sample_outline()) == []
 
 
+# -- #538, the structural Introduction --------------------------------------
+
+
+def test_an_outline_without_an_introduction_is_rejected():
+    """`sample_outline`'s only section is headed "The problem", not
+    "Introduction". The frozen heading order puts Introduction first, right
+    after the Abstract."""
+    errors = outlines.validate(sample_outline(), require_introduction=True)
+    assert any("introduction" in item.lower() for item in errors), errors
+
+
+def test_an_introduction_first_section_passes():
+    drafted = sample_outline(
+        word_target_total=800,
+        sections=[
+            sample_section("intro", heading="Introduction", word_target=400),
+            sample_section("s1", word_target=400),
+        ],
+    )
+    assert outlines.validate(drafted, require_introduction=True) == []
+
+
+def test_an_introduction_in_the_wrong_position_is_rejected():
+    """Position matters as much as presence: an Introduction second, not
+    first, still fails the rule."""
+    drafted = sample_outline(
+        word_target_total=800,
+        sections=[
+            sample_section("s1", word_target=400),
+            sample_section("intro", heading="Introduction", word_target=400),
+        ],
+    )
+    errors = outlines.validate(drafted, require_introduction=True)
+    assert any("introduction" in item.lower() for item in errors), errors
+
+
+def test_require_introduction_is_off_by_default():
+    """`sample_outline`'s only section is headed "The problem". The many
+    other tests in this file rely on this rule not running unless a caller
+    opts in, the same as `require_next_step`."""
+    assert outlines.validate(sample_outline()) == []
+
+
 def test_duplicate_ids_fail():
     drafted = sample_outline(
         word_target_total=800,

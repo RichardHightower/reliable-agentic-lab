@@ -84,7 +84,10 @@ MAX_PRIOR_ART_HITS = 12
 MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
 MAX_CLAIMS = 40
-MAX_WORDS = 2000
+# #538, PR #554 judge finding F4. Matches `PROFILES["demo"]` in `loop.py`,
+# raised from 2000 for the same reason: five sections, Introduction
+# included, now share this default where four did before #538.
+MAX_WORDS = 2800
 # #473. How many secondary-tier numeric claims get a follow turn asking for
 # the primary study, per run, not per section: the ticket asked for a cap
 # per section, and eight sections at six each would roughly double a run.
@@ -299,6 +302,10 @@ class Run:
     # `loop.py`'s real CLI run, off for the many phase tests whose outline
     # stubs carry no `evidence_requirements` block.
     require_evidence_requirements: bool = False
+    # #538. Same reason and same default as `require_next_step`: on for
+    # `loop.py`'s real CLI run, off for the many phase tests whose outline
+    # stubs carry a single section headed something other than Introduction.
+    require_introduction: bool = False
     log: object = print
 
     def __post_init__(self) -> None:
@@ -660,6 +667,7 @@ def _call_outliner(run: Run, note: str) -> dict:
         corpus_keys=_pack_keys(run),
         require_next_step=run.require_next_step,
         require_evidence_requirements=run.require_evidence_requirements,
+        require_introduction=run.require_introduction,
     )
     if errors:
         raise RunFailed(outlines.retry_note(errors))
@@ -774,6 +782,7 @@ def _edit_outline(run: Run, current: dict, note: str, verdict: dict) -> dict:
             corpus_keys=_pack_keys(run),
             require_next_step=run.require_next_step,
             require_evidence_requirements=run.require_evidence_requirements,
+            require_introduction=run.require_introduction,
         )
         return revised if errors else merged
 
@@ -787,6 +796,7 @@ def _edit_outline(run: Run, current: dict, note: str, verdict: dict) -> dict:
             corpus_keys=_pack_keys(run),
             require_next_step=run.require_next_step,
             require_evidence_requirements=run.require_evidence_requirements,
+            require_introduction=run.require_introduction,
         )
         if errors:
             raise TurnFailed(outlines.retry_note(errors))
@@ -918,6 +928,7 @@ def do_outline(run: Run) -> dict:
             corpus_keys=_pack_keys(run),
             require_next_step=run.require_next_step,
             require_evidence_requirements=run.require_evidence_requirements,
+            require_introduction=run.require_introduction,
         )
         if errors:
             raise RunFailed(outlines.retry_note(errors))
@@ -1986,6 +1997,52 @@ def _study_table_block(claims: list[dict], load_bearing: set[int]) -> str:
     return "\n".join(lines)
 
 
+def _introduction_stub(planned: dict) -> str:
+    """A short Python-written Introduction, for the run whose outline
+    carried none. #538.
+
+    No model turn, the same reason `_methods_lines` takes none: this is the
+    backstop for an outline that predates `outline.validate`'s
+    `require_introduction`, or an already-approved outline from before this
+    rule landed, not a replacement for a written Introduction. A real run
+    with `require_introduction` on drafts one, and `assemble` places that
+    written section here instead.
+
+    A blockquote, not a paragraph, the same way `sections.py`'s own
+    claim-free fallback is: this line carries no citation of its own to
+    demand, and inventing one would be the dishonesty `cited` exists to
+    catch. `uncited_claims` already skips a line starting with `>`.
+
+    Names the title only, not the thesis: `plan_view` sets the outline's own
+    `abstract` field from the same `thesis` string the Abstract itself falls
+    back to when no `write_abstract` turn ran, and restating it here would
+    plant that same sentence a second place a later, real abstract does not
+    reach to replace.
+
+    Long enough to clear `checks.MIN_SECTION_WORDS`: PR #554 judge finding
+    F3, a section this short failed `has_body` under the 80-word floor
+    every real section is held to, so it is neither exempt through
+    `PYTHON_WRITTEN_SECTIONS` (that would also excuse a real, written
+    Introduction from the same floor) nor a bare sentence. The title opens
+    the line on its own, capitalized once, rather than splicing into the
+    middle of a sentence with its own capital (F6).
+    """
+    title = str(planned.get("title") or "This paper").strip()
+    return (
+        f"> {title}. This paper's outline carried no Introduction, so no key "
+        "question named it and no writer turn drafted it. Assembly writes "
+        "this paragraph in its place, the same way it writes Methods below: "
+        "from the run's own record, not from a retrieved source, and it "
+        "states no claim beyond the paper's own title. Methods names every "
+        "host this run searched and every source it admitted to the "
+        "reference list, and the Evidence summary, when the run cites a "
+        "human study, sits beside it. A later run whose outline drafts a "
+        "real Introduction replaces this paragraph with the outliner's own "
+        "opening, checked through the same research and review pipeline as "
+        "every other section on the page."
+    )
+
+
 def assemble(run: Run) -> dict:
     """Stitch the sections, append the glossary, then the reference list.
 
@@ -2048,12 +2105,129 @@ def assemble(run: Run) -> dict:
             glossary.setdefault(term, definition)
         abstract_text = _resolve_markers(abstract_text, numbers)
         parts += ["## Abstract", "", abstract_text.strip(), ""]
-    # #478. Methods is Python-written, right after the Abstract and before
-    # every outline section: it is not itself an outline section, so the
-    # loop below never has to skip it. The Evidence summary table (Python,
-    # from the ledger) sits immediately after it, when the run cites at
-    # least one human-study claim; otherwise Methods carries a one-line
-    # note instead of a table nobody could fill.
+
+    def _render_planned_section(section: dict) -> bool:
+        """One outline section's own written file, cleaned up and placed.
+
+        Returns whether a file existed to render. Shared by the Introduction
+        splice below and the body-section loop further down (#538): both
+        place a real, written outline section the same way, and only their
+        position in `parts` differs.
+        """
+        nonlocal figure_number
+        path = run.file("sections") / f"{section['id']}.md"
+        if not path.exists():
+            return False
+        # A writer told not to append a reference list will still sometimes
+        # append one, and an instruction is not a mechanism. Strip it here.
+        text = checks.drop_owned_headings(path.read_text(encoding="utf-8"))
+        text, found = checks.take_flags(text)
+        flags.extend({"section": section["id"], "flag": flag} for flag in found)
+        # First use wins. A term marked twice keeps the sentence that
+        # introduced it, not a later restatement.
+        text, term_hits = checks.take_terms(text)
+        for term, definition in term_hits:
+            glossary.setdefault(term, definition)
+        text = _resolve_markers(text, numbers)
+        # Assembly owns the section heading. Two of three writers headed their
+        # section with its key questions and never wrote the outline heading,
+        # so `outline_coverage` could not find the section to grade. A heading
+        # the writer did include is kept, not doubled.
+        heading = str(section.get("heading") or "").strip()
+        lines = text.strip().splitlines()
+        first_line = lines[0].strip() if lines else ""
+        if heading and first_line.lstrip("# ").strip().lower() == heading.lower():
+            # The writer wrote it, at whatever level it chose. One wrote the
+            # section heading as `# `, an H1 beside the paper's own title,
+            # and the gate that reads `## ` could not find the section.
+            # Assembly owns the level, not only the presence.
+            lines[0] = f"## {heading}"
+            text = "\n".join(lines)
+        elif heading:
+            parts.extend([f"## {heading}", ""])
+        # The section's heading is the only `## ` it owns. A writer that
+        # headed its sub-sections `## ` put them at the section's own level,
+        # and every row that reads the paper by heading level then saw the
+        # section end at its first sub-heading. Demote everything below.
+        text = _demote_subheadings(text, heading)
+        parts.extend([text.strip(), ""])
+        for chart in _charts_for(run, section["id"]):
+            rel = f"charts/{Path(chart['path']).name}"
+            caption = chart.get("caption") or chart.get("name") or rel
+            # #464 B2. The number is spent for every placed figure, whether
+            # this call writes the image line fresh or the line already
+            # sits in `text` from a persisted trim: a slot the counter does
+            # not charge is a slot the next figure duplicates.
+            figure_number += 1
+            if rel not in text:
+                parts.extend([f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""])
+        # Charts already had a placement helper. Diagrams were rendered, judged,
+        # and left on disk: the first assembled paper had a 597 KB PNG and no
+        # markdown link (#370). Deep Agents inserts at assemble; copy that.
+        for figure in _diagrams_for(run, section["id"]):
+            rel = _diagram_rel(figure)
+            caption = figure.get("caption") or figure.get("name") or rel
+            if rel:
+                figure_number += 1
+                if rel not in text and Path(rel).name not in text:
+                    parts.extend([f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""])
+        # #386, #464. A skip is not silence: it is named, with its reason,
+        # under the section that asked for it. A blockquote so `cited`
+        # never reads it as an unsourced claim, the same free ride an
+        # image's own caption paragraph already gets.
+        for skip in skipped_figures:
+            if skip["section"] != section["id"] or id(skip) in noted_skips:
+                continue
+            noted_skips.add(id(skip))
+            parts.extend([f"> {skip['name']} was not shown: {skip['reason']}.", ""])
+        return True
+
+    # #538. Introduction is a real outline section like any other, written
+    # by the same section loop that wrote every body section, but the
+    # frozen heading order puts it right after the Abstract and before
+    # Methods, not wherever the outliner happened to place it. Searched by
+    # heading across every section, not only the first: PR #554 judge
+    # finding F2, checking only `sections[0]` left an Introduction the
+    # outliner placed second in the body loop untouched, and the stub
+    # branch below then added a second `## Introduction` on top of it.
+    # Popped here and rendered now, moved rather than left in place, the
+    # way Deep Agents' `stages.normalize_plan` (`stages.py` near line 348)
+    # searches every heading for "introduction" before deciding whether to
+    # add one; the body-section loop below runs over what is left, so it
+    # is never rendered twice.
+    #
+    # #559. An outline that carries two Introductions had only the first
+    # popped, so the second rode through the body-section loop untouched
+    # and the paper still closed with two `## Introduction` headings, the
+    # gap #557 closed on Deep Agents reopened here. Every matching index is
+    # collected and dropped from `body_sections`, first match kept as the
+    # one that gets rendered: the same duplicate-collapse `normalize_plan`
+    # already does (`stages.py` near line 355), copied rather than
+    # imported.
+    body_sections = list(planned["sections"])
+    intro_indexes = [
+        index
+        for index, section in enumerate(body_sections)
+        if str(section.get("heading") or "").strip().lower() == "introduction"
+    ]
+    intro_section = body_sections[intro_indexes[0]] if intro_indexes else None
+    body_sections = [
+        section for index, section in enumerate(body_sections) if index not in intro_indexes
+    ]
+    if intro_section is None or not _render_planned_section(intro_section):
+        # #538. No written Introduction: an outline that predates this
+        # rule, or a caller that skips `outline.validate`'s
+        # `require_introduction`. Python inserts one, the same way it
+        # inserts Methods below: no model turn. Copied from Deep Agents'
+        # `stages.normalize_plan`, not imported.
+        parts += ["## Introduction", "", _introduction_stub(planned), ""]
+
+    # #478. Methods is Python-written, right after the Introduction and
+    # before every remaining outline section: it is not itself an outline
+    # section, so the loop below never has to skip it. The Evidence summary
+    # table (Python, from the ledger) sits immediately after it, when the
+    # run cites at least one human-study claim; otherwise Methods carries a
+    # one-line note instead of a table nobody could fill.
     load_bearing = _load_bearing_numbers(run, planned)
     methods_lines = _methods_lines(run, len(references))
     table_block = _study_table_block(usable, load_bearing)
@@ -2079,7 +2253,7 @@ def assemble(run: Run) -> dict:
         conclusion_text = _resolve_markers(conclusion_text, numbers)
         conclusion_parts = ["## Conclusion", "", conclusion_text.strip(), ""]
     conclusion_placed = False
-    for section in planned["sections"]:
+    for section in body_sections:
         if (
             not conclusion_placed
             and conclusion_parts
@@ -2087,71 +2261,7 @@ def assemble(run: Run) -> dict:
         ):
             parts += conclusion_parts
             conclusion_placed = True
-        path = run.file("sections") / f"{section['id']}.md"
-        if not path.exists():
-            continue
-        # A writer told not to append a reference list will still sometimes
-        # append one, and an instruction is not a mechanism. Strip it here.
-        text = checks.drop_owned_headings(path.read_text(encoding="utf-8"))
-        text, found = checks.take_flags(text)
-        flags += [{"section": section["id"], "flag": flag} for flag in found]
-        # First use wins. A term marked twice keeps the sentence that
-        # introduced it, not a later restatement.
-        text, term_hits = checks.take_terms(text)
-        for term, definition in term_hits:
-            glossary.setdefault(term, definition)
-        text = _resolve_markers(text, numbers)
-        # Assembly owns the section heading. Two of three writers headed their
-        # section with its key questions and never wrote the outline heading,
-        # so `outline_coverage` could not find the section to grade. A heading
-        # the writer did include is kept, not doubled.
-        heading = str(section.get("heading") or "").strip()
-        lines = text.strip().splitlines()
-        first_line = lines[0].strip() if lines else ""
-        if heading and first_line.lstrip("# ").strip().lower() == heading.lower():
-            # The writer wrote it, at whatever level it chose. One wrote the
-            # section heading as `# `, an H1 beside the paper's own title,
-            # and the gate that reads `## ` could not find the section.
-            # Assembly owns the level, not only the presence.
-            lines[0] = f"## {heading}"
-            text = "\n".join(lines)
-        elif heading:
-            parts += [f"## {heading}", ""]
-        # The section's heading is the only `## ` it owns. A writer that
-        # headed its sub-sections `## ` put them at the section's own level,
-        # and every row that reads the paper by heading level then saw the
-        # section end at its first sub-heading. Demote everything below.
-        text = _demote_subheadings(text, heading)
-        parts += [text.strip(), ""]
-        for chart in _charts_for(run, section["id"]):
-            rel = f"charts/{Path(chart['path']).name}"
-            caption = chart.get("caption") or chart.get("name") or rel
-            # #464 B2. The number is spent for every placed figure, whether
-            # this call writes the image line fresh or the line already
-            # sits in `text` from a persisted trim: a slot the counter does
-            # not charge is a slot the next figure duplicates.
-            figure_number += 1
-            if rel not in text:
-                parts += [f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""]
-        # Charts already had a placement helper. Diagrams were rendered, judged,
-        # and left on disk: the first assembled paper had a 597 KB PNG and no
-        # markdown link (#370). Deep Agents inserts at assemble; copy that.
-        for figure in _diagrams_for(run, section["id"]):
-            rel = _diagram_rel(figure)
-            caption = figure.get("caption") or figure.get("name") or rel
-            if rel:
-                figure_number += 1
-                if rel not in text and Path(rel).name not in text:
-                    parts += [f"![{caption}]({rel})", "", f"Figure {figure_number}. {caption}", ""]
-        # #386, #464. A skip is not silence: it is named, with its reason,
-        # under the section that asked for it. A blockquote so `cited`
-        # never reads it as an unsourced claim, the same free ride an
-        # image's own caption paragraph already gets.
-        for skip in skipped_figures:
-            if skip["section"] != section["id"] or id(skip) in noted_skips:
-                continue
-            noted_skips.add(id(skip))
-            parts += [f"> {skip['name']} was not shown: {skip['reason']}.", ""]
+        _render_planned_section(section)
     # A skip with no owning section (an empty `section`, or one that never
     # matched a planned section id) still gets a note, not silence, just
     # not one a specific section can claim.

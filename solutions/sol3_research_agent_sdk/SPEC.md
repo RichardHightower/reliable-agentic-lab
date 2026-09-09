@@ -228,7 +228,7 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
    that file and nothing else. The outline judge is not the paper judge.
    After research, the paper judge scores the written page: `defined`,
    `structured`, `evidenced`, `limited`, `figured`, `depth`, `repetition`,
-   `voice`. `--profile demo` commissions 2000 words,
+   `voice`. `--profile demo` commissions 2800 words,
    `--profile paper` 4000, and `--profile whitepaper` 6000. A profile sets the
    outline target, never the check floor: the floor is one number, 2000 words,
    for every profile. `--approve` stops after the outline

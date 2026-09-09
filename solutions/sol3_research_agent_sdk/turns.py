@@ -51,7 +51,8 @@ from load_agents import (
 MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
 MAX_CLAIMS = 40
-MAX_WORDS = 2000
+# #538, PR #554 judge finding F4. Matches `paper.MAX_WORDS`.
+MAX_WORDS = 2800
 EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
 SCOUT_SCHEMA = {
@@ -1150,16 +1151,58 @@ class OfflineTurns(Turns):
 
         budget = budget or {}
         words = int(budget.get("words") or MAX_WORDS)
-        # Four sections, last one is the next step. The CTA is a fixed-size
-        # close regardless of topic, so it takes a small target off the top
-        # and the three body sections split what remains. Word targets still
-        # sum exactly to `words`, which is what `validate` checks.
+        # Five sections: Introduction first (#538, the frozen heading order's
+        # own structural position), three body sections, and the next step
+        # last. Introduction's target is carved out of `words` the same way
+        # `next_step_target` already is: PR #554 judge finding F4, a live
+        # outline is still told `word_target_total={words}` (the prompt this
+        # class's own `SdkTurns` sibling sends, unchanged by #538) and has to
+        # sum its five sections within ten percent of that same number, so
+        # this offline twin reporting a bigger total here would test an
+        # arithmetic no live run is ever asked to hit. `PROFILES["demo"]` in
+        # `loop.py` carries the make-up margin instead: five sections now
+        # share one word budget that four used to, and this fixture's own
+        # canned research (`fixtures/research.json`, four recorded answers
+        # for what is now ten key questions) triggers more of the
+        # whole-paper trim pass's own repeat-collapse the more sections
+        # share one finding, so the same nominal total renders fewer words
+        # than it did at four sections.
         next_step_target = max(100, words // 20)
-        remaining = max(words - next_step_target, 0)
+        introduction_target = max(100, words // 8)
+        remaining = max(words - next_step_target - introduction_target, 0)
         first = remaining // 3
         second = remaining // 3
         third = remaining - first - second
         sections = [
+            {
+                "id": "introduction",
+                "heading": "Introduction",
+                "objective": (
+                    "Name the problem an arithmetic-free stop condition produces, and "
+                    "what this paper settles about it."
+                ),
+                "abstract": (
+                    "A production agent loop needs an exit condition arithmetic can "
+                    "check, not one left to a model's own report. This paper settles "
+                    "what a reliable loop checks instead, and who pays when it does not."
+                ),
+                "key_questions": [
+                    q("What problem does an agent loop with no exit criteria create?"),
+                    q(
+                        "Who is affected when a loop's stop condition is left to a "
+                        "model's own judgment?"
+                    ),
+                ],
+                "claims_to_support": [
+                    "A reliable loop computes done from a rubric in code.",
+                ],
+                "required_evidence": [
+                    "this repository's paper loop implementation",
+                ],
+                "word_target": introduction_target,
+                "figures": [],
+                "depends_on": [],
+            },
             {
                 "id": "problem",
                 "heading": "The problem",
@@ -1377,14 +1420,29 @@ class OfflineTurns(Turns):
     ) -> str:
         lines = [f"## {section['heading']}", ""]
         questions = section.get("key_questions") or []
+        is_introduction = section.get("heading", "").strip().lower() == "introduction"
         marker = f"[{claims[0]['number']}]" if claims and claims[0].get("number") else ""
-        for question in questions:
+        for index, question in enumerate(questions):
             text = checks.question_text(question)
             if claims:
-                lines += [
-                    f"This section answers: {text} {marker}".strip(),
-                    "",
-                ]
+                if index == 0 and is_introduction:
+                    # #538. `abstract_matches_body` grades an Introduction's
+                    # first paragraph the same way it grades the Abstract: a
+                    # sentence citing a single-source claim needs a hedge
+                    # word in that same sentence. This is that first
+                    # paragraph, so it carries the hedge unconditionally
+                    # rather than depending on which claim this offline run
+                    # happened to verify independently.
+                    lines += [
+                        f"This section introduces {text}, drawn from a single source "
+                        f"in this run's own corpus. {marker}".strip(),
+                        "",
+                    ]
+                else:
+                    lines += [
+                        f"This section answers: {text} {marker}".strip(),
+                        "",
+                    ]
             else:
                 lines += [f"> This section would have answered: {text}", ""]
         for planned in section.get("figures") or []:

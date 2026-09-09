@@ -37,6 +37,12 @@ pay for that. Fewer whole sections beat more half-researched ones.
 Include a mechanism or architecture section, tradeoffs, and Limitations. A
 paper with no limitations section is marketing.
 
+The first section is always headed Introduction. It names the problem, who
+has it, and what this paper settles about it. The frozen heading order
+places it right after the Abstract, which you do not write; Python
+assembles the Abstract, Methods, and reference list around the sections
+you return.
+
 Every section is an object with all of these fields:
 
 - `id`: a short slug used as a filename. Pattern: start with a lowercase
@@ -106,6 +112,7 @@ answer.
 8. A Limitations section exists.
 9. Every claim to support has a matching required evidence entry.
 10. Every figure is earned by the section abstract.
+11. The first section is headed Introduction.
 
 ## Output contract
 
@@ -117,11 +124,11 @@ No prose before it, no fence around it.
   "title": "...",
   "audience": "who this paper is for",
   "thesis": "one paragraph, no citations",
-  "word_target_total": 2000,
+  "word_target_total": 2800,
   "sections": [
     {
-      "id": "problem",
-      "heading": "The problem",
+      "id": "introduction",
+      "heading": "Introduction",
       "objective": "...",
       "abstract": "two or three sentences",
       "key_questions": [

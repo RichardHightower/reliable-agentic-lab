@@ -324,6 +324,217 @@ def test_assembly_writes_the_section_heading_the_writer_left_out(work, turns, no
     assert "\n## A sub-point\n" not in body
 
 
+def test_assemble_inserts_a_python_written_introduction_when_the_outline_has_none(
+    work, turns, no_renderer
+):
+    """#538. The default outline here is headed "The problem", not
+    "Introduction": `outline.validate`'s `require_introduction` is off by
+    default, the same as `require_next_step`, so this outline draws no
+    error. `assemble` still inserts one, the way it inserts Methods: no
+    model turn, right after the Abstract and before Methods."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    # PR #554 judge finding F3: a six-word stub failed `has_body`'s 80-word
+    # floor, the same floor every real section clears.
+    thin = checks.sections_without_prose(body, checks.MIN_SECTION_WORDS)
+    assert not any(row.startswith("Introduction") for row in thin), thin
+
+
+def test_assemble_places_a_written_introduction_before_methods(work, turns, no_renderer):
+    """#538. An outline whose first section is headed "Introduction" gets
+    its own written file placed there, not the Python-written stub: the
+    section-writing loop already wrote it like any other section."""
+
+    class WithIntro(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            # Split the one section's word budget in two rather than
+            # copying it, so the total still sums to `word_target_total`
+            # within `validate`'s 10% slack.
+            half = drafted["sections"][0]["word_target"] // 2
+            drafted["sections"][0]["word_target"] -= half
+            drafted["sections"].insert(
+                0,
+                {
+                    "id": "intro",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": half,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, WithIntro())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    intro_path = Path(work) / "sections" / "intro.md"
+    intro_path.write_text("Written introduction text [1].\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "Written introduction text" in introduction, introduction
+    assert body.count("## Introduction") == 1
+
+
+def test_assemble_moves_an_out_of_order_introduction_to_the_front(work, turns, no_renderer):
+    """#538, PR #554 judge finding F2. An outline whose Introduction landed
+    second, not first, still assembles with exactly one `## Introduction`
+    heading, moved to the frozen position, not a second one stacked on top
+    of it. Checking only `sections[0]` missed this: the outliner's own
+    Introduction sat untouched in the body loop and the stub branch added
+    another."""
+
+    class IntroSecond(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            half = drafted["sections"][0]["word_target"] // 2
+            drafted["sections"][0]["word_target"] -= half
+            drafted["sections"].insert(
+                1,
+                {
+                    "id": "intro",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": half,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, IntroSecond())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    intro_path = Path(work) / "sections" / "intro.md"
+    intro_path.write_text("Written introduction text [1].\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "Written introduction text" in introduction, introduction
+
+
+def test_assemble_collapses_a_duplicate_introduction(work, turns, no_renderer):
+    """#559. PR #558's judge found the same gap reopened here: Deep Agents'
+    `stages.normalize_plan` collapses a duplicate `## Introduction`, but the
+    SDK's move rule from PR #554 only popped the first match, leaving a
+    second Introduction to ride through the body-section loop untouched.
+    An outline carrying two now assembles with exactly one, the first in
+    body order, in the frozen position. Copied from Deep Agents'
+    `test_stages.test_normalize_collapses_a_duplicate_introduction`."""
+
+    class TwoIntros(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            third = drafted["sections"][0]["word_target"] // 3
+            drafted["sections"][0]["word_target"] -= 2 * third
+            drafted["sections"].insert(
+                0,
+                {
+                    "id": "intro-first",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            drafted["sections"].append(
+                {
+                    "id": "intro-second",
+                    "heading": "Introduction",
+                    "objective": "Name the problem, again.",
+                    "abstract": "A second introduction section.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, TwoIntros())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    (Path(work) / "sections" / "intro-first.md").write_text(
+        "First written introduction text [1].\n", encoding="utf-8"
+    )
+    (Path(work) / "sections" / "intro-second.md").write_text(
+        "Second written introduction text [1].\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "First written introduction text" in introduction, introduction
+    assert "Second written introduction text" not in body, body
+
+
+def test_assemble_repairs_a_resumed_outline_with_no_introduction(work, turns, no_renderer):
+    """#538, PR #554 judge finding F2. A resume whose `outline.approved.json`
+    was stamped before this rule landed carries no Introduction section at
+    all. `assemble` still produces exactly one, from the Python backstop,
+    not zero and not two."""
+    import outline as outlines  # noqa: PLC0415
+
+    run = make_run(work, turns())
+    old_outline = {
+        "title": "Old topic",
+        "audience": "engineers",
+        "thesis": "An old thesis.",
+        "word_target_total": 400,
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "The problem",
+                "objective": "State it.",
+                "abstract": "States the problem.",
+                "key_questions": ["what is the problem", "why it fails"],
+                "claims_to_support": [],
+                "required_evidence": [],
+                "word_target": 400,
+                "figures": [],
+                "depends_on": [],
+            }
+        ],
+    }
+    run.write_json("outline.approved.json", outlines.stamp(old_outline, approved_by="operator"))
+    run.write_json("claims.json", {"claims": []})
+    (Path(work) / "sections").mkdir(parents=True, exist_ok=True)
+    (Path(work) / "sections" / "s1.md").write_text("The problem is real. [1]\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+
+
 def test_a_term_marker_is_harvested_and_stripped(work, turns, no_renderer):
     """The writer's `TERM` marker never reaches the reader, and its term
     reaches the glossary assembly writes."""
@@ -915,7 +1126,7 @@ def test_the_plan_is_held_to_a_question_budget(work, turns):
     paper.prior_art(run)
     paper.plan(run)
     asked = next(args for args in run.turns.asked if args[0] == "outline")
-    assert asked[3] == {"questions": 3, "diagrams": 2, "claims": 40, "words": 2000}
+    assert asked[3] == {"questions": 3, "diagrams": 2, "claims": 40, "words": 2800}
 
 
 def test_truncation_never_leaves_a_heading_with_nothing_under_it(work, turns):
@@ -1280,7 +1491,7 @@ def test_the_planner_is_told_what_it_can_afford(work, turns, no_renderer):
     paper.prior_art(run)
     paper.plan(run)
     budget = next(args[3] for args in recorder.asked if args[0] == "outline")
-    assert budget == {"questions": 5, "diagrams": 2, "claims": 40, "words": 2000}
+    assert budget == {"questions": 5, "diagrams": 2, "claims": 40, "words": 2800}
 
 
 # -- the verification budget ------------------------------------------------

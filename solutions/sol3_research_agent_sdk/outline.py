@@ -112,6 +112,7 @@ def validate(
     corpus_keys: list[str] | None = None,
     require_next_step: bool = False,
     require_evidence_requirements: bool = False,
+    require_introduction: bool = False,
 ) -> list[str]:
     """Return human-readable errors. Empty means the outline is usable.
 
@@ -133,6 +134,27 @@ def validate(
             )
     if errors:
         return errors
+
+    # #538. The plan's frozen heading order is Front matter, Abstract,
+    # Introduction, Methods, Evidence summary, body sections, Conclusion,
+    # Next step, Glossary, References. Abstract, Methods, Evidence summary,
+    # Conclusion, Glossary, and References are Python's own, never an
+    # outline section in this port; Introduction is the one structural
+    # heading the outliner still has to draft, and position matters as much
+    # as presence: it has to be first, the same as Deep Agents'
+    # `stages.normalize_plan` puts it right after its own Abstract section.
+    # Copied, not imported, per the house rule against a shared loop
+    # package. Gated the same way `require_next_step` is, so the many
+    # single-section outline stubs across this test suite keep validating
+    # with no changes.
+    if require_introduction:
+        heading = str(sections[0].get("heading") or "").strip()
+        if heading.lower() != "introduction":
+            errors.append(
+                f"the first section is headed {heading!r}, not 'Introduction'. "
+                "The frozen heading order puts Introduction first, right after "
+                "the Abstract. Head the first section 'Introduction'."
+            )
 
     ids = [section.get("id") for section in sections]
     if any(not sid for sid in ids):

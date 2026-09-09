@@ -320,7 +320,8 @@ def _child_command(
     and does not clamp those numbers. `--max-questions 3 --max-claims 6` on
     top of six-to-ten sections is why two live runs never stamped an outline
     (#335). The fixture lane stays on demo size: its recorded paper is a
-    2000-word artifact with three questions.
+    `PROFILES["demo"]["word_target_total"]`-word artifact with three
+    questions.
     """
     command = [
         python,
