@@ -12,6 +12,50 @@ where no amount of confident prose can talk its way past it.
 A failing gate blocks the publish. `publish.py` refuses to push a paper that did
 not pass, which is the difference between a gate and a warning.
 
+Rows `check()` appends, past the three it reuses from `brief`:
+
+    sections       every required heading is present
+    limitations    the paper states its limitations (soft)
+    figure_alt     every figure carries real alt text
+    figure_assets  every diagram is a judged publication asset, not a sketch
+    captioned      every image is followed by a Figure N. caption
+    figure_referenced every placed figure is named Figure N in its own section's prose
+    skip_noted     every skipped figure is named, with its reason, on the page
+    no_diagram_source diagram source text never leaked into the body
+    ste_language   no contraction, no e.g./i.e./etc. in body prose
+    noun_stack     no noun cluster longer than three (soft)
+    person         no second person, no first-person tour
+    marketing      no banned marketing verb in body prose
+    policy_leak    the body names no search host and narrates no retrieval boundary
+    caveat_once    a caveat sentence or a numeric finding repeats across sections
+    question_heading a heading pastes a question instead of answering it
+    abstract_matches_body the abstract and introduction match the body they summarize
+    next_step      the last prose heading is a next-step section, not a bare Conclusion
+    cta_language   the next-step section sells nothing and every step stays short
+    glossary_complete every first-use term reached the glossary
+    glossary_exact every glossary entry is a term the body actually uses
+    references     the reference list has a row for every source
+    reference_hosts every reference host is on the approved allowlist
+    exit_doctrine  the body names done, then cost, then max turns, in order
+    langgraph_limitations limitations do not contradict an official LangGraph page
+    single_source_caveat every single-source claim admits it
+    no_contradicted no contradicted claim reached the paper
+    has_body       every section carries real prose, not a heading
+    length         the paper clears the word floor
+    charted        every plotted value is in the corpus and the caption cites
+    methods_present the Methods section, Python-written from the run record, is present
+    conclusion_present the Conclusion section, one writer turn from the body, is present
+    study_table    one Evidence summary row per human-study claim, placed after Methods
+    front_matter   the byline, date, provenance line, and conflicts line sit above the Abstract
+
+Belt versus judge, matching the house style page's ownership table
+(https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style).
+Python grades every row above. `skills/reviewer/SKILL.md` grades what Python
+cannot: defines_terms, states_mechanism, names_tradeoff, evidence_matches,
+scope_honest, no_filler, depth, voice, figure_earns_place, and
+abstract_matches_body, where Python catches only the fixed overclaim list and
+the reviewer catches the rest.
+
     python3 paper_check.py --demo
 """
 
@@ -22,6 +66,7 @@ from dataclasses import dataclass, field
 
 import brief
 import evidence
+import outline as outlines
 import source_policy
 
 # The sections a technical white paper has. A reader looking for limitations
@@ -35,7 +80,24 @@ CAVEAT = re.compile(r"single source|one source|not corroborated|unconfirmed", re
 
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.M)
 IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-FENCE = re.compile(r"```(\w*)\n(.*?)```", re.S)
+# A judge on PR #529 found three fence shapes this pattern missed. Group 1 is
+# the delimiter run, backtick or tilde, backreferenced so a closer must use
+# the same character; group 2 is the info string, unrestricted so a trailing
+# space or a hyphenated language tag (`objective-c`) still opens a fence;
+# group 3 is the body. The closer is `\1` on its own line, or end of body
+# when no closer exists, so an unclosed fence masks to the end rather than
+# leaving its content, headings included, exposed as prose.
+#
+# The trailing `(?=\n|\Z)` is a lookahead, not a consumed match. A judge on
+# the same PR found the first version consumed that newline, so a heading
+# on the line right after a closing fence, with no blank line between, had
+# its own leading newline swallowed into the masked span and replaced with
+# a space along with it. `SECTION_HEADING`'s `^` anchor needs an actual
+# newline before it, not a space, so that heading vanished from every row
+# that scans it, and `missing_sections` reported a present `References` as
+# missing. The lookahead ends the match before that newline, leaving it in
+# place. Copied from the SDK port, not imported.
+FENCE = re.compile(r"^[ \t]*([`~]{3,})([^\n]*)\n(.*?)(?:\n[ \t]*\1[ \t]*(?=\n|\Z)|\Z)", re.M | re.S)
 REFERENCE_ROW = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)[.)])\s+(.*\S)\s*$", re.M)
 URL = re.compile(r"https?://[^\s)\]<>\"']+")
 
@@ -58,9 +120,808 @@ EXIT_TERMS = (re.compile(r"\bdone\b", re.I), re.compile(r"\bcost\b", re.I), re.c
 
 SECTION_HEADING = re.compile(r"^(#{2,6})\s+(.+?)\s*$", re.M)
 
+# Sections Python writes directly, never through a writer turn: Methods from
+# the run record, and the Evidence summary table from the ledger (#478).
+# Neither carries a citation of its own to demand and neither is prose a
+# length floor should measure. PR #535 judge revision, ruling (b) and F2: a
+# name-based exemption, the same mechanism the SDK twin uses, not an
+# incidental formatting rule. Copied from the SDK port, not imported.
+PYTHON_WRITTEN_SECTIONS = {"methods", "evidence summary"}
+
 # Sections that legitimately carry no prose. References is a generated list, and
 # a Figures appendix is images with their alt text.
-PROSE_EXEMPT = ("references", "figures")
+PROSE_EXEMPT = ("references", "figures") + tuple(PYTHON_WRITTEN_SECTIONS)
+
+# Copied from `sections.py`, where it already grades one section. No second
+# person anywhere in the paper, not just the section body.
+SECOND_PERSON = re.compile(r"\b(you|your|yours)\b", re.I)
+
+# STE-S6, no contractions. `n't` covers do not/does not/etc; the pronoun list
+# covers `it's`, `that's`, `we're`, and the like without also matching a
+# genitive noun such as "the writer's card", which is not a contraction.
+CONTRACTION = re.compile(
+    r"\b[A-Za-z]+n't\b"
+    r"|\b(?:i|you|we|they|it|he|she|that|there|who|what|here|let|how|when|where|why)"
+    r"'(?:m|re|ve|ll|d|s)\b",
+    re.I,
+)
+# STE-S7, no Latin abbreviations. Write "for example", not "e.g."
+LATIN_ABBREV = re.compile(r"\b(?:e\.g\.|i\.e\.|etc\.)", re.I)
+# Split into sentence-shaped chunks without breaking on the two periods inside
+# "e.g."/"i.e."/"etc." themselves.
+SENTENCE_END = re.compile(r"(?<!e\.g\.)(?<!i\.e\.)(?<!etc\.)(?<=[.!?])\s+", re.I)
+REFERENCES_HEADING = re.compile(r"^#{1,6}\s+references?\s*$", re.I | re.M)
+LIST_ITEM = re.compile(r"^\d+[.)]\s")
+
+# P3, first-use glossary terms. The writer marks a term in the section that
+# first uses it, `<!-- TERM: orchestrator: the process that sequences roles -->`,
+# and assembly harvests and strips the mark. Copied from the SDK port's
+# `NEEDS_SOURCE` and `take_flags` mechanism at `checks.py`, not imported.
+TERM_MARKER = re.compile(r"<!--\s*TERM:\s*(.*?)\s*-->", re.S)
+# The glossary entry assembly writes for each captured term: `**term.** text`.
+GLOSSARY_ENTRY = re.compile(r"^\*\*(.+?)\.\*\*\s*(.+)$", re.M)
+
+# STE-S5, no noun stack longer than three. There is no part-of-speech tagger
+# in this codebase and this unit may not add one, so a token counts as a noun
+# candidate only when it is not one of these function words and does not carry
+# a verb or adverb ending. The list is short on purpose: articles,
+# prepositions, conjunctions, pronouns/determiners, auxiliaries, and the
+# common verbs and adverbs a briefing actually uses. Copied from the SDK port,
+# not imported.
+STE_FUNCTION_WORDS = frozenset(
+    """
+    a an the
+    of in on at by for with about against between into through during before
+    after above below to from up down over under again further than once off
+    out across along among around behind beside beyond near toward towards
+    upon within without via per amid versus plus minus
+    and but or nor so yet because although though while if unless whether
+    since as
+    i you he she it we they this that these those who whom which what whose
+    when where why how whatever whoever whichever wherever whenever
+    someone something anyone anything everyone everything nothing each either
+    neither all any some such one two three four five six seven eight nine
+    ten first second third fourth fifth last next single multiple several
+    various many few much more most less least other another same own new old
+    whole entire additional its his her their our your my no not
+    every cannot both none them due
+    be is are was were been being have has had do does did will would shall
+    should may might must can could
+    run runs use uses need needs want wants show shows name names hold holds
+    take takes give gives get gets know knows see sees say says call calls
+    make makes made
+    also only just still even already always never often sometimes here
+    there now then well however therefore thus very quite rather instead
+    hence otherwise nonetheless nevertheless regardless moreover furthermore
+    meanwhile besides namely indeed perhaps maybe given whereas whereby
+    thereby notwithstanding
+    """.split()
+)
+# A gerund/participle, an adverb, or a third-person-singular verb / plain
+# plural reads as a verb or an adverb, not a noun, often enough that excluding
+# the ending is cheaper than tagging the word. A trailing double `s`,
+# `harness`, `process`, is left alone, because that `s` is not the plural or
+# verb marker.
+# ponytail: heuristic noun test, upgrade to a tagger if false positives appear
+STE_VERB_ADVERB_SUFFIX = re.compile(r"(?:ing|ed|ly)$|(?<!s)s$", re.I)
+# A handful of adjective endings read as a descriptive modifier, not the noun
+# it modifies: "virtual", "single-source", "top level" survives, "folder-local
+# Python virtual environment" does not once "folder-local" and "virtual" both
+# drop out. A hyphenated token is almost always a compound modifier
+# ("folder-local", "twenty-four") rather than the noun itself, and a spelled-
+# out number is a quantifier, not a noun.
+MODIFIER_SUFFIX = re.compile(r"(?:al|ous|ive|able|ible|ful|less|ic|ish|ary|ent|ant)$", re.I)
+NUMBER_WORDS = frozenset(
+    """
+    one two three four five six seven eight nine ten eleven twelve thirteen
+    fourteen fifteen sixteen seventeen eighteen nineteen twenty hundred
+    thousand
+    """.split()
+)
+# Digits stay inside a token so `E2E` is one token, not `E` and `E` either
+# side of an invisible `2`; a token that carries a digit is never itself a
+# noun candidate, so it still breaks the run instead of extending it.
+STE_WORD_TOKEN = re.compile(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
+NOUN_STACK_LIMIT = 3
+# The SDK's inline-and-fenced code mask, copied so a contraction inside
+# single backticks is not scored as prose in this port either. `FENCE`
+# elsewhere in this file grades only a full fenced block; this one is scoped
+# to the STE belt.
+CODE_SPAN = re.compile(r"`[^`]*`|```.*?```", re.S)
+
+# Identifiers a later edit must not invent, copied from the SDK's `checks.py`,
+# not imported. A bare URL is deliberately excluded: too common in retrieved
+# text to be signal, and a dead link is a different problem.
+ARXIV = re.compile(r"\barXiv[:\s]*(\d{4}\.\d{4,5})", re.I)
+DOI = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)")
+AUTHOR_YEAR = re.compile(r"\[([A-Z][^\[\]\n]{2,60}?,\s*(?:19|20)\d{2})\]")
+PERCENT = re.compile(r"\b\d+(?:\.\d+)?%")
+VERSION = re.compile(r"\bv?\d+\.\d+(?:\.\d+)?\b")
+YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+BIG_INT = re.compile(r"\b([1-9]\d{2,})\b")
+QUOTED = re.compile(r'"([^"]{3,})"')
+
+# P9, #477. A numeric finding stated in full twice, with the same value and
+# unit, is a repeat even when the wording around it differs enough to dodge
+# the shingle threshold below: "2.4 percent" once, then "2.4%" a paragraph
+# later, is one finding either way.
+#
+# Methods is exempt from this rule, P11, #478: it is Python-written from
+# the run's own ledger, so the same count it names (sources retrieved,
+# claims verified) legitimately recurs there in the same units a body
+# section reports for an unrelated reason.
+NUMERIC_FULL = re.compile(r"\b\d+(?:\.\d+)?\s*(?:%|percent)\b", re.I)
+CAVEAT_EXEMPT_SECTIONS = {"glossary", "references"} | PYTHON_WRITTEN_SECTIONS
+# D2, #477. The whole-paper pass replaces a repeat with a short sentence
+# that points back to the section stating it first. That sentence is not
+# itself a repeat, even when the exact same short sentence appears in two
+# sections pointing at the same source: the writer card for the pass is
+# told to open with exactly one of these four phrases, so a sentence this
+# short starting this way is recognized as a pointer, not a restatement.
+#
+# #521. The exemption keys on the cue, not the length: a cap of 12 words
+# failed the pass's own output once the source section's heading ran past
+# four words, because the fixed frame around the heading is already 8
+# words. A live model-written outline names sections in five or six words
+# routinely; the offline fixtures never hit this because their headings
+# are one or two words. 24 words covers a heading well past what a real
+# outline produces while still being far too short to smuggle in a fresh
+# restatement of a finding.
+BACK_REFERENCE_CUES = ("as stated in", "as noted in", "as shown in", "see ")
+BACK_REFERENCE_MAX_WORDS = 24
+
+
+def _is_back_reference(sentence: str, headings: frozenset[str] | None = None) -> bool:
+    """A short pointer sentence that names one of the paper's own `##`
+    headings, exempt from `caveat_once` because it points at a finding
+    instead of restating it.
+
+    The cue phrase alone used to be enough: a judge on #531's line found a
+    manufactured "See ..." sentence under 24 words that named no section
+    at all could dodge the row by cue and length alone, then repeat across
+    sections just like any other sentence. Naming a real heading is the
+    difference between a pointer and a restatement wearing a pointer's
+    opening words. Copied from the SDK's `checks.py`, not imported.
+    """
+    words = WORD.findall(sentence)
+    if not words or len(words) > BACK_REFERENCE_MAX_WORDS:
+        return False
+    if not sentence.strip().lower().startswith(BACK_REFERENCE_CUES):
+        return False
+    if not headings:
+        return False
+    lowered = sentence.lower()
+    # Word-bounded: a substring match let a short or common heading claim
+    # the exemption from inside an unrelated longer word. #464 F6.
+    return any(heading and re.search(rf"\b{re.escape(heading)}\b", lowered) for heading in headings)
+
+
+def _collapse_prose_piece(text: str, headings: frozenset[str] | None) -> str:
+    """One prose chunk (no embedded image line) with a duplicate back
+    reference collapsed to its first occurrence.
+
+    Compares every piece already kept, not only the immediately preceding
+    one (#531): two repeats in the same paragraph can be split by an
+    unrelated sentence in between, and the second pointer is still a
+    duplicate of the first even though it is not adjacent to it.
+    """
+    pieces = SENTENCE_END.split(text)
+    kept: list[str] = []
+    for piece in pieces:
+        if _is_back_reference(piece, headings) and any(
+            piece.strip() == prior.strip() for prior in kept
+        ):
+            continue
+        kept.append(piece)
+    return text if len(kept) == len(pieces) else " ".join(kept)
+
+
+def _map_prose_blocks(body: str, transform) -> str:
+    """Apply `transform(text) -> text` to every prose block, a same-block
+    `![figure]` line split onto its own segment first.
+
+    Shared by `collapse_repeated_back_references` and
+    `drop_dangling_figure_mentions` (#464 F2): whatever the transform does
+    to a block's sentences, an image line with no blank line separating it
+    from the prose above it must never be swept into that flow and lose
+    its own line. A heading, a list, a table, a quote, a fence, and a
+    `Figure N.` caption are passed through untouched, the same exemptions
+    the sentence-scanning helpers grant elsewhere. Copied from the SDK's
+    `checks.py`, not imported.
+    """
+    out_lines: list[str] = []
+    block_lines: list[str] = []
+
+    def flush() -> None:
+        if not block_lines:
+            return
+        block = "\n".join(block_lines)
+        stripped = block.strip()
+        if (
+            not stripped
+            or stripped.startswith(("#", "!", "|", ">", "```", "-", "*"))
+            or LIST_ITEM.match(stripped)
+            or FIGURE_CAPTION.match(stripped)
+        ):
+            out_lines.append(block)
+            return
+        segments: list[str] = []
+        prose_buf: list[str] = []
+        for line in block_lines:
+            if line.lstrip().startswith("!["):
+                if prose_buf:
+                    segments.append(transform("\n".join(prose_buf)))
+                    prose_buf = []
+                segments.append(line)
+            else:
+                prose_buf.append(line)
+        if prose_buf:
+            segments.append(transform("\n".join(prose_buf)))
+        out_lines.append("\n".join(segments))
+
+    for line in body.split("\n"):
+        if line.strip() == "":
+            flush()
+            out_lines.append(line)
+            block_lines = []
+            continue
+        block_lines.append(line)
+    flush()
+    return "\n".join(out_lines)
+
+
+def collapse_repeated_back_references(body: str, headings: frozenset[str] | None = None) -> str:
+    """Two or more identical back references stacked in one paragraph
+    collapse to one.
+
+    The whole-paper pass can point more than one repeat in the same
+    paragraph at the same source; each is edited on its own, so the
+    result is the same short pointer sentence typed out once per repeat
+    it cleared, instead of the single pointer a reader needs. Runs on the
+    deterministic trim's own output and again on whatever a model-written
+    pass returns, since a model can stack the same pointer on its own.
+    #521. Copied from the SDK's `checks.py`, not imported.
+
+    `headings` defaults to `top_level_sections(body)`'s own `##` scan,
+    right for the SDK's call on a whole assembled body. `stage_trim` calls
+    this once per section on `self.written[heading]` alone, which carries
+    no `##` line of its own to scan, so it passes the paper's real heading
+    set in instead.
+    """
+    if headings is None:
+        headings = frozenset(top_level_sections(body))
+    return _map_prose_blocks(body, lambda text: _collapse_prose_piece(text, headings))
+
+
+def _mask_references(text: str) -> str:
+    """Blank the references section. A host name in a URL is not body prose."""
+    match = REFERENCES_HEADING.search(text)
+    if not match:
+        return text
+    return text[: match.start()] + " " * (len(text) - match.start())
+
+
+def _mask_code(text: str) -> str:
+    """Blank inline and fenced code so a code sample is not scanned for STE
+    violations. Offsets are kept.
+    """
+    return CODE_SPAN.sub(lambda m: " " * len(m.group(0)), text)
+
+
+INLINE_URL = re.compile(r"https?://\S+")
+
+
+def _mask_urls(text: str) -> str:
+    """Blank an inline URL, through the next whitespace.
+
+    A citation URL outside the reference list is not body prose either. A
+    `your-account` path segment fabricated a `person` hit, and `unlock-guide`
+    fabricated a `marketing` hit, both from a link a reader never reads as
+    English. Copied from the SDK port, not imported.
+    """
+    return INLINE_URL.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def _mask_fences(text: str) -> str:
+    """Blank a fenced code block, keeping every character offset.
+
+    A judge on PR #508 found a `##` line inside a quoted markdown snippet
+    counted as a heading in `question_headings`, and every sibling row that
+    scans headings has the same exposure: `next_step` (`last_prose_heading`),
+    the `sections` row, and the section-boundary helpers they all share.
+    Narrower than `_mask_code` on purpose: an inline single-backtick span
+    never spans a line, so it cannot fake a heading, and blanking it here
+    would also blank a heading's own inline code. Copied from the SDK port,
+    not imported. #509
+    """
+    return FENCE.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def _headings(text: str) -> list[re.Match]:
+    """`SECTION_HEADING` matches read from the fence-masked body.
+
+    One call, and every row below reads through it, so a heading inside a
+    fenced snippet is never counted as paper structure. #509
+    """
+    return list(SECTION_HEADING.finditer(_mask_fences(text)))
+
+
+def _mask_for_ste(text: str) -> str:
+    """Code, an inline URL, and references, gone. Everything else is body prose."""
+    return _mask_urls(_mask_references(_mask_code(text)))
+
+
+def _prose_sentences(text: str) -> list[str]:
+    """Sentence-shaped chunks of body prose. Skips headings, images, lists,
+    tables, quotes, fences, and a `Figure N.` caption, none of which are a
+    sentence a writer composed. A caption is system-generated from a
+    diagram's own node labels, not prose a writer is held to the STE belt
+    for. #464.
+    """
+    sentences: list[str] = []
+    for block in re.split(r"\n\s*\n", text):
+        block = block.strip()
+        if not block or block.startswith(("#", "!", "|", ">", "```", "-", "*")):
+            continue
+        if LIST_ITEM.match(block) or FIGURE_CAPTION.match(block):
+            continue
+        for piece in SENTENCE_END.split(block):
+            piece = piece.strip()
+            if piece:
+                sentences.append(piece)
+    return sentences
+
+
+def ste_language_violations(body: str) -> list[str]:
+    """Sentences carrying a contraction or a Latin abbreviation.
+
+    STE-S6 and STE-S7. Unconditional: a clean sentence passes by construction.
+    """
+    masked = _mask_for_ste(body)
+    return [
+        sentence[:160]
+        for sentence in _prose_sentences(masked)
+        if CONTRACTION.search(sentence) or LATIN_ABBREV.search(sentence)
+    ]
+
+
+def _noun_candidate(word: str) -> bool:
+    if "-" in word or any(ch.isdigit() for ch in word):
+        return False
+    lowered = word.lower()
+    if lowered in STE_FUNCTION_WORDS or lowered in NUMBER_WORDS:
+        return False
+    return not (STE_VERB_ADVERB_SUFFIX.search(word) or MODIFIER_SUFFIX.search(word))
+
+
+NOUN_RUN_BREAK = re.compile(r"[,;:()]")
+
+
+def noun_stacks(body: str, limit: int = NOUN_STACK_LIMIT) -> list[str]:
+    """Runs of more than `limit` consecutive noun-candidate tokens.
+
+    STE-S5. Advisory: reported, never a hard gate. A hyphenated token,
+    `folder-local`, stays one token so it breaks the run as one unit, but it
+    reads as a compound modifier and is never itself a candidate. A comma-
+    separated list, "the researcher, verifier, writer, and gate boundaries",
+    is enumeration, not a stack, so punctuation between two tokens also
+    breaks the run.
+    """
+    masked = _mask_for_ste(body)
+    hits: list[str] = []
+    for sentence in _prose_sentences(masked):
+        run: list[str] = []
+        end = 0
+        for match in STE_WORD_TOKEN.finditer(sentence):
+            if NOUN_RUN_BREAK.search(sentence, end, match.start()):
+                run = []
+            end = match.end()
+            word = match.group(0)
+            if _noun_candidate(word):
+                run.append(word)
+                if len(run) == limit + 1:
+                    hits.append(" ".join(run))
+            else:
+                run = []
+    return hits
+
+
+# P2, third person and no first person tour. SECOND_PERSON already grades one
+# section at `sections.section_check`; these rows raise the same regex, plus
+# the two first-person phrases, to the whole paper. Copied from the SDK port,
+# not imported.
+WE_WILL = re.compile(r"\bwe\s+will\b", re.I)
+IN_THIS_ARTICLE = re.compile(r"\bin\s+this\s+article\b", re.I)
+
+
+def person_violations(body: str) -> list[str]:
+    """Sentences carrying second person, or a first-person tour.
+
+    Unconditional: third person, active voice, passes by construction.
+    """
+    masked = _mask_for_ste(body)
+    return [
+        sentence[:160]
+        for sentence in _prose_sentences(masked)
+        if SECOND_PERSON.search(sentence) or WE_WILL.search(sentence) or IN_THIS_ARTICLE.search(sentence)
+    ]
+
+
+# P2, the marketing lexicon. `\w*` covers the inflections a writer reaches
+# for: leverages, unlocked, empowering, revolutionizes, seamlessly,
+# robustness.
+#
+# `leverage`/`leverages` alone is exempt when the next word is `ratio(s)` or
+# `buyout(s)`: a finance section naming a bank's leverage ratio is not the
+# harness's marketing verb. `leveraging`/`leveraged` carry no such reading and
+# stay banned outright. Copied from the SDK port, not imported.
+MARKETING_VERB = re.compile(
+    r"\bleverages?\b(?!\s+(?:ratios?|buyouts?)\b)"
+    r"|\bleverag(?:ing|ed)\w*\b"
+    r"|\b(?:unlock\w*|empower\w*|revolutioniz\w*|seamless\w*|robust\w*)\b",
+    re.I,
+)
+
+
+def marketing_violations(body: str) -> list[str]:
+    """Sentences carrying a marketing verb: leverage, unlock, empower,
+    revolutionize, seamless, robust.
+
+    Unconditional: a clean sentence passes by construction.
+    """
+    masked = _mask_for_ste(body)
+    return [sentence[:160] for sentence in _prose_sentences(masked) if MARKETING_VERB.search(sentence)]
+
+
+# P6, the paper does not narrate the harness. #452 #465 #412: the finished
+# creatine paper named arxiv.org 42 times and spent whole paragraphs saying no
+# preprint was found. A reader of a sports-nutrition paper does not care which
+# index a search was scoped to. Copied from the SDK port, not imported.
+POLICY_LEAK_PHRASES = (
+    "preprint search",
+    "search scope",
+    "no study was hosted on",
+)
+POLICY_LEAK_PHRASE = re.compile(
+    "|".join(re.escape(phrase) for phrase in POLICY_LEAK_PHRASES), re.I
+)
+
+
+def _mask_for_policy(text: str) -> str:
+    """Code, a URL, References, and Methods, gone. Methods is where #478
+    names the admitted hosts by design; nothing else in the body may.
+    """
+    return _mask_section(_mask_for_ste(text), "methods")
+
+
+def policy_leak_violations(body: str, allowed_domains=None) -> list[str]:
+    """Sentences that narrate the harness's own source policy instead of the
+    subject: a search host name, or one of the three retrieval phrases.
+
+    Unconditional: a clean sentence passes by construction. Methods and
+    References are exempt; every other section is graded.
+    """
+    masked = _mask_for_policy(body)
+    hosts = [
+        str(host).strip()
+        for host in (tuple(source_policy.SEED_ALLOWLIST) + tuple(allowed_domains or ()))
+        if str(host).strip()
+    ]
+    host_pattern = (
+        re.compile(r"\b(?:" + "|".join(re.escape(host) for host in hosts) + r")\b", re.I)
+        if hosts
+        else None
+    )
+    hits = []
+    for sentence in _prose_sentences(masked):
+        if POLICY_LEAK_PHRASE.search(sentence) or (host_pattern and host_pattern.search(sentence)):
+            hits.append(sentence[:160])
+    return hits
+
+
+# P4, the next-step section may use imperative CTA steps, but it may not sell.
+# `unlock`, `revolutionize`, and the rest of the marketing lexicon are already
+# banned everywhere by `MARKETING_VERB`; this phrase list is the CTA ban list
+# ticket #460 names, minus those two, which are not marketing verbs on their
+# own. Copied from the SDK port, not imported.
+CTA_PHRASE = re.compile(
+    r"\b(buy|sign up|subscribe|get started|only solution|contact sales|transform your|contact us)\b",
+    re.I,
+)
+
+
+def _cta_steps(text: str) -> list[str]:
+    """Every step in the next-step section: a bullet line, or a prose
+    sentence when a block carries no bullet. A CTA line is short by design,
+    so the word cap and the ban list both grade per step, not per section.
+    """
+    masked = _mask_code(text)
+    steps: list[str] = []
+    for block in re.split(r"\n\s*\n", masked):
+        block = block.strip()
+        if not block:
+            continue
+        bullets = [line.strip() for line in block.splitlines() if re.match(r"^[-*]\s+", line.strip())]
+        if bullets:
+            steps += [re.sub(r"^[-*]\s+", "", line) for line in bullets]
+            continue
+        if block.startswith(("#", "!", "|", ">", "```")):
+            continue
+        for piece in SENTENCE_END.split(block):
+            piece = piece.strip()
+            if piece:
+                steps.append(piece)
+    return steps
+
+
+def cta_violations(section_text: str) -> list[str]:
+    """Every step in the next-step section that sells, or runs past 20 words.
+
+    Scoped to the one section `check` hands it. `unlock` in a body section is
+    the unconditional `marketing` row's business, not this one.
+    """
+    hits = []
+    for step in _cta_steps(section_text):
+        words = len(re.findall(r"\b[\w'-]+\b", step))
+        if CTA_PHRASE.search(step) or MARKETING_VERB.search(step) or words > 20:
+            hits.append(step[:160])
+    return hits
+
+
+def take_terms(body: str) -> tuple[str, list[tuple[str, str]]]:
+    """Pull every TERM marker out of the text, and return both.
+
+    The marker names a term and its first-use definition, separated by the
+    first colon. A marker with no definition half is dropped rather than
+    guessed at.
+    """
+    terms: list[tuple[str, str]] = []
+    for payload in TERM_MARKER.findall(body):
+        term, _, definition = payload.partition(":")
+        term = term.strip()
+        definition = definition.strip()
+        if term and definition:
+            terms.append((term, definition))
+    return TERM_MARKER.sub("", body), terms
+
+
+def _mask_section(text: str, name: str) -> str:
+    """Blank one named heading's own text, keeping every other character offset.
+
+    Grading whether a glossary term is used elsewhere in the body must not
+    credit the glossary's own entry as that use.
+    """
+    matches = _headings(text)
+    for index, match in enumerate(matches):
+        if match.group(2).strip().lower() != name:
+            continue
+        level = len(match.group(1))
+        end = len(text)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        start = match.start()
+        return text[:start] + " " * (end - start) + text[end:]
+    return text
+
+
+def _mask_sections(text: str, names: set[str]) -> str:
+    """Blank every heading in `names`, one pass, in an order that cannot
+    matter. Copied from the SDK port, not imported.
+
+    Calling `_mask_section` once per name chains: it re-scans the string the
+    previous call already mutated, and a mask always eats the newline right
+    before the next heading (the mask ends exactly where that heading's `#`
+    starts). Two masked sections sitting back to back lose the line break
+    between them on the first call, so the second call's own `_headings`
+    scan never sees the second heading at all, only sometimes, whichever
+    name a set happened to iterate first. Spans are computed once, from the
+    untouched text, so this never depends on scanning a text a prior mask
+    already edited.
+    """
+    matches = _headings(text)
+    spans = []
+    for index, match in enumerate(matches):
+        if match.group(2).strip().lower() not in names:
+            continue
+        level = len(match.group(1))
+        end = len(text)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        spans.append((match.start(), end))
+    out = text
+    for start, end in spans:
+        out = out[:start] + " " * (end - start) + out[end:]
+    return out
+
+
+def glossary_terms(body: str) -> dict[str, str]:
+    """The term-to-definition map assembly wrote into `## Glossary`.
+
+    Empty when the paper carries no Glossary heading: no captured term means
+    no section, not a missing one.
+    """
+    matches = _headings(body)
+    for index, match in enumerate(matches):
+        if match.group(2).strip().lower() != "glossary":
+            continue
+        level = len(match.group(1))
+        end = len(body)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        section = body[match.end() : end]
+        return {m.group(1).strip(): m.group(2).strip() for m in GLOSSARY_ENTRY.finditer(section)}
+    return {}
+
+
+def glossary_incomplete(body: str) -> list[str]:
+    """A term marked for capture that never reached the glossary.
+
+    Assembly strips every `TERM` marker before it writes the paper, so a
+    marker surviving into the body handed to this row is itself the defect. A
+    body with no marker at all has nothing captured and passes by
+    construction.
+    """
+    _, captured = take_terms(body)
+    glossary = {term.lower() for term in glossary_terms(body)}
+    return [term for term, _ in captured if term.lower() not in glossary]
+
+
+def glossary_host_terms(terms, allowed_domains=None) -> list[str]:
+    """Glossary entries that are a search host, not a term.
+
+    The reference list may name `docs.langchain.com`. The glossary may not: it
+    is prose about the subject, not a map of where the run went looking.
+    """
+    hosts = {
+        str(entry).strip().lower()
+        for entry in (tuple(source_policy.SEED_ALLOWLIST) + tuple(allowed_domains or ()))
+        if str(entry).strip()
+    }
+    return [term for term in terms if term.strip().lower().split("/")[0] in hosts or term.strip().lower() in hosts]
+
+
+# Irregular plurals a paper actually reaches for. The regular suffix rules
+# below cannot fold "criteria" to "criterion": neither form ends in `s`,
+# `es`, or `ies`. Checked first, both directions, so either surface form
+# folds to the singular. Copied from the SDK port, not imported.
+IRREGULAR_PLURALS = {
+    "criteria": "criterion",
+    "phenomena": "phenomenon",
+    "analyses": "analysis",
+    "hypotheses": "hypothesis",
+    "indices": "index",
+}
+_IRREGULAR_FOLD = {**IRREGULAR_PLURALS, **{singular: singular for singular in IRREGULAR_PLURALS.values()}}
+
+
+def _stem(word: str) -> str:
+    """A crude plural fold. An irregular pair folds first, from a fixed
+    table (exit criteria / exit criterion and the like). Anything else
+    folds by suffix: trailing `ies` to `y`, else strip a trailing `es` or
+    `s`. Not a real stemmer, only enough that a term defined singular and
+    used plural, or the reverse, is not graded as two words. Copied from
+    the SDK port, not imported.
+    """
+    word = word.lower()
+    if word in _IRREGULAR_FOLD:
+        return _IRREGULAR_FOLD[word]
+    if word.endswith("ies") and len(word) > 3:
+        return word[:-3] + "y"
+    if word.endswith("es") and len(word) > 2:
+        return word[:-2]
+    if word.endswith("s") and len(word) > 1:
+        return word[:-1]
+    return word
+
+
+WORD = re.compile(r"[A-Za-z][\w'-]*")
+
+
+def _term_used(term: str, prose: str) -> bool:
+    """Whether `term`'s stemmed words appear as a run inside `prose`.
+
+    A literal phrase match rejected "one exit criterion" for the glossary
+    term "exit criteria". Comparing stems catches the regular plural or
+    singular a sentence actually used.
+    """
+    wanted = [_stem(w) for w in WORD.findall(term)]
+    if not wanted:
+        return False
+    found = [_stem(w) for w in WORD.findall(prose)]
+    span = len(wanted)
+    return any(found[i : i + span] == wanted for i in range(len(found) - span + 1))
+
+
+def glossary_unused(body: str) -> list[str]:
+    """Glossary entries for a term the body never uses.
+
+    "Uses" is generous on purpose. A stemmed match counts. A term repeated
+    inside its own definition also counts: that sentence is the one the
+    writer's own `TERM` marker carried, not the glossary inventing a use.
+    """
+    terms = glossary_terms(body)
+    if not terms:
+        return []
+    prose = CODE_SPAN.sub(lambda m: " " * len(m.group(0)), _mask_section(body, "glossary"))
+    return [
+        term
+        for term, definition in terms.items()
+        if not _term_used(term, prose) and not _term_used(term, definition)
+    ]
+
+
+# P4. Glossary and References are assembled, never written by a model, so the
+# last heading a writer could have produced is the last one before them.
+# Figures is assembled too, an orphan appendix for a diagram no section
+# claimed, so it is not a prose section either.
+NON_PROSE_TRAILING = {"glossary", "references", "figures"}
+
+
+def last_prose_heading(body: str) -> str | None:
+    """The last top-level (`##`) section heading before Glossary and References.
+
+    Frozen order: front matter, Abstract, Introduction, Methods, study table,
+    body sections, Conclusion, Next step, Glossary, References. `None` when
+    the paper has no top-level heading at all.
+    """
+    headings = [
+        match.group(2).strip()
+        for match in _headings(body)
+        if len(match.group(1)) == 2 and match.group(2).strip().lower() not in NON_PROSE_TRAILING
+    ]
+    return headings[-1] if headings else None
+
+
+def _section_text(body: str, name: str) -> str:
+    """One named heading's own body, the same boundary rule `glossary_terms` uses."""
+    matches = _headings(body)
+    for index, match in enumerate(matches):
+        if match.group(2).strip().lower() != name:
+            continue
+        level = len(match.group(1))
+        end = len(body)
+        for later in matches[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        return body[match.end() : end]
+    return ""
+
+
+def question_headings(body: str, outline: dict | None = None) -> list[str]:
+    """H2/H3 headings that are pasted questions, not the answers to them.
+
+    A heading that ends in a question mark reads as a slide prompt, not a
+    finding. A heading that repeats an outline key question verbatim is the
+    same defect with the closing punctuation changed. Copied from the SDK
+    `checks.py` row of the same name, never imported. #385.
+
+    The question and the heading both drop trailing `?.:;!` before the
+    comparison. A judge on PR #508 found the P5 version stripped only a
+    trailing `?`, so a key question the writer re-punctuated with a period
+    or a colon as a heading still matched the wanted set and slipped past.
+    """
+    wanted = set()
+    for section in (outline or {}).get("sections") or []:
+        for item in section.get("key_questions") or []:
+            text = outlines.question_text(item).strip().lower().rstrip("?.:;!").strip()
+            if text:
+                wanted.add(text)
+    bad = []
+    for match in _headings(body):
+        if len(match.group(1)) not in (2, 3):
+            continue
+        heading = match.group(2).strip()
+        stripped = heading.lower().rstrip("?.:;!").strip()
+        if heading.endswith("?") or stripped in wanted:
+            bad.append(heading)
+    return bad
 
 
 @dataclass
@@ -105,15 +966,43 @@ class PaperScore:
 
 
 def sections(body: str) -> list[str]:
-    return [heading.strip().lower() for heading in HEADING.findall(body)]
+    return [heading.strip().lower() for heading in HEADING.findall(_mask_fences(body))]
 
 
 def figures(body: str) -> list[tuple[str, str]]:
     return IMAGE.findall(body)
 
 
+SKIP_NOTE = re.compile(r"^>.*was not shown:.*\.$", re.M)
+
+
+def _strip_figure_notes(body: str) -> str:
+    """Blank a `Figure N.` caption line and a skip-note blockquote line.
+
+    Neither is prose a writer composed, and counting either toward
+    `has_body` or `length` credits a section for system-generated text.
+    `FIGURE_CAPTION` has no `re.M` flag (every other caller matches it
+    against one already-split line), so this multiline body needs its own
+    flag on the substitution. Copied from the SDK port's `checks.py`, not
+    imported. #464, F4.
+    """
+    body = re.sub(FIGURE_CAPTION.pattern, "", body, flags=re.M)
+    return SKIP_NOTE.sub("", body)
+
+
 def word_count(body: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", body)))
+    """The whole-paper word count `length` grades against `MIN_WORDS`.
+
+    Blanks the same system-generated text `_strip_figure_notes` already
+    excludes, and now also `PYTHON_WRITTEN_SECTIONS`: Methods and the study
+    table are Python output, never a writer's prose, and crediting either
+    toward the floor is the same overclaim `_strip_figure_notes` already
+    names. PR #535 judge revision F5. The front-matter block above the
+    Abstract is Python output too, and gets the same exclusion: PR #542
+    judge F2.
+    """
+    stripped = _mask_front_matter(_mask_sections(_strip_figure_notes(body), PYTHON_WRITTEN_SECTIONS))
+    return len(re.findall(r"\b[\w'-]+\b", FENCE.sub("", stripped)))
 
 
 def missing_sections(body: str, required=REQUIRED_SECTIONS) -> list[str]:
@@ -139,10 +1028,153 @@ def non_publication_figures(body: str) -> list[str]:
     return bad
 
 
+FIGURE_CAPTION = re.compile(r"^Figure (\d+)\.[ \t]*(.*)$")
+IMAGE_LINE = re.compile(r"^!\[[^\]]*\]\([^)]+\)\s*$")
+FIGURE_MENTION = re.compile(r"\bFigure\s+(\d+)\b")
+
+
+def placed_figures(body: str) -> list[dict]:
+    """Every numbered figure the assembled body carries: its number, its
+    owning `##` section, and the caption text on its own `Figure N.` line.
+
+    Reads the caption line `assemble` writes at placement, the single
+    source of truth for `captioned`, `figure_referenced`, and the
+    whole-paper pass's own figure list: whatever number is on the page is
+    the number a mention has to name, nothing recomputed separately.
+    Copied from the SDK port's `checks.py`, not imported. #413, #464.
+    """
+    spans = top_level_section_spans(body)
+    out: list[dict] = []
+    pos = 0
+    for line in body.split("\n"):
+        match = FIGURE_CAPTION.match(line.strip())
+        if match:
+            owner = next((name for name, (s, e) in spans.items() if s <= pos < e), "")
+            out.append(
+                {
+                    "number": int(match.group(1)),
+                    "section": owner,
+                    "caption": match.group(2).strip(),
+                }
+            )
+        pos += len(line) + 1
+    return out
+
+
+def captioned_violations(body: str) -> list[str]:
+    """Every placed image is followed by a `Figure N.` caption line, and
+    every caption on the page numbers a distinct figure, contiguous from
+    one.
+
+    Not a fake caption on an image that resolved to nothing: `figure_alt`
+    and `figure_assets` already own the file itself. This row owns only
+    whether a resolved image carries the caption a reader needs, and
+    whether the numbers on the page still add up. #413, #464.
+    """
+    lines = body.split("\n")
+    missing = []
+    for idx, line in enumerate(lines):
+        if not IMAGE_LINE.match(line.strip()):
+            continue
+        j = idx + 1
+        while j < len(lines) and lines[j].strip() == "":
+            j += 1
+        nxt = lines[j].strip() if j < len(lines) else ""
+        if not FIGURE_CAPTION.match(nxt):
+            missing.append(line.strip()[:80])
+    # #464 B2. A figure whose image line was already persisted from an
+    # earlier pass, and one freshly placed this call, must still number
+    # 1..N with no gap and no duplicate.
+    numbers = [figure["number"] for figure in placed_figures(body)]
+    if numbers and sorted(numbers) != list(range(1, len(numbers) + 1)):
+        missing.append(f"figure numbers are not contiguous from one: {numbers}")
+    return missing
+
+
+def mentions_figure(text: str, number: int) -> bool:
+    """Whether `text` names `Figure {number}` as a whole number, not as a
+    prefix of a longer one.
+
+    A plain substring let "Figure 1" read as satisfied by a "Figure 12"
+    mention. Shared by `figure_referenced_violations` and `stage_trim`'s
+    own "already mentioned" check, so neither can decide a figure is
+    referenced when the other would still flag it missing. Copied from
+    the SDK port's `checks.py`, not imported. #464 F1.
+    """
+    return re.search(rf"\bFigure {number}\b", text) is not None
+
+
+def figure_referenced_violations(body: str) -> list[str]:
+    """Every placed figure is named `Figure N` in its owning section's own
+    prose, outside the caption line itself.
+
+    Reads `placed_figures`, so a figure with no number at all -- skipped,
+    dropped, or never rendered -- never reaches this row and never demands
+    a mention. #464.
+    """
+    spans = top_level_section_spans(body)
+    missing = []
+    for figure in placed_figures(body):
+        section = figure["section"]
+        span = spans.get(section)
+        scope = body[span[0] : span[1]] if span else body
+        prose = re.sub(rf"^Figure {figure['number']}\..*$", "", scope, flags=re.M)
+        if not mentions_figure(prose, figure["number"]):
+            missing.append(f"Figure {figure['number']} never named in {section or 'its section'!r} prose")
+    return missing
+
+
+def skip_noted_violations(body: str, skipped: list[dict] | None) -> list[str]:
+    """Every recorded skip is named, with its reason, under the section it
+    names -- or somewhere on the page, for a skip with no section at all.
+
+    Not a fake image, not a caption on an empty axis: a skip is a note,
+    and a note with nothing to show for it is the defect #386 named.
+    Grading only the name let a note that dropped its reason, or landed
+    under the wrong section, still pass. #464, F3.
+    """
+    sections = top_level_sections(body)
+    missing = []
+    for item in skipped or []:
+        name = str((item or {}).get("name") or "").strip()
+        if not name:
+            continue
+        reason = str((item or {}).get("reason") or "").strip()
+        section = str((item or {}).get("section") or "").strip().lower()
+        scope = sections.get(section, body) if section else body
+        if name not in scope or (reason and reason not in scope):
+            missing.append(name)
+    return missing
+
+
+def drop_dangling_figure_mentions(body: str, valid_numbers) -> str:
+    """A sentence naming a figure number that is no longer placed reads as
+    a promise the page does not keep: a figure a later attempt dropped
+    after an earlier pass already pointed a section at it, or one a live
+    image backend failed to render (#514, #531). Strips the whole
+    sentence, never only the number, so a reader is never left with a
+    dangling "shows" pointed at nothing. Copied from the SDK port's
+    `checks.py`, not imported. #464.
+    """
+    valid = set(valid_numbers)
+
+    def _drop(text: str) -> str:
+        pieces = SENTENCE_END.split(text)
+        kept = [
+            piece
+            for piece in pieces
+            if not any(int(n) not in valid for n in FIGURE_MENTION.findall(piece))
+        ]
+        return text if len(kept) == len(pieces) else " ".join(kept)
+
+    return _map_prose_blocks(body, _drop)
+
+
 def visible_source_syntax(body: str) -> list[str]:
     """Diagram source left in the paper. The figure is the artifact, not the code."""
     found = []
-    for language, block in FENCE.findall(body):
+    for _delimiter, language, block in FENCE.findall(body):
+        language = language.strip()
         if language.lower() in ("mermaid", "plantuml", "puml") or SOURCE_SYNTAX.search(block):
             found.append(language or block.strip().split("\n", 1)[0][:40])
     return found
@@ -161,7 +1193,7 @@ def sections_without_prose(body: str, min_words: int = MIN_SECTION_WORDS) -> lis
     so this is the check that says the paper has a body.
     """
     thin = []
-    matches = list(SECTION_HEADING.finditer(body))
+    matches = _headings(body)
     for index, match in enumerate(matches):
         heading = match.group(2).strip()
         if heading.lower() in PROSE_EXEMPT:
@@ -169,8 +1201,10 @@ def sections_without_prose(body: str, min_words: int = MIN_SECTION_WORDS) -> lis
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
         chunk = body[match.end() : end]
         # Images and fenced code are not prose. A section that is one figure and
-        # nothing else still owes the reader an explanation.
-        chunk = IMAGE.sub("", FENCE.sub("", chunk))
+        # nothing else still owes the reader an explanation. Nor is a
+        # `Figure N.` caption or a skip-note blockquote, both system-
+        # generated. #464, F4.
+        chunk = IMAGE.sub("", FENCE.sub("", _strip_figure_notes(chunk)))
         words = re.findall(r"\b[\w'-]+\b", chunk)
         if len(words) < min_words:
             thin.append(f"{heading} ({len(words)} words)")
@@ -340,6 +1374,413 @@ def contradicted_in_body(body: str, ledger: evidence.Ledger | None) -> list[str]
     return found
 
 
+# P7, #472. The abstract restates the body and may not say more than the body
+# says. `single_source_caveat` above grades any section a single-source claim's
+# own vocabulary matches; this row grades the abstract and the introduction's
+# first paragraph by citation number instead, because that is where a reader
+# meets the paper's claim before meeting its evidence.
+ABSTRACT_HEDGE = re.compile(r"single|one study|one trial|preliminary", re.I)
+ABSTRACT_OVERCLAIM = re.compile(r"\b(?:proves|definitively|conclusively|establishes that)\b", re.I)
+ABSTRACT_MARKER = re.compile(r"\[(\d+)\]")
+
+
+def _first_paragraph(text: str) -> str:
+    for block in re.split(r"\n\s*\n", text.strip()):
+        block = block.strip()
+        if block and not block.startswith(("#", "!", "|", ">", "```", "-", "*")):
+            return block
+    return ""
+
+
+_MARKER_ONLY = re.compile(r"^(?:\[\d+\]\s*)+$")
+
+
+def _cited_sentences(text: str) -> list[str]:
+    """`_prose_sentences`, with a trailing citation-only fragment folded back
+    into the sentence before it.
+
+    The writer cites after the period, `"...notices. [1]"`, so `SENTENCE_END`
+    splits the marker into a sentence of its own. Grading that fragment for a
+    hedge word finds nothing, because the hedge is one sentence back.
+    """
+    merged: list[str] = []
+    for sentence in _prose_sentences(text):
+        if _MARKER_ONLY.match(sentence) and merged:
+            merged[-1] = f"{merged[-1]} {sentence}"
+        else:
+            merged.append(sentence)
+    return merged
+
+
+def _single_source_numbers(body: str, ledger: evidence.Ledger | None) -> set[int]:
+    """Reference numbers backed by exactly one source, decided per claim.
+
+    `stages.numbering` already maps url to number from the ledger, but
+    `stages.py` imports this module, so calling back would be a cycle. The
+    rendered reference list already carries the same mapping, so this reads
+    it from `body` instead.
+
+    A url can back more than one claim: one single-source, one corroborated
+    by a second url. Flagging the number whenever any claim on that url is
+    single-source forced a hedge onto a sentence citing the corroborated
+    claim too. A number counts as single-source only when every claim
+    citing its url is.
+    """
+    if ledger is None:
+        return set()
+    claims_by_url: dict[str, list[evidence.Claim]] = {}
+    for claim in ledger.claims.values():
+        for source_id in claim.source_ids:
+            source = ledger.sources.get(source_id)
+            if source is not None:
+                claims_by_url.setdefault(source.url, []).append(claim)
+    numbers = set()
+    for row in reference_rows(body):
+        match = re.match(r"\[(\d+)\]\s*(.*)", row)
+        if not match:
+            continue
+        urls = URL.findall(match.group(2))
+        url = urls[0].rstrip(".,;") if urls else ""
+        claims = claims_by_url.get(url)
+        if claims and all(c.truth_state == evidence.SINGLE_SOURCE for c in claims):
+            numbers.add(int(match.group(1)))
+    return numbers
+
+
+def abstract_matches_body(body: str, ledger: evidence.Ledger | None = None) -> list[str]:
+    """The abstract, and the introduction's first paragraph, state only what
+    the body states.
+
+    Inert with no `## Abstract` heading: nothing to grade. Otherwise
+    unconditional, because a clean excerpt passes every rule by construction.
+    Every graded sentence citing a single-source claim carries a hedge word,
+    and a fixed overclaim phrase never appears. The abstract carries one more
+    rule the introduction does not: it restates the body, so a number it
+    cites must appear in the body too. The introduction is the body; a number
+    appearing there for the first time is not a defect.
+    """
+    abstract = _section_text(body, "abstract")
+    if not abstract.strip():
+        return []
+    single_source = _single_source_numbers(body, ledger)
+    rest_of_body = body.replace(abstract, "", 1)
+    excerpts = [("abstract", abstract, True)]
+    intro_first = _first_paragraph(_section_text(body, "introduction"))
+    if intro_first:
+        excerpts.append(("introduction", intro_first, False))
+    issues: list[str] = []
+    for label, excerpt, check_numbers in excerpts:
+        for sentence in _cited_sentences(excerpt):
+            cited = {int(n) for n in ABSTRACT_MARKER.findall(sentence)}
+            if cited & single_source and not ABSTRACT_HEDGE.search(sentence):
+                issues.append(f"{label}: unhedged single-source claim: {sentence[:70]!r}")
+            if ABSTRACT_OVERCLAIM.search(sentence):
+                issues.append(f"{label}: overclaim in: {sentence[:70]!r}")
+        if check_numbers:
+            for number in {int(n) for n in ABSTRACT_MARKER.findall(excerpt)}:
+                if f"[{number}]" not in rest_of_body:
+                    issues.append(f"{label}: [{number}] does not appear in the body")
+    return issues
+
+
+def top_level_sections(body: str) -> dict[str, str]:
+    """Each `##` heading's own text, running to the next `##`-or-higher
+    heading. Keyed by the heading, lowercased. A `###` key-question
+    sub-heading is left inside its parent's span, not split out as a second
+    section: `caveat_once` needs that distinction, or a sentence under a
+    sub-heading is graded as repeating itself, once in its own entry and
+    once more inside its `##` parent's span. Copied from the SDK port's
+    `checks.py`, not imported.
+    """
+    matches = [m for m in _headings(body) if len(m.group(1)) == 2]
+    out: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        out[match.group(2).strip().lower()] = body[match.end() : end]
+    return out
+
+
+def top_level_section_spans(body: str) -> dict[str, tuple[int, int]]:
+    """Byte offsets for `top_level_sections`' own boundaries.
+
+    A deterministic edit that must touch only the one section a repeat
+    names, and never search the rest of the document, slices `body[start:
+    end]`, edits that slice, and splices it back, instead of asking
+    `str.replace` to find a short sentence that a different section might
+    also happen to contain. Copied from the SDK port, not imported. #477.
+    """
+    matches = [m for m in _headings(body) if len(m.group(1)) == 2]
+    out: dict[str, tuple[int, int]] = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        out[match.group(2).strip().lower()] = (match.end(), end)
+    return out
+
+
+def _section_sentences_with_lines(text: str) -> list[tuple[int, str]]:
+    """(line, sentence) pairs inside one section's own text, the line counted
+    from that section's own first line. Skips a heading, an image, a list, a
+    table, a quote, a fence, and a `Figure N.` caption, the same exemptions
+    `_prose_sentences` grants, because none of those is a sentence a writer
+    composed. Copied from the SDK port, not imported. The caption exemption
+    matters here specifically: two auto-described diagrams of the same
+    paper share enough boilerplate wording ("A flowchart diagram of
+    <topic>, showing ...") to read as a repeat of each other, which is not
+    a finding restated, it is two figures about the same paper. #464.
+    """
+    out: list[tuple[int, str]] = []
+    block_lines: list[str] = []
+    block_start = 0
+
+    def flush() -> None:
+        if not block_lines:
+            return
+        block = "\n".join(block_lines).strip()
+        if (
+            block.startswith(("#", "!", "|", ">", "```", "-", "*"))
+            or LIST_ITEM.match(block)
+            or FIGURE_CAPTION.match(block)
+        ):
+            return
+        for piece in SENTENCE_END.split(block):
+            piece = piece.strip()
+            if piece:
+                out.append((block_start, piece))
+
+    for index, line in enumerate(text.split("\n"), start=1):
+        if line.strip() == "":
+            flush()
+            block_lines = []
+            continue
+        if not block_lines:
+            block_start = index
+        block_lines.append(line)
+    flush()
+    return out
+
+
+def _word_shingles(sentence: str, n: int = 4) -> set[tuple[str, ...]]:
+    """Word 4-grams, lowercased. A sentence shorter than `n` words still
+    shingles as one tuple, so two short sentences can still match.
+    """
+    words = [w.lower() for w in WORD.findall(sentence)]
+    if len(words) < n:
+        return {tuple(words)} if words else set()
+    return {tuple(words[i : i + n]) for i in range(len(words) - n + 1)}
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _numeric_full_tokens(sentence: str) -> frozenset[str]:
+    """Every number-and-unit pair stated in full, normalized so '2.4%' and
+    '2.4 percent' compare equal.
+    """
+    return frozenset(
+        re.sub(r"\s+", " ", match.group(0).lower()).replace("percent", "%")
+        for match in NUMERIC_FULL.finditer(sentence)
+    )
+
+
+def repeat_shingles(sections: dict[str, str]) -> list[dict]:
+    """A caveat sentence, or a numeric finding stated in full, that a later
+    section restates. Glossary and References are exempt. The abstract may
+    restate one body finding, so it is exempt on the abstract side; two body
+    sections that both restate the same finding are still a repeat. Copied
+    from the SDK port, not imported. #477.
+    """
+    headings = frozenset(sections)
+    entries: list[dict] = []
+    for name, text in sections.items():
+        if name in CAVEAT_EXEMPT_SECTIONS:
+            continue
+        for line, sentence in _section_sentences_with_lines(text):
+            if _is_back_reference(sentence, headings):
+                continue
+            entries.append(
+                {
+                    "section": name,
+                    "line": line,
+                    "sentence": sentence,
+                    "shingles": _word_shingles(sentence),
+                    "numbers": _numeric_full_tokens(sentence),
+                }
+            )
+    results: list[dict] = []
+    for index, entry in enumerate(entries):
+        if entry["section"] == "abstract":
+            continue
+        matches = []
+        for other in entries[index + 1 :]:
+            if other["section"] == entry["section"] or other["section"] == "abstract":
+                continue
+            same_numbers = bool(entry["numbers"]) and entry["numbers"] == other["numbers"]
+            if same_numbers or _jaccard(entry["shingles"], other["shingles"]) > 0.6:
+                matches.append(
+                    {"section": other["section"], "line": other["line"], "sentence": other["sentence"]}
+                )
+        if matches:
+            results.append(
+                {
+                    "section": entry["section"],
+                    "line": entry["line"],
+                    "sentence": entry["sentence"],
+                    "matches": matches,
+                }
+            )
+    return results
+
+
+def caveat_once_violations(body: str) -> list[str]:
+    """Every repeat `repeat_shingles` names, as one detail string per repeat.
+
+    Unconditional: a body with nothing to repeat passes by construction.
+    """
+    hits = []
+    for item in repeat_shingles(top_level_sections(body)):
+        where = [f"{item['section']}:{item['line']}"] + [
+            f"{m['section']}:{m['line']}" for m in item["matches"]
+        ]
+        hits.append(f"{item['sentence'][:120]!r} in {', '.join(where)}")
+    return hits
+
+
+# Headings a plan inserts as structure, never a body's own evidence
+# section. PR #535 judge revision B1: `assemble_gate` is always called with
+# `outline=self.plan` (`paper.py`'s own `stage_assemble`), and `self.plan`'s
+# own sections always begin with `abstract` -- guaranteed by
+# `stages.normalize_plan` and by `stages.outline_gate`'s required set. "The
+# first evidence section" has to skip every structural heading explicitly,
+# not just take the first name `outline` lists.
+STRUCTURAL_HEADINGS = {"abstract", "introduction", "methods", "conclusion", "references"}
+
+# A markdown table's own separator row: only `|`, `-`, `:`, and whitespace.
+TABLE_SEPARATOR_ROW = re.compile(r"^\|[\s:|-]+\|$")
+
+
+def study_table_violations(body: str, human_studies: list, outline: dict | None) -> list[str]:
+    """The Evidence summary table exists, holds one row per human-study
+    claim, and sits after Methods and before the first evidence section.
+    #478. Called only when `human_studies` is non-empty.
+    """
+    sections = top_level_sections(body)
+    order = list(sections)
+    if "evidence summary" not in order:
+        return ["no Evidence summary table for a ledger holding a human-study claim"]
+    rows = [
+        line.strip()
+        for line in sections["evidence summary"].strip().splitlines()
+        if line.strip().startswith("|")
+    ]
+    # PR #535 judge revision F8: a fixed `rows[2:]` miscounted a table that
+    # lost its separator row, or that shares its section with an unrelated
+    # pipe-prefixed line. The header is the first row; every other row is
+    # data unless it is the separator itself.
+    data_rows = [row for row in rows[1:] if not TABLE_SEPARATOR_ROW.match(row)]
+    problems = []
+    if len(data_rows) != len(human_studies):
+        problems.append(f"{len(data_rows)} table rows for {len(human_studies)} human-study claims")
+    methods_at = order.index("methods") if "methods" in order else -1
+    table_at = order.index("evidence summary")
+    headings = [str(s.get("heading") or "").strip().lower() for s in (outline or {}).get("sections") or []]
+    first_section = next(
+        (h for h in headings if h in order and h not in STRUCTURAL_HEADINGS), None
+    )
+    first_at = order.index(first_section) if first_section else len(order)
+    if not (methods_at != -1 and methods_at < table_at < first_at):
+        problems.append("the table is not between Methods and the first evidence section")
+    return problems
+
+
+FRONT_MATTER_PROVENANCE = re.compile(
+    r"Generated by an automated research loop\. "
+    r"Sources: \d+ retrieved, \d+ cited\. "
+    r"Verification: \d+ claims cross-checked\. See Methods\."
+)
+
+
+def _front_matter_zone(body: str) -> str:
+    """Text between the title and the first `## ` heading, where the byline,
+    date, provenance, and conflicts lines live. Copied from the SDK port's
+    `checks.py`, not imported. #479
+    """
+    zone: list[str] = []
+    started = False
+    for line in body.splitlines():
+        if not started:
+            if line.startswith("# "):
+                started = True
+            continue
+        if line.startswith("## "):
+            break
+        zone.append(line)
+    return "\n".join(zone)
+
+
+def front_matter_violations(body: str) -> list[str]:
+    """The byline, the date, the provenance line, and the conflicts line all
+    sit above the Abstract. #479. The conflicts line's own text is whatever
+    the `CONFLICTS` override was at assemble time, so this checks for a
+    fourth paragraph, never for fixed words.
+    """
+    zone = _front_matter_zone(body)
+    problems = []
+    if "Prepared by:" not in zone:
+        problems.append('no byline ("Prepared by:") above the Abstract')
+    if not re.search(r"Date: \d{4}-\d{2}-\d{2}\.", zone):
+        problems.append("no Date line above the Abstract")
+    if not FRONT_MATTER_PROVENANCE.search(zone):
+        problems.append("no provenance line with source and verification counts")
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", zone) if p.strip()]
+    if len(paragraphs) != 4:
+        # PR #542 judge F3. `< 4` let a fifth paragraph slip into the
+        # exempt zone and still pass this row; the byline, the date, the
+        # provenance line, and the conflicts line are the whole block.
+        problems.append(f"{len(paragraphs)} front-matter lines above the Abstract, need exactly 4")
+    return problems
+
+
+def _mask_front_matter(body: str) -> str:
+    """Blank exactly the four lines `front_matter_block` writes above the
+    Abstract: the byline, the date, the provenance line, and the conflicts
+    line. `brief.uncited_claims` has no heading of its own to skip there,
+    since front matter carries no `## ` heading at all.
+
+    Anchored on the body's own first heading, and only when that heading is
+    a genuine H1 (`# `, not `## `): a snippet whose first heading is
+    already `## ` is returned unmasked, never with its own first section
+    blanked. Capped at the first four paragraphs a blank line splits,
+    never the whole zone up to the next heading, so a fifth paragraph a
+    writer or a later change slips in above the Abstract is graded like
+    any other prose, not given a second free pass. #479, PR #542 judge F1
+    (the shared exposure) and F4.
+    """
+    first = HEADING.search(body)
+    if first is None or not first.group(0).startswith("# ") or first.group(0).startswith("##"):
+        return body
+    after_title = first.end()
+    second = SECTION_HEADING.search(body, after_title)
+    zone_end = second.start() if second is not None else len(body)
+    zone = body[after_title:zone_end]
+    # The blank line between the title and the first front-matter paragraph
+    # is not a paragraph separator; only what sits between two paragraphs
+    # counts toward the four-paragraph cap.
+    content_start = len(zone) - len(zone.lstrip("\n"))
+    breaks = list(re.finditer(r"\n\s*\n", zone[content_start:]))
+    if len(breaks) < 4:
+        # Fewer than four paragraphs above the first heading: not the shape
+        # `front_matter_block` writes, so there is nothing to exempt. A
+        # body with no front matter at all lands here too (zero paragraphs,
+        # zero breaks). Masking a partial zone would still eat the blank
+        # line the next heading depends on to stay its own block.
+        return body
+    zone_end = after_title + content_start + breaks[3].start()
+    return body[:after_title] + " " * (zone_end - after_title) + body[zone_end:]
+
+
 def check(
     body: str,
     sources: list[str],
@@ -352,6 +1793,9 @@ def check(
     allowed_domains=None,
     located: list[str] | None = None,
     loop_doctrine: bool = True,
+    enforce_structure: bool = False,
+    outline: dict | None = None,
+    skipped_figures=None,
 ) -> PaperScore:
     """Score a white paper. Every check here is arithmetic."""
     words_needed = MIN_WORDS if min_words is None else min_words
@@ -359,7 +1803,14 @@ def check(
     checks: list[Check] = []
 
     # The three brief.py already owns, reused rather than restated.
-    inner = brief.check(body, sources)
+    # `brief.uncited_claims` has no section name of its own to skip, unlike
+    # this file's own citation-shaped rows; PYTHON_WRITTEN_SECTIONS is
+    # masked out here so Methods and the study table never read as an
+    # uncited claim. PR #535 judge revision, ruling (b) and F2. The front
+    # matter block above the Abstract gets the same treatment: it carries no
+    # `## ` heading `_mask_sections` could key on, so it is masked on its
+    # own span. #479
+    inner = brief.check(_mask_front_matter(_mask_sections(body, PYTHON_WRITTEN_SECTIONS)), sources)
     checks.extend(Check(c.name, c.passed, c.detail) for c in inner.checks)
 
     absent = missing_sections(body, required)
@@ -403,6 +1854,47 @@ def check(
         )
     )
 
+    # Unconditional, and inert with no image at all: a snippet another
+    # row's test built has nothing to caption. #413, #464.
+    cap_missing = captioned_violations(body)
+    checks.append(
+        Check(
+            "captioned",
+            not cap_missing,
+            "every image is followed by its Figure N. caption"
+            if not cap_missing
+            else f"no caption: {cap_missing[:3]}",
+        )
+    )
+
+    # Unconditional, and inert with no numbered figure at all: `placed_figures`
+    # reads only what `Figure N.` captions the body actually carries, so a
+    # figure the diagrammer dropped or the chart stage skipped is never
+    # placed and never demands a mention here. #464.
+    ref_missing = figure_referenced_violations(body)
+    checks.append(
+        Check(
+            "figure_referenced",
+            not ref_missing,
+            "every placed figure is named Figure N in its own section's prose"
+            if not ref_missing
+            else f"unreferenced: {ref_missing[:3]}",
+        )
+    )
+
+    # Unconditional, and inert with nothing skipped: a snippet another
+    # row's test built has no skip to note. #386, #464.
+    skip_missing = skip_noted_violations(body, skipped_figures)
+    checks.append(
+        Check(
+            "skip_noted",
+            not skip_missing,
+            "every skipped figure is named with its reason"
+            if not skip_missing
+            else f"no note: {skip_missing[:3]}",
+        )
+    )
+
     raw = visible_source_syntax(body)
     checks.append(
         Check(
@@ -411,6 +1903,219 @@ def check(
             "no diagram source in the body" if not raw else f"visible source: {raw}",
         )
     )
+
+    ste_hits = ste_language_violations(body)
+    checks.append(
+        Check(
+            "ste_language",
+            not ste_hits,
+            "no contractions or Latin abbreviations in body prose"
+            if not ste_hits
+            else f"contraction or e.g./i.e./etc. in: {ste_hits[0]!r}",
+        )
+    )
+
+    stacks = noun_stacks(body)
+    checks.append(
+        Check(
+            "noun_stack",
+            not stacks,
+            "no noun cluster longer than three"
+            if not stacks
+            else f"noun cluster: {stacks[0]!r}",
+            # Advisory until the heuristic earns a hard gate: a deviation from
+            # #456, stated in the P1-fix PR body. It still reports its detail
+            # and never blocks `passed`.
+            hard=False,
+        )
+    )
+
+    person_hits = person_violations(body)
+    checks.append(
+        Check(
+            "person",
+            not person_hits,
+            "third person, no first person tour"
+            if not person_hits
+            else f"second person or first person tour in: {person_hits[0]!r}",
+        )
+    )
+
+    marketing_hits = marketing_violations(body)
+    checks.append(
+        Check(
+            "marketing",
+            not marketing_hits,
+            "no marketing verb in body prose"
+            if not marketing_hits
+            else f"marketing verb in: {marketing_hits[0]!r}",
+        )
+    )
+
+    leak_hits = policy_leak_violations(body, allowed_domains)
+    checks.append(
+        Check(
+            "policy_leak",
+            not leak_hits,
+            "the body names no search host and narrates no retrieval boundary"
+            if not leak_hits
+            else f"search host or retrieval narration in: {leak_hits[0]!r}",
+        )
+    )
+
+    # Unconditional: a heading ending in "?" is checked with no outline at
+    # all. A clean paper has no interrogative heading, so this never fires
+    # on a snippet the outline was never handed. #385 #463.
+    bad_headings = question_headings(body, outline)
+    checks.append(
+        Check(
+            "question_heading",
+            not bad_headings,
+            "no heading is a pasted question"
+            if not bad_headings
+            else f"heading is a question: {bad_headings[0]!r}",
+        )
+    )
+
+    # Unconditional, and inert with no `## Abstract` heading: a snippet
+    # another row's test built has nothing to grade. #472.
+    abstract_mismatches = abstract_matches_body(body, ledger)
+    checks.append(
+        Check(
+            "abstract_matches_body",
+            not abstract_mismatches,
+            "the abstract and introduction match the body they summarize"
+            if not abstract_mismatches
+            else f"mismatch: {abstract_mismatches[:3]}",
+        )
+    )
+
+    # Unconditional, and inert with nothing to repeat: a snippet another
+    # row's test built has no second section to compare against. #477.
+    caveat_hits = caveat_once_violations(body)
+    checks.append(
+        Check(
+            "caveat_once",
+            not caveat_hits,
+            "no caveat or numeric finding repeats across sections"
+            if not caveat_hits
+            else f"repeated: {caveat_hits[:2]}",
+        )
+    )
+
+    if enforce_structure:
+        # Every row below is opt-in behind this one keyword, the house pattern
+        # `loop_doctrine` already sets. A clean snippet with no glossary at
+        # all passes both rows by construction: no captured term means
+        # nothing missing, and no glossary entry means nothing unused.
+        # A body with no top-level heading at all is not a paper, it is a
+        # snippet another row's test built. Nothing to grade, so this passes
+        # by construction, the same defence `glossary_complete` gives a body
+        # with no captured term.
+        last_heading = last_prose_heading(body)
+
+        # #479. The frozen order's own first item: front matter, above the
+        # Abstract. Guarded the same way as every row below: nothing to
+        # grade in a heading-less snippet.
+        front_matter_missing = last_heading is not None and front_matter_violations(body)
+        checks.append(
+            Check(
+                "front_matter",
+                not front_matter_missing,
+                "byline, date, provenance, and conflicts sit above the Abstract"
+                if not front_matter_missing
+                else f"front matter: {front_matter_missing[0]}",
+            )
+        )
+
+        if last_heading is None:
+            next_step_ok, next_step_detail = True, "no prose section to grade"
+        elif outlines.is_bare_conclusion(last_heading):
+            next_step_ok, next_step_detail = False, f"last prose heading is a bare Conclusion: {last_heading!r}"
+        elif not outlines.starts_with_next_step_verb(last_heading):
+            next_step_ok, next_step_detail = (
+                False,
+                f"last prose heading has no next-step verb: {last_heading!r}",
+            )
+        else:
+            next_step_ok, next_step_detail = True, f"last prose heading is a next step: {last_heading!r}"
+        checks.append(Check("next_step", next_step_ok, next_step_detail))
+
+        cta_text = _section_text(body, last_heading.strip().lower()) if last_heading else ""
+        cta_bad = cta_violations(cta_text)
+        checks.append(
+            Check(
+                "cta_language",
+                not cta_bad,
+                "the next-step section sells nothing and every step is 20 words or fewer"
+                if not cta_bad
+                else f"cta language or a step over 20 words: {cta_bad[:3]}",
+            )
+        )
+
+        incomplete = glossary_incomplete(body)
+        checks.append(
+            Check(
+                "glossary_complete",
+                not incomplete,
+                "every first-use term reached the glossary"
+                if not incomplete
+                else f"missing from glossary: {incomplete[:3]}",
+            )
+        )
+        terms = glossary_terms(body)
+        unused = glossary_unused(body)
+        host_hits = glossary_host_terms(terms, allowed_domains)
+        exact_bad = sorted(set(unused) | set(host_hits))
+        checks.append(
+            Check(
+                "glossary_exact",
+                not exact_bad,
+                "every glossary entry is a term the body uses"
+                if not exact_bad
+                else f"glossary-only or search-host term: {exact_bad[:3]}",
+            )
+        )
+
+        # #478. A body with no top-level heading at all is not a paper, the
+        # same defence `next_step` above already gives.
+        sections_present = top_level_sections(body)
+        methods_missing = last_heading is not None and "methods" not in sections_present
+        checks.append(
+            Check(
+                "methods_present",
+                not methods_missing,
+                "the Methods section is present" if not methods_missing else "no Methods section",
+            )
+        )
+
+        conclusion_missing = last_heading is not None and "conclusion" not in sections_present
+        checks.append(
+            Check(
+                "conclusion_present",
+                not conclusion_missing,
+                "the Conclusion section is present"
+                if not conclusion_missing
+                else "no Conclusion section",
+            )
+        )
+
+        # Only when the ledger holds a human-study claim: a paper on a
+        # topic with none must not be told to grow a table for it.
+        human_studies = [
+            claim for claim in (ledger.claims.values() if ledger else []) if claim.usable and claim.study
+        ]
+        if human_studies:
+            table_bad = study_table_violations(body, human_studies, outline)
+            checks.append(
+                Check(
+                    "study_table",
+                    not table_bad,
+                    f"{len(human_studies)} human-study rows, correctly placed"
+                    if not table_bad
+                    else f"study table: {table_bad[0]}",
+                )
+            )
 
     rows = reference_rows(body)
     checks.append(
@@ -539,6 +2244,26 @@ def _ledger_blob(ledger) -> str:
     return "\n".join(parts)
 
 
+def _specifics(text: str) -> set[str]:
+    """Identifiers a later edit must not invent. Copied from the SDK port's
+    `checks.py`, not imported, because Deep Agents had no whole-paper edit
+    pass before P9.
+    """
+    masked = _mask_code(text)
+    found: set[str] = set()
+    for rx in (ARXIV, DOI, AUTHOR_YEAR, PERCENT, VERSION, YEAR, BIG_INT, QUOTED):
+        for match in rx.finditer(masked):
+            token = match.group(1) if match.lastindex else match.group(0)
+            if token:
+                found.add(token.strip())
+    return found
+
+
+def new_claims(before: str, after: str) -> list[str]:
+    """Specifics that appear in the edit and not in the original."""
+    return sorted(_specifics(after) - _specifics(before))
+
+
 def demo() -> None:
     good = (
         "# Exit conditions in agent loops\n\n"
@@ -547,6 +2272,8 @@ def demo() -> None:
         "## Introduction\n\n"
         "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
         "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
+        "Figure 1. A flowchart of the three exits.\n\n"
+        "Figure 1 shows the order. [1]\n\n"
         "## Limitations\n\n"
         "This paper measures two runtimes only. [2]\n\n"
         "## References\n\n"
@@ -568,8 +2295,14 @@ def demo() -> None:
 
     # A paper of headings and a reference list satisfies every other gate,
     # because each of them checks content that is not there.
+    # P7, #472: the abstract's citation now needs a matching mention outside
+    # the abstract, or the new `abstract_matches_body` row calls it orphaned,
+    # which is not what this fixture measures. The introduction restates the
+    # same sentence rather than adding new content that would satisfy the
+    # gate on its own; `has_body` still fires, on the still-empty Limitations.
     hollow = (
-        "# Exit conditions\n\n## Abstract\n\ndone, then cost, then max turns. [1]\n\n## Introduction\n\n"
+        "# Exit conditions\n\n## Abstract\n\ndone, then cost, then max turns. [1]\n\n"
+        "## Introduction\n\ndone, then cost, then max turns. [1]\n\n"
         "## Limitations\n\n## References\n\n"
         "1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
     )
@@ -579,7 +2312,11 @@ def demo() -> None:
 
     # One sentence under a heading is not a section either.
     thin = good.replace(
-        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]", "Yes. [1]"
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
+        "![A flowchart of the three exits](figures/exits_imagen.png)\n\n"
+        "Figure 1. A flowchart of the three exits.\n\n"
+        "Figure 1 shows the order. [1]",
+        "Yes. [1]",
     )
     assert "has_body" in gate(thin, urls).signature()
 
@@ -653,11 +2390,160 @@ def demo() -> None:
     score = gate(caveated, urls, ledger=ledger)
     assert "single_source_caveat" not in score.signature(), score.report()
 
+    # P7, #472. `good`'s abstract and its introduction both cite `[1]`, the
+    # same single-source claim, and neither sentence hedges it.
+    assert "abstract_matches_body" in gate(good, urls, ledger=ledger).signature()
+    hedged_everywhere = good.replace(
+        "A loop without an exit spends until someone notices. [1]",
+        "A loop without an exit spends until someone notices, on a single source. [1]",
+    ).replace(
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]",
+        "Three exits cover the observed cases: done, then cost, then max turns, on a single source. [1][2]",
+    )
+    score = gate(hedged_everywhere, urls, ledger=ledger)
+    assert "abstract_matches_body" not in score.signature(), score.report()
+
+    # A number the abstract cites but the body never states.
+    orphaned = good.replace(
+        "A loop without an exit spends until someone notices. [1]",
+        "A loop without an exit spends until someone notices. [1][9]",
+    )
+    assert "abstract_matches_body" in gate(orphaned, urls).signature()
+
+    # A fixed overclaim phrase, whatever the ledger says.
+    overclaimed = good.replace(
+        "A loop without an exit spends until someone notices. [1]",
+        "This paper proves a loop without an exit spends until someone notices. [1]",
+    )
+    assert "abstract_matches_body" in gate(overclaimed, urls).signature()
+
+    # No `## Abstract` heading: nothing to grade, so the row passes.
+    assert "abstract_matches_body" not in gate(
+        good.replace("## Abstract", "## Overview"), urls
+    ).signature()
+
     # A contradicted claim never reaches the paper.
     evidence.corroborate(claim, contradicted=True)
     score = gate(caveated, urls, ledger=ledger)
     assert not score.passed
     assert "no_contradicted" in score.signature()
+
+    assert ste_language_violations("The writer does not skip a step.") == []
+    hit = ste_language_violations("The writer doesn't skip a step.")
+    assert hit and "doesn't" in hit[0]
+    assert ste_language_violations("For example, the writer names the actor.") == []
+    assert ste_language_violations("The writer names the actor, e.g. the host.")
+    assert ste_language_violations("```\nThe writer doesn't skip a step.\n```") == [], (
+        "a fenced code block is masked"
+    )
+    assert ste_language_violations("`The writer doesn't skip a step.`") == [], (
+        "an inline code span is masked too, copied from the SDK's mask"
+    )
+    assert ste_language_violations("## References\n\nSee it's fine at example.com.") == [], (
+        "the references section is masked"
+    )
+    assert ste_language_violations("The writer's card names the actor.") == [], (
+        "a genitive is not a contraction"
+    )
+    assert noun_stacks("The orchestrator charges the budget before the writer runs.") == []
+    assert noun_stacks("A loop harness gate ledger ships every seminar.")
+    assert noun_stacks("The independent researcher, verifier, writer, and gate boundaries appear.") == [], (
+        "a comma-separated list is enumeration, not a stack"
+    )
+    # The judge's five reported false positives on PR #492, each traced to a
+    # missing guard and now fixed: a suffix that reads as a modifier, a
+    # hyphen that reads as a compound modifier, a missing function word, and
+    # a digit swallowed by the old tokenizer.
+    assert noun_stacks("This is a standalone Claude Agent SDK for the seminar.") == [], (
+        "Agent ends in -ent, a modifier suffix"
+    )
+    assert noun_stacks("Each lab uses a folder-local Python virtual environment.") == [], (
+        "folder-local is a hyphenated modifier and virtual ends in -al"
+    )
+    assert noun_stacks("The plan names a twenty-four question research phase.") == [], (
+        "twenty-four is a hyphenated number word"
+    )
+    assert noun_stacks("The allowlist governs every top level domain.") == [], (
+        "every is a function word"
+    )
+    assert noun_stacks("The default live E2E run costs about a dollar.") == [], (
+        "E2E is one digit-bearing token, not two bare letters"
+    )
+
+    assert person_violations("The orchestrator charges the budget before the writer runs.") == []
+    hit = person_violations("You should charge the budget before the writer runs.")
+    assert hit and "You should" in hit[0]
+    assert person_violations("We will now look at the budget in detail.")
+    assert person_violations("In this article, the orchestrator sequences every role.")
+    assert person_violations("```\nYou should not skip a step.\n```") == [], "a fenced code block is masked"
+    assert person_violations("## References\n\nSee you at example.com.") == [], (
+        "the references section is masked"
+    )
+
+    assert marketing_violations("The orchestrator sequences roles in a fixed order.") == []
+    assert marketing_violations("The design will leverage existing infrastructure.")
+    assert marketing_violations("The mechanism unlocks new throughput for the pipeline.")
+    assert marketing_violations("```\na seamless robust retry loop\n```") == [], (
+        "a fenced code block is masked"
+    )
+    assert marketing_violations("## References\n\n1. https://example.com/unlock-guide\n") == [], (
+        "the references section is masked"
+    )
+
+    # Follow-up from the P2 judge: a finance term is not the marketing verb.
+    assert marketing_violations("The bank's leverage ratio fell in the quarter.") == []
+    assert marketing_violations("The fund's leverages ratios stayed flat.") == []
+    assert marketing_violations("We leverage the SDK for every call.")
+    assert marketing_violations("The design was leveraged to cut costs.")
+
+    # Follow-up from the P2 judge: an inline URL is not body prose either.
+    assert person_violations("See https://example.org/your-account for the record.") == []
+    assert person_violations("See the record at your account page.")
+    assert marketing_violations("See https://example.com/unlock-guide for the record.") == []
+
+    body, terms = take_terms("A point. <!-- TERM: orchestrator: sequences roles --> More.")
+    assert terms == [("orchestrator", "sequences roles")]
+    assert "TERM" not in body
+    assert take_terms("no markers")[1] == []
+
+    glossed = "## Glossary\n\n**orchestrator.** Sequences roles.\n\n**widget.** Unused elsewhere.\n"
+    assert glossary_terms(glossed) == {"orchestrator": "Sequences roles.", "widget": "Unused elsewhere."}
+    assert glossary_terms("## Body\n\nno glossary here") == {}
+
+    marked = "The orchestrator runs first. <!-- TERM: orchestrator: sequences roles -->"
+    assert glossary_incomplete(marked) == ["orchestrator"], "no glossary section, nothing captured it"
+    assert glossary_incomplete(marked + "\n\n" + glossed) == []
+    assert glossary_incomplete("no marker at all") == []
+
+    assert glossary_unused("The orchestrator runs first.\n\n" + glossed) == ["widget"]
+    assert glossary_unused("## Glossary\n\n**widget.** Unused.\n") == ["widget"]
+    assert glossary_unused("## Body\n\nno glossary here") == []
+    assert glossary_host_terms(["docs.langchain.com", "widget"]) == ["docs.langchain.com"]
+
+    # Follow-up from the PR #499 judge: a stemmed match, and a term repeated
+    # inside its own definition, both count as used.
+    plural_only = "A point about workflows.\n\n## Glossary\n\n**workflow.** A sequence of steps a run executes.\n"
+    assert glossary_unused(plural_only) == []
+    self_defined = "A point about the process.\n\n## Glossary\n\n**orchestrator.** The orchestrator sequences roles.\n"
+    assert glossary_unused(self_defined) == []
+
+    # Follow-up: an irregular plural is folded from a fixed table, not a
+    # suffix rule, since "criteria" does not end in s, es, or ies.
+    irregular = "The run checks one exit criterion.\n\n## Glossary\n\n**exit criteria.** What a run must clear before it stops.\n"
+    assert glossary_unused(irregular) == []
+
+    # P4, the next-step section.
+    assert last_prose_heading("## Introduction\n\ntext\n\n## Next step\n\ntext\n\n## Glossary\n\nt\n") == "Next step"
+    assert last_prose_heading("## Introduction\n\ntext\n\n## References\n\n1. u\n") == "Introduction"
+    assert last_prose_heading("no heading here") is None
+    assert outlines.is_bare_conclusion("Conclusion") and not outlines.is_bare_conclusion("Next step")
+    assert outlines.starts_with_next_step_verb("Next step") and outlines.starts_with_next_step_verb("Evaluate X")
+    assert not outlines.starts_with_next_step_verb("Limitations")
+    assert cta_violations("- Evaluate X on a live ticket.\n- Run the fixture with --doer none.\n") == []
+    assert cta_violations("- Unlock the platform for every team.\n")
+    assert cta_violations("- Buy the enterprise plan today and contact us for a demo.\n")
+    long_step = "- " + " ".join(["word"] * 21) + "."
+    assert cta_violations(long_step)
 
     print("paper_check: all demo assertions passed")
 

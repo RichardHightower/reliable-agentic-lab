@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 import checks
+import diagrams
 import gates
+import pytest
+
+
+@pytest.fixture
+def no_renderer(monkeypatch):
+    """A recorded-fixture run must never depend on a live image call. #514"""
+    monkeypatch.setattr(diagrams, "available", lambda: False)
 
 
 def test_the_self_checks_run(capsys):
@@ -34,9 +42,17 @@ def test_no_corpus_means_no_opinion():
 
 def test_a_missing_figure_fails(tmp_path):
     (tmp_path / "there.png").write_bytes(b"x")
-    good = checks.check("A point [1].\n\n![f](there.png)", ["https://a"], base_dir=tmp_path)
+    good = checks.check(
+        "A point [1]. Figure 1 shows the same thing.\n\n![f](there.png)\n\nFigure 1. f",
+        ["https://a"],
+        base_dir=tmp_path,
+    )
     assert good.passed, good.report()
-    bad = checks.check("A point [1].\n\n![f](gone.png)", ["https://a"], base_dir=tmp_path)
+    bad = checks.check(
+        "A point [1]. Figure 1 shows the same thing.\n\n![f](gone.png)\n\nFigure 1. f",
+        ["https://a"],
+        base_dir=tmp_path,
+    )
     assert bad.signature() == ("images",)
 
 
@@ -60,7 +76,10 @@ def test_a_rendered_diagram_absent_from_the_paper_fails_images():
 
 
 def test_a_remote_figure_is_not_this_checks_problem(tmp_path):
-    body = "A point [1].\n\n![f](https://example.invalid/x.png)"
+    body = (
+        "A point [1]. Figure 1 shows the same thing.\n\n"
+        "![f](https://example.invalid/x.png)\n\nFigure 1. f"
+    )
     assert checks.check(body, ["https://a"], base_dir=tmp_path).passed
 
 
@@ -138,9 +157,9 @@ def test_the_doctrine_row_is_absent_when_the_flag_is_off():
 def test_the_paper_gate_requires_done_then_cost_then_max_turns_in_figure_one():
     body = (
         "# T\n\n## Control\n\n"
-        "The paper exits on done, then cost, then max turns [1].\n\n"
+        "The paper exits on done, then cost, then max turns [1]. Figure 1 shows the same order.\n\n"
         "![Figure 1: done, then cost, then max turns](exits_imagen.png)\n\n"
-        "Figure 1 shows done, then cost, then max turns."
+        "Figure 1. done, then cost, then max turns."
     )
     score = checks.check(
         body,
@@ -154,9 +173,9 @@ def test_the_paper_gate_requires_done_then_cost_then_max_turns_in_figure_one():
 def test_the_exit_order_may_live_in_the_caption_after_a_block_image():
     body = (
         "# T\n\n## Control\n\n"
-        "The paper exits on done, then cost, then max turns [1].\n\n"
+        "The paper exits on done, then cost, then max turns [1]. Figure 1 shows the same order.\n\n"
         "![Figure 1: control loop](exits_imagen.png)\n\n"
-        "Figure 1 shows done, then cost, then max turns."
+        "Figure 1. done, then cost, then max turns."
     )
     score = checks.check(
         body,
@@ -170,9 +189,9 @@ def test_the_exit_order_may_live_in_the_caption_after_a_block_image():
 def test_the_paper_gate_rejects_whichever_fires_first_and_blog_references():
     body = (
         "# T\n\n## Control\n\n"
-        "The loop has five exits and stops whichever fires first [1].\n\n"
+        "The loop has five exits and stops whichever fires first [1]. Figure 1 shows the cap.\n\n"
         "![Figure 1: budget and attempt cap](exits_imagen.png)\n\n"
-        "Figure 1 shows budget and an attempt cap."
+        "Figure 1. budget and an attempt cap."
     )
     score = checks.check(
         body,
@@ -255,6 +274,242 @@ def test_has_body_counts_the_prose_under_a_sections_subheadings():
     assert sections_without_prose(body, 50) == []
 
 
+def test_a_heading_inside_a_fence_is_not_a_heading():
+    """#509. A `##` line inside a fenced code block is not paper structure,
+    in every row that scans headings: `question_heading`, `next_step`'s
+    own `last_prose_heading`, `outline_coverage`, `has_body`
+    (`sections_without_prose`), and `section_bodies`, the boundary helper
+    the others build on. The same line outside the fence still fails
+    `question_heading`.
+    """
+    from checks import (  # noqa: PLC0415
+        last_prose_heading,
+        outline_coverage_gaps,
+        question_headings,
+        section_bodies,
+        sections_without_prose,
+    )
+
+    fenced = (
+        "## Real heading\n\n"
+        "Real prose describes a heading question with a rubric here today [1].\n\n"
+        "## Another heading\n\n"
+        "More real prose closes the section out today [1].\n\n"
+        "```markdown\n"
+        "## Is this a heading?\n"
+        "more fence text\n"
+        "```\n"
+    )
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+
+    assert question_headings(fenced, outline) == []
+    assert set(section_bodies(fenced)) == {"real heading", "another heading"}
+    # The fence sits after "Another heading", so a heading scan that reads
+    # it unmasked would report the fenced line as the paper's last section,
+    # not "Another heading".
+    assert last_prose_heading(fenced) == "Another heading"
+    assert outline_coverage_gaps(fenced, outline) == []
+    assert sections_without_prose(fenced, 5) == []
+
+    unfenced = (
+        "## Real heading\n\n"
+        "Real prose describes a heading question with a rubric here today [1].\n\n"
+        "## Is this a heading?\n\n"
+        "more fence text\n\n"
+        "## Another heading\n\n"
+        "More real prose closes the section out today [1].\n"
+    )
+    assert "Is this a heading?" in question_headings(unfenced, outline)
+
+
+def test_a_fenced_heading_does_not_satisfy_the_complete_row():
+    """#509. A fenced markdown example naming a plan section must not let
+    `missing_sections` (`complete`) believe that section was actually
+    written.
+    """
+    from checks import missing_sections  # noqa: PLC0415
+
+    body = (
+        "## Abstract\n\nSummary text here today [1].\n\n"
+        "```markdown\n"
+        "## Introduction\n"
+        "example only\n"
+        "```\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert missing_sections(body, ["Abstract", "Introduction", "References"]) == ["Introduction"]
+
+
+def test_a_long_question_needs_a_third_of_its_terms():
+    """#510. A judge on PR #508 found the #385 gist question "Which trace
+    counts were reported by the MAST taxonomy paper?" scored covered by
+    "This paper does not report any of it.", on the single incidental word
+    "paper". Scaling the requirement to a third of the question's content
+    terms, not a flat floor of two, closes that gap; a nine-term question
+    used to need the same two incidental matches a two-term question did.
+    """
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    mast_question = "Which trace counts were reported by the MAST taxonomy paper?"
+    outline = {"sections": [{"heading": "One", "key_questions": [mast_question]}]}
+
+    unrelated = "## One\n\nThis paper does not report any of it [1].\n"
+    gaps = outline_coverage_gaps(unrelated, outline)
+    assert gaps and mast_question in gaps[0], gaps
+
+    covering = "## One\n\nThe section names the trace counts and cites the MAST taxonomy directly [1].\n"
+    assert outline_coverage_gaps(covering, outline) == []
+
+    long_question = (
+        "How does the retry ledger track a stale approval stamp across a "
+        "resumed run and an escalation boundary?"
+    )
+    outline2 = {"sections": [{"heading": "One", "key_questions": [long_question]}]}
+    two_terms = "## One\n\nThe retry path checks a stamp before it runs again [1].\n"
+    gaps2 = outline_coverage_gaps(two_terms, outline2)
+    assert gaps2 and long_question in gaps2[0], gaps2
+
+    three_terms = "## One\n\nThe retry ledger checks a stamp before an escalation [1].\n"
+    assert outline_coverage_gaps(three_terms, outline2) == []
+
+    # The stop-list growth on its own, isolated from the third-scaling: a
+    # question padded with words the old twenty-word list missed (`which`,
+    # `were`, `not`, `when`, `was`) has more raw tokens than content terms,
+    # and the extra tokens must not count against the body.
+    padded_question = "Which claims were not corroborated when the budget was capped?"
+    outline3 = {"sections": [{"heading": "One", "key_questions": [padded_question]}]}
+    padded_body = "## One\n\nThe retry budget stayed capped for the whole run [1].\n"
+    assert outline_coverage_gaps(padded_body, outline3) == []
+
+
+def test_a_short_question_still_passes_on_two_terms():
+    """#510. The floor of two survives the scaling: a two-term question
+    still needs both of its terms, and passes once the body names both.
+    """
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    question = "What blocks retries?"
+    outline = {"sections": [{"heading": "One", "key_questions": [question]}]}
+
+    one_term = "## One\n\nA stale lock blocks the writer today [1].\n"
+    gaps = outline_coverage_gaps(one_term, outline)
+    assert gaps and question in gaps[0], gaps
+
+    both_terms = "## One\n\nA stale lock blocks retries until it clears [1].\n"
+    assert outline_coverage_gaps(both_terms, outline) == []
+
+
+def test_a_fence_opener_with_trailing_whitespace_still_closes():
+    """#529 judge finding 2. `` ``` `` followed by a space is still a valid
+    opener; the old pattern required the newline right after the backticks
+    and silently paired with the next fence instead, hiding everything
+    between as masked code, including a real heading.
+    """
+    from checks import missing_sections  # noqa: PLC0415
+
+    body = (
+        "``` \ncode\n```\n\n"
+        "## Real heading\n\nprose [1].\n\n"
+        "```python\nx = 1\n```\n"
+    )
+    assert missing_sections(body, ["Real heading"]) == []
+
+
+def test_a_tilde_fence_masks_like_a_backtick_fence():
+    """#529 judge finding 3. A tilde fence is still a fence."""
+    from checks import question_headings  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "~~~markdown\n## Is this a heading?\nmore fence text\n~~~\n"
+    )
+    assert question_headings(body, outline) == []
+
+
+def test_a_hyphenated_info_string_still_opens_a_fence():
+    """#529 judge finding 3. An info string is not restricted to `\\w*`."""
+    from checks import question_headings  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```objective-c\n## Is this a heading?\nmore fence text\n```\n"
+    )
+    assert question_headings(body, outline) == []
+
+
+def test_an_unclosed_fence_masks_to_the_end_of_the_body():
+    """#529 judge finding 3. No closer means nothing after the opener is
+    prose either; the alternative, leaving it unmasked, reads a heading
+    inside an unterminated snippet as real structure.
+    """
+    from checks import question_headings  # noqa: PLC0415
+
+    outline = {"sections": [{"heading": "Real heading", "key_questions": ["Is this a heading?"]}]}
+    body = (
+        "## Real heading\n\nprose [1].\n\n"
+        "```markdown\n## Is this a heading?\nmore fence text\n"
+    )
+    assert question_headings(body, outline) == []
+
+
+def test_a_heading_right_after_a_closing_fence_is_still_seen():
+    """#529 judge regression: the closer's trailing `(?:\\n|\\Z)` used to
+    consume the newline after `` ``` ``, so a heading on the very next
+    line, with no blank line between, lost its own leading newline to the
+    masked span and vanished from every row that scans headings.
+    """
+    from checks import last_prose_heading, missing_sections, section_bodies  # noqa: PLC0415
+
+    body = (
+        "## Abstract\n\nsummary [1].\n\n"
+        "```python\nx = 1\n```\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert missing_sections(body, ["Abstract", "References"]) == []
+    assert "references" in section_bodies(body)
+    assert last_prose_heading(body) == "Abstract"
+
+
+def test_a_question_worded_around_domain_verbs_keeps_its_content_terms():
+    """#529 judge finding 4. `STE_FUNCTION_WORDS` stops `run`, `calls`,
+    `uses`, and `holds` for the noun-stack row; a coverage row that
+    inherited the same list scored this question on one leftover term,
+    `tool`, easier to satisfy than the old rule's two of seven.
+    """
+    from checks import _coverage_terms  # noqa: PLC0415
+
+    question = "How many tool calls does a run use before it holds?"
+    assert len(_coverage_terms(question)) >= 4
+
+
+def test_a_fifteen_term_question_needs_a_third_not_two():
+    """#529 judge finding 5. The recorded fixtures top out at six content
+    terms per question, so the new threshold never actually raises the bar
+    there. This question, built for the test, has fifteen: two incidental
+    matches is not a third of them, and five is.
+    """
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    question = (
+        "Which trace counts, retry ledger entries, stale approval stamps, "
+        "escalation boundaries, and resumed verifier turns does the "
+        "harness report?"
+    )
+    outline = {"sections": [{"heading": "One", "key_questions": [question]}]}
+
+    two_terms = "## One\n\nThe dashboard shows a trace and files a report each night [1].\n"
+    gaps = outline_coverage_gaps(two_terms, outline)
+    assert gaps and question in gaps[0], gaps
+
+    five_terms = (
+        "## One\n\nThe dashboard shows a trace and files a report each night. "
+        "The ledger records stale stamps at each escalation [1].\n"
+    )
+    assert outline_coverage_gaps(five_terms, outline) == []
+
+
 def test_the_hosts_row_grades_only_the_references_the_caller_hands_it():
     """A located cabinet source is a public copy of a paper the brain held.
 
@@ -287,3 +542,1374 @@ def test_the_hosts_row_grades_only_the_references_the_caller_hands_it():
     assert not rows["hosts"].passed, rows["hosts"]
     assert "arxiv.org" in rows["hosts"].detail, rows["hosts"]
     assert rows["sources"].detail == "2 sources retrieved", rows["sources"]
+
+
+# -- P1, the STE belt: contractions, Latin abbreviations, noun stacks --------
+
+
+def test_a_contraction_in_body_prose_fails():
+    """`don't` fails `ste_language`, and the detail names the sentence."""
+    body = "The writer doesn't skip a step [1]."
+    score = checks.check(body, ["https://a"])
+    assert "ste_language" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "ste_language")
+    assert "doesn't" in row.detail
+    assert "skip a step" in row.detail
+
+
+def test_a_latin_abbreviation_fails():
+    """`e.g.` fails, and a clean body still passes."""
+    dirty = "The writer names the actor, e.g. the host [1]."
+    score = checks.check(dirty, ["https://a"])
+    assert "ste_language" in score.signature(), score.report()
+
+    clean = "The writer names the actor, for example the host [1]."
+    score = checks.check(clean, ["https://a"])
+    assert "ste_language" not in score.signature(), score.report()
+
+
+def test_four_nouns_in_a_row_fail():
+    """`noun_stack` fires on a four-noun phrase. It is advisory (a deviation
+    from #456, stated in the P1-fix PR body): it reports and never blocks the
+    gate, so it never appears in `signature()` and never flips `passed`.
+    """
+    body = "A loop harness gate ledger ships every seminar [1]."
+    score = checks.check(body, ["https://a"])
+    assert "noun_stack" not in score.signature(), score.report()
+    assert "noun_stack" in score.advisories(), score.report()
+    row = next(c for c in score.checks if c.name == "noun_stack")
+    assert not row.passed
+    assert "loop harness gate ledger" in row.detail
+    assert score.passed, "an advisory row never fails the gate"
+
+
+def test_may_on_an_unverified_claim_still_passes():
+    """STE-S9 stays off. A hedge on an unverified claim is not a procedure step."""
+    body = "The approach may reduce cost on some workloads [1]."
+    score = checks.check(body, ["https://a"])
+    assert score.passed, score.report()
+
+
+def test_a_contraction_inside_a_code_fence_passes():
+    """The mask works: a contraction inside a fenced code block is not prose."""
+    body = "A real point [1].\n\n```\nassert doesn't_exist == False\n```\n"
+    score = checks.check(body, ["https://a"])
+    assert "ste_language" not in score.signature(), score.report()
+
+
+def test_a_genitive_is_not_a_contraction():
+    """"the writer's card" is a possessive, not `it's`/`don't`."""
+    body = "The writer's card names the actor [1]."
+    score = checks.check(body, ["https://a"])
+    assert "ste_language" not in score.signature(), score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_ste_belt(tmp_path, no_renderer):
+    """The paper `task demo` writes carries no contraction, no Latin
+    abbreviation, and no four-noun stack. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    assert checks.ste_language_violations(body) == []
+    assert checks.noun_stacks(body) == []
+
+
+# #524. The claim this recorded fixture's counter-evidence pass drives, by
+# id. `sections._shares_terms`'s coincidental overlap on the four-letter
+# word "paper" is what selects it today, between the "approach" section's
+# claim text and its own `claims_to_support` entry "The researcher cannot
+# write the paper." A future `fixtures/research.json` re-key can change
+# that coincidence without changing anything this test is meant to guard,
+# so the test below asserts on this id, not on the coincidence.
+PINNED_COUNTER_CLAIM_ID = "approach-f2"
+
+
+def test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass(tmp_path, no_renderer):
+    """#474 follow-up F7: the counter-evidence pass runs for real against
+    the recorded fixture, offline, no network. No claim's text in this
+    fixture matches the `GENERALIZING` regex, so the candidate this run
+    finds comes from the SDK-only selection criterion,
+    `generalizing_claims`'s sole-support-for-a-`claims_to_support`-item
+    branch, in the "approach" section. `OfflineTurns` inherits the base
+    `counter_search` miss, so the candidate resolves to "miss", not "hit".
+
+    #524: pinned to a named claim id, not to whether the candidate set is
+    merely non-empty. `_shares_terms`'s own coincidental overlap picks this
+    claim today; the id is now the contract, not the coincidence, so a
+    `fixtures/research.json` re-key that swaps which claim happens to
+    share a word with its `claims_to_support` entry fails this test on the
+    row that actually matters."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0
+    generalizing = []
+    for path in (work / "knowledge").glob("*/findings.json"):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        generalizing.extend(f for f in payload.get("findings") or [] if f.get("generalizing"))
+    ids = {f.get("id") for f in generalizing}
+    assert PINNED_COUNTER_CLAIM_ID in ids, (
+        f"the pinned claim {PINNED_COUNTER_CLAIM_ID!r} is missing from the recorded "
+        f"fixture's generalizing candidates: {sorted(ids)}"
+    )
+    assert all(f.get("counter") in ("hit", "miss", "capped") for f in generalizing)
+    named = next(f for f in generalizing if f.get("id") == PINNED_COUNTER_CLAIM_ID)
+    assert named.get("counter") == "miss"
+
+
+def test_the_counter_pass_fixture_test_names_its_claim():
+    """#524. The test above must assert on `PINNED_COUNTER_CLAIM_ID`, not on
+    whether the candidate set is merely non-empty: `assert generalizing`
+    would still pass against today's fixture, by the same coincidence #524
+    closes. This test inspects the other test's own source for the pinned
+    constant, rather than re-running the whole offline pipeline a second
+    time to say the same thing.
+    """
+    import inspect  # noqa: PLC0415
+
+    source = inspect.getsource(test_the_recorded_fixture_paper_runs_a_claim_through_the_counter_pass)
+    assert "PINNED_COUNTER_CLAIM_ID" in source
+
+
+# -- P2, person and marketing verbs -------------------------------------------
+
+
+def test_second_person_fails_the_whole_paper():
+    """`you should` fails `person` at paper level, and the detail names the
+    sentence."""
+    body = "You should charge the budget before the writer runs [1]."
+    score = checks.check(body, ["https://a"])
+    assert "person" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "person")
+    assert "You should" in row.detail
+
+
+def test_we_will_and_in_this_article_fail():
+    """Both first-person phrases fail the same row."""
+    will_body = "We will now look at the retry budget in detail [1]."
+    assert "person" in checks.check(will_body, ["https://a"]).signature()
+
+    article_body = "In this article, the orchestrator sequences every role [1]."
+    assert "person" in checks.check(article_body, ["https://a"]).signature()
+
+
+def test_a_marketing_verb_fails():
+    """`leverage` fails, `robust` fails, and an inflected form fails."""
+    leverage = checks.check("The design will leverage existing infrastructure [1].", ["https://a"])
+    assert "marketing" in leverage.signature(), leverage.report()
+
+    robust = checks.check("The retry loop stays robust under load [1].", ["https://a"])
+    assert "marketing" in robust.signature(), robust.report()
+
+    unlocks = checks.check("The change unlocks new throughput for the pipeline [1].", ["https://a"])
+    assert "marketing" in unlocks.signature(), unlocks.report()
+
+
+def test_a_marketing_word_inside_code_or_a_url_passes():
+    """A code span and a reference-list URL are not body prose."""
+    body = (
+        "A real point [1].\n\n"
+        "The adapter uses `a seamless robust retry loop` internally.\n\n"
+        "## References\n\n1. https://example.com/unlock-guide\n"
+    )
+    score = checks.check(body, ["https://example.com/unlock-guide"])
+    assert "marketing" not in score.signature(), score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_person_and_marketing_rows(tmp_path, no_renderer):
+    """The paper `task demo` writes carries no second person, no first person
+    tour, and none of the six marketing verbs. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    assert checks.person_violations(body) == []
+    assert checks.marketing_violations(body) == []
+
+
+def test_a_leverage_ratio_is_not_a_marketing_verb():
+    """Follow-up from the P2 judge: a finance section may name a leverage
+    ratio without tripping the marketing row. `leveraging`/`leveraged` are
+    still banned outright."""
+    ok = checks.check("The bank's leverage ratio fell in the quarter [1].", ["https://a"])
+    assert "marketing" not in ok.signature(), ok.report()
+    bad = checks.check("We leverage the SDK for every call [1].", ["https://a"])
+    assert "marketing" in bad.signature(), bad.report()
+
+
+def test_an_inline_url_is_not_body_prose_for_person_or_marketing():
+    """Follow-up from the P2 judge: a citation URL outside the reference list
+    must not fabricate a hit on a path segment."""
+    ok = checks.check("See https://example.org/your-account for the record [1].", ["https://a"])
+    assert "person" not in ok.signature(), ok.report()
+    bad = checks.check("See the record at your account page [1].", ["https://a"])
+    assert "person" in bad.signature(), bad.report()
+
+
+# -- P3, the glossary ----------------------------------------------------
+
+
+def test_a_defined_term_missing_from_the_glossary_fails():
+    """`glossary_complete` fires when a captured term never reached the
+    glossary. Production strips every marker at assembly, so this row is a
+    defence: a marker that survives into the body is itself the defect."""
+    body = (
+        "The orchestrator sequences roles [1]. "
+        "<!-- TERM: orchestrator: the process that sequences roles -->"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "glossary_complete" in score.signature(), score.report()
+
+
+def test_a_glossary_only_term_fails():
+    """`glossary_exact` fires on a glossary entry the body prose never uses."""
+    body = (
+        "A point [1].\n\n"
+        "## Glossary\n\n"
+        "**widget.** A term the body never uses.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "glossary_exact" in score.signature(), score.report()
+
+
+def test_a_search_host_in_the_glossary_fails():
+    """`glossary_exact` also fires on a search-host name, even one the body
+    prose does use, because a host is a place the run searched, not a term
+    about the subject."""
+    body = (
+        "This paper names docs.langchain.com as a retrieved source [1].\n\n"
+        "## Glossary\n\n"
+        "**docs.langchain.com.** A vendor documentation site.\n\n"
+        "## References\n\n1. https://docs.langchain.com/x\n"
+    )
+    score = checks.check(body, ["https://docs.langchain.com/x"], enforce_structure=True)
+    assert "glossary_exact" in score.signature(), score.report()
+
+
+def test_a_plural_or_self_defined_term_does_not_fail_glossary_exact():
+    """Follow-up from the PR #499 judge: a literal phrase match rejected
+    "one exit criterion" for a glossary term used only in its plural. A
+    stemmed match counts, and so does a term repeated inside its own
+    definition, which is the writer's own marked sentence."""
+    plural_only = (
+        "A point about workflows [1].\n\n"
+        "## Glossary\n\n"
+        "**workflow.** A sequence of steps a run executes.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "glossary_exact" not in checks.check(plural_only, ["https://a"], enforce_structure=True).signature()
+
+    self_defined = (
+        "A point about the process [1].\n\n"
+        "## Glossary\n\n"
+        "**orchestrator.** The orchestrator sequences roles.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "glossary_exact" not in checks.check(self_defined, ["https://a"], enforce_structure=True).signature()
+
+
+def test_an_irregular_plural_matches_its_singular():
+    """Follow-up from the PR #499 judge: the regular suffix fold cannot turn
+    "criteria" into "criterion", since neither ends in s, es, or ies. A
+    fixed table of irregular pairs is checked first."""
+    body = (
+        "The run checks one exit criterion [1].\n\n"
+        "## Glossary\n\n"
+        "**exit criteria.** What a run must clear before it stops.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "glossary_exact" not in checks.check(body, ["https://a"], enforce_structure=True).signature()
+
+
+def test_structural_rows_are_off_by_default():
+    """`enforce_structure` defaults false, so a body carrying glossary
+    defects, a bare-Conclusion close, and a selling CTA passes when the
+    caller does not opt in, and an existing narrow snippet's signature is
+    unchanged."""
+    body = (
+        "A point [1].\n\n"
+        "## Conclusion\n\n- Unlock the platform for every team today. [1]\n\n"
+        "## Glossary\n\n"
+        "**widget.** A term the body never uses.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    off = checks.check(body, ["https://a"])
+    assert "glossary_complete" not in off.signature()
+    assert "glossary_exact" not in off.signature()
+    assert "next_step" not in off.signature()
+    assert "cta_language" not in off.signature()
+
+    corpus = "we retrieved arXiv:2401.00001 and it says things"
+    unrelated = "A real point [1].\n\nAnother point, see arXiv:2999.99999 [1]."
+    assert checks.check(unrelated, ["https://a"], corpus=corpus).signature() == ("sourced",)
+
+
+def test_no_terms_means_no_glossary_and_both_rows_pass():
+    """No captured term means nothing missing and nothing extra. The row
+    exists and passes, it does not simply stay absent."""
+    score = checks.check("A point [1].", ["https://a"], enforce_structure=True)
+    names = {c.name for c in score.checks}
+    assert {"glossary_complete", "glossary_exact"} <= names
+    assert score.passed, score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_glossary_rows(tmp_path, no_renderer):
+    """The paper `task demo` writes carries no leftover TERM marker and no
+    glossary section, since the recorded writer never marks a term. Both rows
+    still run, under the harness's own `enforce_research_policy=True`, and
+    both pass on the empty set. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`.
+    """
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    assert "TERM" not in body
+    report = json.loads((work / "check.json").read_text(encoding="utf-8"))
+    names = {row["name"] for row in report["checks"]}
+    assert "glossary_complete" in names
+    assert "glossary_exact" in names
+    assert report["passed"], report
+
+
+# -- P4, the next-step section --------------------------------------------
+
+
+def test_a_conclusion_heading_with_no_next_step_verb_fails():
+    """`next_step` fires when the last prose heading is a bare Conclusion."""
+    body = (
+        "A point [1].\n\n"
+        "## Conclusion\n\nThis paper reviewed the same point again. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "next_step" in score.signature(), score.report()
+
+
+def test_unlock_in_the_next_step_section_fails():
+    """`cta_language` is scoped to the next-step section. `unlock` in a body
+    section is the unconditional `marketing` row's business, not this one."""
+    body = (
+        "A point [1].\n\n"
+        "## Next step\n\n"
+        "- Unlock the platform for every team.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "cta_language" in score.signature(), score.report()
+
+    elsewhere = (
+        "This paper does not unlock every runtime [1].\n\n"
+        "## Next step\n\n"
+        "- Evaluate the design on a live ticket.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    scored = checks.check(elsewhere, ["https://a"], enforce_structure=True)
+    assert "marketing" in scored.signature(), scored.report()
+    assert "cta_language" not in scored.signature(), scored.report()
+
+
+def test_evaluate_x_on_a_live_ticket_passes():
+    """The house style's own allowed CTA shape passes both new rows."""
+    body = (
+        "A point [1].\n\n"
+        "## Next step\n\n"
+        "- Evaluate X on a live ticket.\n"
+        "- Run the fixture with --doer none.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "next_step" not in score.signature(), score.report()
+    assert "cta_language" not in score.signature(), score.report()
+
+
+def test_a_figures_appendix_after_next_step_still_passes():
+    """A rendered figure no section claimed lands in an orphan `## Figures`
+    appendix between the last body section and Glossary. That appendix is
+    assembled, not written, so it must not read as the paper's last prose
+    section."""
+    body = (
+        "A point [1].\n\n"
+        "## Next step\n\n"
+        "- Evaluate X on a live ticket.\n\n"
+        "## Figures\n\n"
+        "![orphan](diagrams/orphan_imagen.png)\n\n"
+        "## Glossary\n\n**widget.** A term the body uses.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "next_step" not in score.signature(), score.report()
+
+
+def test_the_rest_of_the_460_ban_list_fails_in_the_next_step_section():
+    """Ticket #460 also names these four; `CTA_PHRASE` was missing them."""
+    for phrase in ("subscribe", "get started", "only solution", "contact sales"):
+        body = (
+            "A point [1].\n\n"
+            f"## Next step\n\n- {phrase.capitalize()} today.\n\n"
+            "## References\n\n1. https://a\n"
+        )
+        score = checks.check(body, ["https://a"], enforce_structure=True)
+        assert "cta_language" in score.signature(), (phrase, score.report())
+
+
+def test_a_step_over_twenty_words_fails():
+    """Each step in the next-step section is 20 words or fewer."""
+    long_step = "- " + " ".join(["evaluate"] * 21) + "."
+    body = (
+        "A point [1].\n\n"
+        f"## Next step\n\n{long_step}\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], enforce_structure=True)
+    assert "cta_language" in score.signature(), score.report()
+
+
+def test_a_body_with_no_heading_passes_next_step_by_construction():
+    """A heading-less snippet, the shape other rows' tests build, has
+    nothing to grade and passes rather than fails."""
+    score = checks.check("A point [1].", ["https://a"], enforce_structure=True)
+    assert "next_step" not in score.signature(), score.report()
+
+
+def test_the_recorded_fixture_paper_passes_the_next_step_rows(tmp_path, no_renderer):
+    """After the fixture repair, `task demo` assembles a paper whose last
+    prose section is the next step, and `next_step`/`cta_language` both pass
+    under the harness's own `require_next_step=True`/`enforce_structure=True`.
+    """
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    assert body.index("## Next step") < body.index("## References")
+    assert "Evaluate the three exits on a live ticket" in body, "the CTA steps, not a coverage stub"
+    report = json.loads((work / "check.json").read_text(encoding="utf-8"))
+    names = {row["name"] for row in report["checks"]}
+    assert "next_step" in names
+    assert "cta_language" in names
+
+
+# -- P5, headings are answers -------------------------------------------------
+
+
+def test_a_raw_key_question_as_a_heading_fails():
+    """A section that pastes its outline key question as an H3 fails
+    `question_heading`, and the detail names the offending heading."""
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = (
+        "## One\n\n"
+        "### What stops the loop from running forever?\n\n"
+        "A rubric computed in code, not left to the model, stops it [1].\n"
+    )
+    score = checks.check(body, ["https://a"], outline=outline)
+    assert "question_heading" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "question_heading")
+    assert "What stops the loop from running forever?" in row.detail
+
+
+def test_a_repunctuated_key_question_as_a_heading_still_fails():
+    """PR #508 judge follow-up: the old version stripped only a trailing
+    `?` from the wanted set, so a writer that closed the pasted question
+    with a period or a colon instead slipped past `question_heading`."""
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    period = (
+        "## One\n\n"
+        "### What stops the loop from running forever.\n\n"
+        "A rubric computed in code, not left to the model, stops it [1].\n"
+    )
+    colon = (
+        "## One\n\n"
+        "### What stops the loop from running forever:\n\n"
+        "A rubric computed in code, not left to the model, stops it [1].\n"
+    )
+    assert "question_heading" in checks.check(period, ["https://a"], outline=outline).signature()
+    assert "question_heading" in checks.check(colon, ["https://a"], outline=outline).signature()
+
+
+def test_a_heading_ending_in_a_question_mark_fails():
+    """The row is unconditional: a heading ending in `?` fails with no
+    outline handed to `check` at all."""
+    body = (
+        "## Is the harness safe to run unattended?\n\n"
+        "A rubric computed in code stops it, not a model's own judgment [1].\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "question_heading" in score.signature(), score.report()
+
+
+def test_a_clean_heading_passes_question_heading():
+    """A heading that answers the question, rather than asking it, passes."""
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = (
+        "## One\n\n"
+        "### A rubric in code stops the loop\n\n"
+        "The rubric decides when the loop stops, never a model's own "
+        "judgment [1].\n"
+    )
+    score = checks.check(body, ["https://a"], outline=outline)
+    assert "question_heading" not in score.signature(), score.report()
+
+
+def test_coverage_passes_when_the_body_answers_the_question():
+    """`outline_coverage_gaps` no longer requires the verbatim question. Token
+    overlap between the question and the section body carries it. #385."""
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = (
+        "## One\n\n"
+        "A deterministic rubric in code decides when the loop stops, never a "
+        "model's own judgment. [1]\n"
+    )
+    assert outline_coverage_gaps(body, outline) == []
+
+
+def test_coverage_still_fails_a_paper_section_that_never_answers_the_question():
+    """A body with no term overlap with the question is still a gap."""
+    from checks import outline_coverage_gaps  # noqa: PLC0415
+
+    outline = {
+        "sections": [
+            {
+                "heading": "One",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+    body = "## One\n\nThis section is about something else entirely [1].\n"
+    gaps = outline_coverage_gaps(body, outline)
+    assert gaps and "One" in gaps[0]
+
+
+def test_the_recorded_fixture_paper_passes_question_heading(tmp_path, no_renderer):
+    """The paper `task demo` writes has no heading that pastes a key
+    question, under the harness's own outline. Same command as the
+    Taskfile: `--backend fixture --fresh --brain tests/fixtures/brain`."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    report = json.loads((work / "check.json").read_text(encoding="utf-8"))
+    names = {row["name"] for row in report["checks"]}
+    assert "question_heading" in names
+    assert report["passed"], report
+
+
+# -- P6, the paper does not narrate the harness --------------------------------
+
+
+def test_the_creatine_sentence_fails_policy_leak():
+    """The exact sentence from #412. The finished creatine paper spent whole
+    paragraphs reporting that no preprint was found, and this is the one the
+    ticket quotes. `arxiv.org` was the host admitted for that run, the same
+    way a biomedical librarian would admit it today."""
+    body = (
+        "A point about creatine [1].\n\n"
+        "No study identified for this mechanism was hosted on arxiv.org.\n"
+    )
+    score = checks.check(body, ["https://a"], allowed_domains=("arxiv.org",))
+    assert "policy_leak" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "policy_leak")
+    assert "arxiv.org" in row.detail
+
+
+def test_an_allowlist_host_in_body_prose_fails():
+    """A host from the run's allowlist in a body section fails. The same
+    host in Methods or References passes: #478 fills Methods with the
+    admitted-host list by design, and References is the citation list."""
+    host = "example-journal.org"
+    body_hit = f"The team searched {host} for evidence [1].\n"
+    assert "policy_leak" in checks.check(body_hit, ["https://a"], allowed_domains=(host,)).signature()
+
+    methods_ok = (
+        "A point [1].\n\n"
+        f"## Methods\n\nThe run searched {host} for evidence.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "policy_leak" not in checks.check(methods_ok, ["https://a"], allowed_domains=(host,)).signature()
+
+    references_ok = f"A point [1].\n\n## References\n\n1. https://{host}/x\n"
+    assert (
+        "policy_leak"
+        not in checks.check(references_ok, [f"https://{host}/x"], allowed_domains=(host,)).signature()
+    )
+
+
+def test_methods_may_name_admitted_hosts():
+    """The Methods exemption, on its own: #478 writes Methods from the run
+    record, and it names the admitted hosts by design."""
+    host = "example-journal.org"
+    body = (
+        "A point [1].\n\n"
+        f"## Methods\n\nSources were retrieved from {host} and {host}/archive.\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"], allowed_domains=(host,))
+    assert "policy_leak" not in score.signature(), score.report()
+
+
+def test_the_references_section_may_name_hosts():
+    """The References exemption, on its own: the reference list is where a
+    host name belongs."""
+    host = "example-journal.org"
+    body = f"A point [1].\n\n## References\n\n1. https://{host}/paper\n"
+    score = checks.check(body, [f"https://{host}/paper"], allowed_domains=(host,))
+    assert "policy_leak" not in score.signature(), score.report()
+
+
+def test_the_three_phrases_fail():
+    """The three retrieval phrases #412 names, each in an otherwise ordinary
+    sentence."""
+    sentences = {
+        "preprint search": "The preprint search turned up nothing usable here [1].",
+        "search scope": "The search scope excluded several relevant databases [1].",
+        "no study was hosted on": "No study was hosted on a site this run could reach [1].",
+    }
+    for phrase, body in sentences.items():
+        score = checks.check(body, ["https://a"])
+        assert "policy_leak" in score.signature(), (phrase, score.report())
+
+
+def test_a_paper_that_never_names_a_host_passes():
+    """A clean paper, with no search host and no retrieval language, passes
+    by construction."""
+    body = (
+        "Creatine reduces lean mass loss during immobilization [1].\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    assert "policy_leak" not in checks.check(body, ["https://a"]).signature()
+
+
+def test_the_writer_message_names_no_allowlist_host_belt():
+    """`policy_leak` is the belt behind the stripped delegation message
+    (`tests/test_research_and_turns.py`). This is the Python-side row that
+    still catches a leak if the strip is ever bypassed."""
+    body = "The result came from arxiv.org, which this run searched [1].\n"
+    assert "policy_leak" in checks.check(body, ["https://a"], allowed_domains=("arxiv.org",)).signature()
+
+
+def test_the_recorded_fixture_paper_passes_policy_leak(tmp_path, no_renderer):
+    """The paper `task demo` writes names no search host and narrates no
+    retrieval boundary. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`."""
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    hits = checks.policy_leak_violations(body)
+    assert hits == [], hits
+
+
+# -- P7, the abstract is written last -------------------------------------
+
+
+def test_an_unhedged_single_source_abstract_fails():
+    """A hedge-free sentence in the abstract, beside a `[n]` whose claim is
+    single-source, fails and names the sentence."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices. [1]\n\n"
+        "## Introduction\n\nThe loop halts before a person notices, one trial supporting it. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    claims = [{"number": 1, "source_url": "https://a", "verifier_url": ""}]
+    score = checks.check(body, ["https://a"], claims=claims)
+    assert "abstract_matches_body" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert "halts before a person notices" in row.detail
+
+
+def test_a_number_shared_by_a_corroborated_claim_is_not_forced_to_hedge():
+    """Two claims can share one reference number. A single-source claim on
+    it must not force a hedge onto a sentence citing the other, corroborated
+    claim on the same number."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices. [1]\n\n"
+        "## Introduction\n\nThe loop halts before a person notices. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    claims = [
+        {"number": 1, "source_url": "https://a", "verifier_url": ""},
+        {"number": 1, "source_url": "https://a", "verifier_url": "https://b"},
+    ]
+    score = checks.check(body, ["https://a"], claims=claims)
+    assert "abstract_matches_body" not in score.signature(), score.report()
+
+
+def test_an_abstract_number_absent_from_the_body_fails():
+    """A citation the abstract uses, and no other section does, fails."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices [1]. It also cites [2].\n\n"
+        "## Introduction\n\nThe loop halts before a person notices [1].\n\n"
+        "## References\n\n1. https://a\n2. https://b\n"
+    )
+    score = checks.check(body, ["https://a", "https://b"])
+    assert "abstract_matches_body" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert "[2]" in row.detail
+
+
+def test_an_overclaim_in_the_abstract_fails():
+    """The fixed overclaim list, whatever the ledger says about the claim."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThis paper proves the loop halts before a person notices. [1]\n\n"
+        "## Introduction\n\nThe loop halts before a person notices. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "abstract_matches_body" in score.signature(), score.report()
+
+
+def test_improves_is_not_an_overclaim():
+    """`ABSTRACT_OVERCLAIM` matches whole words: `improves` is not `proves`."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nCreatine improves lean mass. [1]\n\n"
+        "## Introduction\n\nCreatine improves lean mass, on a single source. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "abstract_matches_body" not in score.signature(), score.report()
+
+
+def test_the_introduction_first_paragraph_is_graded_too():
+    """The same row runs on the introduction's first paragraph, not only the
+    abstract."""
+    body = (
+        "# Title\n\n"
+        "## Abstract\n\nThe loop halts before a person notices, one trial supporting it. [1]\n\n"
+        "## Introduction\n\nThis paper proves the loop halts before a person notices. [1]\n\n"
+        "## References\n\n1. https://a\n"
+    )
+    score = checks.check(body, ["https://a"])
+    assert "abstract_matches_body" in score.signature(), score.report()
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert "introduction" in row.detail
+
+
+def test_a_body_with_no_abstract_heading_is_inert():
+    """The row runs on every check, and a snippet another row's test built
+    has no `## Abstract` heading and nothing to grade. `signature()` only
+    ever lists failing rows, so absence there is not proof the row ran;
+    check the row itself, on a body that would fail the overclaim rule if
+    it were graded."""
+    body = "# Title\n\n## Introduction\n\nThis paper proves nothing yet. [1]\n\n## References\n\n1. https://a\n"
+    score = checks.check(body, ["https://a"])
+    row = next(c for c in score.checks if c.name == "abstract_matches_body")
+    assert row.passed, row.detail
+
+
+def test_the_recorded_fixture_paper_passes_abstract_matches_body(tmp_path, no_renderer):
+    """The paper `task demo` writes assembles with the abstract last, and it
+    matches the body it summarizes. Same command as the Taskfile:
+    `--backend fixture --fresh --brain tests/fixtures/brain`."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    report = json.loads((work / "check.json").read_text(encoding="utf-8"))
+    names = {row["name"] for row in report["checks"]}
+    assert "abstract_matches_body" in names
+    assert report["passed"], report
+
+
+# -- #514: the offline lane never depends on a live image call ---------------
+
+
+def test_the_recorded_fixture_tests_never_touch_the_renderer(tmp_path, monkeypatch):
+    """`available()` says no, and a renderer patched to blow up if it is ever
+    called still lets the recorded fixture pipeline pass. A file-exists
+    check that reported available on a machine with keys set is exactly how
+    `task demo` used to reach a live backend from a suite that promises no
+    network."""
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("the offline lane must never call the renderer")
+
+    monkeypatch.setattr(diagrams, "available", lambda: False)
+    monkeypatch.setattr(diagrams, "render", boom)
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0
+    assert (work / "paper.md").exists()
+
+
+def test_a_failing_image_backend_becomes_a_named_skip(tmp_path, monkeypatch):
+    """#514: a renderer that reports itself available and then raises on the
+    live call must not crash `task demo`. The paper still assembles, with
+    the figure skipped and the skip named."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    def flaky_render(source, topic, out_dir, theme=diagrams.DEFAULT_THEME):
+        prompt = Path(out_dir) / f"{Path(source).stem}_imagen.prompt.txt"
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("plugin-built prompt", encoding="utf-8")
+        raise diagrams.ImageBackendUnavailable(prompt)
+
+    monkeypatch.setattr(diagrams, "available", lambda: True)
+    monkeypatch.setattr(diagrams, "render", flaky_render)
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "a live backend failure must degrade, not crash, the run"
+    assert (work / "paper.md").exists()
+    recorded = json.loads((work / "diagrams.json").read_text(encoding="utf-8"))
+    skipped = [f for f in recorded["figures"] if not f["path"]]
+    assert skipped, "no figure was recorded as skipped"
+    assert any(
+        "image backend unavailable" in m for f in skipped for m in f["misses"]
+    ), skipped
+
+
+# -- P11, methods, conclusion, and the study table -------------------------
+
+METHODS_BLOCK = (
+    "## Methods\n\n"
+    "This paper searched two planned sections for evidence, starting 2026-01-01: "
+    "Abstract, Introduction. Each planned section names a facet of the topic the "
+    "outline settled before research began.\n\n"
+    "Admitted search hosts, decided once before any paid search ran: "
+    "docs.langchain.com, docs.claude.com. A host outside this list was not searched.\n\n"
+    "Sources retrieved during research: 2. Sources admitted to the reference list, "
+    "after the same host and claim checks every finding in this paper passed: 2.\n\n"
+    "The verification cap for this run allows a second opinion on up to 24 claims. "
+    "The follow-turn cap allows 6 secondary claims a look at their own primary "
+    "study, of which 0 were spent. The counter-evidence cap allows 6 generalizing "
+    "claims a search for a contrary finding, of which 0 were spent.\n\n"
+    "No proposed host was excluded during admission; every host cleared the wall.\n\n"
+    "No claim in this run carries a recorded human study.\n\n"
+)
+CONCLUSION_BLOCK = (
+    "## Conclusion\n\nThe evidence above supports the three exits, with the runtime "
+    "scope noted as a limit. [1][2]\n\n"
+)
+GOOD_P11 = (
+    "# Exit conditions\n\n"
+    "## Abstract\n\nA loop without an exit spends until someone notices. [1]\n\n"
+    "## Introduction\n\nThree exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
+    + METHODS_BLOCK
+    + "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
+    + CONCLUSION_BLOCK
+    + "## Next step\n\n"
+    "- Evaluate the three exits on a live ticket before adopting them.\n"
+    "- Run the fixture with --backend fixture, then again with a live backend.\n"
+    "- Compare this port against the sibling runtime on the same topic.\n\n"
+    "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
+)
+GOOD_P11_URLS = ["https://docs.langchain.com/one", "https://docs.claude.com/two"]
+
+
+def test_a_body_without_methods_fails():
+    """`methods_present` fires when the Methods heading is missing entirely."""
+    body = GOOD_P11.replace(METHODS_BLOCK, "")
+    score = checks.check(body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "methods_present" in score.signature(), score.report()
+
+
+def test_a_body_without_conclusion_fails():
+    """`conclusion_present` fires when the Conclusion heading is missing entirely."""
+    body = GOOD_P11.replace(CONCLUSION_BLOCK, "")
+    score = checks.check(body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "conclusion_present" in score.signature(), score.report()
+
+
+def test_a_clean_paper_passes_methods_and_conclusion_present():
+    score = checks.check(GOOD_P11, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "methods_present" not in score.signature(), score.report()
+    assert "conclusion_present" not in score.signature(), score.report()
+
+
+def test_a_study_table_with_the_wrong_row_count_fails():
+    """`study_table` fires only when the ledger holds a human-study claim,
+    and checks that the table's own row count matches it. #478"""
+    body = GOOD_P11.replace(
+        METHODS_BLOCK,
+        METHODS_BLOCK.rstrip("\n")
+        + "\n\n"
+        + "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 (older men) | 12 weeks | 500 kcal per day | yes | DXA | preserved lean mass [1] | primary_trial |\n\n",
+    )
+    claims = [{"id": "c1", "number": 1, "study": {"participants": {"n": 24}}}]
+    score = checks.check(
+        body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True, claims=claims
+    )
+    assert "study_table" not in score.signature(), score.report()
+
+    two_studies = claims + [{"id": "c2", "number": 2, "study": {"participants": {"n": 40}}}]
+    understated = checks.check(
+        body,
+        GOOD_P11_URLS,
+        reference_numbers=[1, 2],
+        enforce_structure=True,
+        claims=two_studies,
+    )
+    assert "study_table" in understated.signature(), understated.report()
+
+
+def test_a_study_table_before_methods_fails():
+    """The table must sit after Methods and before the first evidence
+    section, not merely exist somewhere on the page."""
+    claims = [{"id": "c1", "number": 1, "study": {"participants": {"n": 24}}}]
+    misplaced = (
+        "# T\n\n"
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+        "## Abstract\n\nA point. [1]\n\n"
+        + METHODS_BLOCK
+        + "## Limitations\n\nA limit. [2]\n\n"
+        "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
+    )
+    score = checks.check(
+        misplaced,
+        GOOD_P11_URLS,
+        reference_numbers=[1, 2],
+        enforce_structure=True,
+        claims=claims,
+        headings=["Limitations"],
+    )
+    assert "study_table" in score.signature(), score.report()
+
+
+def test_a_correctly_placed_table_passes_even_when_headings_start_with_abstract():
+    """PR #535 judge revision B1: a real outline's `headings` list can start
+    with a structural name like Abstract; `study_table_violations` must
+    still find the real first evidence section, not stop at index 0."""
+    claims = [{"id": "c1", "number": 1, "study": {"participants": {"n": 24}}}]
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+    )
+    body = GOOD_P11.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = checks.check(
+        body,
+        GOOD_P11_URLS,
+        reference_numbers=[1, 2],
+        enforce_structure=True,
+        claims=claims,
+        headings=["Abstract", "Introduction", "Limitations", "Next step"],
+    )
+    assert "study_table" not in score.signature(), score.report()
+
+
+def test_the_evidence_summary_table_passes_has_body():
+    """PR #535 judge revision B2: a table is not prose, and the 80-word
+    per-section floor must not measure it."""
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+    )
+    body = GOOD_P11.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = checks.check(
+        body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True, min_section_words=80
+    )
+    row = next(c for c in score.checks if c.name == "has_body")
+    assert "Evidence summary" not in row.detail, row.detail
+
+
+def test_a_body_with_no_heading_passes_methods_and_conclusion_by_construction():
+    """A heading-less snippet, the shape other rows' tests build, has nothing
+    to grade and passes rather than fails. #385, #463 precedent."""
+    score = checks.check("A point [1].", ["https://a"], enforce_structure=True)
+    assert "methods_present" not in score.signature(), score.report()
+    assert "conclusion_present" not in score.signature(), score.report()
+
+
+def test_a_conclusion_with_a_new_citation_fails():
+    """Conclusion is one writer turn from the body, with no new citation.
+    The existing `grounded` row already rejects a reference number that is
+    not in the run's own citation registry, Conclusion included."""
+    body = GOOD_P11.replace(
+        "The evidence above supports the three exits, with the runtime scope "
+        "noted as a limit. [1][2]",
+        "The evidence above supports the three exits, with the runtime scope "
+        "noted as a limit. [1][2][99]",
+    )
+    score = checks.check(body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "grounded" in score.signature(), score.report()
+
+
+def test_the_heading_order_is_frozen(tmp_path, no_renderer):
+    """Front matter, Abstract, Introduction, Methods, study table, body
+    sections, Conclusion, Next step, Glossary, References. On the assembled
+    recorded fixture: no human-study claim in this topic, so no table."""
+    import re  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0, "the recorded fixture must still assemble and pass its gate"
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    order = re.findall(r"^## (.+)$", body, re.M)
+    methods_at = order.index("Methods")
+    conclusion_at = order.index("Conclusion")
+    next_step_at = order.index("Next step")
+    references_at = order.index("References")
+    assert order[0] == "Abstract"
+    # #538. A real outline, not only an assembled fixture: `loop.py`'s real
+    # CLI run sets `require_introduction=True`, and `OfflineTurns.outline`
+    # drafts Introduction as its own first section, so this is the
+    # section-writing loop's own written prose, the same as any other body
+    # section, not `assemble`'s Python-written backstop.
+    assert order[1] == "Introduction"
+    assert order[2] == "Methods"
+    assert methods_at < conclusion_at < next_step_at < references_at
+    assert "Evidence summary" not in order, "no human-study claim in this topic, no table"
+
+
+def test_next_step_still_grades_the_last_prose_heading(tmp_path, no_renderer):
+    """P4's `next_step` row grades the last prose heading before Glossary
+    and References. Inserting Conclusion ahead of it must not make
+    Conclusion read as the paper's own closing section."""
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import loop  # noqa: PLC0415
+
+    folder = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    code = loop.main(
+        [
+            "--topic", "loop engineering exit criteria",
+            "--out", str(work),
+            "--backend", "fixture",
+            "--brain", str(folder / "tests" / "fixtures" / "brain"),
+            "--fresh",
+        ]
+    )
+    assert code == 0
+    body = (work / "paper.md").read_text(encoding="utf-8")
+    assert checks.last_prose_heading(body) == "Next step"
+    report = json.loads((work / "check.json").read_text(encoding="utf-8"))
+    row = next(r for r in report["checks"] if r["name"] == "next_step")
+    assert row["passed"], row
+
+
+def test_word_count_does_not_credit_methods_or_the_study_table():
+    """PR #535 judge revision F5. Neither section is prose a writer
+    composed; `_strip_figure_notes`'s own docstring already names the
+    principle for a figure caption, and it now applies here too."""
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 24 | not reported | not reported | not reported | not reported | "
+        "preserved lean mass [1] | other |\n\n"
+    )
+    with_table = GOOD_P11.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    without_generated = with_table.replace(METHODS_BLOCK, "").replace(table, "")
+    assert checks.word_count(with_table) == checks.word_count(without_generated)
+
+
+# -- F9, the plan's two cross-lane P11 tests --------------------------------
+
+
+def test_a_tiered_claim_renders_in_the_study_table():
+    """`source_policy.tier_for()` (E4) is the actual source of a study
+    row's Tier column, not a hand-picked string. Plan's cross-lane P11
+    test."""
+    import source_policy  # noqa: PLC0415
+
+    record = {"pubtype": ["Randomized Controlled Trial"]}
+    tier = source_policy.tier_for(record)
+    assert tier == "primary_trial"
+    claims = [{"id": "c1", "number": 1, "study": {"participants": {"n": 24}}, "evidence_tier": tier}]
+    table = (
+        "## Evidence summary\n\n"
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        f"| 24 | not reported | not reported | not reported | not reported | "
+        f"preserved lean mass [1] | {tier} |\n\n"
+    )
+    body = GOOD_P11.replace(METHODS_BLOCK, METHODS_BLOCK.rstrip("\n") + "\n\n" + table)
+    score = checks.check(
+        body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True, claims=claims
+    )
+    assert "study_table" not in score.signature(), score.report()
+    assert tier in body
+
+
+def test_a_counterweighed_section_still_passes_the_page_rows():
+    """The E5 counter-evidence pass grades one section; P11's methods,
+    conclusion, and study_table rows grade the whole page. Plan's
+    cross-lane P11 test: neither reads the other's own findings."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "text": "The mechanism always holds across every deployment.",
+            "generalizing": True,
+            "counter": "hit",
+            "counterargument_to": "",
+        }
+    ]
+    section_score = checks.section_check(
+        "## Exit conditions\n\nThe mechanism always holds across every deployment. [1]\n",
+        section={"heading": "Exit conditions"},
+        findings=findings,
+    )
+    assert "counterweighed" not in section_score.signature(), section_score.report()
+
+    page_score = checks.check(GOOD_P11, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "methods_present" not in page_score.signature(), page_score.report()
+    assert "conclusion_present" not in page_score.signature(), page_score.report()
+
+
+# -- P12, front matter -------------------------------------------------------
+
+FRONT_MATTER_P12 = (
+    "Prepared by: Claude Agent SDK (writer: claude-opus-5, judge: claude-opus-5).\n\n"
+    "Date: 2026-01-01.\n\n"
+    "Generated by an automated research loop. Sources: 2 retrieved, 2 cited. "
+    "Verification: 2 claims cross-checked. See Methods.\n\n"
+    "No funding. No conflicts declared.\n\n"
+)
+GOOD_P12 = GOOD_P11.replace(
+    "# Exit conditions\n\n", "# Exit conditions\n\n" + FRONT_MATTER_P12
+)
+
+
+def test_a_body_without_front_matter_fails():
+    """`front_matter` fires when the byline, date, provenance, and conflicts
+    block never runs. #479"""
+    score = checks.check(GOOD_P11, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "front_matter" in score.signature(), score.report()
+
+
+def test_front_matter_sits_above_the_abstract():
+    """A clean front-matter block above the Abstract passes. Moving the same
+    four lines below the Abstract still fails: `front_matter` grades a
+    position, not merely a presence somewhere on the page. #479"""
+    score = checks.check(GOOD_P12, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "front_matter" not in score.signature(), score.report()
+    # #479. The block carries no citation of its own to demand, the same
+    # exemption Methods and References already have, by name not by luck.
+    assert "cited" not in score.signature(), score.report()
+
+    moved = GOOD_P12.replace("# Exit conditions\n\n" + FRONT_MATTER_P12, "# Exit conditions\n\n").replace(
+        "## Introduction\n\nThree exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n",
+        "## Introduction\n\nThree exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
+        + FRONT_MATTER_P12,
+    )
+    moved_score = checks.check(moved, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "front_matter" in moved_score.signature(), moved_score.report()
+
+
+def test_a_stray_h1_mid_page_does_not_reopen_the_exempt_zone():
+    """PR #542 judge F1. `_mask_front_matter` anchors on the document's own
+    first heading; a writer-emitted `#` later in the body is graded like
+    any other heading, never a second free pass for an uncited claim."""
+    body = GOOD_P12 + (
+        "\n# Discussion\n\n"
+        "This unsourced paragraph asserts a specific number, 42 percent, "
+        "and cites nothing at all.\n\n"
+    )
+    score = checks.check(body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "cited" in score.signature(), score.report()
+
+
+def test_a_fifth_paragraph_in_the_front_matter_zone_is_not_exempt():
+    """PR #542 judge F1 and F3. The zone exempts exactly the four lines
+    `assemble` writes; a fifth paragraph slipped in above the Abstract is
+    graded like any other prose and fails `front_matter` too."""
+    extra = "Creatine increases lean mass by 42 percent in every population studied.\n\n"
+    body = GOOD_P12.replace(FRONT_MATTER_P12, FRONT_MATTER_P12 + extra)
+    score = checks.check(body, GOOD_P11_URLS, reference_numbers=[1, 2], enforce_structure=True)
+    assert "cited" in score.signature(), score.report()
+    assert "front_matter" in score.signature(), score.report()
+
+
+def test_word_count_excludes_the_front_matter_block():
+    """PR #542 judge F2. The Python-written front matter must not move the
+    whole-paper word floor, the same rule Methods and the study table
+    already follow."""
+    without_block = GOOD_P12.replace(FRONT_MATTER_P12, "")
+    assert checks.word_count(GOOD_P12) == checks.word_count(without_block)

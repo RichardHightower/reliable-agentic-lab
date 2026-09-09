@@ -46,6 +46,35 @@ def test_a_valid_outline_has_no_errors():
     assert outlines.validate(sample_outline()) == []
 
 
+# -- P4, the next-step section --------------------------------------------
+
+
+def test_an_outline_without_a_next_step_section_is_rejected():
+    """The validator error text is the retry instruction the outline editor
+    sees. `sample_outline`'s only section is headed "The problem", which
+    carries no next-step verb."""
+    errors = outlines.validate(sample_outline(), require_next_step=True)
+    assert any("next step" in item.lower() for item in errors), errors
+
+
+def test_a_next_step_heading_passes():
+    drafted = sample_outline(sections=[sample_section(heading="Next step")])
+    assert outlines.validate(drafted, require_next_step=True) == []
+
+
+def test_a_bare_conclusion_heading_is_named_as_such():
+    drafted = sample_outline(sections=[sample_section(heading="Conclusion")])
+    errors = outlines.validate(drafted, require_next_step=True)
+    assert any("bare Conclusion" in item for item in errors), errors
+
+
+def test_require_next_step_is_off_by_default():
+    """`sample_outline`'s last section is "The problem", which would fail the
+    rule if it ran. The dozens of other tests in this file rely on it not
+    running unless a caller opts in."""
+    assert outlines.validate(sample_outline()) == []
+
+
 def test_duplicate_ids_fail():
     drafted = sample_outline(
         word_target_total=800,

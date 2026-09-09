@@ -19,6 +19,10 @@ vars:
   # Matches the default TOPIC, the seminar's own loop paper. Override with
   # LOOP_DOCTRINE=--no-loop-doctrine for any other topic.
   LOOP_DOCTRINE: '{{.LOOP_DOCTRINE | default "--loop-doctrine"}}'
+  # #479. The front matter's own conflicts line. `stages.front_matter_block`
+  # reads this as an environment variable, so overriding it here is enough;
+  # no CLI flag.
+  CONFLICTS: '{{.CONFLICTS | default "No funding. No conflicts declared."}}'
   VENV: '{{.TASKFILE_DIR}}/.venv'
   PY: '{{.PY | default "python3"}}'
   RUN_PY: '{{.RUN_PY | default (printf "%s/bin/python" .VENV)}}'
@@ -42,6 +46,17 @@ tasks:
           "{{.RUN_PY}}" -m pytest tests -q
         else
           {{.PY}} -m pytest tests -q
+        fi
+
+  test-live:
+    desc: The one live renderer test. Needs SOL3_LIVE_TESTS=1 and a real image backend key.
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - |
+        if [ -x "{{.RUN_PY}}" ]; then
+          SOL3_LIVE_TESTS=1 "{{.RUN_PY}}" -m pytest tests/test_diagrams.py::test_a_live_render_when_keys_are_present -q
+        else
+          SOL3_LIVE_TESTS=1 {{.PY}} -m pytest tests/test_diagrams.py::test_a_live_render_when_keys_are_present -q
         fi
 
   table:
@@ -84,7 +99,7 @@ tasks:
       # TOPIC (the seminar's own loop paper) and the recorded fixture it was
       # captured against. Pass a different TOPIC and
       # LOOP_DOCTRINE=--no-loop-doctrine together for any other topic.
-      - '{{.PY}} -u loop.py --paper --topic "{{.TOPIC}}" --backend {{.BACKEND}} {{.LOOP_DOCTRINE}} {{.CLI_ARGS}}'
+      - 'CONFLICTS="{{.CONFLICTS}}" {{.PY}} -u loop.py --paper --topic "{{.TOPIC}}" --backend {{.BACKEND}} {{.LOOP_DOCTRINE}} {{.CLI_ARGS}}'
 
   live:
     desc: A real run. Research uses filtered Perplexity, then Anthropic, OpenAI, and fixture; never Bing. Add -- --debug for subgraph traces.
@@ -95,7 +110,7 @@ tasks:
           echo "run task setup first. It creates .venv in this folder and installs Deep Agents."
           exit 1
         fi
-        "{{.RUN_PY}}" -u loop.py --paper --topic "{{.TOPIC}}" --backend auto {{.LOOP_DOCTRINE}} {{.CLI_ARGS}}
+        CONFLICTS="{{.CONFLICTS}}" "{{.RUN_PY}}" -u loop.py --paper --topic "{{.TOPIC}}" --backend auto {{.LOOP_DOCTRINE}} {{.CLI_ARGS}}
 
   publish:
     desc: Push a finished paper to its stable secret gist. Never runs on its own.

@@ -37,6 +37,20 @@ For the first loop-control figure, label the exits exactly in their paper order:
 attempt cap, or "whichever fires first"; those are different control rules and
 the deterministic paper gate rejects the figure.
 
+## Label only what the claims support
+
+You are handed this section's claims, when it has any. A node label that
+states an outcome (gain, loss, preservation, increase, decrease, improve,
+prevent, reduce, or a plural of one) must match the direction a claim in
+that list actually asserts. A label a claim contradicts is rejected the same
+way a rendering miss is: you are asked again with the mismatched label
+named.
+
+When exactly one claim backs that direction, the label needs the word
+"reported": the section is stating what one source said, not a settled
+fact. "Reported lean mass gain" is fine on one claim. "Lean mass gain" is
+not, until a second claim backs it too.
+
 ## When you are told what the render lost
 
 The harness renders your source and runs a fidelity judge against it. When the

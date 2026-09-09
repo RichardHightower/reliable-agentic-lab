@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import ClassVar
 
+import diagrams as diagrams_mod
 import paper
 import pytest
 import stages
@@ -252,6 +253,12 @@ CREATINE_PLAN = {
             "key_questions": ["where does the evidence run out", "what is understudied"],
         },
         {
+            "heading": "Next step",
+            "objective": "Tell a colleague what to do with this review before adopting it.",
+            "abstract": "A colleague evaluates the dosing protocol against a live cutting cycle.",
+            "key_questions": ["what should a colleague do with these findings", "how is the protocol tried"],
+        },
+        {
             "heading": "References",
             "objective": "List every source the body cites, in citation order.",
             "abstract": "Generated from the evidence ledger.",
@@ -310,6 +317,26 @@ def test_stage_plan_does_not_force_the_doctrine_question_when_the_flag_is_off(ru
         text = " ".join(section.get("key_questions") or []).lower()
         assert not any(word in heading for word in doctrine_words), section
         assert not any(word in text for word in doctrine_words), section
+
+
+def test_a_real_run_rejects_a_plan_with_no_next_step_section(run_dir, stub_renderer):
+    """`_approve_outline` passes `require_next_step=True` at both its call
+    sites. A plan whose last body section is not a next step must be
+    rejected there, not only in `outlines.validate` called directly."""
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    no_next_step = dict(CREATINE_PLAN)
+    no_next_step["sections"] = [s for s in CREATINE_PLAN["sections"] if s["heading"] != "Next step"]
+
+    class Runner(paper.FixtureRunner):
+        def ask(self, role, prompt):
+            if role == "planner":
+                return paper.Reply(data=no_next_step)
+            return super().ask(role, prompt)
+
+    run = build_run(run_dir, runner=Runner(FIXTURES / "replies.json"), loop_doctrine=False)
+    with pytest.raises(stages.GateFailed, match="next-step"):
+        run.stage_plan()
 
 
 class RecordingPlannerRunner(paper.FixtureRunner):
@@ -437,6 +464,34 @@ def test_a_retry_keeps_the_sections_that_passed(offline, run_dir):
     assert offline.state.total_calls == calls
 
 
+def test_the_abstract_turn_runs_after_the_last_section(offline):
+    """P7, #472. `stage_write` reorders its loop so every bound section is
+    stamped before the abstract restates them. #478: the conclusion joins
+    the abstract at the end, and being written after it, is the true last
+    writer turn."""
+    prompts: list[str] = []
+    original_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        if role == "writer":
+            prompts.append(prompt)
+        return original_ask(role, prompt)
+
+    offline.runner.ask = spy
+    assert offline.run() == 0
+    assert prompts, "the writer never ran"
+    assert "'Conclusion' section" in prompts[-1]
+    assert "'Abstract' section" in prompts[-2]
+    assert all(
+        "'Abstract' section" not in p and "'Conclusion' section" not in p for p in prompts[:-2]
+    )
+    # #478. The conclusion turn reads the whole body already written, the
+    # same shape the abstract turn gets, and is told to introduce no new
+    # citation.
+    assert "already written below" in prompts[-1]
+    assert "no new citation" in prompts[-1]
+
+
 def test_a_review_retry_sends_failed_rows_to_the_writer(offline, monkeypatch):
     offline.run()
     offline.state.mark_failed("review", "rerun")
@@ -458,6 +513,247 @@ def test_a_review_retry_sends_failed_rows_to_the_writer(offline, monkeypatch):
     assert offline.run() == 0
     assert calls["review"] == 2
     assert calls["revise"] and "names_tradeoff" in calls["revise"][0]
+
+
+def test_strip_policy_leak_scrubs_a_host_and_a_retrieval_phrase():
+    """#452 #465 #412: a reviewer's own note, or Python's `policy_leak`
+    report, can name the offending host or phrase while explaining what to
+    fix. The writer must not see either."""
+    note = "policy_leak: search host or retrieval narration in: 'hosted on arxiv.org'"
+    scrubbed = paper._strip_policy_leak(note, ("arxiv.org",))
+    assert "arxiv.org" not in scrubbed
+    assert paper._strip_policy_leak("no host here", ("arxiv.org",)) == "no host here"
+
+    phrase_note = "Section s1 still names its preprint search."
+    assert "preprint search" not in paper._strip_policy_leak(phrase_note, ())
+
+
+def test_the_retry_feedback_names_no_allowlist_host(offline):
+    """A reviewer's own note can quote a `policy_leak` failure's host back at
+    the writer while explaining what to fix. #452 #465 #412: `stage_revise`
+    must not repeat it in the message it sends the writer."""
+    offline.run()
+    heading = next(iter(offline.written))
+    prompts: list[tuple[str, str]] = []
+    original_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        prompts.append((role, prompt))
+        return original_ask(role, prompt)
+
+    offline.runner.ask = spy
+    offline.stage_revise(
+        "The section still names docs.langchain.com; remove that mention.",
+        targets=[heading],
+    )
+    writer_prompts = [prompt for role, prompt in prompts if role == "writer"]
+    assert writer_prompts
+    assert "docs.langchain.com" not in writer_prompts[0], writer_prompts[0]
+
+
+def test_the_write_retry_extra_names_no_allowlist_host(offline):
+    """`stage_write`'s own retry `extra` gets the same guard `stage_revise`
+    applies to its feedback, so a future caller cannot reopen the leak.
+    #452 #465 #412."""
+    offline.run()
+    heading = next(iter(offline.written))
+    del offline.written[heading]
+    prompts: list[tuple[str, str]] = []
+    original_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        prompts.append((role, prompt))
+        return original_ask(role, prompt)
+
+    offline.runner.ask = spy
+    offline.stage_write("The prior attempt named docs.langchain.com; remove it.")
+    writer_prompts = [prompt for role, prompt in prompts if role == "writer"]
+    assert writer_prompts
+    assert "docs.langchain.com" not in writer_prompts[0], writer_prompts[0]
+
+
+# -- #411: the review stall rule gets a progress escape ---------------------
+
+
+def test_review_retry_continues_when_the_score_rises_a_tenth(offline, monkeypatch):
+    """The same rows failing twice is not a stall when the score is moving.
+    Copied from the SDK port's `decide(progressed=...)` rule (#361, #362)."""
+    calls = {"review": 0}
+
+    def review(_extra=""):
+        calls["review"] += 1
+        if calls["review"] == 1:
+            raise GateFailed("still filler", ("no_filler",), score=0.5)
+        if calls["review"] == 2:
+            raise GateFailed("still filler", ("no_filler",), score=0.65)
+        return paper.StageResult("review", summary="fixed")
+
+    monkeypatch.setattr(offline, "stage_review", review)
+    monkeypatch.setattr(
+        offline, "stage_revise", lambda feedback, **_: paper.StageResult("revise", summary="ok")
+    )
+
+    assert offline._run_stage("review") is None
+    assert calls["review"] == 3
+    assert offline.state.stages["review"].status == pstate.COMPLETE
+
+
+def test_review_retry_escalates_when_the_score_does_not_rise(offline, monkeypatch):
+    """The same rows and the same score is exactly the existing stall: the
+    loop is not converging, and the message says so."""
+    calls = {"review": 0}
+
+    def review(_extra=""):
+        calls["review"] += 1
+        raise GateFailed("still filler", ("no_filler",), score=0.5)
+
+    monkeypatch.setattr(offline, "stage_review", review)
+    monkeypatch.setattr(
+        offline, "stage_revise", lambda feedback, **_: paper.StageResult("revise", summary="ok")
+    )
+    said = []
+    monkeypatch.setattr(offline, "say", said.append)
+
+    assert offline._run_stage("review") == 2
+    assert calls["review"] == 2
+    assert offline.state.stages["review"].status == pstate.FAILED
+    assert any("the same rows failed twice" in line for line in said)
+
+
+def test_a_resumed_review_at_budget_escalates_without_a_model_call(offline, monkeypatch):
+    """#411: a resume is another attempt against the budget, not a clean
+    slate. A stage that already spent every attempt does not buy another."""
+    for _ in range(offline.attempts):
+        offline.state.mark_in_progress("review")
+    offline.state.mark_failed(
+        "review", "the same rows failed twice: no_filler. The loop is not converging."
+    )
+    offline.state.save()
+
+    calls = {"review": 0}
+    monkeypatch.setattr(
+        offline, "stage_review", lambda extra="": calls.__setitem__("review", calls["review"] + 1)
+    )
+    said = []
+    monkeypatch.setattr(offline, "say", said.append)
+
+    assert offline._run_stage("review") == 2
+    assert calls["review"] == 0, "no model call is spent on an already-exhausted stage"
+    assert any("3 of 3" in line for line in said)
+    assert offline.state.stages["review"].status == pstate.FAILED
+
+
+def test_a_resumed_review_below_budget_continues_from_the_persisted_count(offline, monkeypatch):
+    """#411: `resuming review at attempt 3 of 3` reads the persisted count,
+    not a fresh local counter, and keeps going against the same budget."""
+    offline.state.mark_in_progress("review")
+    offline.state.mark_in_progress("review")
+    offline.state.mark_failed("review", "still filler")
+    offline.state.save()
+
+    said = []
+    monkeypatch.setattr(offline, "say", said.append)
+    monkeypatch.setattr(
+        offline, "stage_review", lambda extra="": paper.StageResult("review", summary="fixed")
+    )
+
+    assert offline._run_stage("review") is None
+    assert any("resuming review at attempt 3 of 3" in line for line in said)
+    assert offline.state.stages["review"].attempts == 3
+
+
+def test_review_retry_hands_revise_the_paired_notes_keyed_by_row(offline, monkeypatch):
+    """#411: the paired reply shape reaches `stage_revise` with each row
+    still attached to its own note."""
+    verdict = {
+        "failed_rows": [
+            {"row": "no_filler", "note": "Paragraph two restates the abstract."},
+            {"row": "defines_terms", "note": "MCP is used before it is defined."},
+        ],
+        "score": 0.4,
+    }
+    calls = {"review": 0}
+
+    def review(_extra=""):
+        calls["review"] += 1
+        if calls["review"] == 1:
+            stages.review_gate(verdict)
+        return paper.StageResult("review", summary="fixed")
+
+    feedback_seen = []
+
+    def revise(feedback, **_):
+        feedback_seen.append(feedback)
+        return paper.StageResult("revise", summary="ok")
+
+    monkeypatch.setattr(offline, "stage_review", review)
+    monkeypatch.setattr(offline, "stage_revise", revise)
+
+    assert offline._run_stage("review") is None
+    assert feedback_seen
+    assert "no_filler: Paragraph two restates the abstract." in feedback_seen[0]
+    assert "defines_terms: MCP is used before it is defined." in feedback_seen[0]
+
+
+def test_review_retry_with_the_legacy_reply_shape_still_reaches_revise(offline, monkeypatch):
+    """The flat list-of-names-plus-notes shape still parses and still reaches
+    the revise stage."""
+    verdict = {"failed_rows": ["voice"], "notes": ["A rhetorical question opens section 2."]}
+    calls = {"review": 0}
+
+    def review(_extra=""):
+        calls["review"] += 1
+        if calls["review"] == 1:
+            stages.review_gate(verdict)
+        return paper.StageResult("review", summary="fixed")
+
+    feedback_seen = []
+
+    def revise(feedback, **_):
+        feedback_seen.append(feedback)
+        return paper.StageResult("revise", summary="ok")
+
+    monkeypatch.setattr(offline, "stage_review", review)
+    monkeypatch.setattr(offline, "stage_revise", revise)
+
+    assert offline._run_stage("review") is None
+    assert feedback_seen
+    assert "voice: A rhetorical question opens section 2." in feedback_seen[0]
+
+
+def test_the_reviewer_skill_documents_the_paired_reply_shape():
+    skill = (
+        Path(__file__).resolve().parents[1] / "skills" / "reviewer" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert '"score"' in skill
+    assert '"row"' in skill
+
+
+def test_stage_review_reads_a_recorded_paired_shape_reply(offline):
+    """#411 follow-up: the paired shape must reach `review_gate` from an
+    actual recorded reply through `_ask`/`_json_reply`, not only from a
+    hand-built dict passed straight to the gate."""
+    offline.run()
+    with pytest.raises(GateFailed) as exc:
+        offline.stage_review("PAIRED_SHAPE_PROBE")
+    assert exc.value.signature == ("no_filler",)
+    assert exc.value.score == 0.55
+
+
+def test_the_reviewer_schema_and_prompt_both_name_score_and_row():
+    """#411 follow-up: the schema `roles.REVIEWER_RESPONSE` admits and the
+    shape `stage_review` asks for must not silently drift apart again."""
+    import roles  # noqa: PLC0415  (sys.path is set by conftest first)
+
+    roles_src = Path(roles.__file__).read_text(encoding="utf-8")
+    schema = roles_src[roles_src.index("REVIEWER_RESPONSE = {") : roles_src.index("RESPONSE_FORMATS = {")]
+    assert '"score"' in schema
+    assert '"row"' in schema
+
+    paper_src = Path(paper.__file__).read_text(encoding="utf-8")
+    prompt = paper_src[paper_src.index("def stage_review(") : paper_src.index("def stage_assemble(")]
+    assert '"score"' in prompt
+    assert '"row"' in prompt
 
 
 def test_writer_heading_is_removed_before_the_citation_gate():
@@ -616,10 +912,25 @@ def test_a_fenced_diagram_reply_is_unfenced():
     assert paper._strip_fence("flowchart LR\n  A --> B") == "flowchart LR\n  A --> B\n"
 
 
+def _run_up_to_write(run) -> None:
+    """Drive the fixture-backed pipeline through `write`, with the default
+    runner, so `diagram` (which now runs after it, #476) has bound claims
+    and written sections to commission from."""
+    run.stage_corpus()
+    run.stage_scout()
+    run.stage_plan()
+    run.stage_sources()
+    run.stage_search()
+    run.stage_verify()
+    run.stage_outline()
+    run.stage_charts()
+    run.stage_write()
+
+
 def test_the_live_diagrammer_file_is_not_replaced_by_its_tool_receipt(
     offline, run_dir, stub_renderer
 ):
-    offline.stage_plan()
+    _run_up_to_write(offline)
 
     class FileDiagrammer:
         name = "deep_agents"
@@ -644,6 +955,337 @@ def test_the_live_diagrammer_file_is_not_replaced_by_its_tool_receipt(
 
     assert (run_dir / "diagrams" / "three-exits.mmd").read_text().startswith("flowchart")
     assert (run_dir / "diagrams" / "maker-checker.puml").read_text().startswith("@startuml")
+
+
+def test_a_third_mismatch_drops_the_figure_and_the_image(offline, run_dir, stub_renderer):
+    """#476: three claims mismatches, then the figure is dropped. No source,
+    no image, and no dangling reference in the assembled paper."""
+    _run_up_to_write(offline)
+    inner = offline.runner
+
+    class MismatchedDiagrammer:
+        name = "fixture"
+
+        def __init__(self, inner):
+            self.inner = inner
+            self.calls = 0
+
+        def ask(self, role, prompt):
+            if role != "diagrammer" or "three-exits" not in prompt:
+                return self.inner.ask(role, prompt)
+            self.calls += 1
+            self.prompts = getattr(self, "prompts", [])
+            self.prompts.append(prompt)
+            return paper.Reply(text='flowchart LR\n  A["Lean mass preservation"]\n')
+
+    fake = MismatchedDiagrammer(inner)
+    offline.runner = fake
+    result = offline.stage_diagram()
+
+    assert fake.calls == diagrams_mod.MAX_LABEL_ATTEMPTS
+    assert "Claims this section may draw on:" in fake.prompts[0], (
+        "the diagrammer must be grounded in the section's own claims"
+    )
+    assert result.artifacts["dropped"] == ["three-exits"]
+    assert not (run_dir / "diagrams" / "three-exits.mmd").exists(), "no orphan source file"
+    assert not any(
+        p.name.startswith("three-exits") for p in (run_dir / "figures").glob("*")
+    ), "no orphan image file"
+    assert not any(
+        "three-exits" in (section.get("figures") or []) for section in offline.outline["sections"]
+    ), "the dropped figure's section reference must be removed"
+
+    body = stages.assemble(
+        offline.plan, offline.outline, offline.written, offline.figures, offline.ledger
+    )
+    assert "three-exits" not in body, "no dangling reference to the dropped figure"
+
+
+def test_the_attempt_budget_is_durable_across_a_changed_section(offline, run_dir, stub_renderer):
+    """#476 B2: a figure that can never pass does not get a fresh three
+    every time an unrelated write retry changes the sections hash. Three
+    attempts, ever, is the figure's lifetime budget for the run. B3 falls
+    out of this: a durably-dropped figure never redraws, so it can never
+    land as a later orphan under a generated Figures heading."""
+    _run_up_to_write(offline)
+    inner = offline.runner
+
+    class MismatchedDiagrammer:
+        name = "fixture"
+
+        def __init__(self, inner):
+            self.inner = inner
+            self.calls = 0
+
+        def ask(self, role, prompt):
+            if role != "diagrammer" or "three-exits" not in prompt:
+                return self.inner.ask(role, prompt)
+            self.calls += 1
+            return paper.Reply(text='flowchart LR\n  A["Lean mass preservation"]\n')
+
+    fake = MismatchedDiagrammer(inner)
+    offline.runner = fake
+    result = offline.stage_diagram()
+    assert fake.calls == diagrams_mod.MAX_LABEL_ATTEMPTS
+    assert result.artifacts["dropped"] == ["three-exits"]
+
+    heading = next(iter(offline.written))
+    offline.written[heading] += "\nA second section rewrite, unrelated to the figure."
+    offline._save_sections()
+    result = offline.stage_diagram()
+
+    assert fake.calls == diagrams_mod.MAX_LABEL_ATTEMPTS, (
+        "an already-exhausted figure must not spend on a two-write-cycle change"
+    )
+    assert result.artifacts["dropped"] == ["three-exits"]
+    assert not (run_dir / "diagrams" / "three-exits.mmd").exists()
+
+    body = stages.assemble(
+        offline.plan, offline.outline, offline.written, offline.figures, offline.ledger
+    )
+    assert "three-exits" not in body
+
+
+def test_a_rendered_figure_with_three_attempts_does_not_raise_on_re_entry(
+    offline, run_dir, stub_renderer
+):
+    """#476 N2: the budget check must read `dropped`, not attempts alone.
+    A figure that succeeded on its third label attempt (`attempts: 3,
+    dropped: false`, a record the production code itself writes) is not
+    carrying a lifetime debt. Charging it anyway left `remaining` at 0, an
+    empty attempt loop that never rebuilt a source the wipe-on-change step
+    had just deleted, and `diagram_gate` raised `missing_figures` for a
+    figure the run never dropped."""
+    _run_up_to_write(offline)
+    offline.stage_diagram()
+
+    guard_path = run_dir / "diagrams.json"
+    recorded = json.loads(guard_path.read_text())
+    for record in recorded["figures"]:
+        record["attempts"] = 3
+        record["dropped"] = False
+    guard_path.write_text(json.dumps(recorded))
+
+    heading = next(iter(offline.written))
+    offline.written[heading] += "\nA section rewrite to force recommissioning."
+    offline._save_sections()
+
+    offline.stage_diagram()  # must not raise GateFailed: missing_figures
+
+
+def test_a_shortfall_hedges_the_writer_brief(offline, run_dir, stub_renderer):
+    """#475, judge revision on #520, F6a: a section bound to a question
+    whose evidence_requirements fell short is told to hedge its
+    generalizations, and the shortfall reason reaches the writer prompt.
+
+    Injects the shortfall directly rather than relying on the fixture to
+    produce one incidentally (it does not, once #476 F6c's fixture fix
+    removes the recency window their yearless sources used to fail):
+    `q1`'s subject, `exit-conditions`, is what the "Exit conditions"
+    section's bound claims resolve to.
+    """
+    offline.stage_corpus()
+    offline.stage_scout()
+    offline.stage_plan()
+    offline.stage_sources()
+    offline.stage_search()
+    offline.stage_verify()
+    offline.stage_outline()
+    offline.stage_charts()
+
+    offline.evidence_shortfall_unmet = {"q1": "needs 1 other, has 0"}
+
+    prompts = []
+    real_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        if role == "writer":
+            prompts.append(prompt)
+        return real_ask(role, prompt)
+
+    offline.runner.ask = spy
+    offline.stage_write()
+
+    assert any(
+        "Evidence requirements were not fully met" in p and "Hedge every generalization" in p
+        for p in prompts
+    ), "at least one section's brief must carry the shortfall hedge"
+
+
+def test_an_em_dash_is_normalized_before_the_section_is_graded(offline, run_dir, stub_renderer):
+    """#517 follow-up 2: `style` is now a hard row (`close_section` raises
+    on any hard row's failure), and `stage_assemble` strips em dashes
+    deterministically anyway (`brief.strip_em_dashes`). A writer's em dash
+    must not cost a section an attempt over something the paper would have
+    fixed silently: normalized before `close_section` grades the body, so
+    `style` passes at write time and the assembled paper carries none."""
+    import dataclasses  # noqa: PLC0415
+
+    real_ask = offline.runner.ask
+
+    def dashed(role, prompt):
+        reply = real_ask(role, prompt)
+        if role == "writer" and "'Introduction' section" in prompt:
+            return dataclasses.replace(reply, text=reply.text.replace(". ", " — noted. ", 1))
+        return reply
+
+    offline.runner.ask = dashed
+
+    offline.stage_corpus()
+    offline.stage_scout()
+    offline.stage_plan()
+    offline.stage_sources()
+    offline.stage_search()
+    offline.stage_verify()
+    offline.stage_outline()
+    offline.stage_charts()
+    offline.stage_write()
+
+    section_body = (run_dir / "sections" / "introduction.md").read_text(encoding="utf-8")
+    assert "—" not in section_body
+
+    score = json.loads((run_dir / "knowledge" / "introduction" / "section-check.json").read_text())
+    assert "style" not in score["signature"]
+
+    offline.stage_diagram()
+    # #464/#534: `trim` sits between `diagram` and `review` in `STAGE_ORDER`
+    # and is where a figure's in-text mention is actually added; `assemble`
+    # now hard-fails a figure `trim` never got to mention. Skipping it here
+    # left the fixture's two figures unmentioned and failed `figure_referenced`.
+    offline.stage_trim()
+    offline.stage_review()
+    offline.stage_assemble()
+    assembled = offline.paper_path.read_text(encoding="utf-8")
+    assert "—" not in assembled
+
+
+def test_stage_write_fails_an_uncited_ledger_guideline_and_briefs_it(offline, run_dir, stub_renderer):
+    """#517 follow-up 3. `guideline_brief`'s call site inside `stage_write`
+    is what a live run actually executes, not only the unit call to
+    `sections.guideline_brief`/`section_check`. A guideline injected into
+    the ledger, on topic for a recorded section and never cited by it,
+    fails `guideline_cited` on that section's own `section-check.json`
+    (and, since #517 also makes Deep Agents enforce that row, stops the
+    section the same way `stub` always has), and the writer's own prompt
+    for that section names the source and its number.
+    """
+    import evidence  # noqa: PLC0415
+
+    offline.stage_corpus()
+    offline.stage_scout()
+    offline.stage_plan()
+    offline.stage_sources()
+    offline.stage_search()
+    offline.stage_verify()
+    offline.stage_outline()
+    offline.stage_charts()
+
+    target = next(s for s in offline.outline["sections"] if s["heading"] == "Independent verification")
+    target["key_questions"] = list(target.get("key_questions") or []) + [
+        "what does the verification checkpoint require for safety"
+    ]
+
+    guideline = offline.ledger.add_source(
+        evidence.SourceDocument(
+            title="Practice Guideline on Verification Checkpoint Safety",
+            url="https://example.org/verification-guideline",
+            subject="verification",
+            tier="position_stand_or_guideline",
+        )
+    )
+    offline.ledger.add_claim(
+        evidence.Claim(
+            text="A guideline sets the checkpoint bar.",
+            subject="verification",
+            source_ids=[guideline.id],
+        )
+    )
+
+    prompts = {}
+    real_ask = offline.runner.ask
+
+    def spy(role, prompt):
+        if role == "writer" and "'Independent verification' section" in prompt:
+            prompts["Independent verification"] = prompt
+        return real_ask(role, prompt)
+
+    offline.runner.ask = spy
+    with pytest.raises(GateFailed) as exc:
+        offline.stage_write()
+    assert "guideline_cited" in exc.value.signature
+
+    score = json.loads(
+        (run_dir / "knowledge" / "independent-verification" / "section-check.json").read_text()
+    )
+    assert "guideline_cited" in score["signature"]
+
+    prompt = prompts["Independent verification"]
+    assert "Practice Guideline on Verification Checkpoint Safety" in prompt
+
+
+def test_redraw_state_does_not_leak_into_a_later_call(
+    offline, run_dir, stub_renderer, monkeypatch
+):
+    """#476 F4: `_redraw` must not survive a successful commission into a
+    later, unrelated `stage_diagram` call. A fidelity complaint that does
+    not trip `diagram_gate` (the figure still renders, `best` is not None)
+    still populates `_redraw`; without a reset that state wrongly reads as
+    still mid-retry next time, skipping both the stale-source wipe and
+    every figure whose source is on disk, claims gate included."""
+    _run_up_to_write(offline)
+
+    def render_with_a_non_blocking_complaint(src_dir, out_dir, topic, **kwargs):
+        figures, _ = stub_renderer(src_dir, out_dir, topic, **kwargs)
+        return figures, ["three-exits.mmd: imagen-diagrams fidelity miss: a minor cosmetic note"]
+
+    monkeypatch.setattr(stages, "render_figures", render_with_a_non_blocking_complaint)
+    offline.stage_diagram()
+    assert offline._redraw == set(), (
+        "a non-blocking complaint must not leak into a later, unrelated call"
+    )
+
+
+def test_a_second_write_attempt_does_not_recommission_a_figure(offline, run_dir, stub_renderer):
+    """#476's `sections_sha` guard: one diagrammer turn across two calls to
+    `stage_diagram`, when the written sections have not changed between them."""
+    _run_up_to_write(offline)
+    real_ask = offline.runner.ask
+    calls = {"n": 0}
+
+    def counting(role, prompt):
+        if role == "diagrammer":
+            calls["n"] += 1
+        return real_ask(role, prompt)
+
+    offline.runner.ask = counting
+    offline.stage_diagram()
+    first = calls["n"]
+    assert first > 0
+
+    offline.stage_diagram()
+    assert calls["n"] == first, "an unchanged sections_sha must not recommission a figure"
+
+
+def test_a_changed_section_recommissions_its_figure(offline, run_dir, stub_renderer):
+    """The `sections_sha` guard is not a permanent skip."""
+    _run_up_to_write(offline)
+    offline.stage_diagram()
+
+    real_ask = offline.runner.ask
+    calls = {"n": 0}
+
+    def counting(role, prompt):
+        if role == "diagrammer":
+            calls["n"] += 1
+        return real_ask(role, prompt)
+
+    offline.runner.ask = counting
+    heading = next(iter(offline.written))
+    offline.written[heading] += "\nAn added sentence changes the section body."
+    offline._save_sections()
+
+    offline.stage_diagram()
+    assert calls["n"] > 0, "a changed section must recommission its figure"
 
 
 # -- the cost cap ----------------------------------------------------------
@@ -712,7 +1354,9 @@ def test_the_writer_was_actually_reached(run_dir, stub_renderer):
     run = priced_run(run_dir, 3.00)
     run.run()
     done = [n for n, s in run.state.stages.items() if s.status == pstate.COMPLETE]
-    assert done == ["corpus", "scout", "plan", "sources", "search", "verify", "outline", "diagram", "charts"], done
+    # #476: `diagram` moved after `write`, so a run that stalls at `write`
+    # never reaches it.
+    assert done == ["corpus", "scout", "plan", "sources", "search", "verify", "outline", "charts"], done
 
 
 def test_the_run_says_which_call_it_could_not_afford(run_dir, stub_renderer, capsys):
@@ -767,6 +1411,100 @@ def test_a_missing_image_backend_is_never_retried(run_dir, no_renderer):
     assert run.state.attempts("diagram") == 1
 
 
+# -- #514: the offline lane never depends on a live image call -------------
+
+
+def test_the_recorded_fixture_tests_never_touch_the_renderer(offline, run_dir, monkeypatch):
+    """`diagrams.render` patched to blow up if it is ever invoked, and the
+    recorded fixture pipeline still passes end to end. `stub_renderer`
+    replaces `stages.render_figures` entirely; this proves it never falls
+    through to the real renderer underneath."""
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("the offline lane must never call the renderer")
+
+    monkeypatch.setattr(diagrams_mod, "render", boom)
+    assert offline.run() == 0
+    assert (run_dir / "whitepaper.md").exists()
+
+
+def test_a_failing_image_backend_becomes_a_named_skip(run_dir, monkeypatch):
+    """#514: `available()` already said yes; a live call failing for one
+    figure must not crash the run. That figure is skipped this
+    commissioning, named with the backend's own error, and the paper
+    still completes. `dropped` in the persisted record stays false, a
+    backend failure is not a label failure (#482 follow-up)."""
+    from conftest import build_run, stub_figure  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    _run_up_to_write(run)
+
+    monkeypatch.setattr(diagrams_mod, "available", lambda: True)
+
+    def flaky_render(src, out_dir, **_kwargs):
+        if src.stem == "three-exits":
+            prompt = Path(out_dir) / f"{src.stem}_imagen.prompt.txt"
+            prompt.parent.mkdir(parents=True, exist_ok=True)
+            prompt.write_text("plugin-built prompt", encoding="utf-8")
+            raise diagrams_mod.ImageBackendUnavailable(prompt, "503 from the backend")
+        return stub_figure(src.stem, Path(out_dir))
+
+    monkeypatch.setattr(diagrams_mod, "render", flaky_render)
+
+    result = run.stage_diagram()
+    assert "three-exits" in result.artifacts["dropped"]
+
+    recorded = json.loads((run_dir / "diagrams.json").read_text())["figures"]
+    entry = next(f for f in recorded if f["name"] == "three-exits")
+    assert entry["dropped"] is False
+    assert "503 from the backend" in entry["reason"]
+
+
+def test_a_backend_skip_never_sets_dropped_and_keeps_its_earned_attempts(run_dir, monkeypatch):
+    """#482 follow-up: the durable budget check (`spent = attempts if
+    dropped else 0`) would permanently disqualify a figure that already
+    earned its labels if a backend skip ever set `dropped`. A live call
+    failing must leave `dropped` false and the label-matching attempt
+    count exactly what it was before the backend was even asked."""
+    from conftest import build_run, stub_figure  # noqa: PLC0415
+
+    run = build_run(run_dir)
+    _run_up_to_write(run)
+
+    monkeypatch.setattr(diagrams_mod, "available", lambda: True)
+
+    def flaky_render(src, out_dir, **_kwargs):
+        if src.stem == "three-exits":
+            prompt = Path(out_dir) / f"{src.stem}_imagen.prompt.txt"
+            prompt.parent.mkdir(parents=True, exist_ok=True)
+            prompt.write_text("plugin-built prompt", encoding="utf-8")
+            raise diagrams_mod.ImageBackendUnavailable(prompt, "still overloaded")
+        return stub_figure(src.stem, Path(out_dir))
+
+    monkeypatch.setattr(diagrams_mod, "render", flaky_render)
+
+    run.stage_diagram()
+    before = json.loads((run_dir / "diagrams.json").read_text())["figures"]
+    entry_before = next(f for f in before if f["name"] == "three-exits")
+    assert entry_before["dropped"] is False
+    spent_before = entry_before["attempts"]
+
+    # A real second commissioning, not the unchanged-sections shortcut:
+    # change a section body so `_sections_sha` differs and the wipe-on-
+    # change step redrafts every source, the same backend failure again.
+    # A durable `dropped` from the first call would refuse this figure
+    # outright once `attempts` reached the label-attempt cap; it must not,
+    # and the figure's earned attempts must land on the same number, not
+    # grow just because the backend failed twice.
+    heading = next(iter(run.written))
+    run.written[heading] = run.written[heading] + " Rewritten for this test.\n"
+    run.stage_diagram()
+    after = json.loads((run_dir / "diagrams.json").read_text())["figures"]
+    entry_after = next(f for f in after if f["name"] == "three-exits")
+    assert entry_after["dropped"] is False
+    assert entry_after["attempts"] == spent_before
+
+
 def test_sections_written_before_a_stop_survive(run_dir, stub_renderer):
     """A stage that persists only on success makes a mid-stage stop cost the
     whole stage again, which is the opposite of what a cost cap is for."""
@@ -781,6 +1519,17 @@ def test_findings_are_written_per_question(offline, run_dir):
     offline.stage_plan()
     offline.stage_search()
     assert list((run_dir / "evidence").glob("finding.*.md"))
+
+
+def test_stage_search_passes_its_own_backend_to_record_findings(offline):
+    """#470: `stage_search` must hand `record_findings` `self.backend`, not
+    leave it at the default `None`. The fixture backend has no recorded
+    reply for any of these fixture URLs, so a note lands on every source
+    only if the fetch was actually attempted."""
+    offline.stage_plan()
+    offline.stage_search()
+    assert offline.ledger.sources, "the fixture research produced no sources"
+    assert all(source.note for source in offline.ledger.sources.values())
 
 
 def test_an_empty_checkpointed_finding_is_researched_again(offline):
@@ -1488,3 +2237,222 @@ def test_the_locator_turn_runs_under_a_one_call_ceiling_that_is_always_lifted(
         1 for event in budget.events if event[0] == "end"
     )
     assert budget.inner._tool_limit is None, "the ceiling outlived the turn"
+
+
+# -- a transient provider error at the model-call boundary (#409) ----------
+
+
+class TransientThenFixture(paper.FixtureRunner):
+    """Fails one role's first N calls with a transient error, then answers
+    from the recorded fixture as usual."""
+
+    def __init__(self, path, role, make_error, fail_times):
+        super().__init__(path)
+        self.role = role
+        self.make_error = make_error
+        self.fail_times = fail_times
+        self.failed = 0
+
+    def ask(self, role, prompt):
+        if role == self.role and self.failed < self.fail_times:
+            self.failed += 1
+            raise self.make_error()
+        return super().ask(role, prompt)
+
+
+def _connection_error():
+    import anthropic  # noqa: PLC0415
+    import httpx2  # noqa: PLC0415
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.APIConnectionError(request=request)
+
+
+def _rate_limit_error():
+    import anthropic  # noqa: PLC0415
+    import httpx2  # noqa: PLC0415
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(
+        429,
+        request=request,
+        json={"error": {"type": "rate_limit_error", "message": "slow down"}},
+    )
+    return anthropic.RateLimitError(
+        "slow down", response=response, body={"error": {"type": "rate_limit_error"}}
+    )
+
+
+def test_a_transient_error_twice_then_an_answer_completes_the_turn(
+    run_dir, stub_renderer, monkeypatch, capsys
+):
+    """#409: two dropped connections, then a normal reply. Both retries are
+    logged, the turn row carries them, the budget is charged once, and the
+    stage attempt count stays at one."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    waits: list[float] = []
+    monkeypatch.setattr(paper, "_sleep", waits.append)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _connection_error, 2)
+    run = build_run(run_dir, runner=runner)
+    run.quiet = False
+
+    assert run.run() == 0
+    assert waits == [5.0, 15.0]
+
+    log = capsys.readouterr().out
+    assert log.count("retry 1/3") == 1
+    assert log.count("retry 2/3") == 1
+
+    rows = [
+        json.loads(line)
+        for line in (Path(run_dir) / ".harness" / "turns.jsonl").read_text().splitlines()
+    ]
+    planner_rows = [row for row in rows if row["role"] == "planner"]
+    assert len(planner_rows) == 1, "the budget is charged once, not once per attempt"
+    assert planner_rows[0]["retries"] == 2
+
+    assert run.state.attempts("plan") == 1, "a retry must not spend a stage attempt"
+
+
+def test_a_transient_error_four_times_raises_the_original_exception(
+    run_dir, stub_renderer, monkeypatch
+):
+    """#409: a fourth failure is not swallowed. The exception escapes."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+    import anthropic  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _connection_error, 4)
+    run = build_run(run_dir, runner=runner)
+
+    with pytest.raises(anthropic.APIConnectionError):
+        run.run()
+    assert runner.failed == 4, "every attempt must actually have been made"
+
+
+def test_a_rate_limit_error_is_also_retried(run_dir, stub_renderer, monkeypatch):
+    """The ticket names two transient shapes. Both take the same path."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _rate_limit_error, 1)
+    run = build_run(run_dir, runner=runner)
+
+    assert run.run() == 0
+    assert run.state.attempts("plan") == 1
+
+
+def test_a_non_transient_error_is_not_retried(run_dir, stub_renderer, monkeypatch):
+    """A gate failure, a budget failure, or a plain bug is not a dropped
+    connection. It must escape the first time, with no backoff sleep."""
+    waited: list[float] = []
+    monkeypatch.setattr(paper, "_sleep", waited.append)
+
+    class Runner(paper.FixtureRunner):
+        def ask(self, role, prompt):
+            if role == "planner":
+                raise ValueError("not a transient error")
+            return super().ask(role, prompt)
+
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    run = build_run(run_dir, runner=Runner(FIXTURES / "replies.json"))
+    with pytest.raises(ValueError):
+        run._ask("planner", "prompt")
+    assert waited == [], "a non-transient error must not sleep or retry"
+
+
+def test_the_backoff_sequence_is_five_fifteen_forty_five(run_dir, stub_renderer, monkeypatch):
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    waits: list[float] = []
+    monkeypatch.setattr(paper, "_sleep", waits.append)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _connection_error, 3)
+    run = build_run(run_dir, runner=runner)
+    run._ask("planner", "Write plan.json for this topic.")
+
+    assert waits == [5.0, 15.0, 45.0]
+
+
+# -- the retry asymmetry from #409 (#482) -----------------------------------
+
+
+def _overloaded_error():
+    import anthropic  # noqa: PLC0415
+    import httpx2  # noqa: PLC0415
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(
+        529,
+        request=request,
+        json={"error": {"type": "overloaded_error", "message": "overloaded"}},
+    )
+    return anthropic.OverloadedError(
+        "overloaded", response=response, body={"error": {"type": "overloaded_error"}}
+    )
+
+
+def test_a_529_is_retried(run_dir, stub_renderer, monkeypatch):
+    """#482: HTTP 529 (overloaded) is the most common transient Anthropic
+    failure in practice, and `langchain_anthropic`'s `AnthropicOverloadedError`
+    is an `APIStatusError`, not an `APIConnectionError`, so the pre-#482
+    tuple missed it."""
+    pytest.importorskip("anthropic")
+    # `_overloaded_error` builds a fake response through `httpx2`, the name
+    # this machine's `anthropic` 1.4.0 vendors its `httpx` dependency
+    # under. A different `anthropic` build could name it `httpx` instead;
+    # skip cleanly rather than let that import error read as a failure.
+    pytest.importorskip("httpx2")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+
+    runner = TransientThenFixture(FIXTURES / "replies.json", "planner", _overloaded_error, 2)
+    run = build_run(run_dir, runner=runner)
+
+    assert run.run() == 0
+    assert run.state.attempts("plan") == 1
+
+
+def test_a_retry_gets_a_fresh_request_window(run_dir, stub_renderer, monkeypatch):
+    """#482: `begin_request` opens a window around `_ask` (one tool call,
+    a few provider calls inside it). The first attempt can spend that
+    window's one tool call and then drop with a transient error; a retry
+    that reuses the spent window hits `BudgetExceeded` on its own search
+    and degrades to "NO ANSWER. request search budget spent" instead of
+    actually searching again. `_ask`'s retry loop must re-arm the window
+    so the retried researcher turn still gets its search."""
+    pytest.importorskip("anthropic")
+    from conftest import FIXTURES, build_run  # noqa: PLC0415
+
+    monkeypatch.setattr(paper, "_sleep", lambda seconds: None)
+    calls = {"n": 0}
+
+    class Runner(paper.FixtureRunner):
+        def ask(self, role, prompt):
+            if role == "researcher":
+                calls["n"] += 1
+                run.budget.reserve_tool()
+                if calls["n"] == 1:
+                    raise _connection_error()
+            return super().ask(role, prompt)
+
+    run = build_run(run_dir, runner=Runner(FIXTURES / "replies.json"))
+    run.budget.begin_request(max_calls=1, max_provider_calls=3)
+    try:
+        run._ask(
+            "researcher",
+            "What happens when a graph has no explicit exit condition",
+        )
+    finally:
+        run.budget.end_request()
+    assert calls["n"] == 2, "the retry must actually run its search, not skip straight to BudgetExceeded"

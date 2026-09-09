@@ -168,6 +168,14 @@ Those checks need no SDK, no API key, and no network. They assert:
 - Deleting one phase output re-runs that phase and no other.
 - A paper that did not pass is never published.
 
+## House style and the evidence contract
+
+The paper follows one house style, published once on the wiki as [Sol-3-White-Paper-Style](https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style). The check module grades third person and no marketing verb (`person`, `marketing`), no contraction and no Latin abbreviation (`ste_language`), and a heading that answers its own question (`question_heading`). The body names no search host (`policy_leak`) and states a caveat once (`caveat_once`). A first-use term earns a `TERM:` marker and a Glossary entry (`glossary_complete`, `glossary_exact`). A figure earns a caption and a mention in its own section (`captioned`, `figure_referenced`). The body carries Methods and, for a human study, a study table (`methods_present`, `study_table`), with front matter above the Abstract (`front_matter`). The last body section is a next step, never a sale (`next_step`, `cta_language`), and the abstract is written last, graded against the body (`abstract_matches_body`).
+
+The evidence contract is arithmetic, not a promise from the model. `source_policy.py` seeds the allowlist by field (`seed_for_field`), bans a host outright (`DENYLIST`), and grades a source's tier (`tier_for`). A shaky numeric claim spends one follow turn. Before the paper states that an intervention has no effect, the counter-evidence pass searches for the other side; the `counterweighed` row names a claim nobody checked. A safety claim needs a cited guideline (`guideline_cited`), and a question with stated evidence requirements needs `evidence_requirements_met`. A citation's title, authors, and year come from the fetched record, never the model's guess, and a claim earns attribution only when the fetched text supports it. A diagram is graded against the section's own claims before it is embedded.
+
+The glossary, front-matter, next-step, and study-table rows (`glossary_complete`, `glossary_exact`, `methods_present`, `conclusion_present`, `study_table`, `front_matter`, `next_step`, `cta_language`) sit behind `enforce_structure`, off by default. Every `task demo` lane runs with it on, offline included; only a direct call to `check()` in a test leaves it off.
+
 ## Run the loop
 
 The live operator path is [HOW_TO_RUN.md](HOW_TO_RUN.md). `task setup` creates
@@ -220,7 +228,7 @@ URL can read the paper and fetch every figure. Treat the URL as the credential.
    that file and nothing else. The outline judge is not the paper judge.
    After research, the paper judge scores the written page: `defined`,
    `structured`, `evidenced`, `limited`, `figured`, `depth`, `repetition`,
-   `voice`. `--profile demo` commissions 2000 words,
+   `voice`. `--profile demo` commissions 2800 words,
    `--profile paper` 4000, and `--profile whitepaper` 6000. A profile sets the
    outline target, never the check floor: the floor is one number, 2000 words,
    for every profile. `--approve` stops after the outline

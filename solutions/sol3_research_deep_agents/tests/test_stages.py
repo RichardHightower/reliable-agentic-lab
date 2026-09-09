@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import json
+
 import evidence
+import paper
+import paper_check
 import pytest
 import stages
+import state
+from conftest import build_run
 from stages import GateFailed
+
+
+def evidence_requirements(**over):
+    reqs = {"study_types": ["primary_trial"], "min_count": 1, "recency_years": 10, "populations": []}
+    reqs.update(over)
+    return reqs
 
 
 def plan(**overrides):
@@ -18,6 +30,7 @@ def plan(**overrides):
                 "question": stages.EXIT_DOCTRINE_QUESTION if i == 1 else f"why {i}?",
                 "check": "a URL",
                 "important": i == 1,
+                **({"evidence_requirements": evidence_requirements()} if i == 1 else {}),
             }
             for i in range(1, 4)
         ],
@@ -161,6 +174,234 @@ def test_a_plan_cannot_make_more_than_six_questions_block_the_paper():
     assert "at most 6" in str(exc.value)
 
 
+def test_a_plan_check_that_names_a_host_is_rejected():
+    """The source boundary is Python's allowlist, decided later, never the
+    plan. #469"""
+    bad = plan()
+    bad["questions"][0]["check"] = "a claim cited to arxiv.org"
+    with pytest.raises(GateFailed) as exc:
+        stages.plan_gate(bad)
+    assert "arxiv.org" in str(exc.value)
+
+
+def test_check_names_host_ignores_an_abbreviation():
+    assert stages.check_names_host("a stated mechanism, e.g. a retry budget") == ""
+    assert stages.check_names_host("a URL") == ""
+
+
+# -- #475: evidence requirements per question --------------------------------
+
+
+def test_a_question_without_evidence_requirements_is_rejected():
+    """`plan_gate` names the important question, on by default at the
+    function level (matching `loop_doctrine`'s own function default)."""
+    bad = plan()
+    del bad["questions"][0]["evidence_requirements"]
+    with pytest.raises(GateFailed) as exc:
+        stages.plan_gate(bad)
+    assert "q1" in str(exc.value) and "evidence_requirements" in str(exc.value)
+
+
+def test_an_old_plan_without_requirements_fails_validation_not_parsing():
+    """A plan authored before #475 carries no `evidence_requirements` key at
+    all on any question. `plan_gate` reports it, it never raises a
+    different error or crashes on the missing key."""
+    old_style = {
+        "title": "T",
+        "questions": [
+            {
+                "id": "q1",
+                "subject": "s1",
+                "question": stages.EXIT_DOCTRINE_QUESTION,
+                "check": "a URL",
+                "important": True,
+            }
+        ],
+        "sections": ["Abstract", "Introduction", "References"],
+        "diagrams": [],
+    }
+    with pytest.raises(GateFailed) as exc:
+        stages.plan_gate(old_style)
+    assert "evidence_requirements" in str(exc.value)
+
+
+def test_a_non_important_question_needs_no_evidence_requirements():
+    good = plan()
+    assert "evidence_requirements" not in good["questions"][1]
+    stages.plan_gate(good)  # must not raise
+
+
+def test_evidence_requirements_off_skips_the_check():
+    bad = plan()
+    del bad["questions"][0]["evidence_requirements"]
+    stages.plan_gate(bad, require_evidence_requirements=False)  # must not raise
+
+
+def test_evidence_requirements_names_each_malformed_field():
+    def failure_for(**over):
+        bad = plan()
+        bad["questions"][0]["evidence_requirements"] = evidence_requirements(**over)
+        return str(_gate_failure(bad))
+
+    assert "unknown type" in failure_for(study_types=["not-a-real-tier"])
+    assert "min_count" in failure_for(min_count=0)
+    assert "recency_years" in failure_for(recency_years=-1)
+    assert "populations" in failure_for(populations="not a list")
+
+
+def _gate_failure(bad_plan):
+    with pytest.raises(GateFailed) as exc:
+        stages.plan_gate(bad_plan)
+    return exc.value
+
+
+# -- evidence_shortfall, graded against the ledger's own sources ------------
+
+
+def _ledger_with_source(tier: str, year: str = "2024", subject: str = "s1") -> evidence.Ledger:
+    led = evidence.Ledger("/nonexistent")
+    source = led.add_source(
+        evidence.SourceDocument(title="Src", url=f"https://a.example/{tier}", subject=subject, tier=tier, year=year)
+    )
+    led.add_finding(
+        evidence.Finding(
+            question="q",
+            subject=subject,
+            claim_ids=[led.add_claim(evidence.Claim(text="a fact", subject=subject, source_ids=[source.id])).id],
+        )
+    )
+    return led
+
+
+def test_a_met_requirement_passes_the_gate():
+    led = _ledger_with_source("primary_trial")
+    question = {
+        "id": "q1",
+        "subject": "s1",
+        "evidence_requirements": evidence_requirements(min_count=1),
+    }
+    assert stages.evidence_shortfall(led, question) == ""
+
+
+def test_a_shortfall_names_the_missing_study_type():
+    led = _ledger_with_source("preprint_or_compilation")
+    question = {
+        "id": "q1",
+        "subject": "s1",
+        "evidence_requirements": evidence_requirements(min_count=2),
+    }
+    reason = stages.evidence_shortfall(led, question)
+    assert "primary_trial" in reason
+    assert "needs 2" in reason and "has 0" in reason
+
+
+def test_evidence_shortfall_grades_recency_and_population():
+    led = _ledger_with_source("primary_trial", year="1990")
+    question = {
+        "id": "q1",
+        "subject": "s1",
+        "evidence_requirements": evidence_requirements(min_count=1, recency_years=5),
+    }
+    assert "needs 1" in stages.evidence_shortfall(led, question)
+
+    fresh = _ledger_with_source("primary_trial", year="2024")
+    question["evidence_requirements"]["populations"] = ["women"]
+    reason = stages.evidence_shortfall(fresh, question)
+    assert "women" in reason
+
+    question["evidence_requirements"] = evidence_requirements(min_count=1, recency_years=5)
+    assert stages.evidence_shortfall(fresh, question) == ""
+
+
+def test_evidence_shortfall_passes_trivially_with_no_block():
+    led = evidence.Ledger("/nonexistent")
+    assert stages.evidence_shortfall(led, {"subject": "s1"}) == ""
+
+
+def test_search_gate_fails_a_shortfall_and_passes_a_met_requirement():
+    plan_dict = {
+        "questions": [
+            {
+                "id": "q1",
+                "subject": "s1",
+                "important": True,
+                "evidence_requirements": evidence_requirements(min_count=1),
+            }
+        ]
+    }
+    short = _ledger_with_source("preprint_or_compilation")
+    with pytest.raises(GateFailed, match="evidence_requirements shortfall"):
+        stages.search_gate(short, plan_dict)
+
+    met = _ledger_with_source("primary_trial")
+    stages.search_gate(met, plan_dict)  # must not raise
+
+
+def test_search_gate_accepts_a_question_already_marked_unmet():
+    """Judge revision on #520, blocking finding 1: a question graded and
+    still short after its one turn is a named gap, not a gate failure. Only
+    a question never graded at all still fails the gate."""
+    plan_dict = {
+        "questions": [
+            {
+                "id": "q1",
+                "subject": "s1",
+                "important": True,
+                "evidence_requirements": evidence_requirements(min_count=2),
+            }
+        ]
+    }
+    short = _ledger_with_source("preprint_or_compilation")
+    stages.search_gate(short, plan_dict, unmet={"q1": "needs 2 primary_trial, has 0"})  # must not raise
+    with pytest.raises(GateFailed, match="evidence_requirements shortfall"):
+        stages.search_gate(short, plan_dict, unmet={})
+
+
+def test_evidence_shortfall_excludes_a_review_counted_via_its_primary():
+    """A review plus the primary it summarizes is one source, not two.
+    Judge revision on #520, blocking finding 4."""
+    led = evidence.Ledger("/nonexistent")
+    review = led.add_source(
+        evidence.SourceDocument(title="Review", url="https://a.example/review", subject="s1", tier="narrative_review", year="2024")
+    )
+    primary = led.add_source(
+        evidence.SourceDocument(title="Primary", url="https://a.example/primary", subject="s1", tier="primary_trial", year="2024")
+    )
+    claim = led.add_claim(
+        evidence.Claim(
+            text="a fact",
+            subject="s1",
+            source_ids=[review.id, primary.id],
+            via_source_ids=[review.id],
+        )
+    )
+    led.add_finding(evidence.Finding(question="q", subject="s1", claim_ids=[claim.id]))
+    # F6b: `study_types` names both tiers, the review's included, so a
+    # tier-filter alone cannot explain what happens next. Only the
+    # `via_source_ids` exclusion can drop the review from the count.
+    question = {
+        "id": "q1",
+        "subject": "s1",
+        "evidence_requirements": evidence_requirements(
+            study_types=["primary_trial", "narrative_review"], min_count=1
+        ),
+    }
+    assert stages.evidence_shortfall(led, question) == ""
+
+    question["evidence_requirements"]["min_count"] = 2
+    reason = stages.evidence_shortfall(led, question)
+    assert "has 1" in reason, "the review does not count a second time via its primary"
+
+    # A review plus a genuinely unrelated primary, bound some other way,
+    # still counts as two.
+    unrelated = led.add_source(
+        evidence.SourceDocument(title="Unrelated", url="https://a.example/unrelated", subject="s1", tier="primary_trial", year="2024")
+    )
+    second_claim = led.add_claim(evidence.Claim(text="another fact", subject="s1", source_ids=[unrelated.id]))
+    led.add_finding(evidence.Finding(question="q2", subject="s1", claim_ids=[second_claim.id]))
+    assert stages.evidence_shortfall(led, question) == ""
+
+
 def headings(plan):
     return [stages.plan_heading(item) for item in plan["sections"]]
 
@@ -168,19 +409,102 @@ def headings(plan):
 def test_normalize_adds_the_sections_every_paper_has():
     """Otherwise the section gate fails at stage 8, four stages too late."""
     out = stages.normalize_plan({"questions": [], "sections": ["Body"]})
-    assert headings(out) == ["Abstract", "Introduction", "Body", "References"]
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
 
 
 def test_a_missing_introduction_lands_after_the_abstract():
     """Inserting it at the front would put the introduction first, which is a
     different paper."""
     out = stages.normalize_plan({"questions": [], "sections": ["Abstract", "Body", "References"]})
-    assert headings(out) == ["Abstract", "Introduction", "Body", "References"]
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
+
+
+def test_normalize_plan_inserts_methods_and_conclusion_in_position():
+    """#478. Methods lands right after Introduction. Conclusion lands right
+    before Next step when one exists, second to last so `next_step` still
+    grades Next step, not Conclusion.
+    """
+    out = stages.normalize_plan(
+        {"questions": [], "sections": ["Abstract", "Introduction", "Body", "Next step", "References"]}
+    )
+    assert headings(out) == [
+        "Abstract",
+        "Introduction",
+        "Methods",
+        "Body",
+        "Conclusion",
+        "Next step",
+        "References",
+    ]
+
+
+def test_normalize_puts_conclusion_before_references_with_no_next_step():
+    out = stages.normalize_plan({"questions": [], "sections": ["Abstract", "Introduction", "Body"]})
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
 
 
 def test_normalize_leaves_a_complete_plan_alone():
-    given = ["Abstract", "Introduction", "Method", "Limitations", "References"]
+    given = [
+        "Abstract",
+        "Introduction",
+        "Methods",
+        "Limitations",
+        "Conclusion",
+        "Next step",
+        "References",
+    ]
     assert headings(stages.normalize_plan({"questions": [], "sections": list(given)})) == given
+
+
+def test_normalize_moves_a_misplaced_introduction_to_the_front():
+    """#557, matching the Agent SDK's `assemble` (PR #554 judge finding F2):
+    an Introduction the planner placed second, not first, is moved into the
+    frozen slot instead of left where it landed. The planner's own object
+    keeps its objective and key questions; only its position changes."""
+    written = {
+        "heading": "Introduction",
+        "objective": "Name the problem.",
+        "abstract": "The introduction names the problem.",
+        "key_questions": ["what is the problem"],
+    }
+    out = stages.normalize_plan(
+        {"questions": [], "sections": ["Abstract", "Body", written, "References"]}
+    )
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
+    kept = [item for item in out["sections"] if item["heading"] == "Introduction"][0]
+    assert kept == written
+
+
+def test_normalize_collapses_a_duplicate_introduction():
+    """#557. Two headings named Introduction collapse to the first, moved
+    into the frozen slot, not stacked as a body section on top of it."""
+    out = stages.normalize_plan(
+        {"questions": [], "sections": ["Abstract", "Introduction", "Body", "Introduction", "References"]}
+    )
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
+
+
+def test_a_resumed_plan_missing_its_introduction_is_repaired(tmp_path):
+    """#557. Mirrors the Agent SDK's own resume test for the same case (PR
+    #554 judge finding F2): a `plan.json` stamped before this rule landed
+    carries no Introduction at all. `_need_plan`'s `normalize_plan` call,
+    the code path an actual `--resume` runs, still produces exactly one, in
+    the frozen slot."""
+    old_plan = {
+        "title": "Old topic",
+        "sections": [{"heading": "Abstract"}, {"heading": "The problem"}, {"heading": "References"}],
+    }
+    (tmp_path / "plan.json").write_text(json.dumps(old_plan), encoding="utf-8")
+    run = build_run(tmp_path)
+    run._need_plan()
+    assert headings(run.plan) == [
+        "Abstract",
+        "Introduction",
+        "Methods",
+        "The problem",
+        "Conclusion",
+        "References",
+    ]
 
 
 def test_a_planner_section_object_keeps_its_objective_and_questions():
@@ -225,6 +549,31 @@ def test_record_findings_drops_a_claim_with_no_source():
     assert led.claims == {}
 
 
+def test_a_retrieval_claim_records_a_gap_not_a_claim():
+    """A search miss narrated as a claim is refused; the gap is kept. #469"""
+    led = evidence.Ledger("/nonexistent")
+    finding = stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {
+                    "text": (
+                        "No arxiv.org source was found that reports a specific "
+                        "quantitative rate."
+                    ),
+                    "source_urls": ["https://docs.claude.com/x"],
+                }
+            ],
+        },
+    )
+    assert led.claims == {}
+    assert finding.claim_ids == []
+    assert finding.gaps and "arxiv.org" in finding.gaps[0]
+
+
 def test_record_findings_ignores_a_fabricated_url():
     led = evidence.Ledger("/nonexistent")
     stages.record_findings(
@@ -234,6 +583,1332 @@ def test_record_findings_ignores_a_fabricated_url():
     )
     assert led.sources == {}
     assert led.claims == {}
+
+
+# -- 2b. metadata comes from the record, not the model. #470 ---------------
+
+
+class _FakeBackend:
+    name = "perplexity"
+
+
+def test_record_findings_fetches_metadata_when_a_backend_is_given(monkeypatch):
+    def fake_fetch(url, backend, *, model_title=""):
+        assert backend is not None
+        return {
+            "title": "The Record's Actual Title",
+            "authors": ["Jane Doe"],
+            "year": "2023",
+            "venue": "A Journal",
+            "note": "",
+        }
+
+    monkeypatch.setattr(stages.metadata, "fetch_record", fake_fetch)
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "The Model's Guess", "url": "https://docs.claude.com/x"}],
+            "claims": [{"text": "a fact", "source_urls": ["https://docs.claude.com/x"]}],
+        },
+        backend=_FakeBackend(),
+    )
+    source = led.source_for_url("https://docs.claude.com/x")
+    assert source.title == "The Record's Actual Title"
+    assert source.authors == ["Jane Doe"]
+    assert source.year == "2023"
+    assert source.venue == "A Journal"
+
+
+def test_record_findings_with_no_backend_keeps_the_model_title():
+    """The default. Every existing test above calls `record_findings` this
+    way, and none of them may start making a network call."""
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "The Model's Guess", "url": "https://docs.claude.com/x"}],
+            "claims": [{"text": "a fact", "source_urls": ["https://docs.claude.com/x"]}],
+        },
+    )
+    assert led.source_for_url("https://docs.claude.com/x").title == "The Model's Guess"
+
+
+def test_record_findings_fetches_a_url_only_once_per_run(monkeypatch):
+    calls = []
+
+    def fake_fetch(url, backend, *, model_title=""):
+        calls.append(url)
+        return {"title": "Fetched", "authors": [], "year": "", "venue": "", "note": ""}
+
+    monkeypatch.setattr(stages.metadata, "fetch_record", fake_fetch)
+    led = evidence.Ledger("/nonexistent")
+    for _ in range(2):
+        stages.record_findings(
+            led,
+            {"subject": "s1", "question": "q"},
+            {
+                "answer": "a",
+                "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+                "claims": [{"text": "a fact", "source_urls": ["https://docs.claude.com/x"]}],
+            },
+            backend=_FakeBackend(),
+        )
+    assert calls == ["https://docs.claude.com/x"], calls
+
+
+# -- 2c. attribution: the verifier checks the cited source says the claim. -
+# #471
+
+
+def _fetch_with_text(text):
+    def fake_fetch(url, backend, *, model_title=""):
+        return {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": text}
+
+    return fake_fetch
+
+
+def test_a_quote_absent_from_the_source_loses_the_binding(monkeypatch):
+    """`attributed()` drops the binding, and the drop is logged as a gap."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        _fetch_with_text("This page discusses guanidinoacetic acid, not creatine monohydrate."),
+    )
+    led = evidence.Ledger("/nonexistent")
+    finding = stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {
+                    "text": 'The trial reports "a 42 percent reduction in creatine monohydrate '
+                    'clearance", which no source here backs.',
+                    "source_urls": ["https://docs.claude.com/x"],
+                }
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    assert led.claims == {}
+    assert any("dropped" in gap for gap in finding.gaps), finding.gaps
+
+
+def test_two_urls_in_one_reply_stay_single_source(monkeypatch):
+    """Corroboration counts attributed bindings, not URLs in one reply.
+
+    Neither source here was fetched (no backend), so both bindings are kept
+    unattributed. Two raw source ids from one reply must not read as two
+    independent looks.
+    """
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [
+                {"title": "a", "url": "https://docs.claude.com/a"},
+                {"title": "b", "url": "https://docs.claude.com/b"},
+            ],
+            "claims": [{"text": "a fact", "source_urls": []}],
+        },
+    )
+    claim = next(iter(led.claims.values()))
+    assert len(claim.source_ids) == 2
+    assert claim.truth_state == evidence.SINGLE_SOURCE
+    assert claim.attributed_source_ids == []
+
+
+def test_a_numeric_unimportant_claim_still_reaches_attribution(monkeypatch):
+    """The `important` flag never gates attribution; only `verify_batch`'s
+    model turn is capped by it. An unimportant numeric claim whose cited
+    source lacks that number still loses its binding.
+    """
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        _fetch_with_text("The cohort included far fewer participants than reported elsewhere."),
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q", "important": False},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {
+                    "text": "The cohort included 214 participants.",
+                    "source_urls": ["https://docs.claude.com/x"],
+                }
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    assert led.claims == {}, "the miss was checked despite important=False"
+
+
+def test_a_claim_with_no_attributed_binding_is_dropped_and_logged(monkeypatch):
+    """A claim whose only source fails `attributed()` never reaches the
+    ledger, and the finding's gaps say why."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        _fetch_with_text("Nothing on this page mentions that number."),
+    )
+    led = evidence.Ledger("/nonexistent")
+    finding = stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {"text": "The response rate was 87 percent.", "source_urls": ["https://docs.claude.com/x"]}
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    assert led.claims == {}
+    assert any("87 percent" in gap or "dropped" in gap for gap in finding.gaps), finding.gaps
+
+
+def test_an_unfetched_source_keeps_the_binding_and_notes_it_unattributed():
+    """No backend, no fetch, no text: nothing to contradict, so the binding
+    survives and the claim says attribution was never checked."""
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [{"text": "A claim with a number, 42.", "source_urls": ["https://docs.claude.com/x"]}],
+        },
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.source_ids, "the binding survived"
+    assert claim.note == "unattributed: attribution not checked"
+
+
+def test_the_sources_own_quote_attributes_the_claim(monkeypatch):
+    """#471, finding 3: the needle is the researcher's own quote for this
+    specific binding (that source's `quote` field in the reply, carried onto
+    `SourceDocument.body`), not a `"..."` substring embedded in the claim's
+    own text, which a DA claim rarely carries."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        _fetch_with_text("This position stand reviews creatine monohydrate and lean body mass."),
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [
+                {
+                    "title": "t",
+                    "url": "https://docs.claude.com/x",
+                    "quote": "creatine monohydrate and lean body mass",
+                }
+            ],
+            "claims": [
+                {"text": "Creatine monohydrate preserves lean body mass.", "source_urls": ["https://docs.claude.com/x"]}
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.source_ids, "the binding was dropped despite the source's own quote matching"
+    assert claim.attributed_source_ids == claim.source_ids
+
+
+class _MetaFixtureBackend:
+    name = "fixture"
+
+
+def test_a_pubmed_source_with_an_abstract_attributes_a_number(monkeypatch):
+    """#471, finding 2: the recorded PubMed fixture carries an efetch-shaped
+    abstract, not the rare esummary field. No monkeypatch of `fetch_record`
+    itself: the real fixture reader runs."""
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://pubmed.ncbi.nlm.nih.gov/12345678/"}],
+            "claims": [
+                {
+                    "text": "The trial enrolled 42 adults.",
+                    "source_urls": ["https://pubmed.ncbi.nlm.nih.gov/12345678/"],
+                }
+            ],
+        },
+        seed=("pubmed.ncbi.nlm.nih.gov",),
+        backend=_MetaFixtureBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.source_ids, "the binding was dropped despite the abstract carrying the number"
+    assert claim.attributed_source_ids == claim.source_ids
+
+
+def test_a_pubmed_source_with_no_abstract_keeps_the_binding_unattributed(tmp_path, monkeypatch):
+    """esummary alone, with efetch giving nothing (a fixture recorded before
+    #471, or a live efetch failure): the binding survives and says so."""
+    no_abstract = tmp_path / "no_abstract.json"
+    no_abstract.write_text('{"title": "A Paper", "authors": [], "year": "2020", "venue": "J Test"}')
+    monkeypatch.setattr(stages.metadata, "_fixture_path", lambda url: no_abstract)
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://pubmed.ncbi.nlm.nih.gov/11111111/"}],
+            "claims": [
+                {
+                    "text": "The trial enrolled 42 adults.",
+                    "source_urls": ["https://pubmed.ncbi.nlm.nih.gov/11111111/"],
+                }
+            ],
+        },
+        seed=("pubmed.ncbi.nlm.nih.gov",),
+        backend=_MetaFixtureBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.source_ids, "the binding was dropped with nothing to check it against"
+    assert claim.note == "unattributed: attribution not checked"
+
+
+def test_record_findings_carries_the_study_object_onto_the_claim():
+    """Unused until #478's study table; `record_findings` only has to keep
+    what the researcher reported."""
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "t", "url": "https://docs.claude.com/x"}],
+            "claims": [
+                {
+                    "text": "The trial enrolled 120 adults.",
+                    "source_urls": ["https://docs.claude.com/x"],
+                    "study": {"design": "RCT", "n": 120},
+                }
+            ],
+        },
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.study == {"design": "RCT", "n": 120}
+
+
+def test_not_found_writes_the_queries_into_the_note():
+    """Silence is not a result. #471"""
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(evidence.Claim(text="x", subject="s", source_ids=["a"], important=True))
+    stages.apply_verification(
+        led,
+        {
+            "checked": [
+                {
+                    "claim_id": claim.id,
+                    "corroborate_status": "not_found",
+                    "queries_used": ["x alternate wording", "x site:example.org"],
+                }
+            ]
+        },
+    )
+    assert "x alternate wording" in claim.note
+    assert "x site:example.org" in claim.note
+
+
+def test_not_found_with_no_reported_queries_still_names_the_claim():
+    """A verifier that reports no queries at all still leaves a real note,
+    not a blank one."""
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(evidence.Claim(text="creatine preserves lean mass", subject="s"))
+    stages.apply_verification(
+        led, {"checked": [{"claim_id": claim.id, "corroborate_status": "not_found"}]}
+    )
+    assert "creatine preserves lean mass" in claim.note
+
+
+def test_agreed_second_source_fetches_its_metadata(monkeypatch):
+    """Folded finding: the verifier's second source used to be titled from
+    sixty characters of its own quote, with no metadata fetch, and that
+    fragment could reach `references_block`. It now goes through the same
+    record as any other source. #471
+    """
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "The Real Title of the Second Source",
+            "authors": ["A. Author"],
+            "year": "2020",
+            "venue": "A Journal",
+            "note": "",
+            "text": "",
+            "pubtype": ["Randomized Controlled Trial"],
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(evidence.Claim(text="x", subject="s", source_ids=["a"], important=True))
+    stages.apply_verification(
+        led,
+        {
+            "checked": [
+                {
+                    "claim_id": claim.id,
+                    "second_source_url": "https://c.example",
+                    "corroborate_status": "agreed",
+                    "quote": "a fragment nobody should render as a title",
+                }
+            ]
+        },
+        backend=_FakeBackend(),
+    )
+    source = led.source_for_url("https://c.example")
+    assert source.title == "The Real Title of the Second Source"
+    assert source.authors == ["A. Author"]
+    assert source.year == "2020"
+    assert stages.render_reference(source).startswith("A. Author (2020)")
+    # #473: the second source gets a tier the same way any other does.
+    assert source.tier == "primary_trial"
+
+
+# -- 2b. follow the summary to its primary. #473 -----------------------------
+
+
+def test_a_numeric_preprint_claim_gets_one_follow_turn(monkeypatch):
+    """A numeric claim bound only to a preprint is a follow candidate, and a
+    hit rebinds it to the primary study."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Preprint",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "category": "cs.AI",
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "A Preprint", "url": "https://docs.claude.com/preprint"}],
+            "claims": [
+                {
+                    "text": "The dose increased 42 percent.",
+                    "source_urls": ["https://docs.claude.com/preprint"],
+                }
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    candidates = stages.claims_needing_a_primary(led)
+    assert len(candidates) == 1
+    claim = candidates[0]
+
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "The Primary Trial",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent",
+            "pubtype": ["Randomized Controlled Trial"],
+        },
+    )
+    hit = stages.apply_follow_result(
+        led,
+        claim,
+        {"found": True, "url": "https://docs.claude.com/primary", "title": "The Primary Trial", "quote": ""},
+        backend=_FakeBackend(),
+    )
+    assert hit
+    # Appended, not substituted (item 5): the original preprint stays bound.
+    assert len(claim.source_ids) == 2
+    rebound = led.source_for_url("https://docs.claude.com/primary")
+    assert rebound.id in claim.source_ids
+    assert rebound.tier == "primary_trial"
+    assert not claim.secondary
+    # A rebound claim no longer needs a second follow turn.
+    assert stages.claims_needing_a_primary(led) == []
+
+
+def test_a_follow_hit_and_its_own_review_stay_single_source(monkeypatch):
+    """#474 item 10: a claim attributed by one review, then rebound to the
+    primary that review summarizes, stays single-source. Before
+    `via_source_ids`, `evidence.corroborate` counted the review and the
+    very primary it cites as two independent sources."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent, per the primary trial",
+            "pubtype": ["Review"],
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "A Review", "url": "https://docs.claude.com/review"}],
+            "claims": [
+                {"text": "The dose increased 42 percent.", "source_urls": ["https://docs.claude.com/review"]}
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    review = led.source_for_url("https://docs.claude.com/review")
+    assert review.id in claim.attributed_source_ids
+    assert claim.truth_state == evidence.SINGLE_SOURCE, claim.truth_state
+
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "The Primary Trial",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent",
+            "pubtype": ["Randomized Controlled Trial"],
+        },
+    )
+    hit = stages.apply_follow_result(
+        led,
+        claim,
+        {"found": True, "url": "https://docs.claude.com/primary", "title": "The Primary Trial", "quote": ""},
+        backend=_FakeBackend(),
+    )
+    assert hit
+    assert claim.via_source_ids == [review.id]
+    assert claim.truth_state == evidence.SINGLE_SOURCE, (
+        "a review and the very primary it summarizes is one source, not two"
+    )
+
+
+def test_a_rebind_keeps_a_corroborating_secondary_corroborated(monkeypatch):
+    """#473 item 5: a claim two secondary sources already corroborated stays
+    corroborated after a follow hit, since the primary is appended rather
+    than replacing the binding."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Preprint",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent",
+            "category": "cs.AI",
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [
+                {"title": "Preprint A", "url": "https://docs.claude.com/preprint-a"},
+                {"title": "Preprint B", "url": "https://docs.claude.com/preprint-b"},
+            ],
+            "claims": [
+                {
+                    "text": "The dose increased 42 percent.",
+                    "source_urls": ["https://docs.claude.com/preprint-a", "https://docs.claude.com/preprint-b"],
+                }
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    claim = next(iter(led.claims.values()))
+    assert claim.truth_state == evidence.CORROBORATED, claim.truth_state
+
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "The Primary Trial",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "the dose increased 42 percent",
+            "pubtype": ["Randomized Controlled Trial"],
+        },
+    )
+    hit = stages.apply_follow_result(
+        led,
+        claim,
+        {"found": True, "url": "https://docs.claude.com/primary", "title": "The Primary Trial", "quote": ""},
+        backend=_FakeBackend(),
+    )
+    assert hit
+    assert len(claim.source_ids) == 3
+    assert claim.truth_state == evidence.CORROBORATED, claim.truth_state
+
+
+def test_a_follow_hit_that_is_itself_secondary_does_not_clear_the_caveat(monkeypatch):
+    """#473 item 2: a follow turn that answers with another review must not
+    clear the caveat. The tier of the source `ledger.source_for_url`
+    already holds is consulted the same way a freshly fetched one is."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "category": "cs.AI",
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    stages.record_findings(
+        led,
+        {"subject": "s1", "question": "q"},
+        {
+            "answer": "a",
+            "sources": [{"title": "A Review", "url": "https://docs.claude.com/review"}],
+            "claims": [
+                {"text": "The effect was 20 percent.", "source_urls": ["https://docs.claude.com/review"]}
+            ],
+        },
+        backend=_FakeBackend(),
+    )
+    claim = stages.claims_needing_a_primary(led)[0]
+
+    # The follow turn names a *different* review, still secondary-tier.
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "Another Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "pubtype": ["Review"],
+        },
+    )
+    hit = stages.apply_follow_result(
+        led,
+        claim,
+        {"found": True, "url": "https://docs.claude.com/another-review", "title": "Another Review", "quote": ""},
+        backend=_FakeBackend(),
+    )
+    assert not hit
+    assert claim.secondary
+    assert claim.source_ids == [led.source_for_url("https://docs.claude.com/review").id]
+
+    index, _ = stages.numbering(led)
+    brief = stages.claim_brief(led, claim.id, index)
+    assert "as summarized by" in brief
+
+
+class _SearchThenVerifyRunner(paper.Runner):
+    """Answers the researcher for search and follow, then the verifier.
+
+    Distinguishes the two "researcher" prompts by content, the same way the
+    live agent graph is distinguished only by what it was asked, not by a
+    separate role name: `_follow_primaries` and `stage_search`'s per-question
+    loop both call `_ask("researcher", ...)`.
+    """
+
+    name = "scripted"
+
+    def __init__(self):
+        self.verify_claim_id: str | None = None
+
+    def ask(self, role, prompt):
+        if role == "researcher" and "primary study" in prompt:
+            return paper.Reply(data={"found": False, "url": "", "title": "", "quote": ""})
+        if role == "researcher":
+            return paper.Reply(
+                data={
+                    "answer": "a",
+                    "sources": [{"title": "A Review", "url": "https://docs.claude.com/review"}],
+                    "claims": [
+                        {
+                            "text": "The effect was 20 percent.",
+                            "source_urls": ["https://docs.claude.com/review"],
+                        }
+                    ],
+                }
+            )
+        if role == "verifier":
+            return paper.Reply(
+                data={
+                    "checked": [
+                        {
+                            "claim_id": self.verify_claim_id,
+                            "second_source_url": "",
+                            "corroborate_status": "not_found",
+                            "quote": "",
+                            "queries_used": ["q"],
+                        }
+                    ]
+                }
+            )
+        return paper.Reply(data={})
+
+
+def test_a_follow_miss_marks_the_claim_secondary(run_dir, monkeypatch):
+    """A miss keeps the finding bound to the review it started with, and the
+    brief the writer reads still says "as summarized by [n]" after the
+    verify stage runs, the live `STAGE_ORDER` path between the follow and
+    the brief. #473 item 1: `apply_verification`'s `not_found` branch
+    overwrites `claim.note`, which is why the marker lives in a dedicated
+    `claim.secondary` field `apply_verification` never touches."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "category": "cs.AI",
+        },
+    )
+    runner = _SearchThenVerifyRunner()
+    run = build_run(run_dir, runner=runner, loop_doctrine=False)
+    run.plan = {
+        "title": "T",
+        "questions": [{"id": "q1", "subject": "s1", "question": "why?", "check": "a URL", "important": True}],
+        "sections": ["Abstract", "Introduction", "References"],
+        "diagrams": [],
+    }
+
+    run.stage_search()
+    claim = next(iter(run.ledger.claims.values()))
+    assert claim.secondary
+
+    runner.verify_claim_id = claim.id
+    run.stage_verify()
+
+    assert claim.secondary, "apply_verification must never touch this field"
+    index, _ = stages.numbering(run.ledger)
+    brief = stages.claim_brief(run.ledger, claim.id, index)
+    assert "as summarized by" in brief
+
+
+class _CountingRunner(paper.Runner):
+    name = "counting"
+
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    def ask(self, role: str, prompt: str) -> paper.Reply:
+        self.prompts.append(prompt)
+        return paper.Reply(data={"found": False, "url": "", "title": "", "quote": ""})
+
+
+def _claim_with_tier(ledger: evidence.Ledger, tier: str, text: str) -> evidence.Claim:
+    source = ledger.add_source(
+        evidence.SourceDocument(
+            title="Src", url=f"https://docs.claude.com/{tier}-{len(ledger.sources)}", subject="s", tier=tier
+        )
+    )
+    return ledger.add_claim(evidence.Claim(text=text, subject="s", source_ids=[source.id]))
+
+
+def test_the_follow_pass_stops_at_the_run_cap(run_dir):
+    """Seven candidates, six turns: the run-wide cap, shakiest tier first."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    logs: list[str] = []
+    run.say = logs.append
+    for i in range(3):
+        _claim_with_tier(run.ledger, "preprint_or_compilation", f"The result changed {10 + i} percent.")
+    for i in range(3):
+        _claim_with_tier(run.ledger, "narrative_review", f"The rate moved {20 + i} percent.")
+    _claim_with_tier(run.ledger, "meta_analysis_or_systematic_review", "The effect was 99 percent.")
+
+    run._follow_primaries()
+
+    assert run.runner.prompts and len(run.runner.prompts) == run.max_follow == 6
+    followed = "\n".join(run.runner.prompts)
+    assert followed.count("changed 1") == 3
+    assert followed.count("moved 2") == 3
+    assert "effect was 99" not in followed, "the systematic review is the least shaky, and the one left out"
+
+    assert any("follow" in line and "6/6 used this run" in line for line in logs), logs
+
+
+def test_a_stage_retry_does_not_exceed_max_follow_in_total(run_dir):
+    """#473 item 3: `stage_search` retries a `search_gate` failure by
+    re-entering `_follow_primaries` from the top. `self.follow_used`,
+    persisted in `state.follow_used`, must keep a second call from getting
+    a fresh slice of `max_follow`."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    for i in range(4):
+        _claim_with_tier(run.ledger, "preprint_or_compilation", f"The result changed {10 + i} percent.")
+
+    run._follow_primaries()
+    assert len(run.runner.prompts) == 4
+    assert run.follow_used == 4
+    assert run.state.follow_used == 4
+
+    # A fresh batch of candidates surfaces on the retry, as a re-searched
+    # question's new claims would.
+    for i in range(4):
+        _claim_with_tier(run.ledger, "narrative_review", f"The rate moved {20 + i} percent.")
+    run._follow_primaries()
+
+    assert len(run.runner.prompts) == run.max_follow == 6, run.runner.prompts
+    assert run.follow_used == 6
+    assert run.state.follow_used == 6
+
+    # A resumed run in a new process reads the same total back.
+    reloaded = state.PaperState.load_or_create(run.work_dir)
+    assert reloaded.follow_used == 6
+
+
+# -- 2c. the counter-evidence pass. #474 -------------------------------------
+
+
+def test_stage_search_wires_in_the_counter_evidence_pass(run_dir):
+    """`Paper.stage_search` runs `_counter_evidence` before `search_gate`,
+    not only when a test calls it directly."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    run.plan = {"questions": []}
+    run.ledger.add_claim(
+        evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    )
+    with pytest.raises(GateFailed):
+        run.stage_search()
+    assert len(run.runner.prompts) == 1
+
+
+def test_a_generalizing_claim_gets_one_counter_turn(run_dir):
+    """"protein alone did not prevent lean-mass loss" gets exactly one
+    counter turn, and the contrary claim binds with `counterargument_to`."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    original = evidence.Claim(
+        text="Protein alone did not prevent lean-mass loss.", subject="creatine"
+    )
+    run.ledger.add_claim(original)
+
+    run._counter_evidence()
+
+    assert len(run.runner.prompts) == 1, "exactly one counter turn for the one candidate"
+    assert "Protein alone did not prevent lean-mass loss." in run.runner.prompts[0]
+
+
+def test_a_counter_miss_passes_and_the_brief_says_so(monkeypatch):
+    """A miss is recorded on the claim's own `counter` field, and the
+    writer's brief carries "no contrary evidence found in this search"."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {},
+    )
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(
+        evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    )
+    hit = stages.apply_counter_result(led, claim, {"found": False}, backend=_FakeBackend())
+    assert not hit
+    assert claim.counter == "miss"
+
+    index, _ = stages.numbering(led)
+    brief = stages.claim_brief(led, claim.id, index)
+    assert "no contrary evidence found in this search" in brief
+
+
+def test_a_counter_hit_binds_the_contrary_claim_and_the_brief_carries_both(monkeypatch):
+    """A hit creates a new claim, `counterargument_to` pointing at the
+    original, and the writer's brief for the original names it. #474"""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "Longland 2016",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "protein with resistance training preserved lean mass",
+            "pubtype": ["Randomized Controlled Trial"],
+        },
+    )
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(
+        evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    )
+    hit = stages.apply_counter_result(
+        led,
+        claim,
+        {
+            "found": True,
+            "counter_claim": "Protein with resistance training preserved lean mass (Longland 2016).",
+            "url": "https://docs.claude.com/longland",
+            "title": "Longland 2016",
+            "quote": "protein with resistance training preserved lean mass",
+        },
+        backend=_FakeBackend(),
+    )
+    assert hit
+    assert claim.counter == "hit"
+    countered = stages.counter_evidence_for(led, claim.id)
+    assert countered is not None
+    assert countered.counterargument_to == claim.id
+    assert not claim.secondary
+    assert claim.source_ids == [], "the original claim is not rebound, only evidenced against"
+
+    index, _ = stages.numbering(led)
+    brief = stages.claim_brief(led, claim.id, index)
+    assert "Contrary evidence" in brief
+    assert "Longland 2016" in brief
+
+
+def test_a_retrieval_narrated_counter_claim_is_a_miss(monkeypatch):
+    """#474 follow-up F3: the model's own `counter_claim` is screened with
+    `is_retrieval_claim`, the same screen #469 runs on the research path. A
+    narrated retrieval miss is not evidence about the subject."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {"title": "T", "text": "irrelevant"},
+    )
+    led = evidence.Ledger("/nonexistent")
+    claim = led.add_claim(
+        evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    )
+    hit = stages.apply_counter_result(
+        led,
+        claim,
+        {
+            "found": True,
+            "counter_claim": "No source was found that addresses this directly.",
+            "url": "https://docs.claude.com/nothing",
+            "title": "T",
+            "quote": "",
+        },
+        backend=_FakeBackend(),
+    )
+    assert not hit
+    assert claim.counter == "miss"
+    assert stages.counter_evidence_for(led, claim.id) is None
+
+
+def test_the_counter_pass_stops_at_the_run_cap(run_dir):
+    """Seven generalizing claims, `--max-counter 6`, six turns. The seventh
+    is `capped`, `counterweighed` still passes it, and its brief carries the
+    cap sentence with the hedge instruction. #474 decision item 3"""
+    run = build_run(run_dir, runner=_CountingRunner())
+    logs: list[str] = []
+    run.say = logs.append
+    claims = [
+        run.ledger.add_claim(
+            evidence.Claim(text=f"The result never changed by more than {i} percent.", subject="s")
+        )
+        for i in range(7)
+    ]
+
+    run._counter_evidence()
+
+    assert run.runner.prompts and len(run.runner.prompts) == run.max_counter == 6
+    assert any("counter" in line and "6/6 used this run" in line for line in logs), logs
+    states = [c.counter for c in claims]
+    assert states.count("capped") == 1
+    assert set(states) <= {"miss", "capped"}
+
+    capped = next(c for c in claims if c.counter == "capped")
+    index, _ = stages.numbering(run.ledger)
+    brief = stages.claim_brief(run.ledger, capped.id, index)
+    assert "counter-evidence not searched, run cap reached" in brief
+    assert "hedge" in brief.lower()
+
+
+def test_a_stage_retry_does_not_exceed_max_counter_in_total(run_dir):
+    """#474 decision item 2: `stage_search` retries a `search_gate` failure
+    by re-entering `_counter_evidence` from the top. `self.counter_used`,
+    persisted in `state.counter_used`, must keep a second call from getting
+    a fresh slice of `max_counter`, and `generalizing_claims` must not
+    re-select a claim `apply_counter_result` already resolved."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    first_batch = [
+        run.ledger.add_claim(
+            evidence.Claim(text=f"The result never changed by more than {i} percent.", subject="s")
+        )
+        for i in range(4)
+    ]
+
+    run._counter_evidence()
+    assert len(run.runner.prompts) == 4
+    assert run.counter_used == 4
+    assert run.state.counter_used == 4
+    assert all(c.counter == "miss" for c in first_batch)
+
+    # A fresh batch surfaces on the retry, as a re-searched question's new
+    # claims would; the first batch must not be asked a second time.
+    second_batch = [
+        run.ledger.add_claim(
+            evidence.Claim(text=f"The rate always settled at {20 + i} percent.", subject="s")
+        )
+        for i in range(4)
+    ]
+    run._counter_evidence()
+
+    assert len(run.runner.prompts) == run.max_counter == 6, run.runner.prompts
+    assert run.counter_used == 6
+    assert run.state.counter_used == 6
+    assert all(c.counter == "miss" for c in first_batch), "the first batch was asked again"
+    assert [c.counter for c in second_batch].count("capped") == 2
+
+    # A resumed run in a new process reads the same total back.
+    reloaded = state.PaperState.load_or_create(run.work_dir)
+    assert reloaded.counter_used == 6
+
+
+class _SearchThenCounterThenVerifyRunner(paper.Runner):
+    """Answers the researcher for search and counter, then the verifier.
+
+    Mirrors `_SearchThenVerifyRunner` above, the pattern the E4 fix used to
+    prove `apply_verification` cannot erase `secondary`. #474's own
+    live-path proof: `claim.counter` must survive `stage_verify` the same
+    way.
+    """
+
+    name = "scripted"
+
+    def __init__(self):
+        self.verify_claim_id: str | None = None
+
+    def ask(self, role, prompt):
+        if role == "researcher" and "This claim generalizes" in prompt:
+            return paper.Reply(data={"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""})
+        if role == "researcher":
+            return paper.Reply(
+                data={
+                    "answer": "a",
+                    "sources": [{"title": "A Review", "url": "https://docs.claude.com/review"}],
+                    "claims": [
+                        {
+                            "text": "The effect always held regardless of the protocol.",
+                            "source_urls": ["https://docs.claude.com/review"],
+                        }
+                    ],
+                }
+            )
+        if role == "verifier":
+            return paper.Reply(
+                data={
+                    "checked": [
+                        {
+                            "claim_id": self.verify_claim_id,
+                            "second_source_url": "",
+                            "corroborate_status": "not_found",
+                            "quote": "",
+                            "queries_used": ["q"],
+                        }
+                    ]
+                }
+            )
+        return paper.Reply(data={})
+
+
+def test_a_counter_miss_survives_verify_on_the_live_stage_order(run_dir, monkeypatch):
+    """#474 blocking item 1: `apply_verification`'s `not_found` branch
+    overwrites `claim.note`. `claim.counter` is a dedicated field it never
+    touches, so the brief the writer reads still says "no contrary evidence
+    found in this search" after `stage_verify` runs, the live `STAGE_ORDER`
+    path between the counter pass and the brief."""
+    monkeypatch.setattr(
+        stages.metadata,
+        "fetch_record",
+        lambda url, backend, *, model_title="": {
+            "title": "A Review",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "category": "cs.AI",
+        },
+    )
+    runner = _SearchThenCounterThenVerifyRunner()
+    run = build_run(run_dir, runner=runner, loop_doctrine=False)
+    run.plan = {
+        "title": "T",
+        "questions": [{"id": "q1", "subject": "s1", "question": "why?", "check": "a URL", "important": True}],
+        "sections": ["Abstract", "Introduction", "References"],
+        "diagrams": [],
+    }
+
+    run.stage_search()
+    claim = next(iter(run.ledger.claims.values()))
+    assert claim.counter == "miss"
+
+    runner.verify_claim_id = claim.id
+    run.stage_verify()
+
+    assert claim.counter == "miss", "apply_verification must never touch this field"
+    index, _ = stages.numbering(run.ledger)
+    brief = stages.claim_brief(run.ledger, claim.id, index)
+    assert "no contrary evidence found in this search" in brief
+
+
+def test_the_fixture_pipeline_runs_a_generalizing_claim_through_the_counter_pass(run_dir):
+    """#474 follow-up F7: the recorded fixture is patched with one
+    generalizing claim ("A checker alone does not catch an error the
+    maker's own tool output already hid.", under the "maker and checker
+    split" researcher reply) and a matching counter-turn reply (a miss), so
+    the counter pass runs for real against `FixtureRunner`/`FixtureBackend`,
+    offline, no network. Reason the fixture changed: neither original
+    recorded reply contained a generalizing claim, so the pass had never
+    actually executed against the fixture at all."""
+    run = build_run(run_dir)
+    run.stage_plan()
+    run.stage_search()
+
+    generalizing = [c for c in run.ledger.claims.values() if stages.GENERALIZING.search(c.text)]
+    assert generalizing, "the patched fixture claim did not survive record_findings"
+    assert all(c.counter in ("hit", "miss", "capped") for c in generalizing)
+
+
+# -- #475: the shortfall pass, the scout retry, and title status -----------
+
+
+def test_a_fixture_backed_shortfall_completes_the_run_not_a_crash(run_dir):
+    """Judge revision on #520, follow-up 3: a question the recorded fixture
+    cannot possibly satisfy, run against the real `FixtureRunner` and
+    `FixtureBackend` end to end through `stage_plan` and `stage_search`,
+    completes with the shortfall recorded rather than escalating. `q3`
+    (maker-checker), not important in the recorded plan, is marked
+    important here and given a block no fixture reply can meet, rather
+    than editing the shared `fixtures/paper/replies.json` every other test
+    in this file also reads.
+    """
+    run = build_run(run_dir)
+    run.stage_plan()
+    q3 = next(q for q in run.plan["questions"] if q["id"] == "q3")
+    q3["important"] = True
+    q3["evidence_requirements"] = {
+        "study_types": ["primary_trial"],
+        "min_count": 5,
+        "recency_years": 5,
+        "populations": [],
+    }
+    result = run.stage_search()  # must not raise
+    assert result.name == "search"
+    assert "q3" in run.evidence_shortfall_unmet
+    assert "needs 5" in run.evidence_shortfall_unmet["q3"]
+    # The gate itself, called again standalone, also accepts it.
+    stages.search_gate(run.ledger, run.plan, unmet=run.evidence_shortfall_unmet)
+
+
+# -- item 11b, PR #518 re-verification follow-up -----------------------------
+
+
+def test_a_fresh_paper_reloads_follow_and_counter_used_from_state(run_dir):
+    """A fresh `Paper` built on a work dir that already spent some of the
+    per-run follow and counter budget must see that spend, not start a new
+    process with a fresh `max_follow`/`max_counter`. #473 #474, follow-up
+    to the #518 re-verification: this is the E5 fix's own guard, given a
+    test to lock it in."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    run.follow_used = 3
+    run.state.follow_used = 3
+    run.counter_used = 2
+    run.state.counter_used = 2
+    run.state.save()
+
+    resumed = build_run(run_dir, runner=_CountingRunner())
+    assert resumed.follow_used == 3
+    assert resumed.counter_used == 2
+
+
+def test_a_negative_max_counter_clamps_to_zero_not_a_tail_slice(run_dir):
+    """`remaining = max(0, self.max_counter - self.counter_used)` already
+    clamps a negative `max_counter` to zero before it ever reaches a slice
+    bound; a bare `candidates[:self.max_counter]` would instead have sliced
+    off all but the last `|max_counter|` candidates, Python's own footgun
+    for a negative index. Locked in against a regression, item 11c of the
+    #518 re-verification follow-up."""
+    run = build_run(run_dir, runner=_CountingRunner(), max_counter=-1)
+    for i in range(3):
+        run.ledger.add_claim(
+            evidence.Claim(text=f"The result never changed by more than {i} percent.", subject="s")
+        )
+    run._counter_evidence()
+    assert run.runner.prompts == []
+
+
+def test_a_shortfall_gets_one_research_turn_and_is_not_repeated(run_dir):
+    """One important question short of its `evidence_requirements` gets
+    exactly one extra turn; a second call, mirroring a `stage_search`
+    retry re-entering this method, does not ask it again."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    run.plan = {
+        "questions": [
+            {
+                "id": "q1",
+                "subject": "s1",
+                "question": "What is the effect?",
+                "check": "a number",
+                "important": True,
+                "evidence_requirements": evidence_requirements(min_count=1),
+            }
+        ]
+    }
+    run._research_shortfalls()
+    assert len(run.runner.prompts) == 1
+    # _CountingRunner's reply carries no claims, so the shortfall survives
+    # the one turn: this is what makes it `unmet`, not resolved.
+    assert "q1" in run.evidence_shortfall_unmet
+    assert "needs 1" in run.evidence_shortfall_unmet["q1"]
+    assert run.state.evidence_shortfall_unmet == {"q1": run.evidence_shortfall_unmet["q1"]}
+
+    run._research_shortfalls()
+    assert len(run.runner.prompts) == 1, "already asked, not asked again"
+
+
+def test_a_met_question_gets_no_shortfall_turn(run_dir):
+    run = build_run(run_dir, runner=_CountingRunner())
+    source = run.ledger.add_source(
+        evidence.SourceDocument(title="Src", url="https://a.example/rct", subject="s1", tier="primary_trial", year="2024")
+    )
+    claim = run.ledger.add_claim(evidence.Claim(text="a fact", subject="s1", source_ids=[source.id]))
+    run.ledger.add_finding(evidence.Finding(question="q", subject="s1", claim_ids=[claim.id]))
+    run.plan = {
+        "questions": [
+            {
+                "id": "q1",
+                "subject": "s1",
+                "important": True,
+                "evidence_requirements": evidence_requirements(min_count=1),
+            }
+        ]
+    }
+    run._research_shortfalls()
+    assert run.runner.prompts == []
+
+
+class _ScoutRetryRunner(paper.Runner):
+    name = "scout-retry"
+
+    def __init__(self, second_titles=("A flagship",)):
+        self.prompts: list[str] = []
+        self.second_titles = list(second_titles)
+
+    def ask(self, role: str, prompt: str) -> paper.Reply:
+        self.prompts.append(prompt)
+        if len(self.prompts) == 1:
+            return paper.Reply(data={"headings": ["Background"], "domains": [], "titles": []})
+        return paper.Reply(data={"headings": ["Background"], "domains": [], "titles": self.second_titles})
+
+
+def test_stage_scout_retries_once_when_titles_are_empty(run_dir):
+    run = build_run(run_dir, runner=_ScoutRetryRunner())
+    run.stage_scout()
+    assert len(run.runner.prompts) == 2, "one first pass, one retry, no more"
+    assert "titles" in run.runner.prompts[1].lower()
+    briefing = json.loads((run_dir / "corpus" / "scout-briefing.json").read_text())
+    assert briefing["titles"] == ["A flagship"]
+    assert run.state.scout_retried is True
+
+
+class _FullScoutRunner(paper.Runner):
+    """Headings and titles both present on the first pass. Judge revision on
+    #520, follow-up 6: this test's own name must actually drive a full
+    scout, not an empty one that never needed retrying in the first place.
+    """
+
+    name = "full-scout"
+
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    def ask(self, role: str, prompt: str) -> paper.Reply:
+        self.prompts.append(prompt)
+        return paper.Reply(data={"headings": ["Background"], "domains": [], "titles": ["A flagship"]})
+
+
+def test_a_full_scout_is_not_retried(run_dir):
+    run = build_run(run_dir, runner=_FullScoutRunner())
+    run.stage_scout()
+    assert len(run.runner.prompts) == 1, "titles already present: no retry needed"
+    assert run.scout_retried is False
+
+
+def test_a_resumed_scout_retry_is_not_spent_twice(run_dir):
+    run = build_run(run_dir, runner=_ScoutRetryRunner())
+    run.stage_scout()
+    resumed = build_run(run_dir, runner=_ScoutRetryRunner())
+    assert resumed.scout_retried is True, "loaded from persisted state, not retried a second time"
+    resumed.stage_scout()
+    assert len(resumed.runner.prompts) == 1, "the flag already set: one call, no retry"
+
+
+def test_record_scout_title_status_writes_a_named_skip(run_dir):
+    run = build_run(run_dir, runner=_CountingRunner())
+    (run.work_dir / "corpus").mkdir(parents=True, exist_ok=True)
+    (run.work_dir / "corpus" / "scout-briefing.json").write_text(
+        json.dumps({"titles": ["A Flagship Work"]}), encoding="utf-8"
+    )
+    run.ledger.add_source(
+        evidence.SourceDocument(title="Unrelated Document", url="https://a.example/x", subject="s")
+    )
+    run._record_scout_title_status()
+    briefing = json.loads((run.work_dir / "corpus" / "scout-briefing.json").read_text())
+    assert briefing["title_status"] == [
+        {"title": "A Flagship Work", "retrieved": False, "reason": "no admitted source matched this title"}
+    ]
+
+
+def test_record_scout_title_status_finds_a_retrieved_title(run_dir):
+    run = build_run(run_dir, runner=_CountingRunner())
+    (run.work_dir / "corpus").mkdir(parents=True, exist_ok=True)
+    (run.work_dir / "corpus" / "scout-briefing.json").write_text(
+        json.dumps({"titles": ["The Longland Trial"]}), encoding="utf-8"
+    )
+    run.ledger.add_source(
+        evidence.SourceDocument(title="The Longland Trial, 2016", url="https://a.example/x", subject="s")
+    )
+    run._record_scout_title_status()
+    briefing = json.loads((run.work_dir / "corpus" / "scout-briefing.json").read_text())
+    assert briefing["title_status"][0]["retrieved"] is True
 
 
 def test_search_gate_fails_with_no_claims():
@@ -254,7 +1929,14 @@ def test_search_gate_fails_when_an_important_question_found_nothing():
 
 
 def test_agreement_adds_a_source_and_corroborates():
+    """#471: corroboration now needs two *attributed* bindings. `ledger_with`
+    gives the claim two raw source ids from one reply, which is single-source
+    on its own; seed one of them as already attributed (the researcher's
+    citation, checked against its fetched text) and the verifier's own
+    independently found second source is the one that promotes the claim.
+    """
     led, claims = ledger_with(truth=evidence.PROPOSED)
+    claims[0].attributed_source_ids = [claims[0].source_ids[0]]
     counts = stages.apply_verification(
         led,
         {
@@ -431,8 +2113,82 @@ def test_a_body_section_must_bind_something():
     assert "no claim ids" in str(exc.value)
 
 
+def test_outline_gate_requires_methods_and_conclusion_when_the_plan_named_them():
+    """#478. The plan names Methods and Conclusion once `normalize_plan`
+    runs; the belt check here catches a model outline turn that dropped
+    one of them from its echoed `sections` list."""
+    led, claims = ledger_with()
+    structured_plan = plan(sections=["Abstract", "Introduction", "Methods", "Conclusion", "References"])
+    with pytest.raises(GateFailed) as exc:
+        stages.outline_gate(outline(claims[0].id), led, structured_plan)
+    assert "missing the methods section" in str(exc.value)
+    assert "missing the conclusion section" in str(exc.value)
+
+
 def test_abstract_and_references_need_no_binding():
-    assert stages.UNBOUND_SECTIONS == ("abstract", "references")
+    assert stages.UNBOUND_SECTIONS == ("abstract", "conclusion", "methods", "references")
+
+
+def test_outline_gate_rejects_an_out_of_order_introduction():
+    """#560. Presence alone missed this: a writer outline turn that placed
+    Introduction after Methods passed `outline_gate` unchanged, and the
+    judge measured the same disorder in the assembled paper. The order row
+    now names it, comparing only the structural headings against each
+    other; a body section between two of them names no defect this row
+    exists to catch, `assemble`'s own move rule handles that."""
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    with pytest.raises(GateFailed) as exc:
+        stages.outline_gate(out, led, plan())
+    assert "not the frozen order" in str(exc.value)
+
+
+def test_outline_gate_rejects_a_duplicate_introduction():
+    """#560. A duplicate can never match the order row's de-duplicated
+    `expected` list, so the same row catches this with no separate check."""
+    led, claims = ledger_with(n=2)
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "Body", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    with pytest.raises(GateFailed) as exc:
+        stages.outline_gate(out, led, plan())
+    assert "not the frozen order" in str(exc.value)
+
+
+def test_outline_gate_names_a_misplaced_methods():
+    """#566. Comparing only the structural headings against each other
+    missed this: Abstract, Introduction, and Methods were still in the
+    right order relative to one another, so PR #564's row let a Methods
+    the writer placed after a body section through. The full-shape
+    comparison now catches the body section wedged between Introduction
+    and Methods, the frozen order's own gap for Methods, not a body
+    section."""
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "The problem", "claim_ids": [claims[0].id]},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    with pytest.raises(GateFailed) as exc:
+        stages.outline_gate(out, led, plan())
+    assert "not the frozen order" in str(exc.value)
 
 
 # -- 5. diagram ------------------------------------------------------------
@@ -547,6 +2303,52 @@ def test_review_gate_reports_the_rows_and_the_notes():
     assert exc.value.signature == ("voice",)
 
 
+def test_review_gate_reads_the_paired_reply_shape():
+    """#411: a row and its note travel in one object, so pairing never drifts."""
+    with pytest.raises(GateFailed) as exc:
+        stages.review_gate(
+            {
+                "failed_rows": [
+                    {"row": "no_filler", "note": "Paragraph two restates the abstract."},
+                    {"row": "depth", "note": "No mechanism, only the claim."},
+                ],
+                "score": 0.4,
+            }
+        )
+    assert "no_filler: Paragraph two restates the abstract." in str(exc.value)
+    assert "depth: No mechanism, only the claim." in str(exc.value)
+    assert exc.value.signature == ("depth", "no_filler")
+    assert exc.value.score == 0.4
+
+
+def test_review_gate_leaves_the_score_unset_on_the_legacy_shape():
+    with pytest.raises(GateFailed) as exc:
+        stages.review_gate({"failed_rows": ["voice"], "notes": ["a hook"]})
+    assert exc.value.score is None
+
+
+def test_split_verdict_parses_a_mixed_list_of_rows():
+    """A reviewer that names one row in the paired shape and one in the
+    legacy shape in the same reply must not crash (#411 follow-up)."""
+    rows, notes, score = stages._split_verdict(
+        {
+            "failed_rows": [{"row": "no_filler", "note": "restates the abstract"}, "voice"],
+            "score": 0.5,
+        }
+    )
+    assert rows == ["no_filler", "voice"]
+    assert notes == ["restates the abstract", ""]
+    assert score == 0.5
+
+
+def test_split_verdict_treats_a_non_list_failed_rows_as_empty():
+    """A schema violation from a live model, not a crash (#411 follow-up)."""
+    rows, notes, score = stages._split_verdict({"failed_rows": {"row": "voice"}, "score": 0.4})
+    assert rows == []
+    assert notes == []
+    assert score == 0.4
+
+
 # -- 8. assemble -----------------------------------------------------------
 
 
@@ -566,7 +2368,7 @@ def test_figure_block_rejects_any_non_plugin_asset():
     figure = Figure("loop")
     figure.png = type("P", (), {"name": "loop.svg"})()
     with pytest.raises(GateFailed) as exc:
-        stages.figure_block(figure)
+        stages.figure_block(figure, 1)
     assert exc.value.signature == ("figure_asset",)
 
 
@@ -581,6 +2383,30 @@ def test_assemble_generates_the_references_from_the_ledger():
     assert body.count("https://") == 2
 
 
+def test_the_reference_block_carries_authors_and_years():
+    """#470: "Authors (year). Title. Venue. URL.", falling back field by field."""
+    full = evidence.SourceDocument(
+        title="A Study",
+        url="https://a.example",
+        subject="s",
+        authors=["Jane Doe", "John Smith"],
+        year="2020",
+        venue="Journal of Things",
+    )
+    bare = evidence.SourceDocument(title="", url="https://b.example", subject="s")
+    block = stages.references_block(["https://a.example", "https://b.example"], [full, bare])
+    assert "1. Jane Doe, John Smith (2020). A Study. Journal of Things. https://a.example" in block
+    assert "2. https://b.example" in block
+
+
+def test_render_reference_falls_back_field_by_field():
+    title_only = evidence.SourceDocument(title="Just a Title", url="https://a.example", subject="s")
+    assert stages.render_reference(title_only) == "Just a Title. https://a.example"
+
+    nothing = evidence.SourceDocument(title="", url="https://a.example", subject="s")
+    assert stages.render_reference(nothing) == "https://a.example"
+
+
 def test_assemble_places_a_figure_under_its_section():
     led, claims = ledger_with()
     out = outline(claims[0].id)
@@ -590,14 +2416,337 @@ def test_assemble_places_a_figure_under_its_section():
     assert body.index("A diagram of loop") < body.index("## References")
 
 
-def test_a_rendered_figure_the_outline_forgot_is_still_placed():
-    """It cost a render. Dropping it silently hides that the outline drifted."""
+def test_a_rendered_figure_the_outline_forgot_becomes_a_named_skip():
+    """#464 B1. A figure no planned section names can never receive the
+    whole-paper pass's in-text mention: the old orphan `## Figures` block
+    is gone, and the figure is a named skip instead, not silence and not
+    an image `figure_referenced` can never clear."""
     led, claims = ledger_with()
     body = stages.assemble(
         plan(), outline(claims[0].id), {"Introduction": "A fact. [1]"}, [Figure("orphan")], led
     )
-    assert "## Figures" in body
-    assert "A diagram of orphan" in body
+    assert "## Figures" not in body
+    assert "A diagram of orphan" not in body
+    assert "orphan" in body
+    assert "no owning section" in body
+    assert not paper_check.placed_figures(body)
+
+
+def test_assemble_moves_an_out_of_order_introduction_to_the_front():
+    """#560. `outline_gate` now rejects this for a fresh outline turn, but
+    `assemble` still self-heals it, the same defence `stages.normalize_plan`
+    gives the plan (#557) and the Agent SDK's own `assemble` gives the
+    paper (#554, #559): a resumed run's `outline.json` can predate the
+    gate."""
+    led, claims = ledger_with(n=2)
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[0].id]},
+            {"heading": "Introduction", "claim_ids": [claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(
+        plan(title="T"),
+        out,
+        {"Body": "Body text. [1]", "Introduction": "Introduction text. [1]"},
+        [],
+        led,
+    )
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Body")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "Introduction text" in introduction, introduction
+
+
+def test_assemble_collapses_a_duplicate_introduction():
+    """#560. Two outline sections named Introduction collapse to the one
+    heading in the frozen slot, mirroring `stages.normalize_plan`'s own
+    collapse (#557) and the Agent SDK's `assemble` (#559)."""
+    led, claims = ledger_with(n=2)
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "Body", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(
+        plan(title="T"),
+        out,
+        {"Introduction": "The one introduction. [1]", "Body": "Body text. [1]"},
+        [],
+        led,
+    )
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Body")
+
+
+def test_assemble_inserts_a_python_written_introduction_when_missing():
+    """#560. An outline that never names an Introduction at all: the
+    outliner turn dropped it, or the outline predates `outline_gate`'s new
+    order row. `assemble` still inserts one, the same backstop the Agent
+    SDK's own `assemble` writes (`paper.py`'s `_introduction_stub`, copied
+    not imported): no model turn, right after Abstract and before Methods,
+    and long enough on its own to clear `has_body`'s floor."""
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[0].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(plan(title="T"), out, {"Body": "Body text. [1]"}, [], led)
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    thin = paper_check.sections_without_prose(body, paper_check.MIN_SECTION_WORDS)
+    assert not any(row.startswith("Introduction") for row in thin), thin
+    assert not paper_check.brief.uncited_claims(body), paper_check.brief.uncited_claims(body)
+
+
+def test_assemble_stubs_an_introduction_the_outline_names_but_never_wrote():
+    """#566 C1. The heading exists in the outline, but `written` carries no
+    entry for it: a partial write, or a `sections.json` persisted before
+    this section existed. `Paper._need_written` only requires `written` to
+    be non-empty, never that it covers every outline section, so this is
+    reachable on a resumed run, not only the fully-missing-heading case
+    `test_assemble_inserts_a_python_written_introduction_when_missing`
+    already covers. Left unhandled this rendered a bare `## Introduction`
+    at 0 words and failed `has_body`; the stub now fills it instead."""
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[0].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(plan(title="T"), out, {"Body": "Body text. [1]"}, [], led)
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    thin = paper_check.sections_without_prose(body, paper_check.MIN_SECTION_WORDS)
+    assert not any(row.startswith("Introduction") for row in thin), thin
+    assert not paper_check.brief.uncited_claims(body), paper_check.brief.uncited_claims(body)
+
+
+def test_assemble_moves_an_out_of_order_methods_after_introduction():
+    """#566. The same move rule PR #564 gave Introduction, for Methods.
+    Ticket's own outline: Abstract, Introduction, The problem, Methods,
+    Body -- `outline_gate` now names this a misplaced Methods
+    (`test_outline_gate_names_a_misplaced_methods`), but `assemble` still
+    self-heals a resumed run's persisted outline the same way it already
+    does for Introduction: Methods moves to the frozen slot right after
+    Introduction, before every body section."""
+    led, claims = ledger_with(n=2)
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "The problem", "claim_ids": [claims[0].id]},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(
+        plan(title="T"),
+        out,
+        {
+            "Introduction": "Introduction text. [1]",
+            "The problem": "Problem text. [1]",
+            "Methods": "Methods text, Python-written.",
+            "Body": "Body text. [2]",
+        },
+        [],
+        led,
+    )
+    assert body.count("## Methods") == 1, body
+    assert (
+        body.index("## Abstract")
+        < body.index("## Introduction")
+        < body.index("## Methods")
+        < body.index("## The problem")
+        < body.index("## Body")
+    ), body
+
+
+# -- P11, methods, conclusion, and the study table --------------------------
+
+
+def test_methods_names_the_admitted_hosts(run_dir):
+    """Methods is Python-written from the run record and names the admitted
+    hosts by design, which is why `policy_leak` exempts it. #478"""
+    run = build_run(run_dir)
+    run.plan = {"sections": [{"heading": "Introduction"}]}
+    (run.work_dir / "corpus").mkdir(parents=True, exist_ok=True)
+    (run.work_dir / "corpus" / "source_allowlist.json").write_text(
+        json.dumps({"admitted": ["docs.example-field.org"], "dropped": []}),
+        encoding="utf-8",
+    )
+    body = "## Methods\n\n" + "\n\n".join(run._methods_lines())
+    assert "docs.example-field.org" in body
+    assert not paper_check.policy_leak_violations(body, ("docs.example-field.org",))
+
+
+def _study_ledger():
+    led = evidence.Ledger("/nonexistent")
+    a = led.add_source(
+        evidence.SourceDocument(
+            title="a", url="https://pubmed.ncbi.nlm.nih.gov/one", subject="s1", tier="primary_trial"
+        )
+    )
+    b = led.add_source(
+        evidence.SourceDocument(
+            title="b",
+            url="https://pubmed.ncbi.nlm.nih.gov/two",
+            subject="s1",
+            tier="meta_analysis_or_systematic_review",
+        )
+    )
+    c1 = led.add_claim(
+        evidence.Claim(
+            text="preserved lean mass",
+            subject="s1",
+            source_ids=[a.id],
+            study={
+                "participants": {"n": 24, "population": "older men"},
+                "duration": "12 weeks",
+                "deficit": "500 kcal per day",
+                "training": True,
+                "assay": "DXA",
+                "result": "preserved lean mass",
+            },
+        )
+    )
+    c2 = led.add_claim(
+        evidence.Claim(
+            text="less lean mass loss",
+            subject="s1",
+            source_ids=[b.id],
+            study={
+                "participants": {"n": 40, "population": "postmenopausal women"},
+                "duration": "8 weeks",
+                "deficit": "20 percent caloric restriction",
+                "training": False,
+                "assay": "bioimpedance",
+                "result": "less lean mass loss",
+            },
+        )
+    )
+    return led, [c1, c2]
+
+
+def test_two_human_study_claims_render_a_two_row_table():
+    """`stages.study_table` is Python from the ledger: one row per
+    human-study claim, reading E3's `study` object and E4's `tier`. #478"""
+    led, _claims = _study_ledger()
+    index, _ = stages.numbering(led)
+    table = stages.study_table(led, index)
+    rows = [line for line in table.strip().splitlines() if line.strip().startswith("|")]
+    data_rows = rows[2:]
+    assert len(data_rows) == 2, table
+    assert "24 (older men)" in table
+    assert "12 weeks" in table
+    assert "500 kcal per day" in table
+    assert "yes" in table
+    assert "DXA" in table
+    assert "preserved lean mass" in table
+    assert "primary_trial" in table
+    assert "40 (postmenopausal women)" in table
+    assert "meta_analysis_or_systematic_review" in table
+
+
+def test_a_study_claim_never_cited_in_the_written_body_is_dropped():
+    """PR #535 judge revision F7: a claim carrying a reference number is
+    not proof any section's prose used it. `written`, when given, filters
+    the table to rows a section actually cites."""
+    led, claims = _study_ledger()
+    index, _ = stages.numbering(led)
+    numbers = {sid: n for sid, n in index.items()}
+    first_number = numbers[claims[0].source_ids[0]]
+    written_only_first = {"Introduction": f"A fact. [{first_number}]"}
+    table = stages.study_table(led, index, written_only_first)
+    rows = [line for line in table.strip().splitlines() if line.strip().startswith("|")]
+    data_rows = rows[2:]
+    assert len(data_rows) == 1, table
+    assert "older men" in table
+    assert "postmenopausal" not in table
+
+def test_the_table_sits_after_methods_and_before_the_first_evidence_section():
+    """#560. A body section, not Introduction: `assemble` now moves
+    Introduction into the frozen slot right after Abstract regardless of
+    where the outline placed it, so it can no longer stand in here for "the
+    section right after Methods"."""
+    led, claims = _study_ledger()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[0].id, claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(plan(title="T"), out, {"Body": "A fact. [1][2]"}, [], led)
+    assert body.index("## Methods") < body.index("## Evidence summary") < body.index("## Body")
+
+
+def test_no_human_study_claim_renders_no_table():
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(plan(title="T"), out, {"Introduction": "A fact. [1]"}, [], led)
+    assert "## Evidence summary" not in body
+
+
+def test_a_term_marker_is_harvested_and_stripped():
+    """The writer's `TERM` marker never reaches the reader, and its term
+    reaches the glossary assembly writes."""
+    led, claims = ledger_with()
+    body = stages.assemble(
+        plan(title="T"),
+        outline(claims[0].id),
+        {"Introduction": "A fact. [1][2] <!-- TERM: orchestrator: the process that sequences roles -->"},
+        [],
+        led,
+    )
+    assert "TERM" not in body
+    assert "**orchestrator.** the process that sequences roles" in body
+
+
+def test_assemble_writes_a_glossary_before_references():
+    """Heading order: the last prose section, then Glossary, then References.
+    The writer is denied both trailing headings."""
+    led, claims = ledger_with()
+    body = stages.assemble(
+        plan(title="T"),
+        outline(claims[0].id),
+        {"Introduction": "A fact. [1][2] <!-- TERM: orchestrator: the process that sequences roles -->"},
+        [],
+        led,
+    )
+    assert body.index("## Introduction") < body.index("## Glossary") < body.index("## References")
+
+
+def test_no_glossary_heading_when_no_term_was_captured():
+    """No marker, no section. A Glossary with zero entries is not written."""
+    led, claims = ledger_with()
+    body = stages.assemble(
+        plan(title="T"), outline(claims[0].id), {"Introduction": "A fact. [1][2]"}, [], led
+    )
+    assert "## Glossary" not in body
 
 
 def test_assemble_gate_raises_on_a_failing_paper():
@@ -626,6 +2775,145 @@ def test_assemble_gate_passes_the_doctrine_flag_through_to_paper_check(monkeypat
 
     stages.assemble_gate("# T\n\nbody\n", led, loop_doctrine=True)
     assert seen["loop_doctrine"] is True
+
+
+def test_assemble_gate_fails_a_heading_that_pastes_a_key_question(monkeypatch):
+    """#463: `assemble_gate` hands its `outline` argument through to
+    `paper_check.check`, so `question_heading` can also grade a heading
+    against the plan's `key_questions`, not only against a heading ending
+    in `?`. The H3 below drops the question mark, so it passes with no
+    outline; handed the outline, its text still equals a key question and
+    it fails."""
+    import paper_check  # noqa: PLC0415
+
+    monkeypatch.setattr(paper_check, "MIN_WORDS", 0)
+    monkeypatch.setattr(paper_check, "MIN_SECTION_WORDS", 5)
+    led = evidence.Ledger("/nonexistent")
+    a = led.add_source(
+        evidence.SourceDocument(title="a", url="https://docs.langchain.com/one", subject="exits")
+    )
+    b = led.add_source(
+        evidence.SourceDocument(title="b", url="https://docs.claude.com/two", subject="exits")
+    )
+    led.add_claim(
+        evidence.Claim(
+            text="Three exits cover the observed cases.", subject="exits", source_ids=[a.id, b.id]
+        )
+    )
+    body = (
+        "# Exit conditions\n\n"
+        "Prepared by: LangChain Deep Agents (writer: claude-sonnet-5).\n\n"
+        "Date: 2026-01-01.\n\n"
+        "Generated by an automated research loop. Sources: 2 retrieved, 2 cited. "
+        "Verification: 2 claims cross-checked. See Methods.\n\n"
+        "No funding. No conflicts declared.\n\n"
+        "## Abstract\n\nA loop without an exit spends until someone notices. [1]\n\n"
+        "## Introduction\n\n"
+        "Three exits cover the observed cases: done, then cost, then max turns. [1][2]\n\n"
+        "### What stops the loop from running forever\n\n"
+        "A rubric computed in code decides when the loop stops. [1]\n\n"
+        "## Methods\n\n"
+        "- This paper searched two planned sections for evidence, starting 2026-01-01: "
+        "Abstract, Introduction. Each planned section names a facet of the topic the "
+        "outline settled before research began.\n"
+        "- Admitted search hosts, decided once before any paid search ran: "
+        "docs.langchain.com, docs.claude.com. A host outside this list was not searched.\n"
+        "- Sources retrieved during research: 2. Sources admitted to the reference "
+        "list, after the same host and claim checks every finding in this paper "
+        "passed: 2.\n"
+        "- The verification cap for this run allows a second opinion on up to 24 "
+        "claims. The follow-turn cap allows 6 secondary claims a look at their own "
+        "primary study, of which 0 were spent. The counter-evidence cap allows 6 "
+        "generalizing claims a search for a contrary finding, of which 0 were spent.\n"
+        "- No proposed host was excluded during admission; every host cleared the wall.\n"
+        "- No claim in this run carries a recorded human study.\n\n"
+        "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
+        "## Conclusion\n\nThe evidence above supports the three exits, with the runtime scope "
+        "noted as a limit. [1][2]\n\n"
+        "## Next step\n\n"
+        "- Evaluate the three exits on a live ticket before adopting them.\n"
+        "- Run the fixture with --backend fixture, then again with a live backend.\n"
+        "- Compare this port against the sibling runtime on the same topic.\n\n"
+        "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
+    )
+    outline = {
+        "sections": [
+            {
+                "heading": "Introduction",
+                "key_questions": ["What stops the loop from running forever?"],
+            }
+        ]
+    }
+
+    assert "question_heading" not in stages.assemble_gate(body, led, loop_doctrine=False).signature()
+
+    with pytest.raises(GateFailed) as exc:
+        stages.assemble_gate(body, led, loop_doctrine=False, outline=outline)
+    assert "question_heading" in exc.value.signature
+
+
+# -- P12, front matter -------------------------------------------------------
+
+
+def test_the_models_named_match_the_role_table(monkeypatch):
+    """The byline is not invented: it reads `roleplan.plan()` at assemble
+    time, so a role table's own change is what a reader sees. #479"""
+    import roleplan  # noqa: PLC0415
+
+    fake_roles = {
+        "writer": roleplan.RolePlan(name="writer", purpose="p", tools=(), model="test-fixture-model")
+    }
+    monkeypatch.setattr(roleplan, "plan", lambda contract, loop: fake_roles)
+    led, _ = ledger_with()
+    block = stages.front_matter_block(led, prepared_at="2026-01-01")
+    assert "writer: test-fixture-model" in block
+    assert "claude-sonnet-5" not in block
+
+
+def test_the_provenance_counts_match_the_ledger():
+    """Sources retrieved, sources cited, and claims cross-checked come from
+    the run's own ledger, not a guess. #479"""
+    led = evidence.Ledger("/nonexistent")
+    a = led.add_source(evidence.SourceDocument(title="a", url="https://a.example", subject="s"))
+    b = led.add_source(evidence.SourceDocument(title="b", url="https://b.example", subject="s"))
+    led.add_source(evidence.SourceDocument(title="c", url="https://c.example", subject="s"))
+    led.add_claim(
+        evidence.Claim(text="fact one", subject="s", source_ids=[a.id], cross_checked=True)
+    )
+    led.add_claim(
+        evidence.Claim(text="fact two", subject="s", source_ids=[b.id], cross_checked=False)
+    )
+    block = stages.front_matter_block(led, prepared_at="2026-01-01")
+    assert (
+        "Generated by an automated research loop. Sources: 3 retrieved, 2 cited. "
+        "Verification: 1 claims cross-checked. See Methods." in block
+    ), block
+
+
+def test_the_conflicts_line_is_overridable(monkeypatch):
+    """The Taskfile's own `CONFLICTS` variable reaches `front_matter_block`
+    as an environment variable, and a run with no override still states
+    one. #479"""
+    led, _ = ledger_with()
+    monkeypatch.setenv("CONFLICTS", "Funded by Example Research Fund.")
+    block = stages.front_matter_block(led, prepared_at="2026-01-01")
+    assert "Funded by Example Research Fund." in block
+    assert "No funding. No conflicts declared." not in block
+
+    monkeypatch.delenv("CONFLICTS")
+    default_block = stages.front_matter_block(led, prepared_at="2026-01-01")
+    assert "No funding. No conflicts declared." in default_block
+
+
+def test_front_matter_sits_above_the_abstract_in_assemble():
+    """`stages.assemble` splices the block under the H1, above the Abstract."""
+    led, claims = ledger_with()
+    block = stages.front_matter_block(led, prepared_at="2026-01-01")
+    body = stages.assemble(
+        plan(title="T"), outline(claims[0].id), {"Introduction": "A fact. [1]"}, [], led,
+        front_matter=block,
+    )
+    assert body.index("Prepared by:") < body.index("## Abstract")
 
 
 # -- the verification cap --------------------------------------------------
@@ -711,7 +2999,12 @@ def test_verification_marks_the_claims_it_reported_on():
 
 
 def test_a_source_count_is_not_a_second_look():
-    """Two URLs inside one search answer are two sources and one look."""
+    """Two URLs inside one search answer are two sources and one look.
+
+    #471: `corroborate()` used to count raw source ids, so this claim came
+    back corroborated despite nobody having checked either binding. It now
+    stays single-source until each source is actually attributed.
+    """
     led = evidence.Ledger("/nonexistent")
     a = led.add_source(evidence.SourceDocument(title="a", url="https://a.example", subject="s"))
     b = led.add_source(evidence.SourceDocument(title="b", url="https://b.example", subject="s"))
@@ -719,13 +3012,19 @@ def test_a_source_count_is_not_a_second_look():
         evidence.Claim(text="x", subject="s", source_ids=[a.id, b.id], important=True)
     )
     evidence.corroborate(claim)
-    assert claim.truth_state == evidence.CORROBORATED
+    assert claim.truth_state == evidence.SINGLE_SOURCE
     assert claim.cross_checked is False
     assert led.unchecked() == [claim]
 def test_plan_requires_the_repo_exit_order_question_first():
     plan = {
         "questions": [
-            {"id": "q1", "question": stages.EXIT_DOCTRINE_QUESTION, "check": "the repo source", "important": True},
+            {
+                "id": "q1",
+                "question": stages.EXIT_DOCTRINE_QUESTION,
+                "check": "the repo source",
+                "important": True,
+                "evidence_requirements": evidence_requirements(),
+            },
             {"id": "q2", "question": "A second question", "check": "a source"},
             {"id": "q3", "question": "A third question", "check": "a source"},
         ],
@@ -750,6 +3049,7 @@ def test_a_plan_for_any_other_topic_does_not_need_the_doctrine_question():
                 "question": "What dosing protocol saturates intramuscular phosphocreatine?",
                 "check": "a loading and maintenance dose with a citation",
                 "important": True,
+                "evidence_requirements": evidence_requirements(),
             },
             {"id": "q2", "question": "What percentage of lean mass is typically lost in a deficit?", "check": "a study"},
             {"id": "q3", "question": "What RCTs measured lean mass retention with creatine?", "check": "a named RCT"},

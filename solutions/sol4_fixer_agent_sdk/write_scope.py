@@ -142,7 +142,13 @@ class Orchestrator(Role):
     def usd_left(self) -> float:
         return max(0.0, self.budget_usd - self.spent_usd)
 
-    def spend(self, usd: float) -> None:
+    def spend(self, usd: float | None) -> None:
+        # #541. `None` means the backend never answered (a timed-out query,
+        # a raised exception), not that the turn was free. The budget still
+        # has to keep moving, so an unknown turn spends 0.0 against it; the
+        # trace reports the `None` itself, never a silent 0.0.
+        if usd is None:
+            return
         self.spent_usd += usd
 
     @property

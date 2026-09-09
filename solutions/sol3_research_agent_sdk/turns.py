@@ -27,8 +27,10 @@ import research
 import source_policy
 from load_agents import (
     CHART_SCHEMA,
+    COUNTER_SCHEMA,
     DIAGRAM_SCHEMA,
     FINDINGS_SCHEMA,
+    FOLLOW_SCHEMA,
     GROUNDING,
     LEDGER_SCHEMA,
     LOCATE_SCHEMA,
@@ -49,7 +51,8 @@ from load_agents import (
 MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
 MAX_CLAIMS = 40
-MAX_WORDS = 2000
+# #538, PR #554 judge finding F4. Matches `paper.MAX_WORDS`.
+MAX_WORDS = 2800
 EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
 SCOUT_SCHEMA = {
@@ -70,8 +73,15 @@ SCOUT_SCHEMA = {
                 "required": ["host", "org_type"],
             },
         },
+        # The topic's own research field, not a source recommendation. Python
+        # seeds the fallback allowlist from this when the model names no
+        # host; a paper's field is not always arxiv.org's field. #469
+        "field": {
+            "type": "string",
+            "enum": ["software", "physics", "biomedical", "economics", "law", "general"],
+        },
     },
-    "required": ["headings", "domains"],
+    "required": ["headings", "domains", "field"],
 }
 
 
@@ -190,6 +200,20 @@ def bind_exit_doctrine(plan: dict, *, enforce_loop_doctrine: bool = True) -> dic
     return plan
 
 
+# P6, #452 #465 #412. A claim dict also carries `source_url` and `quote`, the
+# exact host and text the librarian retrieved. A live paper handed that to the
+# writer verbatim, and the writer restated the host and the retrieval outcome
+# instead of the subject: "no arxiv.org source was found" appeared forty-two
+# times in one creatine paper. The writer needs the number it cites by, the
+# text it unpacks, and the status that changes how it is worded. Nothing else.
+WRITER_CLAIM_FIELDS = ("id", "number", "text", "status")
+
+
+def _writer_claims(claims: list[dict]) -> list[dict]:
+    """Only the fields the writer's delegation message may carry."""
+    return [{key: claim[key] for key in WRITER_CLAIM_FIELDS if key in claim} for claim in claims]
+
+
 @dataclass
 class Turns:
     """What a runtime must be able to do."""
@@ -208,7 +232,7 @@ class Turns:
     def source_allowlist(self, topic: str, headings: list, prior_art: str = "") -> dict:
         raise NotImplementedError
 
-    def scout(self, topic: str) -> dict:
+    def scout(self, topic: str, note: str = "") -> dict:
         """A map of the field, not research. Override to call a model."""
         return {"headings": [], "domains": [], "titles": []}
 
@@ -233,7 +257,7 @@ class Turns:
         """
         return {"url": "", "supports": False, "excerpt": ""}
 
-    def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
+    def diagram(self, name: str, concept: str, feedback: str = "", claims: list[str] | None = None) -> dict:
         raise NotImplementedError
 
     def chart_spec(self, figure: dict, rows: list, note: str = "") -> dict:
@@ -242,6 +266,18 @@ class Turns:
     def write(
         self, section: dict, claims: list[dict], figures: list[dict], notes: str, path: str = ""
     ) -> str:
+        raise NotImplementedError
+
+    def write_abstract(self, body: str, ledger=None) -> str:
+        """One turn, after every section is written, that states only what
+        the assembled body already states. P7, #472.
+        """
+        raise NotImplementedError
+
+    def write_conclusion(self, body: str, ledger=None) -> str:
+        """One turn, after every section is written, that restates the
+        body's own findings with no new citation. #478.
+        """
         raise NotImplementedError
 
     def review(self, paper: str, report: str, ledger=None) -> dict:
@@ -268,6 +304,25 @@ class Turns:
         text = question if isinstance(question, str) else question.get("text") or ""
         listed = ", ".join(previous_queries[:8])
         return self.research(text, f"{note}\nPrevious queries: {listed}")
+
+    def follow_primary(self, claim: str, source_title: str, source_tier: str) -> dict:
+        """Find the primary study a review, preprint, or compilation cites.
+
+        Default: a miss. #473, matching `locate`'s "cannot search, reports a
+        miss" default: a runtime with no way to look reports nothing found
+        rather than inventing a URL nobody retrieved.
+        """
+        return {"found": False, "url": "", "title": "", "quote": ""}
+
+    def counter_search(self, claim: str) -> dict:
+        """Search for evidence that a generalizing claim is not the case, or
+        holds only under conditions.
+
+        Default: a miss, the same as `follow_primary`'s: a runtime with no
+        way to look reports nothing found rather than inventing a
+        counterargument nobody retrieved. #474
+        """
+        return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
 
     def judge_section(self, section: dict, body: str, findings: list, note: str = "") -> dict:
         return {"passed": True, "failed_rows": [], "notes": []}
@@ -312,6 +367,10 @@ class Turns:
         """Flow and transitions only. Add no facts."""
         return body
 
+    def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
+        """P9's whole-paper pass. Default: hand the body back unchanged."""
+        return body
+
 
 @dataclass
 class SdkTurns(Turns):
@@ -346,6 +405,7 @@ class SdkTurns(Turns):
                 output_tokens=getattr(result, "output_tokens", 0),
                 stop_reason=result.stop_reason,
                 ok=result.ok,
+                retries=getattr(result, "retries", 0),
             )
         # A runtime ceiling is not a failed turn. Retrying it spends the rest of
         # the budget rediscovering the same ceiling.
@@ -474,8 +534,12 @@ class SdkTurns(Turns):
             SOURCE_ALLOWLIST_SCHEMA,
         )
 
-    def scout(self, topic: str) -> dict:
-        """One cheap map of the field when the cabinet missed. Not research."""
+    def scout(self, topic: str, note: str = "") -> dict:
+        """One cheap map of the field when the cabinet missed. Not research.
+
+        `note`, when given, is #475's one retry: a scout that named headings
+        but no flagship titles is asked again, the missing field named.
+        """
         return self._json(
             "research-researcher",
             "Map the field for a white paper. This is a briefing, not research. "
@@ -484,10 +548,13 @@ class SdkTurns(Turns):
             "Return JSON with headings (5-8 standard section titles for this "
             "kind of paper), domains (canonical hosts with org_type from "
             f"{', '.join(source_policy.ORG_TYPES)}; at most "
-            f"{source_policy.MAX_PERPLEXITY_DOMAINS}), and titles (a few "
-            "flagship works, names only). Prefer arxiv.org, .gov, .edu, .int, "
-            "peer-reviewed publishers, and official documentation. Not blogs, "
-            "not encyclopedias, not cable news.",
+            f"{source_policy.MAX_PERPLEXITY_DOMAINS}), titles (a few "
+            "flagship works, names only), and field (software, physics, "
+            "biomedical, economics, law, or general, naming this topic's own "
+            "research field). Name the hosts that field actually publishes "
+            "in. Prefer .gov, .edu, .int, peer-reviewed publishers, and "
+            "official documentation. Not blogs, not encyclopedias, not cable "
+            f"news.\n{note}",
             SCOUT_SCHEMA,
         )
 
@@ -550,8 +617,43 @@ class SdkTurns(Turns):
         # turn an independent check into a reading-comprehension exercise.
         return self._json(
             "research-verifier",
-            f"Independently check this claim. Search for it yourself: {claim}",
+            f"Independently check this claim. Search for it yourself: {claim}\n\n"
+            "If you find nothing, return `unclear` and list every query you "
+            "tried in `queries_used`. Silence is not a result.",
             VERIFY_SCHEMA,
+        )
+
+    def follow_primary(self, claim: str, source_title: str, source_tier: str) -> dict:
+        """Ask for the primary study behind a claim only a summary carries.
+
+        No `search_domain_filter`: the primary this claim traces to may live
+        on a host the run's allowlist never admitted for its own topic
+        search, e.g. PubMed for a paper whose allowlist is arXiv. #473
+        """
+        return self._json(
+            "research-researcher",
+            f"This numeric claim rests only on a {source_tier or 'summary'}, "
+            f"{source_title or 'an unnamed source'}, not the primary study: "
+            f"{claim}\n\nFind the primary study that source cites for this "
+            "number. Search once. `found: false` if you cannot, rather than "
+            "naming a source you did not open.",
+            FOLLOW_SCHEMA,
+        )
+
+    def counter_search(self, claim: str) -> dict:
+        """Ask whether a generalizing claim holds only under conditions.
+
+        No `search_domain_filter`, the same reasoning as `follow_primary`:
+        counterevidence may live on a host the run's own topic search never
+        admitted. #474
+        """
+        return self._json(
+            "research-researcher",
+            f"This claim generalizes: {claim}\n\nFind evidence that it is "
+            "not the case, or holds only under conditions. Search once. "
+            "`found: false` if you cannot, rather than inventing a "
+            "counterargument you did not open.",
+            COUNTER_SCHEMA,
         )
 
     def locate(self, title: str, vendor: str, claim_head: str) -> dict:
@@ -570,7 +672,12 @@ class SdkTurns(Turns):
             LOCATE_SCHEMA,
         )
 
-    def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
+    def diagram(self, name: str, concept: str, feedback: str = "", claims: list[str] | None = None) -> dict:
+        grounding = (
+            "\n\nClaims this section may draw on:\n" + "\n".join(f"- {c}" for c in claims)
+            if claims
+            else ""
+        )
         again = (
             f"\n\nThe last render lost these: {feedback}. Merge nodes or shorten "
             "labels until it fits. Do not render the same source again."
@@ -579,7 +686,7 @@ class SdkTurns(Turns):
         )
         return self._json(
             "research-diagrammer",
-            f"Draw the figure named {name}. It shows: {concept}{again}",
+            f"Draw the figure named {name}. It shows: {concept}{grounding}{again}",
             DIAGRAM_SCHEMA,
             allow=[f"diagrams/{name}.mmd", f"diagrams/{name}.puml"],
         )
@@ -597,11 +704,12 @@ class SdkTurns(Turns):
         self, section: dict, claims: list[dict], figures: list[dict], notes: str, path: str = ""
     ) -> str:
         questions = section.get("key_questions") or []
-        # The same string the `coverage` row matches. Showing the writer the
-        # raw question, notes and corpus ULIDs included, told it to reproduce
-        # 460 characters of research note in the published paper.
+        # #385: pasting the question, notes and corpus ULIDs included, told
+        # the writer to reproduce it as a heading. Coverage now scores
+        # whether the answer's words overlap the question, so the
+        # instruction asks for an answer, not a copy.
         question_lines = "\n".join(f"- {checks.question_text(item)}" for item in questions)
-        payload = json.dumps({"claims": claims, "figures": figures}, indent=2)
+        payload = json.dumps({"claims": _writer_claims(claims), "figures": figures}, indent=2)
         target = path or f"sections/{section['id']}.md"
         result = self._ask(
             "research-writer",
@@ -611,8 +719,8 @@ class SdkTurns(Turns):
             f"Claims to support: {json.dumps(section.get('claims_to_support') or [])}\n"
             f"Word target: {section.get('word_target') or 'unspecified'} words. "
             "Aim within ten percent of that target.\n\n"
-            "Coverage is a case-insensitive substring. Each key question below "
-            "must appear in the section body as that string, not a paraphrase:\n"
+            "Answer each key question below in prose, in the body. Do not "
+            "paste a question as a heading and do not repeat it verbatim:\n"
             f"{question_lines or '(none)'}\n\n"
             f"Write it to {target} and also return it as your final message.\n\n"
             "Cite each claim by its `number` field, like [3]. Do not cite the id. "
@@ -622,6 +730,51 @@ class SdkTurns(Turns):
             "and its cost, then the limit of the evidence. Do not invent facts.\n\n"
             f"Use only these claims and figures:\n{payload}\n\n{notes}\n\n{GROUNDING}",
             allow=[target],
+        )
+        return result.output or ""
+
+    def write_abstract(self, body: str, ledger=None) -> str:
+        """One turn, after every section is stamped, that states only what
+        the assembled body already states. P7, #472.
+        """
+        payload = ""
+        if ledger:
+            payload = "\nThe paper ledger:\n" + json.dumps(ledger, indent=2)[:6000]
+        result = self._ask(
+            "research-writer",
+            "Write the paper's abstract, last, from the body already written "
+            "below. State only what that body states, and carry the same "
+            "hedge it carries for a single-source claim: say \"single "
+            "source\", \"one study\", \"one trial\", or \"preliminary\" in "
+            "the same sentence that cites it. Never write \"proves\", "
+            "\"definitively\", \"conclusively\", or \"establishes that\" for "
+            "a claim the body hedges. Cite by number, like [3], resolved "
+            "against the same claims the body already cites. Do not invent a "
+            "fact the body does not already state. Return the abstract text "
+            "only, no heading.\n\n"
+            f"The paper body, already written:\n{whole(body)}\n{payload}",
+        )
+        return result.output or ""
+
+    def write_conclusion(self, body: str, ledger=None) -> str:
+        """One turn, after the body, that restates only what it already
+        states, with no new citation. #478.
+        """
+        payload = ""
+        if ledger:
+            payload = "\nThe paper ledger:\n" + json.dumps(ledger, indent=2)[:6000]
+        result = self._ask(
+            "research-writer",
+            "Write the paper's conclusion, from the body already written "
+            "below. State only what that body states. Cite only a number "
+            "the body already cites; introduce no new source and no new "
+            "citation. Carry the same hedge the body carries for a "
+            "single-source claim: say \"single source\", \"one study\", "
+            "\"one trial\", or \"preliminary\" in the same sentence that "
+            "cites it. Never write \"proves\", \"definitively\", "
+            "\"conclusively\", or \"establishes that\" for a claim the "
+            "body hedges. Return the conclusion text only, no heading.\n\n"
+            f"The paper body, already written:\n{whole(body)}\n{payload}",
         )
         return result.output or ""
 
@@ -707,11 +860,12 @@ class SdkTurns(Turns):
             f"\n\nObjective: {section.get('objective') or section.get('goal', '')}"
             f"\nWord target: {section.get('word_target') or 'unspecified'} words, "
             "and aim within ten percent of that.\n"
-            "Each key question must appear in the body as this exact string:\n"
+            "The body must answer each key question below, in prose. Do not "
+            "paste a question as a heading and do not repeat it verbatim:\n"
             f"{questions or '(none)'}\n"
             "Cite each claim by its `number` field, like [3]. Do not cite the id. "
             "Use only the claims below, and add no facts that are not in them:\n"
-            f"{json.dumps(claims or [], indent=2)}"
+            f"{json.dumps(_writer_claims(claims or []), indent=2)}"
         )
         result = self._ask(
             "research-writer",
@@ -738,6 +892,45 @@ class SdkTurns(Turns):
         )
         return result.output or ""
 
+    def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
+        """P9. One turn sees the whole body, because the defect is a repeat
+        across sections and no single-section turn can see it. #464 adds a
+        second job to the same turn: name every figure `figures` lists in
+        its own owning section.
+        """
+        figure_note = (
+            (
+                "\n\nEach entry below also names a figure the paper already "
+                "carries a caption for: its number, its owning section, and "
+                "its caption. If that section's own prose does not yet name "
+                "the figure, add one short sentence there that does, for "
+                "example \"Figure 2 shows the retry sequence.\" Do not "
+                "renumber a figure or move its image or caption line.\n\n"
+                f"Figures:\n{json.dumps(figures, indent=2)[:4000]}"
+            )
+            if figures
+            else ""
+        )
+        result = self._ask(
+            "research-writer",
+            "This is the whole-paper pass. Each entry below names a sentence "
+            "and the other sections that restate it. Keep the first "
+            "statement, in full, with its numbers and units, exactly where "
+            "it already is. Replace every later restatement with one "
+            "sentence of 24 words or fewer that opens with one of these "
+            "four phrases and names one of the paper's own `##` headings: "
+            "\"As stated in\", \"As noted in\", \"As shown in\", or "
+            "\"See\". For example: \"As stated in the Approach, this finding "
+            "also applies here.\" Do not simply delete a repeat; a reader "
+            "needs the pointer, and a paragraph must never end up as only a "
+            "citation marker with no sentence. Add no facts. Keep every "
+            "heading and every figure line exactly as it is. Return the "
+            f"whole edited body.{figure_note}\n\n"
+            f"Repeats:\n{json.dumps(repeats, indent=2)[:6000]}\n\n"
+            f"The paper body, already assembled:\n{whole(body)}",
+        )
+        return result.output or ""
+
 
 # The offline twin. Templates, not intelligence. Each one produces the shape the
 # phase expects so the pipeline is exercised end to end without a key.
@@ -748,6 +941,20 @@ _STOP = {"the", "a", "an", "of", "in", "for", "and", "to", "how", "what", "is", 
 def slugify(text: str, limit: int = 60) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug[:limit].strip("-") or "untitled"
+
+
+def _figure_mention_sentence(number: int, caption: str) -> str:
+    """A plain sentence naming a figure, distinct enough from another
+    figure's own mention to never itself become a `caveat_once` repeat.
+
+    #464. `WORD` (the shingle tokenizer `repeat_shingles` uses) drops a
+    bare digit, so "Figure 1 illustrates this point." and "Figure 2
+    illustrates this point." shingle identically once the number is gone
+    and Jaccard-match each other as a restatement. A few words of the
+    figure's own caption is content two different figures do not share.
+    """
+    gist = " ".join((caption or "").split()[:6]).rstrip(",.:;")
+    return f"Figure {number} shows {gist}." if gist else f"Figure {number} illustrates this point."
 
 
 def _fit_word_target(lines: list[str], target: int) -> list[str]:
@@ -795,11 +1002,21 @@ def develop_claim(text: str, marker: str, status: str = "verified") -> list[str]
         "A host that wants this behavior has to put it in the loop and keep it "
         "out of the model's judgment." + cite
     )
+    # #521. Ten of these paragraphs carried no reference to `claim` at all,
+    # so two different claims produced byte-identical mechanism prose.
+    # `caveat_once` correctly reads identical prose as a restatement no
+    # matter which finding backs it, so a thin fixture's second and third
+    # claim lost almost this whole paragraph to a back reference for a
+    # repeat that was never about the finding, only about the template.
+    # Naming the finding once, in the same third-person declarative voice
+    # the rest of this function already uses, ties the paragraph back to
+    # the one claim it develops, the same fix `mechanism` already carried
+    # for this reason.
     order = (
-        "The order of the check is part of the mechanism. The host runs the "
-        "test after the work of the turn, not before it, and not as a request "
-        "the model can rewrite. A check that runs in the wrong place is a "
-        "check the model can talk past." + cite
+        f"{claim} sets the order the check runs in. "
+        "The host runs the test after the work of the turn, not before it, and "
+        "not as a request the model can rewrite. A check that runs in the wrong "
+        "place is a check the model can talk past." + cite
     )
     missing = (
         "If that component is missing, the bound disappears with it. The rest "
@@ -808,41 +1025,44 @@ def develop_claim(text: str, marker: str, status: str = "verified") -> list[str]
         "operator notices." + cite
     )
     alternative = (
-        "The cheaper alternative is to leave this to a prompt. That alternative "
-        "needs no extra role and no path check. Its cost is that a model can "
-        "talk past it. The bound in the claim is a program bound, not a request." + cite
+        f"{claim} is the finding a cheaper alternative would lose. "
+        "That alternative needs no extra role and no path check. Its cost is "
+        "that a model can talk past it. The bound in the claim is a program "
+        "bound, not a request." + cite
     )
     tradeoff = (
+        f"{claim} is what the tradeoff buys. "
         "Choosing the program bound costs a role, a path, and a test. Choosing "
-        "the prompt costs none of those. The prompt looks cheaper until a run "
-        "has to be explained. Then the missing check is the whole incident." + cite
+        "the prompt costs none of those, until a run has to be explained; then "
+        "the missing check is the whole incident." + cite
     )
     limit = (
-        f"The limit of the evidence is the source behind {marker or 'this claim'}. "
-        "This paragraph does not upgrade that source into a standard or a "
-        "production measurement. If the claim carries one page, it remains a "
-        "single-source observation." + cite
+        f"The limit of the evidence behind {claim} is the source behind "
+        f"{marker or 'this claim'}. This paragraph does not upgrade that "
+        "source into a standard or a production measurement. If the claim "
+        "carries one page, it remains a single-source observation." + cite
     )
     caveat = (
-        "A single source can be right and still be thin. Vendor documentation "
-        "states what a product does on one day. It does not state what every "
-        "host should copy. The paper names the source and stops there." + cite
+        f"{claim} still rests on one source, which can be right and thin at "
+        "the same time. Vendor documentation states what a product does on "
+        "one day. It does not state what every host should copy. The paper "
+        "names the source and stops there." + cite
     )
     scope = (
-        "Scope stays inside the claim. A fact the source does not support does "
+        f"Scope stays inside {claim}. A fact the source does not support does "
         "not enter this section. That is what makes the citation count mean "
         "something." + cite
     )
     resume = (
-        "A loop that records this finding can resume from it. A loop that only "
+        f"A loop that records {claim} can resume from it. A loop that only "
         "holds it in a model message loses it on the next turn. Persistence is "
         "part of the mechanism, not an afterthought." + cite
     )
     ownership = (
-        "The host owns the check. The model does not. A stop condition trusted "
-        "to the model's own judgment is a stop condition the model can talk "
-        "itself past. This paper treats that as a design error, not a style "
-        "choice." + cite
+        f"The host owns the check behind {claim}. The model does not. A stop "
+        "condition trusted to the model's own judgment is a stop condition the "
+        "model can talk itself past. This paper treats that as a design error, "
+        "not a style choice." + cite
     )
     falsify = (
         f"A reader can falsify the claim by opening the cited source. If the "
@@ -851,18 +1071,18 @@ def develop_claim(text: str, marker: str, status: str = "verified") -> list[str]
         "reader to trust the prose." + cite
     )
     host = (
-        "An implementer who copies only the conclusion and skips the check "
-        "has not copied the design. The useful part is the program test, not "
-        "the sentence that describes it." + cite
+        f"An implementer who copies only the conclusion behind {claim} and "
+        "skips the check has not copied the design. The useful part is the "
+        "program test, not the sentence that describes it." + cite
     )
     interrupt = (
-        "An interrupt must leave the finding on disk. Killing the process "
-        "mid-turn is an expected event, not an edge case. A run that can "
-        "only explain itself while it is still in memory is a run that cannot "
-        "be handed to a colleague." + cite
+        f"An interrupt must leave {claim} on disk. Killing the process "
+        "mid-turn is an expected event, not an edge case. A run that can only "
+        "explain itself while it is still in memory is a run that cannot be "
+        "handed to a colleague." + cite
     )
     brief = (
-        "A cited brief can stop after the finding. This paper does not. The "
+        f"A cited brief can stop after {claim}. This paper does not. The "
         "Saturday lab already produces that brief. The extra paragraphs exist "
         "to name the mechanism, the alternative, and the limit of the evidence "
         "so a colleague can implement the check rather than quote the slogan." + cite
@@ -910,13 +1130,79 @@ class OfflineTurns(Turns):
     def outline(
         self, topic: str, prior_art: str, budget: dict | None = None, note: str = "", brief: str = ""
     ) -> dict:
+        # #475. This is a software paper about the harness itself, not a
+        # clinical one: `other` is the honest tier for a doc page or a
+        # vendor repository, the same default `source_policy.tier_for`
+        # gives any record with no PubMed, arXiv, or Crossref match.
+        # `recency_years: 0` -- no window: the fixture's own placeholder
+        # sources carry no publication year, and #520's follow-up 2 makes
+        # a yearless source fail a window that is actually set.
+        def q(text: str) -> dict:
+            return {
+                "text": text,
+                "kind": "fact",
+                "evidence_requirements": {
+                    "study_types": ["other"],
+                    "min_count": 1,
+                    "recency_years": 0,
+                    "populations": [],
+                },
+            }
+
         budget = budget or {}
         words = int(budget.get("words") or MAX_WORDS)
-        # Three sections, last one is limitations. Word targets sum exactly.
-        first = words // 3
-        second = words // 3
-        third = words - first - second
+        # Five sections: Introduction first (#538, the frozen heading order's
+        # own structural position), three body sections, and the next step
+        # last. Introduction's target is carved out of `words` the same way
+        # `next_step_target` already is: PR #554 judge finding F4, a live
+        # outline is still told `word_target_total={words}` (the prompt this
+        # class's own `SdkTurns` sibling sends, unchanged by #538) and has to
+        # sum its five sections within ten percent of that same number, so
+        # this offline twin reporting a bigger total here would test an
+        # arithmetic no live run is ever asked to hit. `PROFILES["demo"]` in
+        # `loop.py` carries the make-up margin instead: five sections now
+        # share one word budget that four used to, and this fixture's own
+        # canned research (`fixtures/research.json`, four recorded answers
+        # for what is now ten key questions) triggers more of the
+        # whole-paper trim pass's own repeat-collapse the more sections
+        # share one finding, so the same nominal total renders fewer words
+        # than it did at four sections.
+        next_step_target = max(100, words // 20)
+        introduction_target = max(100, words // 8)
+        remaining = max(words - next_step_target - introduction_target, 0)
+        first = remaining // 3
+        second = remaining // 3
+        third = remaining - first - second
         sections = [
+            {
+                "id": "introduction",
+                "heading": "Introduction",
+                "objective": (
+                    "Name the problem an arithmetic-free stop condition produces, and "
+                    "what this paper settles about it."
+                ),
+                "abstract": (
+                    "A production agent loop needs an exit condition arithmetic can "
+                    "check, not one left to a model's own report. This paper settles "
+                    "what a reliable loop checks instead, and who pays when it does not."
+                ),
+                "key_questions": [
+                    q("What problem does an agent loop with no exit criteria create?"),
+                    q(
+                        "Who is affected when a loop's stop condition is left to a "
+                        "model's own judgment?"
+                    ),
+                ],
+                "claims_to_support": [
+                    "A reliable loop computes done from a rubric in code.",
+                ],
+                "required_evidence": [
+                    "this repository's paper loop implementation",
+                ],
+                "word_target": introduction_target,
+                "figures": [],
+                "depends_on": [],
+            },
             {
                 "id": "problem",
                 "heading": "The problem",
@@ -929,8 +1215,8 @@ class OfflineTurns(Turns):
                     "judgment. This section names that failure and the reader who pays for it."
                 ),
                 "key_questions": [
-                    EXIT_DOCTRINE_QUESTION,
-                    "What failure mode does a production loop have to prevent?",
+                    q(EXIT_DOCTRINE_QUESTION),
+                    q("What failure mode does a production loop have to prevent?"),
                 ],
                 "claims_to_support": [
                     "A reliable loop computes done from a rubric in code.",
@@ -951,8 +1237,8 @@ class OfflineTurns(Turns):
                     "deterministic gate separate evidence from prose."
                 ),
                 "key_questions": [
-                    "What is the common mistake when research and writing share a context?",
-                    "How does this pipeline separate research from writing?",
+                    q("What is the common mistake when research and writing share a context?"),
+                    q("How does this pipeline separate research from writing?"),
                 ],
                 "claims_to_support": [
                     "The researcher cannot write the paper.",
@@ -987,8 +1273,8 @@ class OfflineTurns(Turns):
                     "does not invent a source when retrieval is empty."
                 ),
                 "key_questions": [
-                    "How does verification work under a finite budget?",
-                    "Where does this pipeline refuse to guess?",
+                    q("How does verification work under a finite budget?"),
+                    q("Where does this pipeline refuse to guess?"),
                 ],
                 "claims_to_support": [
                     "Unverified claims are stated qualitatively or dropped.",
@@ -999,6 +1285,24 @@ class OfflineTurns(Turns):
                 "word_target": third,
                 "figures": [],
                 "depends_on": ["approach"],
+            },
+            {
+                "id": "next-step",
+                "heading": "Next step",
+                "objective": "Tell a colleague what to do with this design before adopting it.",
+                "abstract": (
+                    "A colleague evaluates the three exits on a live ticket before "
+                    "adopting them elsewhere."
+                ),
+                "key_questions": [
+                    q("What should a colleague do with these findings?"),
+                    q("How does a colleague evaluate the design on a live case?"),
+                ],
+                "claims_to_support": [],
+                "required_evidence": [],
+                "word_target": next_step_target,
+                "figures": [],
+                "depends_on": ["limits"],
             },
         ]
         return {
@@ -1079,7 +1383,7 @@ class OfflineTurns(Turns):
     # the offline twin wants exactly the base class's miss. Restating it would
     # be a hunk no test could tell from its parent.
 
-    def diagram(self, name: str, concept: str, feedback: str = "") -> dict:
+    def diagram(self, name: str, concept: str, feedback: str = "", claims: list[str] | None = None) -> dict:
         if name == "trust-boundary":
             source = (
                 "flowchart LR\n"
@@ -1116,14 +1420,29 @@ class OfflineTurns(Turns):
     ) -> str:
         lines = [f"## {section['heading']}", ""]
         questions = section.get("key_questions") or []
+        is_introduction = section.get("heading", "").strip().lower() == "introduction"
         marker = f"[{claims[0]['number']}]" if claims and claims[0].get("number") else ""
-        for question in questions:
+        for index, question in enumerate(questions):
             text = checks.question_text(question)
             if claims:
-                lines += [
-                    f"This section answers: {text} {marker}".strip(),
-                    "",
-                ]
+                if index == 0 and is_introduction:
+                    # #538. `abstract_matches_body` grades an Introduction's
+                    # first paragraph the same way it grades the Abstract: a
+                    # sentence citing a single-source claim needs a hedge
+                    # word in that same sentence. This is that first
+                    # paragraph, so it carries the hedge unconditionally
+                    # rather than depending on which claim this offline run
+                    # happened to verify independently.
+                    lines += [
+                        f"This section introduces {text}, drawn from a single source "
+                        f"in this run's own corpus. {marker}".strip(),
+                        "",
+                    ]
+                else:
+                    lines += [
+                        f"This section answers: {text} {marker}".strip(),
+                        "",
+                    ]
             else:
                 lines += [f"> This section would have answered: {text}", ""]
         for planned in section.get("figures") or []:
@@ -1152,6 +1471,26 @@ class OfflineTurns(Turns):
                     f"shows, and what disappears if that component is missing. {marker}".strip(),
                     "",
                 ]
+        if section.get("heading", "").strip().lower() == "next step":
+            # P4. A fixed, deterministic CTA close: imperative steps, no
+            # `develop_claim` prose, and no marketing. Coverage is already
+            # satisfied above, by the per-question lines every section gets;
+            # a claim the fallback research pass bound to this section (the
+            # fixture backend always returns its nearest match, never a
+            # miss) is not unpacked here, because a CTA is an instruction,
+            # not a finding. `_fit_word_target` is skipped too: its band
+            # would pad by repeating one step past the point of reading as a
+            # next step, or truncate the list mid-bullet.
+            lines += [
+                "- Evaluate the three exits on a live ticket before adopting them elsewhere.",
+                "- Run the fixture with --backend fixture, then again with a live backend.",
+                "- Compare this port against the sibling runtime on the same topic and budget.",
+                "- Measure each section's word count before raising that section's target higher.",
+                "- Try the offline demo first, then repeat the same run against a live backend.",
+                "- Adopt the exit order only after a team reviews the evidence behind it.",
+                "",
+            ]
+            return "\n".join(lines)
         for claim in claims:
             marker = f"[{claim['number']}]" if claim.get("number") else ""
             lines += develop_claim(claim["text"], marker, claim.get("status") or "verified")
@@ -1169,6 +1508,21 @@ class OfflineTurns(Turns):
         if target:
             lines = _fit_word_target(lines, target)
         return "\n".join(lines)
+
+    def write_abstract(self, body: str, ledger=None) -> str:
+        """No model, so no new claim to check. A summary that cites nothing
+        needs no hedge and cannot overclaim.
+        """
+        return "This paper summarizes the sections that follow, from the sources verified in the run."
+
+    def write_conclusion(self, body: str, ledger=None) -> str:
+        """No model, so no new citation to check. Reuses the body's own
+        first citation number rather than inventing one, so `cited` and
+        `grounded` both pass the same way a section's own prose does. #478.
+        """
+        match = re.search(r"\[(\d+)\]", body)
+        marker = f" [{match.group(1)}]" if match else ""
+        return f"The findings above hold under the limits already noted{marker}."
 
     def judge_section(self, section: dict, body: str, findings: list, note: str = "") -> dict:
         return {"passed": True, "failed_rows": [], "notes": []}
@@ -1199,6 +1553,77 @@ class OfflineTurns(Turns):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(body, encoding="utf-8")
         return body
+
+    def edit_whole_paper(self, body: str, repeats: list[dict], figures: list | None = None) -> str:
+        """No model, so no paraphrase either: replace the repeat named by
+        each match, in the one section it names, with a back reference to
+        the section that stated it first. The canonical statement is never
+        touched, because this only ever edits the match's own section slice
+        of the body, never the source section's, and never searches the
+        rest of the document: a short sentence a match names can coincide
+        with text elsewhere that has nothing to do with this repeat.
+
+        The reference opens with "As stated in", one of the four cues
+        `checks.BACK_REFERENCE_CUES` exempts from the row it clears, so
+        pointing several sections at the same source never becomes a new
+        repeat of the pointer itself.
+        """
+        for item in repeats:
+            source = item["section"]
+            for match in item.get("matches") or []:
+                sentence = match.get("sentence") or ""
+                target = match["section"]
+                if not sentence:
+                    continue
+                span = checks.top_level_section_spans(body).get(target)
+                if span is None:
+                    continue
+                start, end = span
+                segment = body[start:end]
+                if sentence not in segment:
+                    continue
+                reference = f"As stated in {source}, this point also holds here."
+                segment = segment.replace(sentence, reference, 1)
+                body = body[:start] + segment + body[end:]
+        # #464. No model, so no paraphrase here either: one plain sentence
+        # naming the figure, added to the end of the last prose paragraph
+        # before the image, for any figure that section's prose does not
+        # already mention. Joined onto that paragraph, not a new one after
+        # it: a standalone sentence after the image's own caption would
+        # read as an uncited claim, and the paragraph it joins already
+        # carries the citation this figure is illustrating.
+        for figure in figures or []:
+            section = figure.get("section")
+            number = figure.get("number")
+            if not section or not number:
+                continue
+            span = checks.top_level_section_spans(body).get(section)
+            if span is None:
+                continue
+            start, end = span
+            segment = body[start:end]
+            image_match = re.search(r"^!\[", segment, re.M)
+            cut = image_match.start() if image_match else len(segment)
+            prose, tail = segment[:cut].rstrip(), segment[cut:]
+            # The `Figure N.` caption line itself always names the figure;
+            # it lives in `tail`, never in `prose`. Checking `segment` as a
+            # whole read the caption as an existing mention and skipped
+            # every figure whose image already carried one. #464. Word-
+            # bounded, so "Figure 1" is not satisfied by a "Figure 12"
+            # mention already in the prose. #464 F1.
+            if checks.mentions_figure(prose, number):
+                continue
+            sentence = _figure_mention_sentence(number, figure.get("caption") or "")
+            prose = f"{prose} {sentence}" if prose else sentence
+            segment = prose + ("\n\n" + tail if tail else "\n\n")
+            body = body[:start] + segment + body[end:]
+        # #521. Pointing two repeats in the same paragraph at the same
+        # source leaves the identical pointer sentence stacked once per
+        # repeat; a reader needs it once. A dangling "Figure N" left from an
+        # earlier pass is `paper.edit_whole_paper`'s own cleanup (#464), run
+        # after this returns so it also catches a model-written reply.
+        body = checks.collapse_repeated_back_references(body)
+        return re.sub(r"\n{3,}", "\n\n", body)
 
     def review(self, paper: str, report: str, ledger=None) -> dict:
         """Agree with the deterministic report and add nothing.

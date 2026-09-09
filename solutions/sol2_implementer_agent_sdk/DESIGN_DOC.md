@@ -27,6 +27,10 @@ This folder is the Claude Agent SDK Ticket Implementer. It is a standalone eight
 - Give the planner ownership of `steps.jsonl`, the test implementer ownership of `tests/**`, and the code implementer ownership of `app/**` while denying `tests/**`.
 - Run target tests through Python rather than granting any role a shell.
 - Produce one `PreToolUse` decision per attempted write and reject parent writes.
+- Run every attempt inside its own git worktree, so the target repo you pass
+  in stays untouched.
+- Write `.harness/state.json` beside the receipt, and resume a killed run
+  from it with `--resume`.
 
 ### Quality requirements
 
@@ -167,7 +171,7 @@ classDiagram
     AgentSdkBackend --> RolePlan
 ```
 
-The only persistent artifacts are plan, application, test, and report files in the target repository. There is no relational schema. Source: [`docs/diagrams/model.mmd`](docs/diagrams/model.mmd).
+The only persistent artifacts are plan, application, test, and report files, plus `.harness/state.json` and `.harness/receipt.json`. All of them live in the run's own git worktree, never in the target repository you passed in. There is no relational schema. Source: [`docs/diagrams/model.mmd`](docs/diagrams/model.mmd).
 
 ![Agent SDK implementer use cases](docs/diagrams/use-cases.svg)
 
@@ -186,6 +190,9 @@ Use `task table` and `task test` as offline checks. `task setup` installs the op
 | Retry | The code-phase prompt carries `gates.retry_instruction` and the failing test ids. |
 | Green rubric, unparseable judge | `done=False`. `gates.decide` escalates. |
 | Green run | `.harness/receipt.json` claims green, this tree, newer than last edit. |
+| Every attempt | The loop runs in `<repo>.worktrees/<ticket>`, on branch `implementer/<ticket>`. The target repo stays clean. |
+| A killed run | `--resume` re-enters from `.harness/state.json`. A corrupt `state.json` starts no work. |
+| A finished run | `main` exits `0` on pass, `2` on escalate, `1` on a contract error or corrupt state. |
 
 The principal risk is runtime hook semantics. Tests pin the one-hook design because a role-specific hook set can silently widen scope.
 
@@ -197,3 +204,5 @@ The principal risk is runtime hook semantics. Tests pin the one-hook design beca
 | Write scope | Role-specific allow and deny paths. |
 | Parent write | A write from the orchestrator process with no subagent identity; it is denied. |
 | Cast | The ordered roles and capabilities used by this lab. |
+| Worktree | The isolated git worktree at `<repo>.worktrees/<ticket>` where a run happens. Never the target repo. |
+| `state.json` | The resume checkpoint beside the receipt: run count, last gate, last reason, last run time, loop, phase, and the fields a `--resume` needs. |

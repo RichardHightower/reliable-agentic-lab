@@ -18,6 +18,7 @@ exists to catch.
 
 from __future__ import annotations
 
+import re
 import sys
 import types
 from dataclasses import dataclass, field
@@ -77,6 +78,65 @@ class FakeResultMessage:
     structured_output: dict | None = None
     is_error: bool = False
     subtype: str = "success"
+    terminal_reason: str | None = None
+
+
+@dataclass
+class FakeTaskStarted:
+    """#578. Stands in for the SDK's `TaskStartedMessage`: a delegated `Task`
+    of one of `_DEFERRING_TASK_TYPES` marks itself in flight with this."""
+
+    task_id: str = "t1"
+    task_type: str = "local_agent"
+    subtype: str = "task_started"
+
+
+@dataclass
+class FakeTaskNotification:
+    """#578. Stands in for `TaskNotificationMessage`: the task named by
+    `task_id` has drained."""
+
+    task_id: str = "t1"
+    subtype: str = "task_notification"
+
+
+# -- transient errors (#409) -------------------------------------------------
+#
+# Minimal stand-ins for `claude_agent_sdk._errors`. Only the shape `adapter.py`
+# actually reads: `CLINotFoundError` is a `CLIConnectionError`, and
+# `ResultError` carries `terminal_reason`.
+
+
+class FakeClaudeSDKError(Exception):
+    pass
+
+
+class FakeCLIConnectionError(FakeClaudeSDKError):
+    pass
+
+
+class FakeCLINotFoundError(FakeCLIConnectionError):
+    pass
+
+
+class FakeProcessError(FakeClaudeSDKError):
+    pass
+
+
+class FakeResultError(FakeProcessError):
+    def __init__(
+        self,
+        message: str = "api error",
+        terminal_reason: str | None = "api_error",
+        api_error_status: int | None = None,
+    ):
+        super().__init__(message)
+        self.terminal_reason = terminal_reason
+        # #482: the real `ResultError` carries the failing call's HTTP
+        # status here, `None` when the CLI reported no status (a timeout,
+        # say). `adapter._is_transient` reads it to tell a 4xx (permanent,
+        # 429 excepted) from a dropped connection or a 5xx (transient).
+        self.api_error_status = api_error_status
 
 
 def make_sdk_module(messages=None):
@@ -85,6 +145,11 @@ def make_sdk_module(messages=None):
     module.HookMatcher = FakeHookMatcher
     module.ClaudeAgentOptions = FakeClaudeAgentOptions
     module.ResultMessage = FakeResultMessage
+    module.ClaudeSDKError = FakeClaudeSDKError
+    module.CLIConnectionError = FakeCLIConnectionError
+    module.CLINotFoundError = FakeCLINotFoundError
+    module.ProcessError = FakeProcessError
+    module.ResultError = FakeResultError
 
     async def query(*, prompt: str, options):
         module.last_prompt = prompt
@@ -216,8 +281,8 @@ class RecordingTurns:
             "excerpt": "a thing is true",
         }
 
-    def diagram(self, name, concept, feedback=""):
-        self.asked.append(("diagram", name, concept, feedback))
+    def diagram(self, name, concept, feedback="", claims=None):
+        self.asked.append(("diagram", name, concept, feedback, list(claims or [])))
         return {"language": "mermaid", "source": "flowchart LR\n  A[A] --> B[B]", "caption": "Cap."}
 
     def chart_spec(self, figure, rows, note=""):
@@ -245,6 +310,16 @@ class RecordingTurns:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(body, encoding="utf-8")
         return body
+
+    def write_abstract(self, body, ledger=None):
+        self.asked.append(("write_abstract", len(body)))
+        return "A recorded abstract."
+
+    def write_conclusion(self, body, ledger=None):
+        self.asked.append(("write_conclusion", len(body)))
+        match = re.search(r"\[(\d+)\]", body)
+        marker = f" [{match.group(1)}]" if match else ""
+        return f"A recorded conclusion{marker}."
 
     def review(self, paper, report):
         self.asked.append(("review", report))

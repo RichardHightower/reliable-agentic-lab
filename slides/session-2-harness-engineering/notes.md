@@ -216,7 +216,8 @@ a fail. Absent evidence is never clean. `synthetic_fail`. Never a pass.
 Read the refusal text out loud, exactly as printed.
 
 Then tell them: your agent will hit this today. Saying it now turns a surprise
-into a demonstration. Claude Code `PreToolUse` hook. Reads `.harness/receipt.json`.
+into a demonstration. Claude Code `PreToolUse` hook, in the CRM clone at
+`.claude/hooks/gate.py`. Reads `.harness/receipt.json`.
 
 **You should be at 25 minutes here.**
 
@@ -302,7 +303,7 @@ is the silent-skip bug wearing a green shirt.
 ## s2-44. tree_hash and written_at
 
 Content, not `git status`. Staged, unstaged, and untracked all count.
-Four refusal reasons from `receipt.check`. Walk them.
+Six refusal reasons from `receipt.check`. Walk them.
 
 ## s2-45. One gate is never enough
 

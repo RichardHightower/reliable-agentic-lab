@@ -190,9 +190,22 @@ def _rooted_patterns(patterns) -> list[str]:
     return [pattern if pattern.startswith("/") else "/" + pattern for pattern in patterns]
 
 
-def subagents_for(contract, loop: str = DEFAULT_LOOP) -> list[dict]:
-    """One Deep Agents subagent per role in this loop's cast, with its own tools."""
-    repo = Path(contract.repo)
+def subagents_for(
+    contract, loop: str = DEFAULT_LOOP, *, cwd: Path | str | None = None
+) -> list[dict]:
+    """One Deep Agents subagent per role in this loop's cast, with its own tools.
+
+    #543 follow-up. This is where a subagent's actual write and read tools
+    are built (`scoped_write_tool`, `read_tool`), independently of the
+    orchestrator's own `FilesystemBackend` in `build_agent`. `build_agent`'s
+    `cwd` fix routed the orchestrator's backend and its `run_tests` tool at
+    the worktree; it never reached here, so the test and code implementer
+    subagents -- the two roles that actually call a write tool -- kept
+    writing into `contract.repo` (the `--repo` clone) regardless. A live
+    run proved it: an untracked, model-authored test file landed in the
+    clone with this gap still open, the same defect #543 set out to fix.
+    """
+    repo = Path(cwd).resolve() if cwd is not None else Path(contract.repo).resolve()
     reader = read_tool(repo)
     out = []
     for role in plan(contract, loop).values():
@@ -231,12 +244,20 @@ def build_agent(
     loop: str = DEFAULT_LOOP,
     model: str = DEFAULT_MODEL,
     subagent_names: frozenset[str] | None = None,
+    cwd: Path | str | None = None,
 ):
     """The orchestrator. Holds `run_tests`. Holds nothing that writes.
 
     Needs `deepagents>=0.7`. The default general-purpose subagent is turned off.
     Built-in write tools are hidden from the main agent. The target repo is
     mounted as a virtual filesystem so `..` cannot walk off it.
+
+    #543. `cwd` is where the live session actually works: `contract.repo`
+    when unset, matching every caller before this ticket, or the caller's
+    own worktree path when `implementer.run` executes somewhere other than
+    `contract.repo` itself (the `--repo` clone). `contract` still supplies
+    the subagent config either way -- `.loop.yml` lives in the clone, and a
+    worktree that does not exist yet at build time has none to read.
     """
     from deepagents import (  # noqa: PLC0415  (optional dependency)
         FilesystemPermission,
@@ -247,7 +268,7 @@ def build_agent(
     )
     from deepagents.backends import CompositeBackend, FilesystemBackend  # noqa: PLC0415
 
-    repo = Path(contract.repo).resolve()
+    repo = Path(cwd).resolve() if cwd is not None else Path(contract.repo).resolve()
     register_harness_profile(
         model,
         HarnessProfile(
@@ -255,7 +276,11 @@ def build_agent(
             general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
         ),
     )
-    specs = subagents_for(contract, loop)
+    # #543 follow-up. `repo` above is already the resolved `cwd` when one
+    # was given; this is the same worktree-vs-clone fix `subagents_for`
+    # itself now needs, threaded through rather than repeating the
+    # `cwd or contract.repo` choice a second time.
+    specs = subagents_for(contract, loop, cwd=repo)
     if subagent_names is not None:
         available = {spec["name"] for spec in specs}
         unknown = subagent_names - available

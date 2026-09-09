@@ -4,8 +4,10 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import doers
 import gates
 import loop
+import write_scope as roles
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,6 +20,16 @@ def test_failure_summary_names_tests():
     text = loop.summarize_failure(run)
     assert "test_y" in text
     assert "ValueError" in text
+
+
+def test_doers_result_usd_none_never_crashes_the_money_gate(tmp_path):
+    """#541. `doers.DoerResult.usd` is `float | None`, the same as its sibling
+    `adapter.DoerResult`, since `fixer.py` routes both families through the
+    same `boss.spend(result.usd)` call site."""
+    boss = roles.Orchestrator(name="orchestrator", repo=tmp_path)
+    result = doers.DoerResult(ok=False, usd=None, output="none backend answered nothing")
+    boss.spend(result.usd)  # must not raise
+    assert boss.spent_usd == 0.0
 
 
 def test_same_failing_ids_escalate():

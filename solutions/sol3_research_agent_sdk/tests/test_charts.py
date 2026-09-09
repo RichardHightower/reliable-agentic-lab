@@ -177,8 +177,12 @@ def test_assemble_embeds_a_rendered_diagram(work, turns):
     assert "Loop and harness architecture" in body
 
 
-def test_assemble_puts_an_unsectioned_diagram_under_figures(work, turns):
-    """A rendered figure the outline never placed still belongs in the paper."""
+def test_an_unsectioned_diagram_becomes_a_named_skip(work, turns):
+    """#464 B1. A figure the outline no longer places under a real section
+    can never receive the whole-paper pass's in-text mention: the old
+    orphan `## Figures` block is gone, and the figure is a named skip
+    instead, not silence and not an image `figure_referenced` can never
+    clear."""
     run = make_run(work, turns())
     paper.prior_art(run)
     paper.do_outline(run)
@@ -219,13 +223,32 @@ def test_assemble_puts_an_unsectioned_diagram_under_figures(work, turns):
     )
     paper.assemble(run)
     body = run.file("paper.md").read_text(encoding="utf-8")
-    assert "## Figures" in body, body
-    assert "diagrams/orphan_imagen.png" in body
+    assert "## Figures" not in body, body
+    assert "diagrams/orphan_imagen.png" not in body
+    assert "orphan" in body
+    assert "no owning section" in body
+    # No image, no number: the orphan-turned-skip never demands an in-text
+    # mention `figure_referenced` could never place.
+    assert not checks.placed_figures(body)
+    score = checks.check(body, ["https://example.invalid/doc"])
+    assert "figure_referenced" not in score.signature(), score.report()
 
 
-def test_linear_runs_charts_after_diagram():
+def test_linear_runs_charts_before_write():
+    """`diagram` moved out of `LINEAR` (#476); `charts` is the only figure
+    phase left here, and it still runs before the write/diagram/assemble
+    cycle."""
     names = [name for _n, name, _out, _fn in paper.LINEAR]
-    assert names.index("diagram") < names.index("charts")
+    assert "diagram" not in names
+    assert names.index("charts") < len(names)
+
+
+def test_diagram_runs_after_write():
+    """#476: a figure is commissioned from the section's own claims, which
+    do not exist until the section is written. `diagram` sits in `CYCLE`,
+    between `write` and `assemble`."""
+    names = [name for _n, name, _fn in paper.CYCLE]
+    assert names.index("write") < names.index("diagram") < names.index("assemble")
 
 
 # -- the renderer is named, and a label is a name (#371) ------------------------
@@ -360,3 +383,14 @@ def test_do_charts_skips_a_figure_the_ledger_serves_with_one_number(work, turns,
     meta = paper.do_charts(run)
     assert meta["skipped"] == 1, meta
     assert meta["rendered"] == 0, meta
+    # #386, #464. Named, not a bare string: a reader (and `assemble`) needs
+    # the owning section and the reason, not only the fact that one figure
+    # never rendered.
+    recorded = json.loads((Path(work) / "charts.json").read_text())["skipped"]
+    assert recorded == [
+        {
+            "name": "token-cost-multipliers",
+            "section": "s1",
+            "reason": "1 value, a sentence, not a chart",
+        }
+    ], recorded

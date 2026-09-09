@@ -122,6 +122,18 @@ def parsed_sections(markdown: str) -> list[tuple[str, list[str | tuple[str, str]
     return sections
 
 
+def front_matter_blocks(remainder: str) -> list[str]:
+    """Paragraphs between the title and the first `## ` heading. #479
+
+    `parsed_sections` only walks text between heading matches, so the
+    byline, date, provenance, and conflicts block above the Abstract needs
+    its own read, the same slice `HEADING.finditer` would otherwise skip.
+    """
+    match = HEADING.search(remainder)
+    head = remainder[: match.start()] if match else remainder
+    return [block.strip().replace("\n", " ") for block in re.split(r"\n\s*\n", head) if block.strip()]
+
+
 def publication_figure_target(target: str) -> bool:
     """PDF diagram assets come only from the imagen-diagrams output contract."""
     return Path(target).name.endswith("_imagen.png")
@@ -281,6 +293,7 @@ def build(markdown: Path, output: Path) -> dict:
     raw = markdown.read_text(encoding="utf-8")
     title_line, _, remainder = raw.partition("\n")
     title = title_line.lstrip("# ").strip()
+    front_matter = front_matter_blocks(remainder)
     sections = parsed_sections(remainder)
     style = styles()
 
@@ -315,9 +328,14 @@ def build(markdown: Path, output: Path) -> dict:
         Paragraph(publication_stats(sections), style["cover_meta"]),
         Spacer(1, 0.11 * inch),
         Paragraph(f"Research completed {DATE}", style["cover_meta"]),
-        NextPageTemplate("body"),
-        PageBreak(),
     ]
+    if front_matter:
+        # #479. The byline, date, provenance, and conflicts, on the title
+        # page itself, not the body page a reader turns to next.
+        story.append(Spacer(1, 0.18 * inch))
+        for paragraph_text in front_matter:
+            story.append(Paragraph(inline(paragraph_text), style["cover_meta"]))
+    story += [NextPageTemplate("body"), PageBreak()]
 
     for heading, blocks in sections:
         if heading.lower() == "references":
@@ -368,6 +386,9 @@ def build(markdown: Path, output: Path) -> dict:
         "pages": doc.page,
         "figures": figure_inventory,
         "bytes": output.stat().st_size,
+        # #479. The block a reader sees on page one, so the sidecar states
+        # that it landed there rather than a caller re-parsing the PDF.
+        "front_matter": front_matter,
     }
 
 

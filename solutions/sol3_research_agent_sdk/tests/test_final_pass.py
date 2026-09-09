@@ -131,10 +131,16 @@ def test_edit_paper_reverts_a_specific_the_evidence_does_not_contain(work, turns
     assert receipt["reverted"]
 
 
-def test_demo_profile_targets_two_thousand_words():
+def test_demo_profile_targets_twenty_eight_hundred_words():
+    """#538, PR #554 judge finding F4, second round. Five sections,
+    Introduction included, now share the demo profile's own budget, raised
+    from 2000 to keep the assembled paper over `checks.MIN_WORDS` (still
+    2000). Exact, not a floor comparison: this is the one number every
+    other #538 fixture (`turns.MAX_WORDS`, `paper.MAX_WORDS`, the outliner
+    card's worked example) is built to match."""
     import loop as loop_mod  # noqa: PLC0415
 
-    assert loop_mod.PROFILES["demo"]["word_target_total"] == 2000
+    assert loop_mod.PROFILES["demo"]["word_target_total"] == 2800
     assert loop_mod.PROFILES["paper"]["word_target_total"] == 4000
     assert loop_mod.PROFILES["whitepaper"]["word_target_total"] == 6000
 

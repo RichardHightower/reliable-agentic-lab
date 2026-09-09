@@ -1,37 +1,40 @@
 """Backends that actually write code.
 
-Three, so the loop can be taught and demonstrated without a model key:
-
-    none        writes nothing. Proves the loop reports failure honestly.
-    reference   copies a known-good answer. Runs offline, in front of a room.
-    cli         shells out to the attendee's coding agent.
-
 The loop does not care which one it holds. That is the point: the harness is
-the product, and the thing that writes the code is swappable.
+the product, and the thing that writes the code is swappable. The specs
+`doers.build` accepts:
+
+    none                writes nothing. Proves the loop reports failure honestly.
+    reference            copies a known-good answer. Runs offline, in front of a room.
+    reference:<ref>      the same, from a named git ref instead of `known-good`.
+    judge-no             wraps `reference`; the judge always refuses. The
+                         classroom demo for a green rubric that still escalates.
+
+A runtime port (Agent SDK, Deep Agents) builds its own live backend in
+`harness.py` and passes it to `doers.build` as an already-built `Backend`,
+which `build` returns unchanged. There is no CLI backend here: shelling out to
+an attendee's coding agent had no caller and no honest way to fence its tools,
+so it was dropped rather than kept unguarded.
 """
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from roles import WriteScope
 
-CLI_COMMANDS = {
-    "claude": ["claude", "-p", "{prompt}", "--allowedTools", "Read,Edit,Write,Bash,Glob,Grep"],
-    "codex": ["codex", "exec", "{prompt}"],
-    "grok": ["grok", "-p", "{prompt}", "--no-auto-update"],
-    "opencode": ["opencode", "run", "{prompt}"],
-}
-
 
 @dataclass
 class DoerResult:
     wrote: list[str] = field(default_factory=list)
     output: str = ""
-    usd: float = 0.0
+    # #539. `None` means the backend never answered a turn (a timed-out
+    # query, a raised exception), which is not the same as an answered turn
+    # that cost nothing. The default stays 0.0: an offline classroom backend
+    # really did answer, for free.
+    usd: float | None = 0.0
     ok: bool = True
     structured: dict | None = None
     stop_reason: str | None = None
@@ -144,35 +147,29 @@ class ReferenceBackend(Backend):
         return DoerResult(wrote=wrote, output=f"copied {len(wrote)} files from {ref}")
 
 
-class CliBackend(Backend):
-    """Shells out to a coding agent. The attendee picks which one."""
+class JudgeSaysNoBackend(Backend):
+    """Any backend, with a judge that refuses. Green rubric plus this is escalate.
 
-    def __init__(self, tool: str, timeout: int = 900):
-        if tool not in CLI_COMMANDS:
-            raise ValueError(f"unknown tool {tool!r}. Choose from {sorted(CLI_COMMANDS)}")
-        self.name = tool
-        self.timeout = timeout
+    A wrapper, not a `ReferenceBackend` subclass: `ReferenceBackend` needs a
+    `known-good` git ref, and a fixture repo built for these tests has none. A
+    subclass would raise `RefNotFound` on every run; wrapping any backend does
+    not.
+    """
+
+    name = "judge-no"
+
+    def __init__(self, inner: Backend | None = None):
+        self.inner = inner or NoneBackend()
 
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
-        if shutil.which(CLI_COMMANDS[self.name][0]) is None:
-            return DoerResult(ok=False, output=f"{self.name} is not on PATH")
-        command = [part.replace("{prompt}", prompt) for part in CLI_COMMANDS[self.name]]
-        proc = subprocess.run(
-            command,
-            cwd=repo,
-            text=True,
-            capture_output=True,
-            timeout=self.timeout,
-            check=False,
-        )
-        return DoerResult(
-            ok=proc.returncode == 0,
-            output=((proc.stdout or "") + (proc.stderr or ""))[-4000:],
-        )
+        return self.inner.run(repo=repo, prompt=prompt, allow=allow)
+
+    def judge(self, *, repo: Path, prompt: str) -> DoerResult:
+        return DoerResult(output='{"done": false, "why": "fixture judge refuses"}')
 
 
 def build(spec: str | Backend) -> Backend:
-    """`none`, `reference`, `reference:<ref>`, a tool name, or an already-built
+    """`none`, `reference`, `reference:<ref>`, `judge-no`, or an already-built
     Backend, passed through unchanged. The pass-through is what lets a runtime
     port (Agent SDK, Deep Agents) plug in its own Backend without this
     function needing to know it exists."""
@@ -183,4 +180,9 @@ def build(spec: str | Backend) -> Backend:
     if spec.startswith("reference"):
         _, _, ref = spec.partition(":")
         return ReferenceBackend(ref or "known-good")
-    return CliBackend(spec)
+    if spec == "judge-no":
+        return JudgeSaysNoBackend(ReferenceBackend())
+    raise ValueError(
+        f"unknown doer spec {spec!r}. Choose from: none, reference, "
+        f"reference:<ref>, judge-no, or an already-built Backend from harness.py."
+    )

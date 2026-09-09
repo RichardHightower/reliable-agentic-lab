@@ -13,6 +13,24 @@ and concatenating every event is how Grep output became a candidate.
 not a turn that failed and can be retried. It is the ceiling, and a driver
 escalates on it instead of spending the rest of the budget rediscovering it.
 
+#568. `collect()` returns the moment a `ResultMessage` arrives, instead of
+continuing to ask the generator for whatever comes next. The round-4 raw
+logs show a query that ended on `error_max_budget_usd` in under a minute and
+then sat open, quiet, until the 900 second ceiling: the terminal record was
+already in hand, and the only thing `collect()` was still waiting on was the
+stream closing itself, which this port has no control over. A stream with
+no terminal result at all is unaffected: nothing here short-circuits that
+wait, and `asyncio.wait_for`'s own ceiling is still what ends it.
+
+#578. Not every `ResultMessage` the installed SDK yields is the run's last
+one. The installed `claude_agent_sdk`'s own `Query._read_messages` (upstream
+#1088) holds a result frame back from closing the run while a delegated
+`Task` it spawned is still running, and lets a later result frame close it
+once that work drains. The run boundary is delegated-task bookkeeping, not
+the result's own shape. `collect()` mirrors that bookkeeping here so a
+`Task` still in flight cannot truncate the run at its first, mid-flight
+result.
+
 Write tracking unions the untracked listing into the diff. `git diff
 --name-only` sees tracked changes only, and this loop's whole job is creating
 files that git has never heard of. A brand new `tests/test_due_date.py` was
@@ -24,15 +42,72 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
+import steps
 from doers import Backend, DoerResult
 from write_scope import WriteScope
 
 _TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
 _COST_STOP = {"error_max_budget_usd", "error_max_budget"}
-QUERY_TIMEOUT_SECONDS = 180
+
+# #578. Matches the installed SDK's own `DEFERRING_TASK_TYPES` and
+# `TERMINAL_TASK_STATUSES` (see `Query._track_task_lifecycle`, upstream
+# #1088): only a delegated `Task` of one of these types can hold a result
+# frame back from ending the run, and only these statuses count as it
+# having finished.
+_DEFERRING_TASK_TYPES = frozenset({"local_agent", "local_workflow"})
+_TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "stopped", "killed"})
+
+
+def _timeout_env(name: str, default: int) -> int:
+    """Read a positive-integer timeout from the environment, never raising
+    at import.
+
+    #553, matching the `_timeout_env()` shape sol1 and sol4 landed for
+    #541. A bad value here used to raise `ValueError` at import time and
+    take the whole module down with it. A logged fallback keeps the process
+    alive, the same way a missing dependency reports as a result, not a
+    traceback.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = None
+    if value is None or value <= 0:
+        print(
+            f"[sol2] {name}={raw!r} is not a positive integer; using the default {default}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        return default
+    return value
+
+
+# #539. A live T001 test-implementer turn ran past 180 seconds and the SDK
+# never got the chance to say what it had spent. sol3 hit the identical
+# defect (#301): a ceiling nobody can reach is the bug, not a safety net.
+# Read at import so a test can still patch the module attribute directly.
+QUERY_TIMEOUT_SECONDS = _timeout_env("SOL2_QUERY_TIMEOUT_SECONDS", 900)
+
+# #577 follow-up (judge spot check at 1b8efe7). #578's own tracker narrows
+# who can hold a result open (`_DEFERRING_TASK_TYPES`) but does not bound how
+# long: a `local_agent` that never reaches a terminal status, on a stream
+# that itself stays open, reads all the way to `QUERY_TIMEOUT_SECONDS`, where
+# the *outer* `except asyncio.TimeoutError` below discards the controlled
+# reason a terminal `ResultMessage` already handed us and reports "query
+# timeout" instead -- the #568 failure mode, reopened at a narrower door.
+# `collect()` bounds the wait for that still-in-flight task on its own, much
+# smaller than `self.timeout_seconds`, and returns the terminal message's own
+# `ok`/`reason`/`usd` if that deadline fires first.
+SUBAGENT_DRAIN_SECONDS = 30
 
 
 def _changed_files(repo: Path) -> set[str]:
@@ -57,12 +132,18 @@ def _changed_files(repo: Path) -> set[str]:
     return names
 
 
-def _from_result(result) -> tuple[str, float, dict | None, bool | None, str | None]:
-    """Pull data from the SDK's final ``ResultMessage`` only."""
+def _from_result(result) -> tuple[str, float | None, dict | None, bool | None, str | None]:
+    """Pull data from the SDK's final ``ResultMessage`` only.
+
+    ``usd`` is ``None`` when the message carries no cost field at all, never
+    a bare 0.0, so a caller can tell "the SDK said zero" from "the SDK never
+    told us" (#539).
+    """
     if isinstance(result, str):
-        return result, 0.0, None, None, None
+        return result, None, None, None, None
     text = getattr(result, "result", None) or ""
-    usd = float(getattr(result, "total_cost_usd", None) or 0.0)
+    raw_cost = getattr(result, "total_cost_usd", None)
+    usd = None if raw_cost is None else float(raw_cost)
     structured = getattr(result, "structured_output", None)
     if structured is not None and not isinstance(structured, dict):
         structured = None
@@ -74,6 +155,45 @@ def _from_result(result) -> tuple[str, float, dict | None, bool | None, str | No
     elif subtype in _COST_STOP:
         reason = "cost budget spent"
     return str(text), usd, structured, is_error, reason
+
+
+def _track_task_lifecycle(message, inflight: set[str]) -> None:
+    """Mirror the installed SDK's own task bookkeeping for one message.
+
+    #578. `Query._track_task_lifecycle` (upstream #1088) holds a result
+    frame back from closing the run while a delegated `Task` it spawned is
+    still running: `task_started` marks one in flight, and a
+    `task_notification` or a `task_updated` patch naming a terminal status
+    clears it (`discard` keeps the pair idempotent, since not every
+    terminal task emits both). Only `local_agent`/`local_workflow` task
+    types are tracked, matching the SDK's own `DEFERRING_TASK_TYPES`; a
+    background shell or a long-lived monitor never reaches a terminal
+    status and would otherwise hold the run open forever.
+    """
+    task_id = getattr(message, "task_id", None)
+    if not task_id:
+        return
+    subtype = getattr(message, "subtype", None)
+    if subtype == "task_started":
+        if getattr(message, "task_type", None) in _DEFERRING_TASK_TYPES:
+            inflight.add(task_id)
+    elif subtype == "task_notification":
+        inflight.discard(task_id)
+    elif subtype == "task_updated":
+        if getattr(message, "status", None) in _TERMINAL_TASK_STATUSES:
+            inflight.discard(task_id)
+
+
+def _is_run_boundary(message, inflight: set[str]) -> bool:
+    """Whether a terminal `ResultMessage` ends the run, not just a turn.
+
+    #578. Mirrors `Query._read_messages` (upstream #1088): a result that
+    arrives while a delegated task is still in flight only closes one turn,
+    and a later result closes the run once it drains. `terminal_reason` is
+    the CLI's own signal that the query loop ended, and is honored on its
+    own even if this port's bookkeeping has not caught up.
+    """
+    return not inflight or bool(getattr(message, "terminal_reason", None))
 
 
 def _raw_event(message) -> str:
@@ -91,6 +211,12 @@ class AgentSdkBackend(Backend):
         self.timeout_seconds = timeout_seconds
 
     def run(self, *, repo: Path, prompt: str, allow: list[str], **extra) -> DoerResult:
+        # #539. Defined before the try, so a raise anywhere below (setup, a
+        # dropped connection mid-stream, or a bug after the query returned)
+        # still leaves the outer `except` able to say what this turn had
+        # spent, instead of falling back to a bare 0.0 that looks free.
+        progress: dict[str, float | None] = {"usd": None}
+        raw_events: list[str] = []
         try:
             from claude_agent_sdk import ResultError, ResultMessage, query  # noqa: PLC0415
 
@@ -112,26 +238,68 @@ class AgentSdkBackend(Backend):
             if overlay and dataclasses.is_dataclass(options):
                 options = dataclasses.replace(options, **overlay)
 
-            raw_events: list[str] = []
+            started = time.monotonic()
 
-            async def collect() -> tuple[str, float, dict | None, bool, str | None]:
+            async def collect() -> tuple[str, float | None, dict | None, bool, str | None]:
+                """#578 follow-up. A deferring task stuck with no
+                `terminal_reason` reads to the `QUERY_TIMEOUT_SECONDS`
+                ceiling instead of returning early, an inherited SDK limit
+                until the CLI sends its own run-boundary signal -- bounded
+                below by `SUBAGENT_DRAIN_SECONDS` instead, once a result
+                arrives while a task is in flight (#577 follow-up).
+                """
                 result_text = ""
-                usd = 0.0
+                usd = None
                 structured = None
                 ok = True
                 reason = None
                 saw_result = False
+                inflight_tasks: set[str] = set()
+                # #577 follow-up. `None` until a `ResultMessage` arrives with
+                # a task still in flight; from then on, the deadline that
+                # keeps this call from reading all the way to the outer
+                # `self.timeout_seconds` wall, computed once, not per message.
+                drain_deadline: float | None = None
+                agen = query(prompt=prompt, options=options).__aiter__()
                 try:
-                    async for message in query(prompt=prompt, options=options):
+                    while True:
+                        if drain_deadline is None:
+                            message = await agen.__anext__()
+                        else:
+                            remaining = drain_deadline - time.monotonic()
+                            if remaining <= 0:
+                                break
+                            try:
+                                message = await asyncio.wait_for(
+                                    agen.__anext__(), timeout=remaining
+                                )
+                            except asyncio.TimeoutError:
+                                # #577 follow-up. This is the drain's own,
+                                # much smaller deadline, not
+                                # `self.timeout_seconds`: the terminal
+                                # message already set `ok`/`reason`/`usd`
+                                # above, and returning them now keeps that
+                                # controlled reason instead of letting the
+                                # *outer* `asyncio.wait_for` fire later and
+                                # report "query timeout" over it.
+                                break
                         raw_events.append(_raw_event(message))
+                        _track_task_lifecycle(message, inflight_tasks)
                         if not isinstance(message, (ResultMessage, str)):
                             continue
                         saw_result = saw_result or isinstance(message, ResultMessage)
                         text, cost, parsed, error, stop = _from_result(message)
                         if text:
                             result_text = text
-                        if cost:
-                            usd = cost
+                        if cost is not None:
+                            # #539, follow-up 6. `total_cost_usd` is
+                            # cumulative, so a later message should never
+                            # report less than an earlier one; `max` is the
+                            # guard against a stray 0.0 overwriting a real
+                            # cost already seen, the same shape as the
+                            # `_bookkeep` guard in `e2e_t001.py`.
+                            usd = cost if usd is None else max(usd, cost)
+                            progress["usd"] = usd
                         if parsed is not None:
                             structured = parsed
                         if error is True:
@@ -139,6 +307,24 @@ class AgentSdkBackend(Backend):
                         if stop:
                             reason = stop
                             ok = False
+                        # #568 follow-up (judge of PR #570, item 1). The
+                        # earlier fix broke only on a controlled stop, so a
+                        # *successful* terminal `ResultMessage` still left
+                        # `collect()` waiting on a stream that round 4 shows
+                        # can sit open for the rest of the timeout window.
+                        # #578: not every `ResultMessage` is that terminal
+                        # record, though -- one can arrive while a delegated
+                        # `Task` this run spawned is still going, and closes
+                        # only that turn. Stop asking the generator for
+                        # anything past a `ResultMessage` only once
+                        # `_is_run_boundary` says the run itself is done.
+                        if isinstance(message, ResultMessage):
+                            if _is_run_boundary(message, inflight_tasks):
+                                break
+                            if drain_deadline is None:
+                                drain_deadline = time.monotonic() + SUBAGENT_DRAIN_SECONDS
+                except StopAsyncIteration:
+                    pass
                 except ResultError:
                     # The SDK yields its terminal ResultMessage and then raises
                     # ResultError for the CLI's non-zero exit. Keep the terminal
@@ -152,9 +338,17 @@ class AgentSdkBackend(Backend):
                     asyncio.wait_for(collect(), timeout=self.timeout_seconds)
                 )
             except asyncio.TimeoutError:
+                elapsed = time.monotonic() - started
+                spent = progress["usd"]
                 return DoerResult(
                     ok=False,
-                    output=f"agent sdk query timed out after {self.timeout_seconds} seconds",
+                    usd=spent,
+                    output=(
+                        f"agent sdk query timed out after {self.timeout_seconds:.0f} seconds "
+                        f"(elapsed={elapsed:.0f}s, events={len(raw_events)}, "
+                        f"usd={'unknown' if spent is None else format(spent, '.4f')}). "
+                        f"Raise SOL2_QUERY_TIMEOUT_SECONDS or shrink the prompt."
+                    ),
                     stop_reason="query timeout",
                     raw_output="\n".join(raw_events),
                 )
@@ -169,7 +363,15 @@ class AgentSdkBackend(Backend):
                 raw_output="\n".join(raw_events),
             )
         except Exception as exc:  # graceful failure. Never claim a write it did not make.
-            return DoerResult(ok=False, output=f"agent sdk backend failed: {exc}")
+            # #539. `progress["usd"]` survives a raise anywhere in the try
+            # block above, including one after the query itself answered, so
+            # a backend that spent money before failing still reports it.
+            return DoerResult(
+                ok=False,
+                usd=progress["usd"],
+                output=f"agent sdk backend failed: {exc}",
+                raw_output="\n".join(raw_events),
+            )
 
     def judge(self, *, repo: Path, prompt: str) -> DoerResult:
         """One judge turn. Structured output when the schema is available."""
@@ -194,12 +396,22 @@ class AgentSdkPhaseBackend(Backend):
         test: AgentSdkBackend,
         code: AgentSdkBackend,
         judge: AgentSdkBackend | None = None,
+        planner: AgentSdkBackend | None = None,
     ):
         self.test = test
         self.code = code
         self.judge_backend = judge
+        self.planner = planner
 
     def _for(self, allow: list[str]) -> AgentSdkBackend:
+        # A9 (#437 #422). The planner's write scope is `steps.jsonl`, the same
+        # scope `contract.py` declares for the role. Route on it before the
+        # test/code branches, so an unconfigured planner fails closed rather
+        # than falling through to "no backend for this scope".
+        if any(pattern == steps.STEPS_FILE for pattern in allow):
+            if self.planner is None:
+                raise ValueError("no Agent SDK planner backend is configured")
+            return self.planner
         if any(pattern.startswith("tests/") for pattern in allow):
             return self.test
         if any(pattern.startswith(("app/", "src/")) for pattern in allow):
@@ -213,4 +425,10 @@ class AgentSdkPhaseBackend(Backend):
         if self.judge_backend is None:
             return super().judge(repo=repo, prompt=prompt)
         return self.judge_backend.judge(repo=repo, prompt=prompt)
+
+    def plan(self, *, repo: Path, prompt: str) -> DoerResult:
+        """Route to the planner graph and run it with the planner's own scope."""
+        return self._for([steps.STEPS_FILE]).run(
+            repo=repo, prompt=prompt, allow=[steps.STEPS_FILE]
+        )
 

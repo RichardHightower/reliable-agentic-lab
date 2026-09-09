@@ -60,6 +60,63 @@ def test_a_missing_fixture_is_unavailable_not_a_crash(tmp_path):
     assert not research.FixtureBackend(tmp_path / "nope.json").available()
 
 
+def test_every_recorded_fixture_key_is_reachable():
+    """#521. A recorded entry that no outline question ever routes to, by
+    exact match or by `FixtureBackend.search`'s own word-overlap fallback,
+    is dead: nothing exercises the source it cites, and a resume can carry
+    it for releases without anyone noticing. #519 fixed one such entry in
+    the e2e fixture; this guards both fixture files going forward.
+
+    #528. #520 made a key question `{text, kind, evidence_requirements}`.
+    `outline.question_text` is the one helper the live path (`sections.py`'s
+    `question_list`) uses to pull the string out of that object before a
+    backend ever sees it; this test routes through the same helper rather
+    than keeping a second copy of the rule.
+    """
+    import outline as outlines  # noqa: PLC0415
+
+    offline = t.OfflineTurns(backend=None)
+    outline = offline.outline("a topic", "")
+    questions = [
+        question
+        for section in outline["sections"]
+        for question in section["key_questions"]
+    ]
+    for path in (FIXTURE, FIXTURE.parent / "loop-engineering-e2e.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        keys = {
+            key for key, value in data.items() if isinstance(value, dict) and not key.startswith("_")
+        }
+        backend = research.FixtureBackend(path)
+        reached = set()
+        for question in questions:
+            finding = backend.search(outlines.question_text(question))
+            for key, value in data.items():
+                if isinstance(value, dict) and value.get("answer") == finding.answer:
+                    reached.add(key)
+                    break
+        assert reached == keys, f"{path.name}: {keys - reached} unreachable from the fixture outline"
+
+
+def test_a_question_object_is_routed_by_its_text():
+    """#528. Pins both halves of the #520/#523 contract: `FixtureBackend.search`
+    refuses a raw question object with a named-type `TypeError` instead of
+    failing inside a hash, and the same object reaches the right recorded
+    answer once its text is pulled out the one way the live path does it,
+    `outline.question_text`.
+    """
+    import outline as outlines  # noqa: PLC0415
+
+    question = {"text": "loop engineering exit criteria", "kind": "fact"}
+    backend = research.FixtureBackend(FIXTURE)
+
+    with pytest.raises(TypeError, match="dict"):
+        backend.search(question)
+
+    finding = backend.search(outlines.question_text(question))
+    assert "done, then cost, then max turns" in finding.answer
+
+
 # -- perplexity -------------------------------------------------------------
 
 
@@ -340,6 +397,78 @@ def test_the_live_edit_prompt_carries_the_writers_contract(work):
     assert "knowledge:claim.x.01M0" not in prompt, prompt
 
 
+def test_the_writer_contract_drops_the_exact_string_rule(work):
+    """#385: the writer could not both paraphrase, which failed `coverage`,
+    and paste the question, which made it a heading. Neither turn's prompt,
+    nor the writer card, demands the question as an exact string any more."""
+    section = {
+        "id": "s1",
+        "heading": "Stopping",
+        "objective": "Say when the loop stops.",
+        "key_questions": ["What stops the loop?"],
+        "word_target": 200,
+    }
+    write_backend = Backend([result(output="a section")])
+    t.SdkTurns(backend=write_backend, work_dir=work).write(
+        section, [{"number": 1, "text": "A thing."}], [], "", path="sections/s1.md"
+    )
+    write_prompt = write_backend.prompts[0][0]
+    assert "exact string" not in write_prompt
+    assert "as that string" not in write_prompt
+
+    edit_backend = Backend([result(output="an edited section")])
+    t.SdkTurns(backend=edit_backend, work_dir=work).edit_section(
+        section, "old body", {"failed_rows": ["coverage"]}
+    )
+    edit_prompt = edit_backend.prompts[0][0]
+    assert "exact string" not in edit_prompt
+
+    card = Path(__file__).resolve().parents[1] / "plugin" / "agents" / "research-writer.md"
+    assert "exact string" not in card.read_text(encoding="utf-8")
+
+
+def test_the_writer_message_names_no_allowlist_host(work):
+    """#452 #465 #412: a claim also carries `source_url` and `quote`, the
+    exact host and text the librarian retrieved. A live paper handed that to
+    the writer verbatim and the writer restated it, forty-two times in one
+    creatine paper. The delegation message may carry only the number a claim
+    cites by, its text, and its status."""
+    section = {
+        "id": "s1",
+        "heading": "The problem",
+        "key_questions": ["what stops the loop"],
+        "word_target": 200,
+    }
+    claims = [
+        {
+            "id": "s1-f1",
+            "text": "Creatine reduces lean mass loss during bed rest.",
+            "source_url": "https://arxiv.org/abs/2401.00001",
+            "quote": "no study was hosted on arxiv.org for this mechanism",
+            "question_id": "q1",
+            "section": "s1",
+            "status": "verified",
+            "number": 1,
+        }
+    ]
+    write_backend = Backend([result(output="a section")])
+    t.SdkTurns(backend=write_backend, work_dir=work).write(
+        section, claims, [], "", path="sections/s1.md"
+    )
+    write_prompt = write_backend.prompts[0][0]
+    assert "arxiv.org" not in write_prompt, write_prompt
+    assert "source_url" not in write_prompt, write_prompt
+    assert "quote" not in write_prompt, write_prompt
+
+    edit_backend = Backend([result(output="an edited section")])
+    t.SdkTurns(backend=edit_backend, work_dir=work).edit_section(
+        section, "old body", {"failed_rows": ["cited"]}, claims=claims
+    )
+    edit_prompt = edit_backend.prompts[0][0]
+    assert "arxiv.org" not in edit_prompt, edit_prompt
+    assert "source_url" not in edit_prompt, edit_prompt
+
+
 def test_the_judge_prompt_carries_the_number_to_source_map(work):
     """The judge received raw findings while everyone else held numbered claims.
 
@@ -429,6 +558,69 @@ def test_a_runtime_that_cannot_search_reports_a_miss():
     assert offline.locate("A Paper", "Anthropic", "head") == miss
 
 
+def test_the_default_follow_primary_is_a_miss_and_the_live_one_asks(work):
+    """#473. Default: a miss, the same as `locate`'s "cannot search" answer.
+    The live turn asks the researcher agent with `FOLLOW_SCHEMA`."""
+    from load_agents import FOLLOW_SCHEMA  # noqa: PLC0415
+
+    miss = {"found": False, "url": "", "title": "", "quote": ""}
+    assert t.Turns().follow_primary("a claim", "a title", "narrative_review") == miss
+
+    backend = Backend([result(structured=miss)])
+    t.SdkTurns(backend=backend, work_dir=work).follow_primary(
+        "The dose increased 42 percent.", "A Review", "narrative_review"
+    )
+    prompt, _allow, output_format = backend.prompts[0]
+    assert prompt.startswith("Use the research-researcher agent.")
+    assert "The dose increased 42 percent." in prompt
+    assert output_format is FOLLOW_SCHEMA
+
+
+def test_the_default_counter_search_is_a_miss_and_the_live_one_asks(work):
+    """#474. Default: a miss, the same as `follow_primary`'s. The live turn
+    asks the researcher agent with `COUNTER_SCHEMA`."""
+    from load_agents import COUNTER_SCHEMA  # noqa: PLC0415
+
+    miss = {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+    assert t.Turns().counter_search("a claim") == miss
+
+    backend = Backend([result(structured=miss)])
+    t.SdkTurns(backend=backend, work_dir=work).counter_search(
+        "Protein alone did not prevent lean-mass loss."
+    )
+    prompt, _allow, output_format = backend.prompts[0]
+    assert prompt.startswith("Use the research-researcher agent.")
+    assert "Protein alone did not prevent lean-mass loss." in prompt
+    assert output_format is COUNTER_SCHEMA
+
+
+def test_the_writer_prompt_carries_claim_and_counter_together(work):
+    """#474. The claim and its counter-evidence reach the writer as two
+    bound entries in the same delegation message."""
+    section = {"id": "s1", "heading": "Findings", "key_questions": [], "figures": [], "word_target": 200}
+    claims = [
+        {
+            "id": "s1-f1",
+            "number": 1,
+            "text": "Protein alone did not prevent lean-mass loss. Contrary evidence in [2].",
+            "status": "verified",
+        },
+        {
+            "id": "s1-cf1",
+            "number": 2,
+            "text": "Protein with resistance training preserved lean mass (Longland 2016).",
+            "status": "verified",
+        },
+    ]
+    backend = Backend([result(output="a section")])
+    turn = t.SdkTurns(backend=backend, work_dir=work)
+    turn.write(section, claims, [], "", path="sections/s1.md")
+    prompt = backend.prompts[0][0]
+    assert "Protein alone did not prevent lean-mass loss" in prompt
+    assert "Contrary evidence in [2]" in prompt
+    assert "Longland 2016" in prompt
+
+
 def test_a_generating_turn_carries_the_grounding_contract(work):
     backend = Backend([result(structured={"answer": "", "sources": [], "claims": []})])
     turns = t.SdkTurns(backend=backend, work_dir=work)
@@ -495,9 +687,13 @@ def test_the_exit_doctrine_finding_accepts_only_this_repository(work):
 
 
 def test_the_offline_outline_includes_the_exit_doctrine_question(work):
+    import outline as outlines  # noqa: PLC0415
+
     offline = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
     drafted = offline.plan("topic", "")
-    questions = [q for s in drafted["sections"] for q in s["key_questions"]]
+    questions = [
+        outlines.question_text(q) for s in drafted["sections"] for q in s["key_questions"]
+    ]
     assert t.EXIT_DOCTRINE_QUESTION in questions
 
     backend = Backend(
@@ -530,7 +726,8 @@ def test_the_offline_outline_reads_as_prose():
         assert topic not in objective, objective
         assert not objective.lower().startswith("describe how how")
         assert not objective.lower().startswith("state what how")
-        for question in section["key_questions"]:
+        for raw_question in section["key_questions"]:
+            question = outlines.question_text(raw_question)
             assert "how how" not in question.lower(), question
             assert not question.lower().startswith(topic), question
             assert question[0].isupper() or question[0].isdigit(), question
@@ -561,6 +758,16 @@ def test_each_turn_declares_the_scope_it_may_write(work):
     backend = Backend([result(structured={"language": "mermaid", "source": "", "caption": ""})])
     t.SdkTurns(backend=backend, work_dir=work).diagram("pipeline", "c")
     assert backend.prompts[0][1] == ["diagrams/pipeline.mmd", "diagrams/pipeline.puml"]
+
+
+def test_the_diagrammer_prompt_carries_the_sections_claims(work):
+    """#476: the diagrammer is grounded in what the section actually landed,
+    not only the outline's concept line."""
+    backend = Backend([result(structured={"language": "mermaid", "source": "", "caption": ""})])
+    t.SdkTurns(backend=backend, work_dir=work).diagram(
+        "pipeline", "c", claims=["Creatine increased fat-free mass."]
+    )
+    assert "Creatine increased fat-free mass." in backend.prompts[0][0]
 
 
 def test_cost_is_reported_to_the_driver(work):
@@ -598,6 +805,29 @@ def test_the_turn_detail_names_the_role_and_the_elapsed_time(work):
     assert seen["elapsed_s"] == 12.5
     assert seen["prompt_chars"] == 400
     assert seen["events"] == 7
+
+
+def test_the_turn_detail_carries_the_retry_count(work):
+    """#409: `Run.spend` needs `retries` in `detail` to log it on the turn row."""
+    seen = {}
+    backend = Backend([result(retries=2, structured={"verdict": "supports"})])
+    t.SdkTurns(
+        backend=backend,
+        work_dir=work,
+        on_cost=lambda usd, **detail: seen.update(detail),
+    ).verify("c")
+    assert seen["retries"] == 2
+
+
+def test_a_turn_with_no_retries_reports_zero(work):
+    seen = {}
+    backend = Backend([result(structured={"verdict": "supports"})])
+    t.SdkTurns(
+        backend=backend,
+        work_dir=work,
+        on_cost=lambda usd, **detail: seen.update(detail),
+    ).verify("c")
+    assert seen["retries"] == 0
 
 
 # -- the offline twin -------------------------------------------------------
@@ -689,3 +919,30 @@ def test_the_writer_prompt_names_key_questions_and_the_claim_number(work):
     assert "why does order matter" in prompt
     assert "Cite each claim by its `number` field" in prompt
     assert '"number": 3' in prompt
+
+
+# -- P7, the abstract is written last ---------------------------------------
+
+
+def test_the_abstract_turn_asks_for_a_hedge_and_the_written_body(work):
+    """The turn hands the writer the assembled body, and asks for the same
+    hedge words and overclaim ban the Python row checks."""
+    backend = Backend([result(output="An abstract.")])
+    t.SdkTurns(backend=backend, work_dir=work).write_abstract("## Section\n\nA finding. [1]")
+    prompt = backend.prompts[0][0]
+    assert "## Section\n\nA finding. [1]" in prompt
+    assert "single source" in prompt
+    assert "definitively" in prompt
+
+
+def test_the_offline_abstract_cites_nothing():
+    """The offline twin invents no claim, so it needs no hedge to check."""
+    turn = t.OfflineTurns(backend=research.FixtureBackend(FIXTURE))
+    assert "[" not in turn.write_abstract("## Section\n\nA finding. [1]")
+
+
+def test_the_reviewer_card_carries_the_abstract_row():
+    """Both the model and Python grade the abstract against the body."""
+    folder = Path(__file__).resolve().parents[1]
+    card = (folder / "plugin" / "agents" / "research-judge.md").read_text(encoding="utf-8")
+    assert "abstract_matches_body" in card

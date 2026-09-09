@@ -210,7 +210,7 @@ def test_verifier_response_cannot_state_a_truth_state():
 
 def test_reviewer_response_cannot_state_a_verdict():
     props = roles.REVIEWER_RESPONSE["properties"]
-    assert set(props) == {"failed_rows", "notes"}
+    assert set(props) == {"failed_rows", "notes", "score"}
     assert "ship" not in props and "verdict" not in props
 
 
@@ -257,6 +257,40 @@ def test_outline_max_tokens_is_wider_than_the_shared_graph_ceiling():
     """#407: the recorded truncation happened inside `GRAPH_MAX_TOKENS`. The
     outline-emitting roles need more room than that shared default."""
     assert roles.OUTLINE_MAX_TOKENS > roles.GRAPH_MAX_TOKENS
+
+
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#553. A non-integer (or non-positive) value must not raise at import
+    and take the whole module down with it. Covers `_timeout_env`'s own
+    branches (unset, non-integer); the real variable is driven through a
+    reload by the test below."""
+    assert roles._timeout_env("SOL3_DA_CALL_TIMEOUT_SECONDS_UNSET", 120) == 120
+    monkeypatch.setenv("SOL3_DA_CALL_TIMEOUT_SECONDS_TEST", "abc")
+    assert roles._timeout_env("SOL3_DA_CALL_TIMEOUT_SECONDS_TEST", 120) == 120
+    assert "abc" in capsys.readouterr().err
+
+
+def test_the_real_timeout_variable_set_to_abc_leaves_the_default_and_imports(
+    monkeypatch, capsys
+):
+    """#553, judge of PR #556. The test above proves `_timeout_env`'s
+    branches but never touches `SOL3_DA_CALL_TIMEOUT_SECONDS` itself, so
+    reverting `MODEL_TIMEOUT_SECONDS` to a bare `120` (or to the unguarded
+    SDK-port shape) left it green while the real variable still raised at
+    import. Drive the real variable through a reload instead. Its own name,
+    not `SOL3_QUERY_TIMEOUT_SECONDS`: that one drives the SDK port's
+    per-query wall-clock ceiling, a different setting from this port's
+    per-model-call HTTP timeout."""
+    import importlib  # noqa: PLC0415
+
+    monkeypatch.setenv("SOL3_DA_CALL_TIMEOUT_SECONDS", "abc")
+    reloaded = importlib.reload(roles)
+    try:
+        assert reloaded.MODEL_TIMEOUT_SECONDS == 120
+        assert "abc" in capsys.readouterr().err
+    finally:
+        monkeypatch.delenv("SOL3_DA_CALL_TIMEOUT_SECONDS")
+        importlib.reload(roles)
 
 
 def test_build_agent_binds_the_bounded_model_to_writer_only(
@@ -398,6 +432,14 @@ def test_the_researcher_card_still_says_the_search_is_filtered():
     card = (roles.SKILLS_DIR / "researcher" / "SKILL.md").read_text(encoding="utf-8")
     assert "domain-filtered" in card
     assert "corpus_search" in card and "source_urls" in card
+
+
+def test_the_researcher_card_asks_for_the_study_field():
+    """#471, finding 5: `record_findings` reads `study` off a reported claim
+    (unused until #478's study table), so the card that fills it in must
+    name it."""
+    card = (roles.SKILLS_DIR / "researcher" / "SKILL.md").read_text(encoding="utf-8")
+    assert "`study`" in card
 
 
 def test_corpus_search_prints_a_url_only_when_the_hit_has_one(fake_langchain, tmp_path):

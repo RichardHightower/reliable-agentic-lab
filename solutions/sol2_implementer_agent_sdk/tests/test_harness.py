@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import harness
+import implementer
 import load_agents
 import roleplan
 
@@ -145,3 +146,94 @@ def test_the_e2e_path_does_not_import_the_sibling_folder():
     text = (FOLDER / "e2e_t001.py").read_text(encoding="utf-8")
     assert "sol2_implementer_deep_agents" not in text
     assert "sys.path" not in text or "_flat_modules" not in text
+
+
+def test_cleanup_flag_reaches_implementer_run(repo, monkeypatch):
+    """A4 (#431). The worktree mechanics are implementer.py's; this only
+    proves harness.py's own --cleanup flag is not dropped on the way to it."""
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"rubric": "", "gate": "pass", "reason": "ok"}
+
+    monkeypatch.setattr(implementer, "run", fake_run)
+
+    exit_code = harness.main(["--repo", str(repo), "--doer", "none", "--cleanup"])
+
+    assert captured.get("cleanup") is True
+    assert exit_code == 0
+
+
+def test_main_maps_gate_to_exit_code(repo, monkeypatch):
+    """A5 (#432 #434). 0 pass, 2 escalate, 1 crash. harness.main mirrors
+    implementer.main's mapping exactly, without repeating implementer.run's
+    own worktree mechanics."""
+    monkeypatch.setattr(
+        implementer, "run", lambda **_kw: {"rubric": "", "gate": "pass", "reason": "ok"}
+    )
+    assert harness.main(["--repo", str(repo), "--doer", "none"]) == 0
+
+    monkeypatch.setattr(
+        implementer,
+        "run",
+        lambda **_kw: {"rubric": "", "gate": "escalate", "reason": "red gate"},
+    )
+    assert harness.main(["--repo", str(repo), "--doer", "none"]) == 2
+
+    def fake_crash(**_kw):
+        raise implementer.ContractError("boom")
+
+    monkeypatch.setattr(implementer, "run", fake_crash)
+    assert harness.main(["--repo", str(repo), "--doer", "none"]) == 1
+
+
+def test_nonexistent_repo_without_table_only_exits_1_with_one_line(tmp_path, capsys):
+    """Folded finding, judge of PR #497 (A5). `Contract(args.repo)` used to
+    be a bare `raise` when `--table-only` was absent, so a nonexistent
+    `--repo` printed a traceback instead of the one line `implementer.main`
+    already prints for the same error."""
+    missing = tmp_path / "does-not-exist"
+
+    exit_code = harness.main(["--repo", str(missing)])
+
+    assert exit_code == 1
+    out = capsys.readouterr().out.strip()
+    assert out.count("\n") == 0
+    assert "does not exist" in out
+
+
+def test_resume_flag_reaches_implementer_run(repo, monkeypatch):
+    """A6 (#433). harness.py's own --resume flag is not dropped on the way
+    to implementer.run; the worktree and state.json mechanics are
+    implementer.py's, proven in tests/test_implementer.py."""
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"rubric": "", "gate": "pass", "reason": "ok"}
+
+    monkeypatch.setattr(implementer, "run", fake_run)
+
+    exit_code = harness.main(["--repo", str(repo), "--doer", "none", "--resume"])
+
+    assert captured.get("resume") is True
+    assert exit_code == 0
+
+
+def test_planner_flag_reaches_implementer_run(repo, monkeypatch):
+    """A9 (#437 #422). harness.py's own --planner flag is not dropped on the
+    way to implementer.run; the planner graph and the classroom guard are
+    implementer.py's and adapter.py's, proven elsewhere."""
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"rubric": "", "gate": "pass", "reason": "ok"}
+
+    monkeypatch.setattr(implementer, "run", fake_run)
+
+    exit_code = harness.main(["--repo", str(repo), "--doer", "none", "--planner", "sdk"])
+
+    assert captured.get("planner") == "sdk"
+    assert exit_code == 0

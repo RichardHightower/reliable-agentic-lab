@@ -13,6 +13,30 @@ Write tracking walks the filesystem rather than asking git. sol1 tracks writes
 with `git diff` because it points at a repo clone. A research run writes into a
 plain work directory that was never `git init`ed, where every git command
 returns empty and the second line of defense silently reports nothing.
+
+#571, copying sol2's #568 fix. `collect()` returns the moment a
+`ResultMessage` arrives, success, an error, or a controlled stop (max turns
+or cost budget) alike, instead of continuing to ask the generator for
+whatever comes next. A `ResultMessage` is the SDK's one terminal record for
+a query; nothing legitimate follows it. A query that ends on
+`error_max_budget_usd` in under a minute and then sits open, quiet, used to
+turn a one-minute, evidenced "cost budget spent" into a 900-second "query
+timeout", discarding the real reason and the spend `spend()` needs; a
+successful query followed by a quiet stream lost its answer the same way.
+Because the break exits through the same return this port already builds
+for a finished turn, the turn record still carries `elapsed_s`,
+`prompt_chars`, and `events` the way #305 wired the timeout path to. A
+stream with no terminal `ResultMessage` at all is unaffected: nothing here
+short-circuits that wait, and `asyncio.wait_for`'s own ceiling is still
+what ends it. A partial, non-terminal event is never a `ResultMessage`, so
+it still cannot end the stream early.
+
+#578. Not every `ResultMessage` is the run's last one, though. The
+installed `claude_agent_sdk`'s own `Query._read_messages` (upstream #1088)
+holds a result frame back from closing the run while a delegated `Task` it
+spawned is still running, and lets a later result frame close it once that
+work drains. `collect()` mirrors that bookkeeping so a `Task` still in
+flight cannot truncate the run at its first, mid-flight result.
 """
 
 from __future__ import annotations
@@ -30,11 +54,47 @@ from write_scope import WriteScope
 _TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
 _COST_STOP = {"error_max_budget_usd", "error_max_budget"}
 
+# #578. Matches the installed SDK's own `DEFERRING_TASK_TYPES` and
+# `TERMINAL_TASK_STATUSES` (see `Query._track_task_lifecycle`, upstream
+# #1088): only a delegated `Task` of one of these types can hold a result
+# frame back from ending the run, and only these statuses count as it
+# having finished.
+_DEFERRING_TASK_TYPES = frozenset({"local_agent", "local_workflow"})
+_TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "stopped", "killed"})
+
+
+def _timeout_env(name: str, default: int) -> int:
+    """Read a positive-integer timeout from the environment, never raising
+    at import.
+
+    #553, matching the `_timeout_env()` shape sol1 and sol4 landed for
+    #541. A bad value here used to raise `ValueError` at import time and
+    take the whole module down with it. A logged fallback keeps the process
+    alive, the same way a missing dependency reports as a result, not a
+    traceback.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = None
+    if value is None or value <= 0:
+        print(
+            f"[sol3] {name}={raw!r} is not a positive integer; using the default {default}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        return default
+    return value
+
+
 # One outline query against a real 48-hit corpus took about 600 seconds. The old
 # 180-second ceiling killed every live run before the first phase finished, so a
 # default nobody can reach was itself the defect. Read at import so a test can
 # still patch the module attribute.
-QUERY_TIMEOUT_SECONDS = int(os.environ.get("SOL3_QUERY_TIMEOUT_SECONDS", "900"))
+QUERY_TIMEOUT_SECONDS = _timeout_env("SOL3_QUERY_TIMEOUT_SECONDS", 900)
 
 # How often a running query says it is still alive. A query that hangs emits no
 # events, which is exactly when an operator needs a line on stderr.
@@ -44,6 +104,72 @@ HEARTBEAT_SECONDS = 15
 # diagram renderer, and walking it on every turn is thousands of stats for a
 # tree the agent cannot write to anyway.
 SKIP_DIRS = {".harness", ".cache", ".git", "__pycache__", "knowledge"}
+
+# Backoff before a retried `collect()`, in seconds. A module-level `_sleep`
+# (rather than `time.sleep` inline) is what lets a test replace the wait with
+# a no-op instead of actually pausing three times.
+RETRY_WAITS_S: tuple[float, ...] = (5.0, 15.0, 45.0)
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _transient_provider_errors() -> tuple[type[BaseException], ...]:
+    """Exception classes that might be a dropped CLI connection or a live
+    provider failure the CLI surfaced. `_is_transient` narrows this to the
+    cases actually worth a retry; `anthropic` is not one of this port's
+    dependencies (`query()` shells out to the Claude Code CLI, it never talks
+    to the Anthropic API directly), so there is nothing of that package's to
+    catch here.
+    """
+    try:
+        from claude_agent_sdk import CLIConnectionError, ResultError  # noqa: PLC0415
+    except ImportError:
+        return ()
+    return (CLIConnectionError, ResultError)
+
+
+# #482: a 4xx other than these two is a permanent failure (a bad key, a
+# malformed request, a forbidden model), not a dropped connection. Retrying
+# it spends 65 seconds and four attempts reaching the same rejection.
+# `request_timeout` (408) and `rate_limit_error` (429) are the two 4xx
+# shapes that a retry can plausibly outlive.
+_RETRYABLE_4XX = {408, 429}
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """A dropped CLI connection, or a live provider error worth retrying.
+
+    `CLINotFoundError` (the CLI is not installed) is a permanent setup
+    problem, not a dropped connection; retrying it just spends 65 seconds
+    reaching the same failure. `ResultError` carries every terminal reason the
+    CLI can end a run with, and only `api_error` (a provider failure mid-run,
+    e.g. overloaded, rate limited, or a dropped connection) is a candidate;
+    `error_max_turns` and its siblings are ordinary, legitimate stops.
+
+    Within `api_error`, `api_error_status` narrows further. A 4xx other than
+    408 or 429 is the provider rejecting the request itself (a bad key
+    fails with 401, for one); no amount of retrying fixes that, and burning
+    the full backoff before the run finally fails is confusing and wastes
+    the run's iteration budget. A 5xx, a 429, a 408, or no status at all
+    (the CLI reported `api_error` without one, e.g. a timeout) stays
+    transient.
+    """
+    try:
+        from claude_agent_sdk import CLINotFoundError, ResultError  # noqa: PLC0415
+    except ImportError:
+        return True
+    if isinstance(exc, CLINotFoundError):
+        return False
+    if isinstance(exc, ResultError):
+        if exc.terminal_reason != "api_error":
+            return False
+        status = getattr(exc, "api_error_status", None)
+        if status is not None and 400 <= status < 500 and status not in _RETRYABLE_4XX:
+            return False
+        return True
+    return True
 
 
 @dataclass
@@ -63,6 +189,9 @@ class TurnResult:
     events: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    # How many times a dropped connection or a rate limit sent this turn back
+    # to `collect()` before it answered. 0 when nothing was retried.
+    retries: int = 0
 
 
 class Backend:
@@ -125,6 +254,45 @@ def _from_message(message) -> tuple[str, float | None, dict | None, bool | None,
     if text or usd or structured is not None or is_error is not None or reason:
         return str(text or ""), usd, structured, is_error, reason
     return str(message), None, None, None, None
+
+
+def _track_task_lifecycle(message, inflight: set[str]) -> None:
+    """Mirror the installed SDK's own task bookkeeping for one message.
+
+    #578. `Query._track_task_lifecycle` (upstream #1088) holds a result
+    frame back from closing the run while a delegated `Task` it spawned is
+    still running: `task_started` marks one in flight, and a
+    `task_notification` or a `task_updated` patch naming a terminal status
+    clears it (`discard` keeps the pair idempotent, since not every
+    terminal task emits both). Only `local_agent`/`local_workflow` task
+    types are tracked, matching the SDK's own `DEFERRING_TASK_TYPES`; a
+    background shell or a long-lived monitor never reaches a terminal
+    status and would otherwise hold the run open forever.
+    """
+    task_id = getattr(message, "task_id", None)
+    if not task_id:
+        return
+    subtype = getattr(message, "subtype", None)
+    if subtype == "task_started":
+        if getattr(message, "task_type", None) in _DEFERRING_TASK_TYPES:
+            inflight.add(task_id)
+    elif subtype == "task_notification":
+        inflight.discard(task_id)
+    elif subtype == "task_updated":
+        if getattr(message, "status", None) in _TERMINAL_TASK_STATUSES:
+            inflight.discard(task_id)
+
+
+def _is_run_boundary(message, inflight: set[str]) -> bool:
+    """Whether a terminal `ResultMessage` ends the run, not just a turn.
+
+    #578. Mirrors `Query._read_messages` (upstream #1088): a result that
+    arrives while a delegated task is still in flight only closes one turn,
+    and a later result closes the run once it drains. `terminal_reason` is
+    the CLI's own signal that the query loop ended, and is honored on its
+    own even if this port's bookkeeping has not caught up.
+    """
+    return not inflight or bool(getattr(message, "terminal_reason", None))
 
 
 def _raw_event(message) -> str:
@@ -202,6 +370,11 @@ class AgentSdkBackend(Backend):
             progress = {"started": time.monotonic(), "events": 0, "last": "-", "usd": None}
 
             async def collect() -> tuple[str, float, bool, dict | None, bool, str | None, int, int]:
+                """#578 follow-up. A deferring task stuck with no
+                `terminal_reason` reads to the `QUERY_TIMEOUT_SECONDS`
+                ceiling instead of returning early, an inherited SDK limit
+                until the CLI sends its own run-boundary signal.
+                """
                 result_text = ""
                 usd = 0.0
                 reported = False
@@ -209,6 +382,7 @@ class AgentSdkBackend(Backend):
                 ok = True
                 reason = None
                 tokens_in = tokens_out = 0
+                inflight_tasks: set[str] = set()
                 beat = asyncio.ensure_future(_heartbeat(progress, role))
                 try:
                     async for message in query(prompt=prompt, options=options):
@@ -218,6 +392,7 @@ class AgentSdkBackend(Backend):
                         got_in, got_out = _tokens(message)
                         tokens_in += got_in
                         tokens_out += got_out
+                        _track_task_lifecycle(message, inflight_tasks)
                         if not isinstance(message, (ResultMessage, str)):
                             continue
                         text, cost, parsed, error, stop = _from_message(message)
@@ -234,38 +409,75 @@ class AgentSdkBackend(Backend):
                         if stop:
                             reason = stop
                             ok = False
+                        if isinstance(message, ResultMessage) and _is_run_boundary(
+                            message, inflight_tasks
+                        ):
+                            # #571. A `ResultMessage` is the SDK's one
+                            # terminal record for this query: success, an
+                            # error, or a controlled ceiling (max turns or
+                            # cost budget) alike. Stop asking the generator
+                            # for anything past it rather than trust the
+                            # stream to close on its own, which can take the
+                            # rest of the timeout window. A bare `str` is
+                            # accepted above for its text but is never
+                            # terminal, so it cannot end the stream early.
+                            # #578: a `ResultMessage` still only ends the run
+                            # when `_is_run_boundary` agrees no delegated
+                            # task is holding it open.
+                            break
                 finally:
                     beat.cancel()
                 return result_text, usd, reported, structured, ok, reason, tokens_in, tokens_out
 
             started = time.monotonic()
-            try:
-                (
-                    output,
-                    usd,
-                    reported,
-                    structured,
-                    ok,
-                    reason,
-                    tokens_in,
-                    tokens_out,
-                ) = asyncio.run(asyncio.wait_for(collect(), timeout=QUERY_TIMEOUT_SECONDS))
-            except asyncio.TimeoutError:
-                elapsed = time.monotonic() - started
-                return TurnResult(
-                    ok=False,
-                    output=(
-                        f"agent sdk query timed out after {QUERY_TIMEOUT_SECONDS} seconds "
-                        f"(role={role}, elapsed={elapsed:.0f}s, events={len(raw_events)}, "
-                        f"prompt={len(prompt)} chars). Raise SOL3_QUERY_TIMEOUT_SECONDS "
-                        f"or shrink the prompt."
-                    ),
-                    stop_reason="query timeout",
-                    raw_output="\n".join(raw_events),
-                    elapsed_s=elapsed,
-                    prompt_chars=len(prompt),
-                    events=len(raw_events),
-                )
+            transient_errors = _transient_provider_errors()
+            retries = 0
+            while True:
+                try:
+                    (
+                        output,
+                        usd,
+                        reported,
+                        structured,
+                        ok,
+                        reason,
+                        tokens_in,
+                        tokens_out,
+                    ) = asyncio.run(asyncio.wait_for(collect(), timeout=QUERY_TIMEOUT_SECONDS))
+                    break
+                except asyncio.TimeoutError:
+                    elapsed = time.monotonic() - started
+                    return TurnResult(
+                        ok=False,
+                        output=(
+                            f"agent sdk query timed out after {QUERY_TIMEOUT_SECONDS} seconds "
+                            f"(role={role}, elapsed={elapsed:.0f}s, events={len(raw_events)}, "
+                            f"prompt={len(prompt)} chars). Raise SOL3_QUERY_TIMEOUT_SECONDS "
+                            f"or shrink the prompt."
+                        ),
+                        stop_reason="query timeout",
+                        raw_output="\n".join(raw_events),
+                        elapsed_s=elapsed,
+                        prompt_chars=len(prompt),
+                        events=len(raw_events),
+                    )
+                except transient_errors as exc:
+                    if not _is_transient(exc) or retries >= len(RETRY_WAITS_S):
+                        raise
+                    wait = RETRY_WAITS_S[retries]
+                    retries += 1
+                    print(
+                        f"[sol3] role={role} transient error, retry {retries}/{len(RETRY_WAITS_S)} "
+                        f"after {wait:.0f}s: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    _sleep(wait)
+                    # A failed attempt's partial stream must not bleed into the
+                    # one that succeeds: raw diagnostics, event count, and the
+                    # heartbeat's progress all start clean for the retry.
+                    raw_events.clear()
+                    progress.update({"started": time.monotonic(), "events": 0, "last": "-", "usd": None})
             elapsed = time.monotonic() - started
             wrote = [path for path in _changed(before, _snapshot(root)) if scope.permits(path)]
             return TurnResult(
@@ -282,6 +494,7 @@ class AgentSdkBackend(Backend):
                 events=len(raw_events),
                 input_tokens=tokens_in,
                 output_tokens=tokens_out,
+                retries=retries,
             )
         except Exception as exc:  # graceful failure. Never claim a write it did not make.
             return TurnResult(ok=False, output=f"agent sdk backend failed: {exc}")
