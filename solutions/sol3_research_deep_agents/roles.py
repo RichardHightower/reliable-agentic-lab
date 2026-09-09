@@ -87,10 +87,14 @@ WRITER_MAX_TOKENS = 4_096
 # more sections without raising it for every other, much smaller, structured
 # reply (a judge verdict, a research finding, a chart spec).
 OUTLINE_MAX_TOKENS = 8_192
-# #553. Was a bare `120`. Env-configurable the same way the SDK port's
-# `QUERY_TIMEOUT_SECONDS` is, so a slow live corpus does not need a code
-# change to clear, and a bad value falls back instead of raising at import.
-MODEL_TIMEOUT_SECONDS = _timeout_env("SOL3_QUERY_TIMEOUT_SECONDS", 120)
+# #553, judge of PR #556. Was a bare `120`. Env-configurable so a slow live
+# corpus does not need a code change to clear, and a bad value falls back
+# instead of raising at import. Its own variable name, not
+# `SOL3_QUERY_TIMEOUT_SECONDS`: that name already drives the SDK port's
+# per-query wall-clock ceiling, a different unit of work from this port's
+# per-model-call HTTP timeout, and sharing the name would let one export
+# silently move both.
+MODEL_TIMEOUT_SECONDS = _timeout_env("SOL3_DA_CALL_TIMEOUT_SECONDS", 120)
 MODEL_MAX_RETRIES = 0
 
 # Built-in harness tools that write or execute. The orchestrator must not hold
