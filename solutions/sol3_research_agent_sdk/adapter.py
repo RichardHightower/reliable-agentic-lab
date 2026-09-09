@@ -13,6 +13,23 @@ Write tracking walks the filesystem rather than asking git. sol1 tracks writes
 with `git diff` because it points at a repo clone. A research run writes into a
 plain work directory that was never `git init`ed, where every git command
 returns empty and the second line of defense silently reports nothing.
+
+#571, copying sol2's #568 fix. `collect()` returns the moment a
+`ResultMessage` arrives, success, an error, or a controlled stop (max turns
+or cost budget) alike, instead of continuing to ask the generator for
+whatever comes next. A `ResultMessage` is the SDK's one terminal record for
+a query; nothing legitimate follows it. A query that ends on
+`error_max_budget_usd` in under a minute and then sits open, quiet, used to
+turn a one-minute, evidenced "cost budget spent" into a 900-second "query
+timeout", discarding the real reason and the spend `spend()` needs; a
+successful query followed by a quiet stream lost its answer the same way.
+Because the break exits through the same return this port already builds
+for a finished turn, the turn record still carries `elapsed_s`,
+`prompt_chars`, and `events` the way #305 wired the timeout path to. A
+stream with no terminal `ResultMessage` at all is unaffected: nothing here
+short-circuits that wait, and `asyncio.wait_for`'s own ceiling is still
+what ends it. A partial, non-terminal event is never a `ResultMessage`, so
+it still cannot end the stream early.
 """
 
 from __future__ import annotations
@@ -331,6 +348,17 @@ class AgentSdkBackend(Backend):
                         if stop:
                             reason = stop
                             ok = False
+                        if isinstance(message, ResultMessage):
+                            # #571. A `ResultMessage` is the SDK's one
+                            # terminal record for this query: success, an
+                            # error, or a controlled ceiling (max turns or
+                            # cost budget) alike. Stop asking the generator
+                            # for anything past it rather than trust the
+                            # stream to close on its own, which can take the
+                            # rest of the timeout window. A bare `str` is
+                            # accepted above for its text but is never
+                            # terminal, so it cannot end the stream early.
+                            break
                 finally:
                     beat.cancel()
                 return result_text, usd, reported, structured, ok, reason, tokens_in, tokens_out
