@@ -259,6 +259,15 @@ def test_outline_max_tokens_is_wider_than_the_shared_graph_ceiling():
     assert roles.OUTLINE_MAX_TOKENS > roles.GRAPH_MAX_TOKENS
 
 
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#553. A non-integer (or non-positive) value must not raise at import
+    and take the whole module down with it."""
+    assert roles._timeout_env("SOL3_QUERY_TIMEOUT_SECONDS_UNSET", 120) == 120
+    monkeypatch.setenv("SOL3_QUERY_TIMEOUT_SECONDS_TEST", "abc")
+    assert roles._timeout_env("SOL3_QUERY_TIMEOUT_SECONDS_TEST", 120) == 120
+    assert "abc" in capsys.readouterr().err
+
+
 def test_build_agent_binds_the_bounded_model_to_writer_only(
     fake_langchain, fake_deepagents, tmp_path, monkeypatch
 ):

@@ -213,6 +213,15 @@ def test_the_default_timeout_clears_one_real_outline_query():
     assert adapter.QUERY_TIMEOUT_SECONDS >= 900
 
 
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#553. A non-integer (or non-positive) value must not raise at import
+    and take the whole module down with it."""
+    assert adapter._timeout_env("SOL3_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL3_QUERY_TIMEOUT_SECONDS_TEST", "abc")
+    assert adapter._timeout_env("SOL3_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "abc" in capsys.readouterr().err
+
+
 def test_a_missing_cost_field_is_not_a_free_turn(fake_sdk, work):
     fake_sdk([FakeResultMessage(result="x")])
     result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])

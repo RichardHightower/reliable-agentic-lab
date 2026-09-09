@@ -23,6 +23,8 @@ module calls a model. `subagents_for` returns configuration.
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 from roleplan import DEFAULT_LOOP, RolePlan, plan
@@ -32,6 +34,33 @@ HERE = Path(__file__).resolve().parent
 SKILLS_DIR = HERE / "skills"
 MEMORY_FILE = HERE / "AGENTS.md"
 DEFAULT_MODEL = "anthropic:claude-sonnet-5"
+
+
+def _timeout_env(name: str, default: int) -> int:
+    """Read a positive-integer timeout from the environment, never raising
+    at import.
+
+    #553, matching the `_timeout_env()` shape sol1 and sol4 landed for
+    #541. A bad value here used to raise `ValueError` at import time and
+    take the whole module down with it. A logged fallback keeps the process
+    alive, the same way a missing dependency reports as a result, not a
+    traceback.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = None
+    if value is None or value <= 0:
+        print(
+            f"[sol3] {name}={raw!r} is not a positive integer; using the default {default}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        return default
+    return value
 
 # The outline judge grades what the planner produced, and the editor repairs it.
 # Give the editor the stronger model: a Sonnet planner re-emitting every section
@@ -58,7 +87,10 @@ WRITER_MAX_TOKENS = 4_096
 # more sections without raising it for every other, much smaller, structured
 # reply (a judge verdict, a research finding, a chart spec).
 OUTLINE_MAX_TOKENS = 8_192
-MODEL_TIMEOUT_SECONDS = 120
+# #553. Was a bare `120`. Env-configurable the same way the SDK port's
+# `QUERY_TIMEOUT_SECONDS` is, so a slow live corpus does not need a code
+# change to clear, and a bad value falls back instead of raising at import.
+MODEL_TIMEOUT_SECONDS = _timeout_env("SOL3_QUERY_TIMEOUT_SECONDS", 120)
 MODEL_MAX_RETRIES = 0
 
 # Built-in harness tools that write or execute. The orchestrator must not hold

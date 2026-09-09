@@ -179,6 +179,15 @@ def test_a_hung_query_times_out(fake_sdk, target, monkeypatch):
     assert "never reached" not in result.output
 
 
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#553. A non-integer (or non-positive) value must not raise at import
+    and take the whole module down with it."""
+    assert adapter._timeout_env("SOL2_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL2_QUERY_TIMEOUT_SECONDS_TEST", "abc")
+    assert adapter._timeout_env("SOL2_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "abc" in capsys.readouterr().err
+
+
 # -- #539: a failure path never claims a silent 0.0 -------------------------
 
 
