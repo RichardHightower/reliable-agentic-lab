@@ -324,6 +324,52 @@ def test_unknown_spend_turns_counts_answers_with_no_cost_reported():
     assert boss.unknown_spend_turns == 1
 
 
+def test_spend_clamps_a_negative_provider_cost_to_zero():
+    """#546. The SDK has never reported a negative cost, but nothing stops a
+    malformed one from arriving; a bare `+=` would let it walk `spent_usd`
+    backwards and loosen the budget it is supposed to shrink."""
+    boss = implementer.roles.Orchestrator(name="orchestrator", repo=Path("."))
+    boss.spend(1.0)
+    boss.spend(-5.0)
+
+    assert boss.spent_usd == 1.0
+
+
+class ControlledStopBackend(doers.Backend):
+    """#546. A backend that returns `ok=False` on purpose: the SDK named a
+    ceiling ("cost budget spent") instead of staying silent. Not the same
+    case as `FailingBackend`, which never answers at all."""
+
+    name = "controlled-stop"
+
+    def __init__(self, message: str):
+        self.message = message
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
+        return doers.DoerResult(
+            ok=False, usd=0.0, output=self.message, stop_reason="cost budget spent"
+        )
+
+
+def test_a_controlled_stop_is_named_apart_from_a_non_answer(tmp_path, monkeypatch):
+    """#546. A backend that stops on purpose (the SDK naming a ceiling such
+    as "cost budget spent") reads differently in the trace from a backend
+    that never answered at all, even though both take the same escalate
+    branch as `FailingBackend` above."""
+    repo = _git_repo(tmp_path / "repo")
+    baseline = _run(passed=("tests/test_health.py::test_health",))
+    still_green = _run(passed=("tests/test_health.py::test_health",))
+    _patch_runs(monkeypatch, [baseline, still_green])
+
+    backend = ControlledStopBackend("Agent SDK E2E budget exhausted at $2.00")
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, write_trace=True)
+
+    assert trace["gate"] == "escalate"
+    assert "the test implementer backend stopped on purpose" in trace["reason"]
+    assert "cost budget spent" in trace["reason"]
+    assert "did not answer" not in trace["reason"]
+
+
 class FailsAtCodePhaseBackend(doers.Backend):
     """Writes a red test, then never answers the code phase."""
 
