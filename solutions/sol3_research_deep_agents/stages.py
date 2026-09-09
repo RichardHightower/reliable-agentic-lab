@@ -308,6 +308,19 @@ STRUCTURAL = {
 # the plan.
 FROZEN_ORDER = ("abstract", "introduction", "methods", "conclusion", "next step", "references")
 
+# #566. The frozen order's own "body sections" slot sits between Methods and
+# Conclusion: every heading up to and including Methods must be contiguous,
+# in this order, with no body section wedged in; every heading from
+# Conclusion on must be contiguous too; a topic's own body sections belong
+# only in the gap between the two groups. `outline_gate`'s order row below
+# grades an outline's full shape against this split, not only the relative
+# order of the structural headings against each other -- a relative-order
+# check alone missed a Methods a writer outline turn placed after a body
+# section, because the structural headings it named (Abstract, Introduction,
+# Methods) were still in the right order relative to one another.
+FROZEN_PREFIX = FROZEN_ORDER[: FROZEN_ORDER.index("methods") + 1]
+FROZEN_SUFFIX = FROZEN_ORDER[FROZEN_ORDER.index("methods") + 1 :]
+
 
 def plan_heading(item) -> str:
     """A plan section is an object with a heading. An older plan is a string."""
@@ -1151,16 +1164,33 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
     # #560. Presence alone let a writer outline turn place its Introduction
     # after a body section, or draft it twice, and neither showed up here:
     # the two problems PR #558's judge measured downstream, in the
-    # assembled paper. A duplicate and an out-of-order heading are the same
-    # defect from this row's point of view, so one comparison catches both:
-    # a repeated entry can never match a `set`-deduplicated `expected`, no
-    # separate duplicate check needed.
+    # assembled paper. #566: comparing only the structural headings against
+    # each other missed a Methods a writer placed after a body section,
+    # because Abstract, Introduction, and Methods were still in the right
+    # order relative to one another -- the body section sitting between
+    # Introduction and Methods named no defect from that narrower view. This
+    # row now compares the outline's full shape against the frozen order:
+    # every heading is labelled by its own structural name, or "body" when
+    # it names none; consecutive "body" labels collapse to the one slot the
+    # frozen order actually gives them, between Methods and Conclusion. A
+    # duplicate structural heading still fails here too, the same as before:
+    # a repeated entry can never match a `set`-deduplicated expected group,
+    # no separate duplicate check needed.
     heading_order = [str(section.get("heading", "")).strip().lower() for section in sections]
-    frozen_present = [heading for heading in heading_order if heading in FROZEN_ORDER]
-    expected = sorted(set(frozen_present), key=FROZEN_ORDER.index)
-    if frozen_present != expected:
+    labelled = [heading if heading in FROZEN_ORDER else "body" for heading in heading_order]
+    collapsed = [
+        label for index, label in enumerate(labelled)
+        if label != "body" or index == 0 or labelled[index - 1] != "body"
+    ]
+    prefix_present = [label for label in labelled if label in FROZEN_PREFIX]
+    suffix_present = [label for label in labelled if label in FROZEN_SUFFIX]
+    expected = sorted(set(prefix_present), key=FROZEN_PREFIX.index)
+    if "body" in collapsed:
+        expected.append("body")
+    expected += sorted(set(suffix_present), key=FROZEN_SUFFIX.index)
+    if collapsed != expected:
         misses.append(
-            f"the outline's structural headings are ordered {frozen_present}, "
+            f"the outline's sections are ordered {collapsed}, "
             f"not the frozen order {expected}."
         )
 
@@ -1691,6 +1721,40 @@ def assemble(
         written.setdefault("Introduction", _introduction_stub(plan))
     insert_at = lowered.index("abstract") + 1 if "abstract" in lowered else 0
     sections.insert(insert_at, intro_section)
+
+    # #566. The same move rule, for Methods: a writer outline turn can place
+    # Methods after a body section exactly the way it could place
+    # Introduction after one, and presence-by-name alone never caught it
+    # either. `outline_gate`'s order row now rejects this for a fresh
+    # outline turn, but a resumed run's persisted `outline.json` can predate
+    # it, so this pass runs unconditionally here too. Methods is always
+    # Python-written before `assemble` is ever called (`Paper.stage_assemble`
+    # sets `self.written["Methods"]` first), so there is no stub branch here
+    # the way Introduction needs one: an outline with no Methods heading at
+    # all still gets the bare heading inserted, and `written["Methods"]`
+    # supplies its body. The Evidence summary needs no move of its own: the
+    # loop below splices `table_block` in right after whichever section
+    # carries the "methods" heading, so relocating that heading carries the
+    # table along with it.
+    lowered = [str(section.get("heading", "")).strip().lower() for section in sections]
+    methods_at = [index for index, heading in enumerate(lowered) if heading == "methods"]
+    if methods_at:
+        methods_section = sections[methods_at[0]]
+        sections = [entry for index, entry in enumerate(sections) if index not in methods_at]
+        lowered = [heading for index, heading in enumerate(lowered) if index not in methods_at]
+    else:
+        methods_section = {
+            "heading": "Methods",
+            "purpose": STRUCTURAL["methods"],
+            "claim_ids": [],
+            "figures": [],
+        }
+    insert_at = (
+        lowered.index("introduction") + 1
+        if "introduction" in lowered
+        else (lowered.index("abstract") + 1 if "abstract" in lowered else 0)
+    )
+    sections.insert(insert_at, methods_section)
     outline = {**outline, "sections": sections}
 
     index, urls = numbering(ledger)
