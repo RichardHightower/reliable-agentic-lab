@@ -12,6 +12,7 @@ keeps working without it.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -24,6 +25,43 @@ from write_scope import WriteScope
 # the estimate the loop uses, not a bill.
 INPUT_USD_PER_MTOK = 3.0
 OUTPUT_USD_PER_MTOK = 15.0
+
+# #562. Copied verbatim from `solutions/sol2_implementer_agent_sdk/e2e_t001.py`'s
+# `_redact` (#543, widened by #545 follow-up), never imported: this port has
+# no e2e script of its own to hold it, and a durable, checked-in raw log
+# needs the same guarantee -- no operator home directory, no live key --
+# that port already gives its own `--raw-log-dir` copies.
+_KEY_PATTERN = re.compile(r"sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]+")
+_HOME_TILDE_PATTERN = re.compile(r"~/[^\s'\"]*")
+_BEARER_PATTERN = re.compile(r"Bearer\s+\S+")
+_HOME_NAME = Path.home().name
+
+
+def _redact(text: str) -> str:
+    """Strip what a durable, checked-in copy must never carry: the
+    operator's own home directory (resolved, `~/`-shorthand, or slugified
+    with `-` in place of `/`), anything shaped like a live key
+    (`sk-ant-...`, `ghp_...`), and a bearer auth header."""
+    text = text.replace(str(Path.home()), "<HOME>")
+    text = _HOME_TILDE_PATTERN.sub("<HOME>", text)
+    if _HOME_NAME:
+        text = re.sub(re.escape(_HOME_NAME), "<HOME>", text)
+    text = _BEARER_PATTERN.sub("Bearer <REDACTED-TOKEN>", text)
+    return _KEY_PATTERN.sub("<REDACTED-KEY>", text)
+
+
+def _phase_of(allow: list[str]) -> str:
+    """#562. The raw log filename's own label. Mirrors the routing
+    `_agent_for` does below, but as a name rather than a graph, so a raw
+    log can be written even when `phase_agents` is a single plain `agent`
+    (`_agent_for` returns that agent unconditionally in that case)."""
+    if any(pattern == steps.STEPS_FILE for pattern in allow):
+        return "plan"
+    if any(pattern.startswith("tests/") for pattern in allow):
+        return "test"
+    if any(pattern.startswith(("app/", "src/")) for pattern in allow):
+        return "code"
+    return "unknown"
 
 
 def _changed_files(repo: Path) -> set[str]:
@@ -216,6 +254,21 @@ def _describe_exc(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def _exception_raw_log(exc: Exception, usage) -> str:
+    """#562, judge of PR #565. `agent.invoke()` returns no state on a raise,
+    so `_raw_messages(result)` has nothing to read and a raising call wrote
+    no raw log at all -- the run most in need of evidence (the one that
+    dies) is the one that left none. The usage callback still saw whatever
+    turns completed before the raise (#543); this is that much of the
+    message sequence, not the full one, but it is not nothing."""
+    saw_usage = usage is not None and usage.saw_usage
+    return (
+        f"exception: {_describe_exc(exc)}\n"
+        f"usage_metadata seen before the raise: {saw_usage}\n"
+        f"total_usd before the raise: {usage.total_usd if usage is not None else 0.0}\n"
+    )
+
+
 class DeepAgentsBudgetExceeded(RuntimeError):
     """#549. Raised by the usage callback when a call's running cost passes
     its own per-call cap. This is the Deep Agents twin of the SDK port's
@@ -313,6 +366,7 @@ class DeepAgentsBackend(Backend):
         judge_agent=None,
         recursion_limit: int | None = None,
         max_call_usd: float | None = None,
+        raw_log_dir: Path | None = None,
     ):
         if agent is None and not phase_agents:
             raise ValueError("provide an agent or one agent for each implementation phase")
@@ -324,6 +378,21 @@ class DeepAgentsBackend(Backend):
         # per-query ceiling. None means no cutoff, the behavior before
         # this ticket.
         self.max_call_usd = max_call_usd
+        # #562. Mirrors the SDK port's `--raw-log-dir`: when set, every call
+        # writes a redacted copy of its own usage_metadata and message
+        # sequence here, the same evidence `DoerResult.raw_output` already
+        # carries in memory, before a killed run could lose it the way #562
+        # found the SDK port's own spend was lost.
+        self.raw_log_dir = raw_log_dir
+        self._raw_log_calls = 0
+
+    def _log_raw(self, raw_output: str, *, role: str) -> None:
+        if not self.raw_log_dir or not raw_output:
+            return
+        self.raw_log_dir.mkdir(parents=True, exist_ok=True)
+        self._raw_log_calls += 1
+        name = f"deep-agents-raw-{self._raw_log_calls}-{role}.txt"
+        (self.raw_log_dir / name).write_text(_redact(raw_output), encoding="utf-8")
 
     def _agent_for(self, allow: list[str]):
         """Choose the graph whose cast matches the driver's current phase."""
@@ -360,11 +429,13 @@ class DeepAgentsBackend(Backend):
             after = _changed_files(repo)
             scope = WriteScope(allow=allow)
             wrote = sorted(path for path in (after - before) if scope.permits(path))
+            raw_output = _raw_messages(result)
+            self._log_raw(raw_output, role=_phase_of(allow))
             return DoerResult(
                 wrote=wrote,
                 output=last_ai_text(result),
                 usd=last_usd(result),
-                raw_output=_raw_messages(result),
+                raw_output=raw_output,
             )
         # Same contract every offline Backend keeps: never raise, report it.
         except Exception as exc:
@@ -383,6 +454,12 @@ class DeepAgentsBackend(Backend):
             # its own cost stop, so e2e_t001.CONTROLLED_STOPS reads a
             # deliberate cutoff as one, not as a crashed query.
             stop_reason = "cost budget spent" if isinstance(exc, DeepAgentsBudgetExceeded) else None
+            # #562, judge of PR #565. The run most in need of evidence -- the
+            # one that just died -- is the one `_log_raw` on the success path
+            # above never reaches. Not the full message sequence (`invoke()`
+            # returned none), but the exception and whatever the callback
+            # already saw.
+            self._log_raw(_exception_raw_log(exc, usage), role=_phase_of(allow))
             return DoerResult(
                 ok=False,
                 usd=spend,
@@ -400,12 +477,15 @@ class DeepAgentsBackend(Backend):
             payload = {"messages": [{"role": "user", "content": prompt}]}
             config = _invoke_config(self.recursion_limit, usage)
             result = agent.invoke(payload, config=config) if config else agent.invoke(payload)
+            raw_output = _raw_messages(result)
+            self._log_raw(raw_output, role="judge")
             return DoerResult(
-                output=last_ai_text(result), usd=last_usd(result), raw_output=_raw_messages(result)
+                output=last_ai_text(result), usd=last_usd(result), raw_output=raw_output
             )
         except Exception as exc:
             spend = usage.total_usd if usage is not None and usage.saw_usage else None
             stop_reason = "cost budget spent" if isinstance(exc, DeepAgentsBudgetExceeded) else None
+            self._log_raw(_exception_raw_log(exc, usage), role="judge")
             return DoerResult(
                 ok=False,
                 usd=spend,
