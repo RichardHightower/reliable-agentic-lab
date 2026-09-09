@@ -26,10 +26,10 @@ wait, and `asyncio.wait_for`'s own ceiling is still what ends it.
 one. The installed `claude_agent_sdk`'s own `Query._read_messages` (upstream
 #1088) holds a result frame back from closing the run while a delegated
 `Task` it spawned is still running, and lets a later result frame close it
-once that work drains; there is no `"partial"` subtype on the wire; the run
-boundary is delegated-task bookkeeping, not the result's own shape.
-`collect()` mirrors that bookkeeping here so a `Task` still in flight cannot
-truncate the run at its first, mid-flight result.
+once that work drains. The run boundary is delegated-task bookkeeping, not
+the result's own shape. `collect()` mirrors that bookkeeping here so a
+`Task` still in flight cannot truncate the run at its first, mid-flight
+result.
 
 Write tracking unions the untracked listing into the diff. `git diff
 --name-only` sees tracked changes only, and this loop's whole job is creating
@@ -229,6 +229,11 @@ class AgentSdkBackend(Backend):
             started = time.monotonic()
 
             async def collect() -> tuple[str, float | None, dict | None, bool, str | None]:
+                """#578 follow-up. A deferring task stuck with no
+                `terminal_reason` reads to the `QUERY_TIMEOUT_SECONDS`
+                ceiling instead of returning early, an inherited SDK limit
+                until the CLI sends its own run-boundary signal.
+                """
                 result_text = ""
                 usd = None
                 structured = None
