@@ -2168,6 +2168,29 @@ def test_outline_gate_rejects_a_duplicate_introduction():
     assert "not the frozen order" in str(exc.value)
 
 
+def test_outline_gate_names_a_misplaced_methods():
+    """#566. Comparing only the structural headings against each other
+    missed this: Abstract, Introduction, and Methods were still in the
+    right order relative to one another, so PR #564's row let a Methods
+    the writer placed after a body section through. The full-shape
+    comparison now catches the body section wedged between Introduction
+    and Methods, the frozen order's own gap for Methods, not a body
+    section."""
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "The problem", "claim_ids": [claims[0].id]},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    with pytest.raises(GateFailed) as exc:
+        stages.outline_gate(out, led, plan())
+    assert "not the frozen order" in str(exc.value)
+
+
 # -- 5. diagram ------------------------------------------------------------
 
 
@@ -2484,6 +2507,74 @@ def test_assemble_inserts_a_python_written_introduction_when_missing():
     thin = paper_check.sections_without_prose(body, paper_check.MIN_SECTION_WORDS)
     assert not any(row.startswith("Introduction") for row in thin), thin
     assert not paper_check.brief.uncited_claims(body), paper_check.brief.uncited_claims(body)
+
+
+def test_assemble_stubs_an_introduction_the_outline_names_but_never_wrote():
+    """#566 C1. The heading exists in the outline, but `written` carries no
+    entry for it: a partial write, or a `sections.json` persisted before
+    this section existed. `Paper._need_written` only requires `written` to
+    be non-empty, never that it covers every outline section, so this is
+    reachable on a resumed run, not only the fully-missing-heading case
+    `test_assemble_inserts_a_python_written_introduction_when_missing`
+    already covers. Left unhandled this rendered a bare `## Introduction`
+    at 0 words and failed `has_body`; the stub now fills it instead."""
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[0].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(plan(title="T"), out, {"Body": "Body text. [1]"}, [], led)
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    thin = paper_check.sections_without_prose(body, paper_check.MIN_SECTION_WORDS)
+    assert not any(row.startswith("Introduction") for row in thin), thin
+    assert not paper_check.brief.uncited_claims(body), paper_check.brief.uncited_claims(body)
+
+
+def test_assemble_moves_an_out_of_order_methods_after_introduction():
+    """#566. The same move rule PR #564 gave Introduction, for Methods.
+    Ticket's own outline: Abstract, Introduction, The problem, Methods,
+    Body -- `outline_gate` now names this a misplaced Methods
+    (`test_outline_gate_names_a_misplaced_methods`), but `assemble` still
+    self-heals a resumed run's persisted outline the same way it already
+    does for Introduction: Methods moves to the frozen slot right after
+    Introduction, before every body section."""
+    led, claims = ledger_with(n=2)
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "The problem", "claim_ids": [claims[0].id]},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(
+        plan(title="T"),
+        out,
+        {
+            "Introduction": "Introduction text. [1]",
+            "The problem": "Problem text. [1]",
+            "Methods": "Methods text, Python-written.",
+            "Body": "Body text. [2]",
+        },
+        [],
+        led,
+    )
+    assert body.count("## Methods") == 1, body
+    assert (
+        body.index("## Abstract")
+        < body.index("## Introduction")
+        < body.index("## Methods")
+        < body.index("## The problem")
+        < body.index("## Body")
+    ), body
 
 
 # -- P11, methods, conclusion, and the study table --------------------------

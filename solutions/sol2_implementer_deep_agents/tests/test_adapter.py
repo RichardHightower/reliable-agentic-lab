@@ -291,6 +291,44 @@ def test_the_judge_keeps_the_raw_message_log(tmp_path):
     assert "the diff matches" in result.raw_output
 
 
+def test_raw_log_dir_writes_one_redacted_call(tmp_path):
+    """#562. Mirrors the SDK port's `--raw-log-dir`: the same `_redact`
+    (copied here, never imported -- this port has no e2e script of its own
+    to hold it) strips a live key and the operator's own home directory from
+    a durable, checked-in copy of the call's usage_metadata and message
+    sequence."""
+    secret = f"sk-ant-{'a' * 20}"
+    home = str(Path.home())
+    raw_dir = tmp_path / "raw"
+    backend = adapter.DeepAgentsBackend(
+        FakeAgent(f"wrote it, key={secret}, under {home}/project", usd=0.01),
+        raw_log_dir=raw_dir,
+    )
+
+    result = backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert result.ok
+    files = list(raw_dir.iterdir())
+    assert len(files) == 1
+    content = files[0].read_text(encoding="utf-8")
+    assert secret not in content
+    assert home not in content
+    assert "<REDACTED-KEY>" in content
+    assert "<HOME>" in content
+    # The evidence itself must still be legible, just scrubbed.
+    assert "wrote it" in content
+
+
+def test_raw_log_dir_untouched_when_not_set(tmp_path):
+    """Optional and off by default, the same as the SDK port's own flag: no
+    `.harness/`-adjacent side effect for a run that never asked for one."""
+    result = adapter.DeepAgentsBackend(FakeAgent("wrote it", usd=0.01)).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert result.ok
+    assert not (tmp_path / "raw").exists()
+
+
 # -- #539: a raised backend never claims a silent 0.0 -----------------------
 
 
@@ -313,7 +351,38 @@ def test_a_backend_that_raises_reports_usd_as_none_not_zero(tmp_path):
     )
     assert not result.ok
     assert result.usd is None
-    assert "RuntimeError: boom" in result.output
+
+
+def test_raw_log_dir_writes_on_a_raising_call_too(tmp_path):
+    """#562, judge of PR #565. `agent.invoke()` returns no state on a raise,
+    so `_raw_messages(result)` has nothing to read there -- the run most in
+    need of evidence, the one that just died, used to leave none. The
+    exception name and whatever the usage callback already saw before the
+    raise now land in the raw log directory instead."""
+    raw_dir = tmp_path / "raw"
+    result = adapter.DeepAgentsBackend(
+        RaisingAgent(RuntimeError("boom")), raw_log_dir=raw_dir
+    ).run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert not result.ok
+    files = list(raw_dir.iterdir())
+    assert len(files) == 1
+    content = files[0].read_text(encoding="utf-8")
+    assert "RuntimeError: boom" in content
+
+
+def test_raw_log_dir_writes_on_a_raising_judge_call_too(tmp_path):
+    """Same fix, the judge-only path."""
+    raw_dir = tmp_path / "raw"
+    judge = RaisingAgent(RuntimeError("judge boom"))
+    result = adapter.DeepAgentsBackend(FakeAgent(), judge_agent=judge, raw_log_dir=raw_dir).judge(
+        repo=tmp_path, prompt="grade this"
+    )
+
+    assert not result.ok
+    files = list(raw_dir.iterdir())
+    assert len(files) == 1
+    assert "RuntimeError: judge boom" in files[0].read_text(encoding="utf-8")
 
 
 def test_a_backend_failure_names_the_exception_class(tmp_path):

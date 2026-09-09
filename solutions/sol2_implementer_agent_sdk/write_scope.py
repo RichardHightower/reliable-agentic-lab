@@ -135,6 +135,10 @@ class Orchestrator(Role):
     # difference: a trace with a nonzero count here has a `spent_usd` that
     # is a floor, not a total.
     unknown_spend_turns: int = 0
+    # #562. One `spend` call is one turn, known-cost or not. `implementer.py`'s
+    # `_checkpoint_spend` reads this to number each `turns.jsonl` row -- pure
+    # bookkeeping, still no write, the same as `spent_usd` above.
+    turns: int = 0
 
     def start_iteration(self) -> int:
         self.iteration += 1
@@ -154,6 +158,7 @@ class Orchestrator(Role):
         # has to keep moving, so an unknown turn spends 0.0 against it; the
         # trace reports the `None` itself, never a silent 0.0, so a reader
         # can tell "cost nothing" from "we do not know".
+        self.turns += 1
         if usd is None:
             self.unknown_spend_turns += 1
             return
