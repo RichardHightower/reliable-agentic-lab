@@ -80,3 +80,7 @@ final sdk-only confirming run follows #567 (the project deny list) and
 
 The deep doer's confirming run for the same day is
 `docs/status/2026-09-08-sol2-t001-live-deep-round4.md`.
+
+The final sdk-only confirming run, after #567 and #568 landed, is
+`2026-09-08-sol2-t001-live-sdk-round5.md`: the test write reached the
+red gate, and the loop escalated on a rubric row, not on a timeout.
