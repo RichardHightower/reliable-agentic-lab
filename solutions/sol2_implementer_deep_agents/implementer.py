@@ -206,6 +206,14 @@ def _state_tampered(path: Path, last_written: bytes | None) -> bool:
 # `steps_done` would fail forever. Folded into an existing, already-provable
 # step instead, so `ui_has_e2e` gets a first-pass answer without inventing a
 # rubric row `_mark_proven` cannot close.
+#
+# #585, judge of PR #582. PR #582 folded this into `plan_for` alone, so
+# `--planner sdk` and `--planner deep` (`_plan_from_backend`, which writes
+# its own steps and never calls `plan_for`) carried no such instruction and
+# reintroduced the same dead end on a backend-planned run with declared
+# `ui_paths`. `_fold_ui_e2e_instruction`, below, is the one place `run()`
+# applies it, after any planner has produced a plan and before
+# `plan.validate`, so `derived`, `sdk`, and `deep` agree.
 UI_E2E_INSTRUCTION = (
     " This ticket's rubric also requires a green end-to-end suite under "
     "tests/e2e/ for the interface it touches. Write that test now, in this "
@@ -214,28 +222,20 @@ UI_E2E_INSTRUCTION = (
 )
 
 
-def plan_for(target_ticket: tickets.Ticket, *, ui_paths: list[str] | None = None) -> steps.Plan:
+def plan_for(target_ticket: tickets.Ticket) -> steps.Plan:
     """A plan derived from the ticket, one test step and one code step per criterion.
-
-    `ui_paths` is `.loop.yml`'s own `rubric.ui_paths`. When declared, the
-    first test step's own action carries `UI_E2E_INSTRUCTION`, so
-    `_test_prompt` (which lists every test step's action) surfaces it with
-    no separate mechanism.
 
     ponytail: derived, not generated. Swapping this for a planner subagent is
     lab 2's stretch goal, and the schema it must satisfy is already enforced.
     """
     made: list[steps.Step] = []
     for index, criterion in enumerate(target_ticket.criteria, 1):
-        action = f"Write a test that fails until this holds: {criterion.text}"
-        if ui_paths and index == 1:
-            action += UI_E2E_INSTRUCTION
         made.append(
             steps.Step(
                 id=f"S{index}T",
                 ticket=target_ticket.id,
                 role="test_implementer",
-                action=action,
+                action=f"Write a test that fails until this holds: {criterion.text}",
                 validation=f"a test covering {criterion.id} exists and fails before any code",
                 criterion=criterion.id,
             )
@@ -251,6 +251,30 @@ def plan_for(target_ticket: tickets.Ticket, *, ui_paths: list[str] | None = None
             )
         )
     return steps.Plan(steps=made)
+
+
+def _fold_ui_e2e_instruction(plan: steps.Plan, ui_paths: list[str] | None) -> steps.Plan:
+    """Append `UI_E2E_INSTRUCTION` to the first test step's own action, no
+    matter which planner produced `plan`.
+
+    #585. Called once, in `run()`, after `plan_for` or `_plan_from_backend`
+    has produced a plan (or `steps.Plan.load` restored one on `--resume`):
+    the only role permitted to write `tests/e2e/**` runs once, before the red
+    gate, and has to be asked for that suite regardless of whether the run
+    used the classroom's derived plan or the sdk or deep agent's own planner
+    graph. A no-op when `ui_paths` is falsy or the plan carries no test step.
+    Idempotent by substring check, so a resumed plan that already carries the
+    instruction from an earlier turn of this same run never gets it twice.
+    """
+    if not ui_paths:
+        return plan
+    test_steps = plan.for_role("test_implementer")
+    if not test_steps:
+        return plan
+    first = test_steps[0]
+    if UI_E2E_INSTRUCTION not in first.action:
+        first.action += UI_E2E_INSTRUCTION
+    return plan
 
 
 # A9 (#437 #422). Backends that force `derived` regardless of the --planner
@@ -384,10 +408,11 @@ def _test_prompt(ticket: tickets.Ticket, plan: steps.Plan) -> str:
     for instead of guessing at coverage. `_code_prompt` stays as it was: the
     code implementer never sees a test step.
 
-    #576. `UI_E2E_INSTRUCTION`, when `plan_for` folded it into a step's own
-    action, reaches this phase for free: it is read back here the same way
-    every other step's action is, with no separate flag or parameter to
-    keep in step with `plan_for`'s own.
+    #576, #585. `UI_E2E_INSTRUCTION`, when `_fold_ui_e2e_instruction` folds
+    it into a step's own action after any planner produced the plan, reaches
+    this phase for free: it is read back here the same way every other
+    step's action is, with no separate flag or parameter to keep in step
+    with the fold-in.
     """
     body = ticket.for_prompt()
     test_steps = plan.for_role("test_implementer")
@@ -751,9 +776,13 @@ def run(  # noqa: PLR0915
         if resume:
             plan = steps.Plan.load(target)
         elif effective_planner == "derived":
-            plan = plan_for(the_ticket, ui_paths=contract.rubric.get("ui_paths"))
+            plan = plan_for(the_ticket)
         else:
             plan = _plan_from_backend(backend, repo=target, ticket=the_ticket)
+        # #585. Applied once here, after any planner has produced a plan, so
+        # `derived`, `sdk`, and `deep` all reach the test phase with the same
+        # e2e instruction when `.loop.yml` declares `rubric.ui_paths`.
+        plan = _fold_ui_e2e_instruction(plan, contract.rubric.get("ui_paths"))
         plan.validate(criteria=the_ticket.criterion_ids)
     except steps.PlanRejected as exc:
         # Fail closed, never a crash and never a skipped red gate. A5's
