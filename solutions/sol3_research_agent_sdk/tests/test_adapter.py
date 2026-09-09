@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import adapter
-from conftest import FakeResultMessage
+from conftest import FakeResultMessage, FakeTaskNotification, FakeTaskStarted
 
 
 def test_it_reads_the_result_message_not_its_repr(fake_sdk, work):
@@ -137,11 +137,19 @@ def test_a_hung_query_times_out(fake_sdk, work, monkeypatch):
 def test_the_timeout_names_the_role_the_elapsed_time_and_the_event_count(
     fake_sdk, work, monkeypatch
 ):
-    """A timeout that says only "timed out" leaves nothing to diagnose (#305)."""
+    """A timeout that says only "timed out" leaves nothing to diagnose (#305).
+
+    #571: a `ResultMessage` is now terminal on arrival, so the event ahead
+    of the hang has to be something else -- a stream event, never the
+    answer -- for the hang to still happen at all."""
+
+    class StreamEvent:
+        pass
+
     module = fake_sdk([])
 
     async def query(*, prompt, options):
-        yield FakeResultMessage(result="partial")
+        yield StreamEvent()
         await adapter.asyncio.sleep(1)
 
     module.query = query
@@ -158,6 +166,100 @@ def test_the_timeout_names_the_role_the_elapsed_time_and_the_event_count(
     assert result.prompt_chars == len("a long prompt")
     # The diagnostics carry the shape of the prompt, never the prompt itself.
     assert "a long prompt" not in result.output
+
+
+# -- #571: `collect()` returns on the terminal ResultMessage -----------------
+
+
+def test_a_budget_stop_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    fake_sdk, work, monkeypatch
+):
+    """#571, copying sol2's #568 fix. A terminal `ResultMessage` naming a
+    controlled cost stop must end the turn right there, well inside this
+    test's own generous timeout, not because the stream finally closed or
+    the timeout ceiling finally fired. The turn record it returns still
+    carries `elapsed_s`, `prompt_chars`, and `cost_reported` the way #305
+    wired the timeout path to, because the break exits through this port's
+    ordinary finished-turn return."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(
+            result="", total_cost_usd=0.3914, subtype="error_max_budget_usd"
+        )
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeResultMessage(result="never reached", total_cost_usd=99.0)
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    elapsed = time.monotonic() - started
+
+    assert result.stop_reason == "cost budget spent"
+    assert result.usd == 0.3914
+    assert result.cost_reported is True
+    assert not result.ok
+    assert result.elapsed_s > 0
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_successful_result_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    fake_sdk, work, monkeypatch
+):
+    """#571. Not only a controlled stop: a plain, successful terminal
+    `ResultMessage` followed by a quiet stream must also end the turn right
+    there, with the answer, rather than wait out the ceiling and lose it."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result="the answer", total_cost_usd=0.05)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    elapsed = time.monotonic() - started
+
+    assert result.ok
+    assert result.output == "the answer"
+    assert result.usd == 0.05
+    assert result.stop_reason is None
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_result_with_a_task_in_flight_does_not_end_the_run(fake_sdk, work, monkeypatch):
+    """#578. A `ResultMessage` that arrives while a delegated `Task` this
+    run spawned is still going only closes that turn, not the run: the
+    installed SDK's own `Query._read_messages` (upstream #1088) holds the
+    close back the same way, and a later result frame arrives once the
+    task drains. The first result here must not be mistaken for the
+    answer, and the stream must not be cut off before the second, real
+    terminal result arrives -- nor should `collect()` wait out the
+    ceiling once that second result is in hand."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted()
+        yield FakeResultMessage(result="turn one", total_cost_usd=0.10)
+        yield FakeTaskNotification()
+        yield FakeResultMessage(result="the real answer", total_cost_usd=0.20)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    elapsed = time.monotonic() - started
+
+    assert result.ok
+    assert result.output == "the real answer"
+    assert result.usd == 0.20
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
 
 
 def test_a_slow_query_writes_a_heartbeat(fake_sdk, work, monkeypatch, capsys):
@@ -177,22 +279,30 @@ def test_a_slow_query_writes_a_heartbeat(fake_sdk, work, monkeypatch, capsys):
     assert "[sol3] t+" in capsys.readouterr().err
 
 
-def test_the_heartbeat_says_unknown_cost_not_zero(fake_sdk, work, monkeypatch, capsys):
-    """`usd=0.00` for ten minutes reads as free. It means nothing told us yet."""
+def test_the_heartbeat_never_reports_zero_before_a_cost_is_known(
+    fake_sdk, work, monkeypatch, capsys
+):
+    """`usd=0.00` for ten minutes reads as free. It means nothing told us yet.
+
+    #571: the only cost signal in this port is the terminal `ResultMessage`,
+    and that message now ends the turn on arrival, so a heartbeat can no
+    longer fire once the cost is known -- only ever before it."""
     module = fake_sdk([])
 
     async def query(*, prompt, options):
         await adapter.asyncio.sleep(0.08)
         yield FakeResultMessage(result="done", total_cost_usd=0.5)
-        await adapter.asyncio.sleep(0.08)
 
     module.query = query
     monkeypatch.setattr(adapter, "HEARTBEAT_SECONDS", 0.02)
-    adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[], role="outliner")
+    result = adapter.AgentSdkBackend(object()).run(
+        root=work, prompt="p", allow=[], role="outliner"
+    )
     beats = [line for line in capsys.readouterr().err.splitlines() if "[sol3] t+" in line]
-    assert any("usd=?" in line for line in beats), beats
-    assert any("usd=0.50" in line for line in beats), beats
+    assert beats, "no heartbeat fired before the terminal result arrived"
+    assert all("usd=?" in line for line in beats), beats
     assert not any("usd=0.00" in line for line in beats), beats
+    assert result.usd == 0.5
 
 
 def test_the_query_timeout_reads_the_environment(monkeypatch):
