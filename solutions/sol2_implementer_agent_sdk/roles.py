@@ -33,11 +33,14 @@ fixture's tracked deny of `Write(./tests/**)` and `Edit(./tests/**)` reached
 the test implementer, whose entire allow list is `tests/**`, before the
 scope hook above ever ran. That deny was never written for a role whose job
 is to write tests; it serves the roles that should never touch `tests/**`
-in the first place, and those roles hold no write tool at all in this cast
-(the judge). The scope hook stays the single source of the write-scope
-rule: `options_for` now loads project settings only for a build with no
-write-capable role in it, so a writer's own settings session can never
-carry a deny that outranks the hook meant to be its only judge.
+in the first place. The scope hook stays the single source of the
+write-scope rule: `options_for` no longer requests project settings for any
+role, judge included (judge of PR #570, follow-up 3). The only stated reason
+for `setting_sources=["project"]` was MCP server inheritance, this port
+declares no MCP server, and leaving the judge as the one role still exposed
+to an arbitrary target repo's deny list bought nothing: a deny on a path the
+judge needs to `Read` would silently starve the verdict that gates the run,
+for a setting this port never used.
 """
 
 from __future__ import annotations
@@ -212,15 +215,6 @@ def options_for(
     # kept from writing by the hook rather than by this list.
     allowed = sorted({tool for role in roles.values() for tool in role.tools} | set(SPAWN_TOOLS))
 
-    # #567. A target repo's `.claude/settings.json` is written for the roles
-    # that never touch the paths it denies, not for the writer this build is
-    # actually for. Loading it for a write-capable role lets its deny list
-    # outrank the scope hook above, which is supposed to be the only judge of
-    # where that role may write. Every real caller builds one role at a time
-    # (`role_names={"test_implementer"}`, and so on), so "no write-capable
-    # role in this build" is exactly "this build is a reader's".
-    settings = [] if any(role.can_write for role in roles.values()) else ["project"]
-
     return ClaudeAgentOptions(
         cwd=str(repo),
         agents=agent_definitions(roles, max_turns=max_turns),
@@ -228,9 +222,12 @@ def options_for(
         disallowed_tools=GLOBAL_DENY,
         permission_mode="dontAsk",
         hooks={"PreToolUse": hooks},
-        # A subagent inherits the project's MCP servers only with this set,
-        # and only when no role in this build can write (#567 above).
-        setting_sources=settings,
+        # #567, widened by follow-up 3. A target repo's `.claude/settings.json`
+        # is not this cast's to load: this port declares no MCP server (the
+        # only reason the setting ever existed), and every role's write scope
+        # is already the scope hook's call, not a project deny's. No role,
+        # judge included, gets project settings.
+        setting_sources=[],
         plugins=[{"type": "local", "path": str(PLUGIN)}],
         system_prompt=PARENT_PROMPT,
         max_turns=max_turns,

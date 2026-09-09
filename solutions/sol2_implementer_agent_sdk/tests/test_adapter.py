@@ -598,6 +598,57 @@ def test_a_budget_stop_returns_immediately_instead_of_waiting_for_the_stream_to_
     assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
 
 
+def test_a_successful_result_also_returns_immediately_instead_of_waiting_for_silence(
+    fake_sdk, target
+):
+    """#568 follow-up (judge of PR #570, item 1). The first fix broke only
+    on a controlled stop (`if stop:`), so a successful terminal
+    `ResultMessage` followed by the same quiet stream still ran to the
+    ceiling and reported "query timeout" instead of the answer it already
+    had. Every `ResultMessage` the real SDK yields is terminal, success
+    included; `collect()` must return on this one too."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result='{"done": true}', total_cost_usd=0.25)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeResultMessage(result="never reached", total_cost_usd=99.0)
+
+    module.query = query
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=5).run(
+        repo=target, prompt="p", allow=[]
+    )
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.ok
+    assert result.output == '{"done": true}'
+    assert result.usd == 0.25
+    assert result.stop_reason is None
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_partial_result_does_not_end_the_stream_early(fake_sdk, target):
+    """#568 follow-up. `"partial"` is this port's own test-only marker for a
+    `ResultMessage` that is not yet the terminal one (a progress report),
+    kept so a real interim message never gets mistaken for the answer. It
+    must not trip the new terminal-result break; only the outer timeout
+    ends a stream stuck after one."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result="progress", total_cost_usd=0.10, subtype="partial")
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached", total_cost_usd=0.99)
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=0.05).run(
+        repo=target, prompt="p", allow=[]
+    )
+    assert result.stop_reason == "query timeout"
+    assert result.usd == 0.10
+
+
 def test_a_stream_with_no_terminal_result_still_times_out(fake_sdk, target):
     """#568, the other half. A query that never produces a `ResultMessage` at
     all (a hung tool call, a dropped connection) must still hit the outer

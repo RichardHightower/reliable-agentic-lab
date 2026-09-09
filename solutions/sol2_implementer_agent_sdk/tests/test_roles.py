@@ -217,20 +217,31 @@ def test_the_cost_ceiling_comes_off_the_contract(fake_sdk, contract):
     assert roles.options_for(contract, max_usd=0.5).max_budget_usd == 0.5
 
 
-def test_project_settings_load_only_for_a_build_with_no_write_role(fake_sdk, contract):
-    """#567. Every real caller builds one role at a time. A build for a
-    write-capable role (planner, test_implementer, code_implementer) must
-    not request project settings, so a target repo's own
-    `.claude/settings.json` deny can never outrank the scope hook. A build
-    for the judge, which holds no write tool, still gets it."""
+def test_no_role_build_requests_project_settings(fake_sdk, contract):
+    """#567, widened by follow-up 3 (judge of PR #570). A write-capable
+    role's build must never request project settings, so a target repo's
+    own `.claude/settings.json` deny can never outrank the scope hook. The
+    judge is no exception: this port declares no MCP server, so the one
+    stated reason for `setting_sources=["project"]` never applied to it
+    either, and leaving it exposed made it the one role a target repo's
+    deny list could still silently starve."""
     fake_sdk()
-    for name in ("planner", "test_implementer", "code_implementer"):
+    for name in ("planner", "test_implementer", "code_implementer", "judge"):
         options = roles.options_for(contract, role_names=frozenset({name}))
         assert options.setting_sources == [], name
 
-    assert roles.options_for(contract, role_names=frozenset({"judge"})).setting_sources == [
-        "project"
-    ]
+
+def test_the_judge_can_still_read_without_project_settings(fake_sdk, contract):
+    """#567 follow-up 3. Dropping project settings for the judge must not
+    cost it the tools its verdict depends on: `Read`, `Glob`, and `Grep` are
+    granted through `tools=[...]`/`allowed_tools`, never through
+    `setting_sources`, so the judge still reads."""
+    fake_sdk()
+    options = roles.options_for(contract, role_names=frozenset({"judge"}))
+    judge_agent = options.agents["implementer-judge"]
+    for tool in ("Read", "Glob", "Grep"):
+        assert tool in judge_agent.tools, tool
+        assert tool in options.allowed_tools, tool
 
 
 def test_the_real_options_for_hook_permits_the_test_implementer_and_denies_the_code_implementer(
