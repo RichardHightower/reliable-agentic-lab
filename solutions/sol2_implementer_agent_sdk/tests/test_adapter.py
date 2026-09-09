@@ -335,12 +335,11 @@ def test_the_real_timeout_variable_set_to_abc_leaves_the_default_and_imports(
 
 
 def test_a_timed_out_query_reports_elapsed_and_the_event_count(fake_sdk, target):
-    """#578. Since #568, a `ResultMessage` (even one that used to be tagged
-    this port's own test-only "partial" subtype) is a terminal record and
-    ends the turn immediately, so it can no longer stand in for progress
-    that arrives before a genuine hang. A non-terminal stream event ahead
-    of the hang still counts toward `events`, and the timeout diagnostics
-    still name the elapsed time; the cost stays unknown because no
+    """#578. Since #568, any `ResultMessage` is a terminal record and ends
+    the turn immediately, so it can no longer stand in for progress that
+    arrives before a genuine hang. A non-terminal stream event ahead of the
+    hang still counts toward `events`, and the timeout diagnostics still
+    name the elapsed time; the cost stays unknown because no
     `ResultMessage` ever answered (see the "no cost message" test below
     for that assertion in full)."""
 
