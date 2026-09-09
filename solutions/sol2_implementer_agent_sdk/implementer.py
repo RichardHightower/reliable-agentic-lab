@@ -197,20 +197,45 @@ def _state_tampered(path: Path, last_written: bytes | None) -> bool:
     return last_written is not None and path.is_file() and path.read_bytes() != last_written
 
 
-def plan_for(target_ticket: tickets.Ticket) -> steps.Plan:
+# #576, judge of PR #582. The row `ui_has_e2e` demands is scored from
+# `tests/e2e/`, never from a criterion-tied unit test; the code implementer
+# is denied `tests/**`, and the test implementer's one pass, before the red
+# gate, is the only turn any role in the loop gets to write there at all.
+# Appended to a step's own `action`, not a new untracked step: a step with
+# no real criterion never gets marked done by `_mark_proven` below, and
+# `steps_done` would fail forever. Folded into an existing, already-provable
+# step instead, so `ui_has_e2e` gets a first-pass answer without inventing a
+# rubric row `_mark_proven` cannot close.
+UI_E2E_INSTRUCTION = (
+    " This ticket's rubric also requires a green end-to-end suite under "
+    "tests/e2e/ for the interface it touches. Write that test now, in this "
+    "same phase: the code phase's scope denies tests/**, so this is the "
+    "only turn any role gets to create it."
+)
+
+
+def plan_for(target_ticket: tickets.Ticket, *, ui_paths: list[str] | None = None) -> steps.Plan:
     """A plan derived from the ticket, one test step and one code step per criterion.
+
+    `ui_paths` is `.loop.yml`'s own `rubric.ui_paths`. When declared, the
+    first test step's own action carries `UI_E2E_INSTRUCTION`, so
+    `_test_prompt` (which lists every test step's action) surfaces it with
+    no separate mechanism.
 
     ponytail: derived, not generated. Swapping this for a planner subagent is
     lab 2's stretch goal, and the schema it must satisfy is already enforced.
     """
     made: list[steps.Step] = []
     for index, criterion in enumerate(target_ticket.criteria, 1):
+        action = f"Write a test that fails until this holds: {criterion.text}"
+        if ui_paths and index == 1:
+            action += UI_E2E_INSTRUCTION
         made.append(
             steps.Step(
                 id=f"S{index}T",
                 ticket=target_ticket.id,
                 role="test_implementer",
-                action=f"Write a test that fails until this holds: {criterion.text}",
+                action=action,
                 validation=f"a test covering {criterion.id} exists and fails before any code",
                 criterion=criterion.id,
             )
@@ -339,6 +364,11 @@ def _test_prompt(ticket: tickets.Ticket, plan: steps.Plan) -> str:
     and validation, so the test implementer can see what the planner asked
     for instead of guessing at coverage. `_code_prompt` stays as it was: the
     code implementer never sees a test step.
+
+    #576. `UI_E2E_INSTRUCTION`, when `plan_for` folded it into a step's own
+    action, reaches this phase for free: it is read back here the same way
+    every other step's action is, with no separate flag or parameter to
+    keep in step with `plan_for`'s own.
     """
     body = ticket.for_prompt()
     test_steps = plan.for_role("test_implementer")
@@ -702,7 +732,7 @@ def run(  # noqa: PLR0915
         if resume:
             plan = steps.Plan.load(target)
         elif effective_planner == "derived":
-            plan = plan_for(the_ticket)
+            plan = plan_for(the_ticket, ui_paths=contract.rubric.get("ui_paths"))
         else:
             plan = _plan_from_backend(backend, repo=target, ticket=the_ticket)
         plan.validate(criteria=the_ticket.criterion_ids)

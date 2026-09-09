@@ -1,17 +1,24 @@
-"""#576. `rubric.ui_has_e2e` and the role write scopes must agree.
+"""#576. `rubric.ui_has_e2e` demands a suite no role was ever asked to write.
 
 `ui_has_e2e` (`rubric.py`) demands a green `tests/e2e` suite whenever a
 changed file matches `.loop.yml`'s `rubric.ui_paths`. A live round-5 trace
 found a target repo whose code implementer is denied `tests/**` and whose
-test implementer runs once, before the code phase, so no role in the cast
-ever got a second chance to write the suite the row was about to demand:
-nine of ten rubric rows passed, the loop retried, and it escalated after
-spending a turn on an attempt no scoped role could have satisfied.
+test implementer runs once, before the code phase, and is never asked for
+an e2e suite: nine of ten rubric rows passed, the loop retried, and it
+escalated after spending a turn on an attempt no scoped role could have
+satisfied.
 
-Two things pin the fix: `Contract.validate` refuses a `.loop.yml` that makes
-`ui_has_e2e` structurally unsatisfiable, naming the row and the path; and a
-test implementer that actually writes the e2e suite the row wants does not
-escalate on that row alone.
+Judge of PR #582: the defect is temporal, not scope-shaped. `tests/**`
+already permits `tests/e2e/**` (fnmatch's `*` has no notion of a path
+separator), so a role able to write there always existed; the gap is that
+nothing in the loop ever asks it to.
+
+Two things pin the fix: `Contract.validate` still refuses a `.loop.yml`
+that makes `ui_has_e2e` structurally unsatisfiable (no role able to write
+`tests/e2e/**` at all), naming the row and the path; and `plan_for` /
+`_test_prompt` now ask the test implementer for an e2e suite, only when
+`ui_paths` are declared, so a test implementer that reads its own prompt
+writes it on the first pass.
 
 Helpers are copied from `tests/test_implementer.py`, not imported, the same
 way `tests/test_parity.py` copies its own fixtures.
@@ -124,24 +131,38 @@ def _run(*, passed=(), failed=()) -> RunResult:
     )
 
 
-class ScriptedBackend(doers.Backend):
-    """Writes the files for this call, then stops. Call 1 is tests. Call 2 is app."""
+class PromptFollowingBackend(doers.Backend):
+    """Writes the e2e suite only when its own prompt actually asks for one.
 
-    name = "scripted"
+    Not `ScriptedBackend`, which hands the test phase `tests/e2e/test_ui.py`
+    to write unconditionally -- judge of PR #582: that proves the rubric row
+    can go green when the suite exists, never that the loop asked for it.
+    This one reads the prompt the way a real model would.
+    """
 
-    def __init__(self, script: list[list[tuple[str, str]]]):
-        self.script = script
-        self.calls = 0
+    name = "prompt-following"
+
+    def __init__(self):
+        self.test_prompt = ""
 
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> doers.DoerResult:
-        files = self.script[self.calls] if self.calls < len(self.script) else []
-        self.calls += 1
-        wrote = []
-        for relative, text in files:
-            target = repo / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text, encoding="utf-8")
-            wrote.append(relative)
+        wrote: list[str] = []
+        if any(pattern.startswith("tests/") for pattern in allow):
+            self.test_prompt = prompt
+            unit = repo / "tests" / "test_greet.py"
+            unit.parent.mkdir(parents=True, exist_ok=True)
+            unit.write_text("def test_ac_1_greets():\n    assert True\n", encoding="utf-8")
+            wrote.append("tests/test_greet.py")
+            if "tests/e2e/" in prompt:
+                e2e = repo / "tests" / "e2e" / "test_ui.py"
+                e2e.parent.mkdir(parents=True, exist_ok=True)
+                e2e.write_text("def test_ui():\n    assert True\n", encoding="utf-8")
+                wrote.append("tests/e2e/test_ui.py")
+        elif any(pattern.startswith("app/") for pattern in allow):
+            template = repo / "app" / "templates" / "greet.html"
+            template.parent.mkdir(parents=True, exist_ok=True)
+            template.write_text("<p>hello</p>\n", encoding="utf-8")
+            wrote.append("app/templates/greet.html")
         return doers.DoerResult(wrote=wrote, output=f"wrote {wrote}", usd=0.0)
 
 
@@ -182,15 +203,23 @@ def _patch_ui_runs(monkeypatch, test_runs: list[RunResult]):
     monkeypatch.setattr(implementer.Contract, "run", fake_run)
 
 
-def test_t001_does_not_escalate_on_ui_has_e2e_when_the_test_implementer_writes_the_suite(
+def test_the_test_implementer_is_asked_for_an_e2e_suite_only_when_ui_paths_are_declared(
     tmp_path, monkeypatch
 ):
-    """The offline loop, against a fixture shaped like the round-5 target
-    (a UI-touching AC, a code implementer denied `tests/**`, `ui_paths`
-    declared): a test implementer that writes `tests/e2e/test_ui.py` in the
-    same call it writes the unit test gives the code phase's later UI edit
-    something to be judged green against. The run must not escalate on
-    `ui_has_e2e` alone."""
+    """#576, judge of PR #582. Round 5's defect was temporal, not scope-shaped:
+    the only role permitted to write `tests/e2e/**` runs once, before the red
+    gate, and was never asked to use that permission. `plan_for` now folds
+    `UI_E2E_INSTRUCTION` into a test step's own action when `.loop.yml`
+    declares `rubric.ui_paths`, and `_test_prompt` surfaces it; a test
+    implementer that actually reads its own prompt (`PromptFollowingBackend`,
+    not one handed the answer regardless) writes the e2e suite the row
+    demands on the first pass, against a repo that ships no `tests/e2e/` of
+    its own, and the loop does not escalate on `ui_has_e2e` alone.
+
+    The negative half lives in the same test: a ticket whose `.loop.yml`
+    declares no `ui_paths` gets no e2e instruction in its plan or its prompt
+    at all.
+    """
     repo = _git_repo(tmp_path / "repo")
     baseline = _run(passed=("tests/test_health.py::test_health",))
     red = _run(
@@ -205,21 +234,24 @@ def test_t001_does_not_escalate_on_ui_has_e2e_when_the_test_implementer_writes_t
     )
     _patch_ui_runs(monkeypatch, [baseline, red, green])
 
-    backend = ScriptedBackend(
-        script=[
-            [
-                ("tests/test_greet.py", "def test_ac_1_greets():\n    assert True\n"),
-                ("tests/e2e/test_ui.py", "def test_ui():\n    assert True\n"),
-            ],
-            [("app/templates/greet.html", "<p>hello</p>\n")],
-        ]
-    )
+    backend = PromptFollowingBackend()
 
     trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, write_trace=True)
 
+    assert "tests/e2e/" in backend.test_prompt, backend.test_prompt
     assert "ui_has_e2e" not in (trace.get("scope_violations") or [])
     assert "PASS  ui_has_e2e" in trace["rubric"], trace["rubric"]
     assert trace["gate"] == "pass", trace.get("reason")
+
+    # Negative: no `ui_paths`, no instruction, anywhere the prompt reads it.
+    plain_ticket = implementer.tickets.Ticket(
+        id="T002",
+        title="x",
+        state="ready",
+        criteria=[implementer.tickets.Criterion("AC-1", "greet returns hello")],
+    )
+    plain_plan = implementer.plan_for(plain_ticket, ui_paths=None)
+    assert "tests/e2e/" not in implementer._test_prompt(plain_ticket, plain_plan)
 
 
 def test_a_rubric_declaring_ui_paths_with_no_writable_e2e_path_fails_validate(tmp_path):

@@ -37,12 +37,12 @@ UI_E2E_PATH = "tests/e2e/**"
 DEFAULTS: dict = {
     "roles": {
         "planner": {"write_allow": ["steps.jsonl"], "write_deny": []},
-        # #576. `tests/**` already covers `tests/e2e/**` (fnmatch's `*` has no
-        # notion of a path separator), so this is belt over suspenders: naming
-        # the path explicitly is what `Contract.validate` below can point at,
-        # rather than trusting every future edit to keep noticing the
-        # subsumption is there.
-        "test_implementer": {"write_allow": ["tests/**", UI_E2E_PATH], "write_deny": []},
+        # #576, judge of PR #582. `tests/**` already covers `tests/e2e/**`
+        # (fnmatch's `*` has no notion of a path separator): naming the path
+        # a second time here was a no-op that changed nothing a target repo
+        # could observe. The real gap was temporal, not scope-shaped -- see
+        # `plan_for` and `_test_prompt` in implementer.py.
+        "test_implementer": {"write_allow": ["tests/**"], "write_deny": []},
         "code_implementer": {"write_allow": ["app/**", "src/**"], "write_deny": ["tests/**"]},
         "judge": {"write_allow": [], "write_deny": ["**"]},
     },
