@@ -124,7 +124,7 @@ No prose before it, no fence around it.
   "title": "...",
   "audience": "who this paper is for",
   "thesis": "one paragraph, no citations",
-  "word_target_total": 2000,
+  "word_target_total": 2800,
   "sections": [
     {
       "id": "introduction",
