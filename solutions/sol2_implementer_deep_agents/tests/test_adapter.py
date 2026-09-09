@@ -500,6 +500,73 @@ def test_a_call_under_its_dollar_cap_answers_normally(tmp_path):
     assert result.output == "done"
 
 
+def test_the_loop_budget_stops_a_call_that_would_overrun_it(tmp_path):
+    """#577. `harness.backend()` already slices `.loop.yml`'s own
+    `budget.usd` into `max_call_usd` for every call alike; a call that
+    spends right up to that slice can still carry the *cumulative* total
+    past the loop's own number, the same 4.4% overrun the SDK port's own
+    round-5 trace measured. With $0.50 left against a $0.66 per-call cap,
+    the next call must not even reach the graph."""
+    agent = FakeAgent("should not run", usd=0.0)
+    backend = adapter.DeepAgentsBackend(agent, max_call_usd=0.66, loop_budget_usd=2.00)
+    backend.spent_usd = 1.50
+
+    result = backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert not result.ok
+    assert result.usd == 0.0
+    assert result.stop_reason == "cost budget spent"
+    assert agent.calls == []
+    assert "1.50" in result.output
+
+
+def test_a_call_that_fits_the_remaining_loop_budget_still_runs(tmp_path):
+    """The cutoff must not fire early: room enough for one more per-call
+    slice must still reach the graph, and the running total keeps
+    accumulating past it."""
+    agent = FakeAgent("done", usd=0.4)
+    backend = adapter.DeepAgentsBackend(agent, max_call_usd=0.66, loop_budget_usd=2.00)
+    backend.spent_usd = 1.00
+
+    result = backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert result.ok
+    assert len(agent.calls) == 1
+    assert backend.spent_usd == 1.40
+
+
+def test_the_running_total_accumulates_across_every_call_on_one_backend(tmp_path):
+    """`harness.backend()` builds exactly one `DeepAgentsBackend`, reused
+    for the test phase and every code-loop iteration `implementer.py`
+    drives; `spent_usd` has to reflect every call that instance makes, not
+    reset between them, or `_budget_stop` always compares against zero."""
+    agent = FakeAgent("done", usd=0.5)
+    backend = adapter.DeepAgentsBackend(agent, max_call_usd=1.0, loop_budget_usd=10.0)
+
+    backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+    backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert backend.spent_usd == 1.0
+
+
+def test_the_judge_call_is_guarded_by_the_loop_budget_too(tmp_path):
+    """#577, judge of PR #584. `_budget_stop()` guards `run()` and `judge()`
+    alike; a judge call the remaining loop budget cannot cover must refuse
+    before ever reaching the graph, reporting the same controlled stop
+    `run()`'s own guard does, not a crash."""
+    judge_agent = FakeAgent("should not run", usd=0.0)
+    backend = adapter.DeepAgentsBackend(
+        FakeAgent(), judge_agent=judge_agent, max_call_usd=0.66, loop_budget_usd=2.00
+    )
+    backend.spent_usd = 1.50
+
+    result = backend.judge(repo=tmp_path, prompt="grade this")
+
+    assert not result.ok
+    assert result.stop_reason == "cost budget spent"
+    assert judge_agent.calls == []
+
+
 def test_a_judge_that_raises_reports_usd_as_none(tmp_path):
     result = adapter.DeepAgentsBackend(
         FakeAgent(), judge_agent=RaisingAgent(RuntimeError("judge boom"))

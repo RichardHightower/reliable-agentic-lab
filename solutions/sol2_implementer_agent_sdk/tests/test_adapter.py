@@ -14,7 +14,7 @@ import implementer
 import pytest
 import roles
 import steps
-from conftest import FakeResultMessage, FakeTaskNotification, FakeTaskStarted
+from conftest import FakeResultMessage, FakeTaskNotification, FakeTaskStarted, FakeTaskUpdated
 from contract import CoverageReport, RunResult, SuiteReport
 
 # -- a full ticket repo, for the #567 end-to-end test below ------------------
@@ -671,6 +671,116 @@ def test_a_result_with_a_task_in_flight_does_not_end_the_run(fake_sdk, target):
     assert result.output == "the real answer"
     assert result.usd == 0.20
     assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_backgrounded_subagents_write_still_belongs_to_the_turn_that_spawned_it(
+    fake_sdk, target
+):
+    """#577, on top of #578's `_track_task_lifecycle`/`_is_run_boundary`. A
+    round-5 raw log shows the parent resume its subagent in the background
+    ("has been resumed to finish. Waiting for it to complete."), and the
+    terminal `ResultMessage` for the parent's own turn arrives right after,
+    with the subagent it just resumed still in flight. `run()`'s own
+    `_changed_files` diff is taken the instant `collect()` returns; sampling
+    it there would have missed a write the subagent makes a moment later --
+    not attributed to this call (already sampled), and not to the next one
+    either (already present in its own `before` snapshot, since it landed
+    before that call ever started). `#578`'s own boundary check keeps
+    `collect()` draining past the terminal message while the task it started
+    is still in flight, so the write is still this call's own."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeResultMessage(result="Waiting for it to complete.", total_cost_usd=0.49)
+        # The subagent's own write lands only once it drains, strictly
+        # after the parent's own mid-flight result.
+        (target / "app" / "late.py").write_text("y = 2\n", encoding="utf-8")
+        yield FakeTaskNotification(task_id="bg-1")
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=["app/**"])
+
+    assert result.wrote == ["app/late.py"]
+    assert result.usd == 0.49
+    assert result.ok
+
+
+def test_a_subagent_that_never_reports_done_still_returns_when_the_stream_ends(
+    fake_sdk, target
+):
+    """The other half. A backgrounded subagent that never posts a completion
+    event before the stream itself closes must not hang `collect()` forever
+    -- there is nothing left to wait on once the generator is exhausted."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeResultMessage(result="done enough", total_cost_usd=0.10)
+        # No task_notification / terminal task_updated ever arrives for "bg-1".
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.output == "done enough"
+    assert result.usd == 0.10
+
+
+def test_a_non_terminal_task_updated_does_not_close_the_task(fake_sdk, target):
+    """#577 follow-up (judge spot check at 1b8efe7). `task_updated` fires
+    whatever its own payload says; every occurrence in the round-5 logs
+    happened to carry a terminal status, but matching on the subtype alone
+    -- ignoring `status` -- would close a task on any update, letting a
+    `ResultMessage` that arrives right after end the run before the
+    subagent's own write ever lands. Only a status in
+    `_TERMINAL_TASK_STATUSES` may close it; this is this port's only test
+    that constructs a `task_updated` message at all."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeTaskUpdated(task_id="bg-1", status="in_progress")
+        yield FakeResultMessage(result="mid-flight", total_cost_usd=0.2)
+        # The subagent's own write lands only once it actually drains.
+        (target / "app" / "late.py").write_text("y = 2\n", encoding="utf-8")
+        yield FakeTaskUpdated(task_id="bg-1", status="completed")
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=["app/**"])
+
+    assert result.wrote == ["app/late.py"]
+
+
+def test_the_bounded_drain_keeps_the_controlled_reason_when_the_wall_is_reached(
+    fake_sdk, target, monkeypatch
+):
+    """#577 follow-up (judge spot check at 1b8efe7). A `local_agent` that
+    never reaches a terminal status, on a stream that itself never closes,
+    must not walk the whole query to `self.timeout_seconds`: the drain's own
+    much smaller deadline gives up first and returns the terminal message's
+    own reason. "query timeout" is reserved for a stream with no terminal
+    result at all."""
+    monkeypatch.setattr(adapter, "SUBAGENT_DRAIN_SECONDS", 0.05)
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeResultMessage(result="", total_cost_usd=0.39, subtype="error_max_budget_usd")
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeTaskUpdated(task_id="bg-1", status="completed")
+
+    module.query = query
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=5).run(
+        repo=target, prompt="p", allow=[]
+    )
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.stop_reason == "cost budget spent"
+    assert result.usd == 0.39
+    assert not result.ok
+    assert elapsed < 2, f"the bounded drain waited {elapsed:.2f}s past its own deadline"
 
 
 def test_a_stream_with_no_terminal_result_still_times_out(fake_sdk, target):

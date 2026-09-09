@@ -97,6 +97,18 @@ def _timeout_env(name: str, default: int) -> int:
 # Read at import so a test can still patch the module attribute directly.
 QUERY_TIMEOUT_SECONDS = _timeout_env("SOL2_QUERY_TIMEOUT_SECONDS", 900)
 
+# #577 follow-up (judge spot check at 1b8efe7). #578's own tracker narrows
+# who can hold a result open (`_DEFERRING_TASK_TYPES`) but does not bound how
+# long: a `local_agent` that never reaches a terminal status, on a stream
+# that itself stays open, reads all the way to `QUERY_TIMEOUT_SECONDS`, where
+# the *outer* `except asyncio.TimeoutError` below discards the controlled
+# reason a terminal `ResultMessage` already handed us and reports "query
+# timeout" instead -- the #568 failure mode, reopened at a narrower door.
+# `collect()` bounds the wait for that still-in-flight task on its own, much
+# smaller than `self.timeout_seconds`, and returns the terminal message's own
+# `ok`/`reason`/`usd` if that deadline fires first.
+SUBAGENT_DRAIN_SECONDS = 30
+
 
 def _changed_files(repo: Path) -> set[str]:
     """Tracked diffs plus untracked files.
@@ -232,7 +244,9 @@ class AgentSdkBackend(Backend):
                 """#578 follow-up. A deferring task stuck with no
                 `terminal_reason` reads to the `QUERY_TIMEOUT_SECONDS`
                 ceiling instead of returning early, an inherited SDK limit
-                until the CLI sends its own run-boundary signal.
+                until the CLI sends its own run-boundary signal -- bounded
+                below by `SUBAGENT_DRAIN_SECONDS` instead, once a result
+                arrives while a task is in flight (#577 follow-up).
                 """
                 result_text = ""
                 usd = None
@@ -241,8 +255,34 @@ class AgentSdkBackend(Backend):
                 reason = None
                 saw_result = False
                 inflight_tasks: set[str] = set()
+                # #577 follow-up. `None` until a `ResultMessage` arrives with
+                # a task still in flight; from then on, the deadline that
+                # keeps this call from reading all the way to the outer
+                # `self.timeout_seconds` wall, computed once, not per message.
+                drain_deadline: float | None = None
+                agen = query(prompt=prompt, options=options).__aiter__()
                 try:
-                    async for message in query(prompt=prompt, options=options):
+                    while True:
+                        if drain_deadline is None:
+                            message = await agen.__anext__()
+                        else:
+                            remaining = drain_deadline - time.monotonic()
+                            if remaining <= 0:
+                                break
+                            try:
+                                message = await asyncio.wait_for(
+                                    agen.__anext__(), timeout=remaining
+                                )
+                            except asyncio.TimeoutError:
+                                # #577 follow-up. This is the drain's own,
+                                # much smaller deadline, not
+                                # `self.timeout_seconds`: the terminal
+                                # message already set `ok`/`reason`/`usd`
+                                # above, and returning them now keeps that
+                                # controlled reason instead of letting the
+                                # *outer* `asyncio.wait_for` fire later and
+                                # report "query timeout" over it.
+                                break
                         raw_events.append(_raw_event(message))
                         _track_task_lifecycle(message, inflight_tasks)
                         if not isinstance(message, (ResultMessage, str)):
@@ -278,10 +318,13 @@ class AgentSdkBackend(Backend):
                         # only that turn. Stop asking the generator for
                         # anything past a `ResultMessage` only once
                         # `_is_run_boundary` says the run itself is done.
-                        if isinstance(message, ResultMessage) and _is_run_boundary(
-                            message, inflight_tasks
-                        ):
-                            break
+                        if isinstance(message, ResultMessage):
+                            if _is_run_boundary(message, inflight_tasks):
+                                break
+                            if drain_deadline is None:
+                                drain_deadline = time.monotonic() + SUBAGENT_DRAIN_SECONDS
+                except StopAsyncIteration:
+                    pass
                 except ResultError:
                     # The SDK yields its terminal ResultMessage and then raises
                     # ResultError for the CLI's non-zero exit. Keep the terminal

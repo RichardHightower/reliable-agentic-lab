@@ -831,6 +831,56 @@ def test_a_judge_who_says_not_done_escalates(tmp_path, monkeypatch):
     assert trace["judge"]["done"] is False
 
 
+def test_a_budget_blocked_judge_escalates_on_the_real_reason_not_a_fabricated_verdict(
+    tmp_path, monkeypatch
+):
+    """#577, judge of PR #584. A live backend's own pre-call budget guard
+    (`AgentSdkE2EBackend`, `DeepAgentsBackend`) refuses the judge call and
+    returns `ok=False, stop_reason="cost budget spent"` -- it never asked a
+    model anything. Feeding that through `parse_judge_verdict` used to read
+    the refusal text as "unparseable" and escalate blaming a rejection the
+    judge never made, on a rubric that is actually green. The run must
+    escalate on the real reason, spend included, and never claim the final
+    judge said no."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+
+    class BudgetBlockedJudge(ScriptedBackend):
+        def judge(self, *, repo: Path, prompt: str) -> doers.DoerResult:
+            return doers.DoerResult(
+                ok=False,
+                usd=0.0,
+                output=(
+                    "loop budget of $2.00 has $0.10 left, under the $0.66 "
+                    "per-query cap; $1.90 spent so far"
+                ),
+                stop_reason="cost budget spent",
+            )
+
+    backend = BudgetBlockedJudge(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [("app/greet.py", "def greet():\n    return 'hello'\n")],
+        ]
+    )
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1)
+
+    assert trace["gate"] == "escalate"
+    assert "budget exhausted before the final judge" in trace["reason"]
+    assert "spent so far" in trace["reason"]
+    assert "final judge says the ticket is not done" not in trace["reason"]
+    assert trace["judge"]["blocked"] is True
+
+
 def test_an_unparseable_verdict_is_a_fail(tmp_path, monkeypatch):
     repo = _git_repo(tmp_path / "repo")
     health = "tests/test_health.py::test_health"

@@ -366,6 +366,7 @@ class DeepAgentsBackend(Backend):
         judge_agent=None,
         recursion_limit: int | None = None,
         max_call_usd: float | None = None,
+        loop_budget_usd: float | None = None,
         raw_log_dir: Path | None = None,
     ):
         if agent is None and not phase_agents:
@@ -378,6 +379,21 @@ class DeepAgentsBackend(Backend):
         # per-query ceiling. None means no cutoff, the behavior before
         # this ticket.
         self.max_call_usd = max_call_usd
+        # #577. The target repo's own `.loop.yml` `budget.usd`, mirroring the
+        # SDK port's own `loop_budget_usd`. `harness.backend` already slices
+        # this same number into `max_call_usd` (`total_usd / (iterations+2)`)
+        # for every call alike; nothing before this ticket compared the two
+        # running against each other, so a call that spent right up to its
+        # own per-call slice could still carry the *cumulative* total past
+        # `loop_budget_usd`, one call's slack away from the SDK port's own
+        # measured 4.4% overrun.
+        self.loop_budget_usd = loop_budget_usd
+        # #577. Running total across every call this one backend instance
+        # makes -- `harness.backend()` builds exactly one, reused for the
+        # test phase and every code-loop iteration alike, the same object
+        # `implementer.py`'s own `boss` (`Orchestrator`) tracks spend
+        # against one level up.
+        self.spent_usd = 0.0
         # #562. Mirrors the SDK port's `--raw-log-dir`: when set, every call
         # writes a redacted copy of its own usage_metadata and message
         # sequence here, the same evidence `DoerResult.raw_output` already
@@ -414,7 +430,41 @@ class DeepAgentsBackend(Backend):
             raise ValueError(f"no Deep Agents graph is configured for scope {allow!r}")
         return self.phase_agents[phase]
 
+    def _budget_stop(self) -> DoerResult | None:
+        """#577. Stop before a call whose own per-call cap would carry the
+        cumulative loop budget past its own number, instead of only
+        checking `max_call_usd` against that one call's own spend after the
+        fact. `None` means there is room, or no loop budget was given at
+        all -- the behavior before this ticket. Guards `run()` and `judge()`
+        alike (judge of PR #584): a live run could still spend past the
+        loop's own budget on the last call that decides pass or escalate.
+
+        Known ceiling, not closed here: this only refuses the *next* call
+        from starting when the remaining budget cannot cover one. A call
+        already in flight can still spend past its own `max_call_usd` slice
+        before `_usage_callback`'s own `DeepAgentsBudgetExceeded` ends it.
+        Worst case is `loop_budget_usd` plus one call's own overshoot.
+        """
+        if self.loop_budget_usd is None or self.max_call_usd is None:
+            return None
+        remaining = self.loop_budget_usd - self.spent_usd
+        if remaining >= self.max_call_usd:
+            return None
+        return DoerResult(
+            ok=False,
+            usd=0.0,
+            output=(
+                f"loop budget of ${self.loop_budget_usd:.2f} has ${max(remaining, 0.0):.2f} "
+                f"left, under the ${self.max_call_usd:.2f} per-call cap; "
+                f"${self.spent_usd:.2f} spent so far"
+            ),
+            stop_reason="cost budget spent",
+        )
+
     def run(self, *, repo: Path, prompt: str, allow: list[str]) -> DoerResult:
+        stopped = self._budget_stop()
+        if stopped is not None:
+            return stopped
         # #543. Attached whether or not a raise ever happens: `on_llm_end`
         # fires per completed model turn, well before a `GraphRecursionError`
         # (which only fires after some number of turns already ran) reaches
@@ -431,10 +481,16 @@ class DeepAgentsBackend(Backend):
             wrote = sorted(path for path in (after - before) if scope.permits(path))
             raw_output = _raw_messages(result)
             self._log_raw(raw_output, role=_phase_of(allow))
+            usd = last_usd(result)
+            # #577. Cross-call running total, mirroring the SDK port's own
+            # `AgentSdkE2EBackend.spent_usd`; `boss.spend` one level up in
+            # `implementer.py` tracks the same figure, but `_budget_stop`
+            # above needs it before that call ever happens.
+            self.spent_usd += max(usd, 0.0)
             return DoerResult(
                 wrote=wrote,
                 output=last_ai_text(result),
-                usd=last_usd(result),
+                usd=usd,
                 raw_output=raw_output,
             )
         # Same contract every offline Backend keeps: never raise, report it.
@@ -450,6 +506,8 @@ class DeepAgentsBackend(Backend):
             # raised backend or an honest empty reply, the two the judge of
             # PR #537 found indistinguishable.
             spend = usage.total_usd if usage is not None and usage.saw_usage else None
+            if spend is not None:
+                self.spent_usd += max(spend, 0.0)
             # #549, judge of PR #552. Named the same way the SDK port names
             # its own cost stop, so e2e_t001.CONTROLLED_STOPS reads a
             # deliberate cutoff as one, not as a crashed query.
@@ -472,6 +530,9 @@ class DeepAgentsBackend(Backend):
         agent = self.judge_agent
         if agent is None:
             return super().judge(repo=repo, prompt=prompt)
+        stopped = self._budget_stop()
+        if stopped is not None:
+            return stopped
         usage = _usage_callback(self.max_call_usd)
         try:
             payload = {"messages": [{"role": "user", "content": prompt}]}
@@ -479,11 +540,13 @@ class DeepAgentsBackend(Backend):
             result = agent.invoke(payload, config=config) if config else agent.invoke(payload)
             raw_output = _raw_messages(result)
             self._log_raw(raw_output, role="judge")
-            return DoerResult(
-                output=last_ai_text(result), usd=last_usd(result), raw_output=raw_output
-            )
+            usd = last_usd(result)
+            self.spent_usd += max(usd, 0.0)
+            return DoerResult(output=last_ai_text(result), usd=usd, raw_output=raw_output)
         except Exception as exc:
             spend = usage.total_usd if usage is not None and usage.saw_usage else None
+            if spend is not None:
+                self.spent_usd += max(spend, 0.0)
             stop_reason = "cost budget spent" if isinstance(exc, DeepAgentsBudgetExceeded) else None
             self._log_raw(_exception_raw_log(exc, usage), role="judge")
             return DoerResult(

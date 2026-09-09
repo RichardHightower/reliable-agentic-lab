@@ -346,6 +346,26 @@ def _ask_judge(
         )
         return done, payload, 0.0
     result = judge(repo=repo, prompt=prompt)
+    judge_usd = getattr(result, "usd", None)
+    # #577, judge of PR #584. A backend that refuses the judge call on
+    # purpose (a budget or turn ceiling it hit before ever asking a model)
+    # never answered, the same way a timed-out or exception-raising call
+    # never does. Feeding its refusal text through `parse_judge_verdict`
+    # reads it as "unparseable" and that becomes `done=False`, which
+    # `gates.decide` reports as "the final judge says the ticket is not
+    # done" on a green rubric -- a rejection attributed to a judge that was
+    # never called. `payload["blocked"]` tells the caller in `run()` to
+    # escalate on the real reason directly, instead of asking `gates.decide`
+    # to grade a verdict this call never produced.
+    if not getattr(result, "ok", True) and getattr(result, "stop_reason", None) in (
+        _CONTROLLED_STOP_REASONS
+    ):
+        payload = {
+            "done": False,
+            "why": f"the judge did not run ({result.stop_reason}): {result.output}",
+            "blocked": True,
+        }
+        return False, payload, None if judge_usd is None else float(judge_usd)
     structured = getattr(result, "structured", None)
     if structured is not None and not isinstance(structured, dict):
         structured = None
@@ -353,7 +373,6 @@ def _ask_judge(
     # #539. `None` here means the judge backend never answered; coercing it
     # to 0.0 with `or` is the exact silent-zero bug this ticket exists to
     # kill, so it is preserved instead.
-    judge_usd = getattr(result, "usd", None)
     return done, payload, None if judge_usd is None else float(judge_usd)
 
 
@@ -1102,6 +1121,7 @@ def run(  # noqa: PLR0915
             changed=changed,
         )
         judge_done: bool | None = None
+        judge_blocked = False
         if score.passed:
             judge_done, judge_payload, judge_usd = _ask_judge(
                 backend, repo=target, ticket=the_ticket, score=score,
@@ -1115,15 +1135,29 @@ def run(  # noqa: PLR0915
             )
             code_scope_violations |= judge_spend_tampered
             trace["judge"] = judge_payload
-        decision = gates.decide(
-            passed=score.passed,
-            iteration=iteration,
-            budget=boss.budget_iterations,
-            signature=score.signature(),
-            previous_signature=previous_signature,
-            usd_left=boss.usd_left,
-            judge_done=judge_done,
-        )
+            judge_blocked = bool(judge_payload.get("blocked"))
+        if judge_blocked:
+            # #577, judge of PR #584. The judge backend refused the call on
+            # a budget ceiling; it never answered, so this is not a verdict
+            # `gates.decide`'s judge_done contract (a real True/False) can
+            # grade. Escalate on the real reason directly, spend included,
+            # rather than let `parse_judge_verdict`'s "unparseable" read as
+            # "the final judge says the ticket is not done" -- a rejection
+            # nobody made, on a rubric that is actually green.
+            decision = gates.Decision(
+                gates.ESCALATE,
+                f"budget exhausted before the final judge: ${boss.spent_usd:.2f} spent so far",
+            )
+        else:
+            decision = gates.decide(
+                passed=score.passed,
+                iteration=iteration,
+                budget=boss.budget_iterations,
+                signature=score.signature(),
+                previous_signature=previous_signature,
+                usd_left=boss.usd_left,
+                judge_done=judge_done,
+            )
         trace["iterations"].append(
             {
                 "iteration": iteration,
