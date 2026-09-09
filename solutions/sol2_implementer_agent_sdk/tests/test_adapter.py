@@ -3,12 +3,136 @@ report what a turn cost."""
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from pathlib import Path
 
 import adapter
+import contract as contract_mod
+import harness
+import implementer
 import pytest
-from conftest import FakeResultMessage
+import roles
+import steps
+from conftest import FakeResultMessage, FakeTaskNotification, FakeTaskStarted, FakeTaskUpdated
+from contract import CoverageReport, RunResult, SuiteReport
+
+# -- a full ticket repo, for the #567 end-to-end test below ------------------
+#
+# Copied from tests/test_implementer.py rather than imported, the same way
+# tests/test_parity.py copies its own fixture helpers: a worker who edits one
+# file should see a failure here, by name, rather than a silent import.
+
+TICKET_TASKFILE = """\
+version: '3'
+tasks:
+  setup:
+    cmds: [echo setup]
+  test:
+    cmds: [echo test]
+  e2e:
+    cmds: [echo e2e]
+  lint:
+    cmds: [echo lint]
+  format-check:
+    cmds: [echo format-check]
+"""
+
+TICKET_LOOP_YML = """\
+version: 1
+roles:
+  planner:
+    write_allow: ["steps.jsonl"]
+  test_implementer:
+    write_allow: ["tests/**"]
+    write_deny: ["app/**"]
+  code_implementer:
+    write_allow: ["app/**"]
+    write_deny: ["tests/**"]
+  judge:
+    write_allow: []
+rubric:
+  coverage_floor: 80
+  require_red: true
+tickets:
+  source: local
+  path: tickets
+budget:
+  iterations: 3
+  usd: 2.00
+"""
+
+TICKET_BODY = """\
+---
+id: T001
+title: greet
+state: ready
+---
+
+# T001 greet
+
+## Acceptance criteria
+
+- (AC-1) greet() returns hello
+"""
+
+
+def _ticket_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "lab@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "lab"], cwd=path, check=True)
+    (path / "Taskfile.yml").write_text(TICKET_TASKFILE, encoding="utf-8")
+    (path / ".loop.yml").write_text(TICKET_LOOP_YML, encoding="utf-8")
+    (path / "tickets").mkdir()
+    (path / "app").mkdir()
+    (path / "tests").mkdir()
+    (path / "tickets" / "T001.md").write_text(TICKET_BODY, encoding="utf-8")
+    (path / "app" / "health.py").write_text("ok = True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=path, check=True, capture_output=True)
+    return path
+
+
+def _suite(*, passed=(), failed=()) -> SuiteReport:
+    passed_ids, failed_ids = set(passed), set(failed)
+    return SuiteReport(
+        exists=True,
+        tests=len(passed_ids) + len(failed_ids),
+        failures=len(failed_ids),
+        passed_ids=passed_ids,
+        failed_ids=failed_ids,
+    )
+
+
+def _run(*, passed=(), failed=()) -> RunResult:
+    return RunResult(
+        task="test",
+        exit_code=0 if not failed else 1,
+        output="",
+        junit=_suite(passed=passed, failed=failed),
+        coverage=CoverageReport(exists=True, line_rate=100.0),
+    )
+
+
+def _patch_runs(monkeypatch, runs: list[RunResult]):
+    leftover = list(runs)
+
+    def fake_run(self, task: str, timeout: int = 900) -> RunResult:
+        if task != "test":
+            return RunResult(
+                task=task,
+                exit_code=0,
+                output="",
+                junit=_suite(passed=("e2e::ok",)) if task == "e2e" else SuiteReport(),
+                coverage=CoverageReport(),
+            )
+        if leftover:
+            return leftover.pop(0)
+        return _run(passed=("tests/test_health.py::test_health",))
+
+    monkeypatch.setattr(contract_mod.Contract, "run", fake_run)
+    monkeypatch.setattr(implementer.Contract, "run", fake_run)
 
 
 @pytest.fixture
@@ -173,3 +297,570 @@ def test_a_hung_query_times_out(fake_sdk, target, monkeypatch):
     assert result.stop_reason == "query timeout"
     assert "timed out" in result.output
     assert "never reached" not in result.output
+
+
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#553. A non-integer (or non-positive) value must not raise at import
+    and take the whole module down with it. Covers `_timeout_env`'s own
+    branches (unset, non-integer); the real variable is driven through a
+    reload by the test below."""
+    assert adapter._timeout_env("SOL2_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL2_QUERY_TIMEOUT_SECONDS_TEST", "abc")
+    assert adapter._timeout_env("SOL2_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "abc" in capsys.readouterr().err
+
+
+def test_the_real_timeout_variable_set_to_abc_leaves_the_default_and_imports(
+    monkeypatch, capsys
+):
+    """#553, judge of PR #556. The test above proves `_timeout_env`'s
+    branches but never touches `SOL2_QUERY_TIMEOUT_SECONDS` itself, so
+    reverting `QUERY_TIMEOUT_SECONDS` to the unguarded
+    `int(os.environ.get(...))` left it green while
+    `SOL2_QUERY_TIMEOUT_SECONDS=abc python -c "import adapter"` still
+    raised. Drive the real variable through a reload instead."""
+    import importlib  # noqa: PLC0415
+
+    monkeypatch.setenv("SOL2_QUERY_TIMEOUT_SECONDS", "abc")
+    reloaded = importlib.reload(adapter)
+    try:
+        assert reloaded.QUERY_TIMEOUT_SECONDS == 900
+        assert "abc" in capsys.readouterr().err
+    finally:
+        monkeypatch.delenv("SOL2_QUERY_TIMEOUT_SECONDS")
+        importlib.reload(adapter)
+
+
+# -- #539: a failure path never claims a silent 0.0 -------------------------
+
+
+def test_a_timed_out_query_reports_elapsed_and_the_event_count(fake_sdk, target):
+    """#578. Since #568, any `ResultMessage` is a terminal record and ends
+    the turn immediately, so it can no longer stand in for progress that
+    arrives before a genuine hang. A non-terminal stream event ahead of the
+    hang still counts toward `events`, and the timeout diagnostics still
+    name the elapsed time; the cost stays unknown because no
+    `ResultMessage` ever answered (see the "no cost message" test below
+    for that assertion in full)."""
+
+    class StreamEvent:
+        pass
+
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield StreamEvent()
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached", total_cost_usd=0.99)
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=0.05).run(
+        repo=target, prompt="p", allow=[]
+    )
+    assert not result.ok
+    assert result.stop_reason == "query timeout"
+    assert result.usd is None
+    assert "elapsed=" in result.output
+    assert "events=1" in result.output
+    assert "usd=unknown" in result.output
+
+
+def test_a_timed_out_query_with_no_cost_message_reports_usd_as_none(fake_sdk, target):
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached")
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=0.05).run(
+        repo=target, prompt="p", allow=[]
+    )
+    assert result.usd is None
+    assert "usd=unknown" in result.output
+
+
+def test_a_message_with_no_cost_field_reports_usd_as_none_not_zero(fake_sdk, target):
+    """`total_cost_usd=None` is "the SDK never told us", not "this was free"."""
+    fake_sdk([FakeResultMessage(result="x", total_cost_usd=None)])
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+    assert result.usd is None
+
+
+def test_a_later_zero_cost_message_does_not_erase_an_earlier_real_cost(fake_sdk, target):
+    """#539, follow-up 6. `total_cost_usd` is cumulative; a stray 0.0 in a
+    later message must not overwrite a real cost a message already reported.
+    #578: a second `ResultMessage` is only reachable at all now while a
+    delegated task is still in flight at the first one, so that mechanism
+    is what puts two frames on the wire here."""
+    fake_sdk(
+        [
+            FakeTaskStarted(),
+            FakeResultMessage(result="progress", total_cost_usd=0.50),
+            FakeTaskNotification(),
+            FakeResultMessage(result="done", total_cost_usd=0.0),
+        ]
+    )
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+    assert result.usd == 0.50
+
+
+def test_a_backend_that_raises_after_spending_reports_the_spend(fake_sdk, target, monkeypatch):
+    """A crash after the query answered must not erase what it already cost."""
+    fake_sdk([FakeResultMessage(result="x", total_cost_usd=0.77)])
+    calls = {"n": 0}
+    real_changed_files = adapter._changed_files
+
+    def flaky(repo):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_changed_files(repo)
+        raise RuntimeError("boom after spend")
+
+    monkeypatch.setattr(adapter, "_changed_files", flaky)
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+    assert not result.ok
+    assert result.usd == 0.77
+    assert "boom after spend" in result.output
+
+
+# -- A9 (#437 #422): the planner scope and the planner graph -----------------
+
+
+def test_the_planner_scope_routes_to_the_planner_backend():
+    """`steps.jsonl` is the planner's whole write scope. `_for` must route on
+    it before the tests/ and app/ branches, and refuse a scope no branch
+    names, the same as before this unit."""
+    test_backend = adapter.AgentSdkBackend(object())
+    code_backend = adapter.AgentSdkBackend(object())
+    planner_backend = adapter.AgentSdkBackend(object())
+    phase = adapter.AgentSdkPhaseBackend(
+        test=test_backend, code=code_backend, planner=planner_backend
+    )
+
+    assert phase._for([steps.STEPS_FILE]) is planner_backend
+    assert phase._for(["tests/**"]) is test_backend
+    assert phase._for(["app/**"]) is code_backend
+    with pytest.raises(ValueError, match="no Agent SDK backend"):
+        phase._for(["reports/**"])
+
+
+def test_an_unconfigured_planner_fails_closed():
+    phase = adapter.AgentSdkPhaseBackend(
+        test=adapter.AgentSdkBackend(object()), code=adapter.AgentSdkBackend(object())
+    )
+    with pytest.raises(ValueError, match="no Agent SDK planner backend"):
+        phase.plan(repo=Path("."), prompt="plan it")
+
+
+def test_plan_runs_the_planner_backend_with_its_own_scope(fake_sdk, target):
+    """`plan()` is `run()` scoped to `steps.jsonl`, the same shape as `judge()`
+    scoping to the judge backend."""
+    module = fake_sdk([FakeResultMessage(result="wrote the plan")])
+    phase = adapter.AgentSdkPhaseBackend(
+        test=adapter.AgentSdkBackend(object()),
+        code=adapter.AgentSdkBackend(object()),
+        planner=adapter.AgentSdkBackend(object()),
+    )
+
+    result = phase.plan(repo=target, prompt="write steps.jsonl")
+
+    assert result.ok
+    assert result.output == "wrote the plan"
+    assert module.last_prompt == "write steps.jsonl"
+
+
+def test_planner_sdk_with_doer_sdk_invokes_the_planner_graph(fake_sdk, contract, repo):
+    """A9 (#437 #422), test 2 of 5. `--planner sdk --doer sdk` must reach the
+    planner subagent, not the test or code one. `harness.backend` builds all
+    four graphs; `.plan()` must be the one that dispatches to the one named
+    `implementer-planner`."""
+    module = fake_sdk([FakeResultMessage(result='{"ok": true}')])
+
+    backend = harness.backend(contract, "T001")
+    result = backend.plan(repo=repo, prompt="write the plan")
+
+    assert result.ok
+    assert list(module.last_options.agents) == ["implementer-planner"]
+
+
+# -- #567: the scope hook, not a fixture's project settings, is the judge ---
+
+
+def test_a_test_implementer_write_lands_through_the_real_hook_and_red_ids_populate(
+    tmp_path, fake_sdk, monkeypatch
+):
+    """#567. The northwind-field-crm fixture's own `.claude/settings.json`
+    denies `Write(./tests/**)`, and that used to reach the test implementer
+    through `setting_sources=["project"]` before the scope hook this port
+    writes ever got a say. This drives the real `harness.backend` (real
+    `options_for`, real scope hook per role) end to end through
+    `implementer.run`: the only thing a live model call would add is the CLI
+    itself asking the hook before a `Write` lands, which this fake `query`
+    does by calling the exact hook object `options_for` built. The write
+    must land in the worktree and the red gate must see it in `red_ids`."""
+    repo = _ticket_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+
+    module = fake_sdk()
+
+    async def query(*, prompt, options):
+        agent = next(iter(options.agents))
+        hook = options.hooks["PreToolUse"][0].hooks[0]
+        if agent == "implementer-test-implementer":
+            path = f"{options.cwd}/tests/test_greet.py"
+            decision = await hook(
+                {"tool_name": "Write", "tool_input": {"file_path": path}, "agent_type": agent},
+                "id",
+                None,
+            )
+            assert decision == {}, f"the test implementer's own write was denied: {decision}"
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text("def test_ac1():\n    assert False\n", encoding="utf-8")
+            yield FakeResultMessage(result="wrote the failing test", total_cost_usd=0.01)
+        elif agent == "implementer-code-implementer":
+            path = f"{options.cwd}/app/greet.py"
+            decision = await hook(
+                {"tool_name": "Write", "tool_input": {"file_path": path}, "agent_type": agent},
+                "id",
+                None,
+            )
+            assert decision == {}
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text("def greet():\n    return 'hello'\n", encoding="utf-8")
+            yield FakeResultMessage(result="wrote greet()", total_cost_usd=0.01)
+        else:
+            yield FakeResultMessage(result='{"done": true, "why": "looks right"}')
+
+    module.query = query
+    contract_obj = contract_mod.Contract(repo)
+    backend = harness.backend(contract_obj, "T001")
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    written = Path(trace["repo"])
+    assert (written / "tests" / "test_greet.py").exists()
+    assert trace["red_ids"], "the test implementer's write never reached the red gate"
+    assert trace["gate"] == "pass", trace.get("reason")
+
+
+def test_the_code_implementer_hook_still_refuses_a_write_under_tests(fake_sdk, contract, repo):
+    """#567. Project settings are gone for both write roles now (see
+    tests/test_roles.py), so the code implementer's own scope hook, built by
+    the same `options_for` that just refused it project settings, is the
+    only thing standing between it and `tests/**`. It still says no."""
+    fake_sdk()
+    options = roles.options_for(contract, role_names=frozenset({"code_implementer"}))
+    assert options.setting_sources == []
+    hook = options.hooks["PreToolUse"][0].hooks[0]
+
+    decision = asyncio.run(
+        hook(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": f"{repo}/tests/test_x.py"},
+                "agent_type": "implementer-code-implementer",
+            },
+            "id",
+            None,
+        )
+    )
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# -- #568: `collect()` returns on the terminal ResultMessage -----------------
+
+
+def test_a_budget_stop_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    fake_sdk, target
+):
+    """#568. Both terminal `ResultMessage`s in the round-4 raw logs read
+    `subtype='error_max_budget_usd'` and the query ended in under a minute,
+    but the stream itself sat open after that, quiet, until the 900 second
+    ceiling: `collect()` had no break on the terminal result and kept asking
+    the generator for more. Once a `ResultMessage` names a controlled stop,
+    `collect()` must return right there, well inside this test's own
+    generous timeout, not because that timeout finally fired."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(
+            result="", total_cost_usd=0.3914, subtype="error_max_budget_usd"
+        )
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeResultMessage(result="never reached", total_cost_usd=99.0)
+
+    module.query = query
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=5).run(
+        repo=target, prompt="p", allow=[]
+    )
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.stop_reason == "cost budget spent"
+    assert result.usd == 0.3914
+    assert not result.ok
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_successful_result_also_returns_immediately_instead_of_waiting_for_silence(
+    fake_sdk, target
+):
+    """#568 follow-up (judge of PR #570, item 1). The first fix broke only
+    on a controlled stop (`if stop:`), so a successful terminal
+    `ResultMessage` followed by the same quiet stream still ran to the
+    ceiling and reported "query timeout" instead of the answer it already
+    had. Every `ResultMessage` the real SDK yields is terminal, success
+    included; `collect()` must return on this one too."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result='{"done": true}', total_cost_usd=0.25)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeResultMessage(result="never reached", total_cost_usd=99.0)
+
+    module.query = query
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=5).run(
+        repo=target, prompt="p", allow=[]
+    )
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.ok
+    assert result.output == '{"done": true}'
+    assert result.usd == 0.25
+    assert result.stop_reason is None
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_result_with_a_task_in_flight_does_not_end_the_run(fake_sdk, target):
+    """#578. A `ResultMessage` that arrives while a delegated `Task` this
+    run spawned is still going only closes that turn, not the run: the
+    installed SDK's own `Query._read_messages` (upstream #1088) holds the
+    close back the same way, and a later result frame arrives once the
+    task drains. The first result here must not be mistaken for the
+    answer, and the stream must not be cut off before the second, real
+    terminal result arrives -- nor should `collect()` wait out the
+    ceiling once that second result is in hand."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted()
+        yield FakeResultMessage(result="turn one", total_cost_usd=0.10)
+        yield FakeTaskNotification()
+        yield FakeResultMessage(result="the real answer", total_cost_usd=0.20)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+
+    module.query = query
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=5).run(
+        repo=target, prompt="p", allow=[]
+    )
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.ok
+    assert result.output == "the real answer"
+    assert result.usd == 0.20
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_backgrounded_subagents_write_still_belongs_to_the_turn_that_spawned_it(
+    fake_sdk, target
+):
+    """#577, on top of #578's `_track_task_lifecycle`/`_is_run_boundary`. A
+    round-5 raw log shows the parent resume its subagent in the background
+    ("has been resumed to finish. Waiting for it to complete."), and the
+    terminal `ResultMessage` for the parent's own turn arrives right after,
+    with the subagent it just resumed still in flight. `run()`'s own
+    `_changed_files` diff is taken the instant `collect()` returns; sampling
+    it there would have missed a write the subagent makes a moment later --
+    not attributed to this call (already sampled), and not to the next one
+    either (already present in its own `before` snapshot, since it landed
+    before that call ever started). `#578`'s own boundary check keeps
+    `collect()` draining past the terminal message while the task it started
+    is still in flight, so the write is still this call's own."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeResultMessage(result="Waiting for it to complete.", total_cost_usd=0.49)
+        # The subagent's own write lands only once it drains, strictly
+        # after the parent's own mid-flight result.
+        (target / "app" / "late.py").write_text("y = 2\n", encoding="utf-8")
+        yield FakeTaskNotification(task_id="bg-1")
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=["app/**"])
+
+    assert result.wrote == ["app/late.py"]
+    assert result.usd == 0.49
+    assert result.ok
+
+
+def test_a_subagent_that_never_reports_done_still_returns_when_the_stream_ends(
+    fake_sdk, target
+):
+    """The other half. A backgrounded subagent that never posts a completion
+    event before the stream itself closes must not hang `collect()` forever
+    -- there is nothing left to wait on once the generator is exhausted."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeResultMessage(result="done enough", total_cost_usd=0.10)
+        # No task_notification / terminal task_updated ever arrives for "bg-1".
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.output == "done enough"
+    assert result.usd == 0.10
+
+
+def test_a_non_terminal_task_updated_does_not_close_the_task(fake_sdk, target):
+    """#577 follow-up (judge spot check at 1b8efe7). `task_updated` fires
+    whatever its own payload says; every occurrence in the round-5 logs
+    happened to carry a terminal status, but matching on the subtype alone
+    -- ignoring `status` -- would close a task on any update, letting a
+    `ResultMessage` that arrives right after end the run before the
+    subagent's own write ever lands. Only a status in
+    `_TERMINAL_TASK_STATUSES` may close it; this is this port's only test
+    that constructs a `task_updated` message at all."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeTaskUpdated(task_id="bg-1", status="in_progress")
+        yield FakeResultMessage(result="mid-flight", total_cost_usd=0.2)
+        # The subagent's own write lands only once it actually drains.
+        (target / "app" / "late.py").write_text("y = 2\n", encoding="utf-8")
+        yield FakeTaskUpdated(task_id="bg-1", status="completed")
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=["app/**"])
+
+    assert result.wrote == ["app/late.py"]
+
+
+def test_the_bounded_drain_keeps_the_controlled_reason_when_the_wall_is_reached(
+    fake_sdk, target, monkeypatch
+):
+    """#577 follow-up (judge spot check at 1b8efe7). A `local_agent` that
+    never reaches a terminal status, on a stream that itself never closes,
+    must not walk the whole query to `self.timeout_seconds`: the drain's own
+    much smaller deadline gives up first and returns the terminal message's
+    own reason. "query timeout" is reserved for a stream with no terminal
+    result at all."""
+    monkeypatch.setattr(adapter, "SUBAGENT_DRAIN_SECONDS", 0.05)
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeResultMessage(result="", total_cost_usd=0.39, subtype="error_max_budget_usd")
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeTaskUpdated(task_id="bg-1", status="completed")
+
+    module.query = query
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=5).run(
+        repo=target, prompt="p", allow=[]
+    )
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.stop_reason == "cost budget spent"
+    assert result.usd == 0.39
+    assert not result.ok
+    assert elapsed < 2, f"the bounded drain waited {elapsed:.2f}s past its own deadline"
+
+
+def test_a_stream_with_no_terminal_result_still_times_out(fake_sdk, target):
+    """#568, the other half. A query that never produces a `ResultMessage` at
+    all (a hung tool call, a dropped connection) must still hit the outer
+    ceiling and report a timeout, not hang forever waiting for a terminal
+    record that is never coming."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield "still working"
+        await adapter.asyncio.sleep(30)
+        yield "unreachable"
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=0.05).run(
+        repo=target, prompt="p", allow=[]
+    )
+    assert result.stop_reason == "query timeout"
+    assert not result.ok
+
+
+# -- #543: the live doer works where implementer.run reads its writes back --
+
+
+def test_a_live_backends_write_lands_in_the_worktree_not_the_clone(tmp_path, fake_sdk):
+    """#543. `implementer.run` executes every phase in `<repo>.worktrees/<ticket>`.
+    `harness.backend` used to build `ClaudeAgentOptions(cwd=...)` and the
+    scope hook rooted at the `--repo` clone instead, so a live doer's writes
+    landed where the red gate never looks, and the run reported "wrote
+    nothing" for work it actually did."""
+    clone_root = tmp_path / "clone"
+    clone_root.mkdir()
+    clone = git_repo(clone_root)
+    worktree = implementer._worktree_path(clone, "T001")
+    worktree.mkdir(parents=True)
+    git_repo(worktree)  # a plain repo stands in for what `_worktree` itself
+    # would have checked out from the clone's HEAD; this test is only about
+    # where a write lands, not about worktree creation, which is tested
+    # elsewhere.
+
+    module = fake_sdk()
+
+    async def query(*, prompt, options):
+        target = Path(options.cwd) / "tests" / "test_due.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("def test_due(): assert False\n", encoding="utf-8")
+        yield FakeResultMessage(result="wrote a test", total_cost_usd=0.01)
+
+    module.query = query
+    contract_obj = contract_mod.Contract(clone)
+    backend_obj = harness.backend(contract_obj, "T001")
+
+    result = backend_obj.run(repo=worktree, prompt="write a test", allow=["tests/**"])
+
+    assert result.wrote == ["tests/test_due.py"]
+    assert (worktree / "tests" / "test_due.py").exists()
+    assert not (clone / "tests" / "test_due.py").exists()
+
+
+def test_no_backend_from_harness_backend_roots_at_the_clone(tmp_path, fake_sdk):
+    """#549. Every write tool a live doer receives (`ClaudeAgentOptions.cwd`
+    plus the scope hook it roots `scope_hook` at) must derive from
+    `implementer._worktree_path`, never `contract.repo`, for every phase
+    `harness.backend` builds, not just the test implementer #543 follow-up
+    already pinned."""
+    fake_sdk()  # `options_for` imports claude_agent_sdk unconditionally
+    clone_root = tmp_path / "clone"
+    clone_root.mkdir()
+    clone = git_repo(clone_root)
+    worktree = implementer._worktree_path(clone, "T001")
+
+    contract_obj = contract_mod.Contract(clone)
+    backend_obj = harness.backend(contract_obj, "T001")
+
+    checked = 0
+    for name in ("test", "code", "judge_backend", "planner"):
+        sub = getattr(backend_obj, name)
+        assert sub.options.cwd == str(worktree), f"{name} did not root at the worktree"
+        assert sub.options.cwd != str(clone.resolve()), f"{name} rooted at contract.repo"
+        checked += 1
+
+    assert checked == 4

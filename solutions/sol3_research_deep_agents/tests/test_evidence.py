@@ -30,7 +30,64 @@ def test_corroboration_needs_two_distinct_sources():
     claim = evidence.Claim(text="x", subject="s", source_ids=["a", "a"])
     assert evidence.corroborate(claim).truth_state == evidence.SINGLE_SOURCE
     claim.source_ids = ["a", "b"]
+    # #471: two raw source ids are not two attributed bindings.
+    assert evidence.corroborate(claim).truth_state == evidence.SINGLE_SOURCE
+    claim.attributed_source_ids = ["a", "b"]
     assert evidence.corroborate(claim).truth_state == evidence.CORROBORATED
+
+
+def test_attributed_requires_the_quote_or_the_numbers_to_appear():
+    """#471: the two signals `attributed()` checks, and the default when a
+    claim carries neither. `quote` is the researcher's own excerpt for this
+    binding (`SourceDocument.body`), not a substring of `claim.text`."""
+    quoted = evidence.Claim(text="The page states that creatine improves lean mass.", subject="s")
+    assert evidence.attributed(
+        quoted, "A review notes creatine improves lean mass in trained adults.", quote="creatine improves lean mass"
+    )
+    assert not evidence.attributed(
+        quoted, "This page never mentions lean mass at all.", quote="creatine improves lean mass"
+    )
+
+    numeric = evidence.Claim(text="The study enrolled 42 participants.", subject="s")
+    assert evidence.attributed(numeric, "Of the 42 participants who enrolled, most finished.")
+    assert not evidence.attributed(numeric, "The study enrolled a different number of people.")
+
+    # Every one of the claim's numbers must appear, not just one. #471
+    dosage = evidence.Claim(text="Creatine adds 1.2 kg of lean mass over 12 weeks.", subject="s")
+    assert not evidence.attributed(dosage, "This was a 12 week study of resistance-trained adults.")
+    assert evidence.attributed(dosage, "Over 12 weeks, creatine added 1.2 kg of lean mass on average.")
+
+    plain = evidence.Claim(text="Creatine is widely studied.", subject="s")
+    assert evidence.attributed(plain, "This text is about something unrelated."), (
+        "nothing to check is not a failure"
+    )
+
+
+def test_a_study_object_survives_a_ledger_round_trip(tmp_path):
+    """Unused until #478's study table; the field only has to persist. #471"""
+    source = evidence.SourceDocument(title="A Study", url="https://study.example/x", subject="s")
+    claim = evidence.Claim(
+        text="The trial enrolled 120 adults over eight weeks.",
+        subject="s",
+        source_ids=[source.id],
+        attributed_source_ids=[source.id],
+        study={"design": "RCT", "n": 120, "weeks": 8},
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_source(source)
+    led.add_claim(claim)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load().claim(claim.id)
+    assert reloaded.study == claim.study
+    assert reloaded.attributed_source_ids == [source.id]
+
+
+def test_a_claim_with_no_study_writes_none(tmp_path):
+    """The common case: `study` is unused, and no key clutters the record."""
+    claim = evidence.Claim(text="x", subject="s")
+    fields, _ = evidence.parse_front_matter(claim.to_markdown())
+    assert "study" not in fields
 
 
 def test_an_uncited_claim_is_never_usable():
@@ -80,6 +137,7 @@ def test_front_matter_round_trips(tmp_path):
         text="A nullable column stores NULL.",
         subject="dt",
         source_ids=["source.a", "source.b"],
+        attributed_source_ids=["source.a", "source.b"],
         important=True,
         confidence=0.75,
     )
@@ -179,3 +237,128 @@ def test_a_hand_edited_non_http_source_url_stops_a_resume(tmp_path):
     (good_root / f"{good.id}.md").write_text(good.to_markdown(), encoding="utf-8")
     loaded = evidence.Ledger(good_root).load()
     assert loaded.sources[good.id].url == "https://a.example"
+
+
+def test_metadata_round_trips_through_the_ledger(tmp_path):
+    """#470: authors, year, venue, and a title_mismatch note all survive a
+    `to_markdown` write and a `load` back, the same way `located_from` does."""
+    fetched = evidence.SourceDocument(
+        title="The Interplay Between Physical Activity, Protein Consumption, "
+        "and Sleep Quality in Muscle Protein Synthesis",
+        url="https://pubmed.ncbi.nlm.nih.gov/12345678/",
+        subject="creatine",
+        authors=["Nakamura K", "Ortiz L"],
+        year="2022",
+        venue="Journal of Applied Physiology",
+        note="title_mismatch: model said 'X'; the record says 'Y'",
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_source(fetched)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load().source_for_url(fetched.url)
+    assert reloaded.title == fetched.title
+    assert reloaded.authors == fetched.authors
+    assert str(reloaded.year) == fetched.year
+    assert reloaded.venue == fetched.venue
+    assert reloaded.note == fetched.note
+
+
+def test_tier_survives_a_ledger_round_trip(tmp_path):
+    """#473: `source_policy.tier_for()`'s answer survives a `to_markdown`
+    write and a `load` back, the same way the other metadata fields do."""
+    tiered = evidence.SourceDocument(
+        title="Position Stand on Creatine Supplementation",
+        url="https://a.example/position-stand",
+        subject="creatine",
+        tier="position_stand_or_guideline",
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_source(tiered)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load().source_for_url(tiered.url)
+    assert reloaded.tier == "position_stand_or_guideline"
+
+
+def test_counterargument_round_trips_through_evidence_md(tmp_path):
+    """#474: `Claim.counterargument_to` survives a `to_markdown` write and a
+    `load` back, the way `tier` already does for `SourceDocument`."""
+    original = evidence.Claim(text="Protein alone did not prevent lean-mass loss.", subject="creatine")
+    counter = evidence.Claim(
+        text="Protein with resistance training preserved lean mass (Longland 2016).",
+        subject="creatine",
+        counterargument_to=original.id,
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_claim(original)
+    led.add_claim(counter)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load()
+    assert reloaded.claim(counter.id).counterargument_to == original.id
+    assert reloaded.claim(original.id).counterargument_to == ""
+
+
+def test_an_older_evidence_md_with_no_counterargument_field_loads(tmp_path):
+    """A claim written before #474 carries no `counterargument_to` line at
+    all: an empty field is already omitted by `render_front_matter`, the
+    same shape an older file has. `load()` defaults it to empty rather than
+    raising."""
+    root = tmp_path / "evidence"
+    root.mkdir()
+    old = evidence.Claim(text="An old claim.", subject="creatine")
+    text = old.to_markdown()
+    assert "counterargument_to" not in text
+    (root / f"{old.id}.md").write_text(text, encoding="utf-8")
+
+    reloaded = evidence.Ledger(root).load().claim(old.id)
+    assert reloaded.counterargument_to == ""
+
+
+def test_a_via_route_source_does_not_count_as_independent():
+    """#474 item 10: a review that only survives as the route to the
+    primary study it summarizes is not a second independent source.
+    `evidence.corroborate` must not upgrade a claim past `SINGLE_SOURCE` by
+    counting a review and the very primary it cites as two."""
+    claim = evidence.Claim(
+        text="The dose increased 42 percent.",
+        subject="s",
+        source_ids=["review", "primary"],
+        attributed_source_ids=["review", "primary"],
+        via_source_ids=["review"],
+    )
+    evidence.corroborate(claim)
+    assert claim.truth_state == evidence.SINGLE_SOURCE
+
+
+def test_an_unrelated_second_source_still_corroborates():
+    """A review plus a genuinely unrelated, independently attributed
+    source, bound some other way than a follow hit, still corroborates:
+    `via_source_ids` names only the routes a follow hit actually recorded."""
+    claim = evidence.Claim(
+        text="The dose increased 42 percent.",
+        subject="s",
+        source_ids=["review", "unrelated_primary"],
+        attributed_source_ids=["review", "unrelated_primary"],
+    )
+    evidence.corroborate(claim)
+    assert claim.truth_state == evidence.CORROBORATED
+
+
+def test_via_source_ids_round_trips_through_evidence_md(tmp_path):
+    """#474 item 10: `Claim.via_source_ids` survives a `to_markdown` write
+    and a `load` back, the way `attributed_source_ids` already does."""
+    claim = evidence.Claim(
+        text="The dose increased 42 percent.",
+        subject="s",
+        source_ids=["review", "primary"],
+        attributed_source_ids=["review", "primary"],
+        via_source_ids=["review"],
+    )
+    led = evidence.Ledger(tmp_path / "evidence")
+    led.add_claim(claim)
+    led.write()
+
+    reloaded = evidence.Ledger(tmp_path / "evidence").load().claim(claim.id)
+    assert reloaded.via_source_ids == ["review"]

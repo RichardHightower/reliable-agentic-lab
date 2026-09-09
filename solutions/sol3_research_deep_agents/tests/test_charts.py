@@ -114,6 +114,13 @@ def test_charts_stage_skips_with_no_data(tmp_path: Path):
     assert result.artifacts["rendered"] == 0
     assert any("no data" in str(item) for item in notes)
     assert not any("not rendered in this phase" in str(item) for item in notes)
+    # #386, #464. Named, not a bare string: a reader (and `assemble`) needs
+    # the owning section and the reason, not only the fact one figure
+    # never rendered.
+    import json  # noqa: PLC0415
+
+    recorded = json.loads((run.work_dir / "charts.json").read_text())["skipped"]
+    assert recorded == [{"name": "latency", "section": "s1", "reason": "no data"}], recorded
 
 
 def test_charts_stage_renders_when_data_arrives(tmp_path: Path):
@@ -180,6 +187,16 @@ def test_assemble_embeds_a_rendered_chart(tmp_path: Path):
     assert "charts/three-exits.png" in body
 
 
-def test_stage_order_runs_charts_after_diagram():
-    assert stages.STAGE_ORDER.index("diagram") < stages.STAGE_ORDER.index("charts")
+def test_stage_order_runs_charts_before_write_and_assemble():
+    """#476 moved `diagram` after `write`; `charts` still runs earlier, from
+    the plan alone, and lands before `assemble` either way."""
+    assert stages.STAGE_ORDER.index("charts") < stages.STAGE_ORDER.index("write")
     assert stages.STAGE_ORDER.index("charts") < stages.STAGE_ORDER.index("assemble")
+
+
+def test_diagram_runs_after_write():
+    """#476: a figure is commissioned from the bound claims of the section
+    that carries it, and those claims do not exist until the section is
+    written."""
+    assert stages.STAGE_ORDER.index("write") < stages.STAGE_ORDER.index("diagram")
+    assert stages.STAGE_ORDER.index("diagram") < stages.STAGE_ORDER.index("assemble")

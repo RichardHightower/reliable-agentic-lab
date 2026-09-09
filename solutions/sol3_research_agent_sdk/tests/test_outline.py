@@ -71,6 +71,78 @@ def test_a_valid_outline_has_no_errors():
     assert outlines.validate(sample_outline()) == []
 
 
+# -- P4, the next-step section --------------------------------------------
+
+
+def test_an_outline_without_a_next_step_section_is_rejected():
+    """The validator error text is the retry instruction the outline editor
+    sees. `sample_outline`'s only section is headed "The problem", which
+    carries no next-step verb."""
+    errors = outlines.validate(sample_outline(), require_next_step=True)
+    assert any("next step" in item.lower() for item in errors), errors
+
+
+def test_a_next_step_heading_passes():
+    drafted = sample_outline(sections=[sample_section(heading="Next step")])
+    assert outlines.validate(drafted, require_next_step=True) == []
+
+
+def test_a_bare_conclusion_heading_is_named_as_such():
+    drafted = sample_outline(sections=[sample_section(heading="Conclusion")])
+    errors = outlines.validate(drafted, require_next_step=True)
+    assert any("bare Conclusion" in item for item in errors), errors
+
+
+def test_require_next_step_is_off_by_default():
+    """`sample_outline`'s last section is "The problem", which would fail the
+    rule if it ran. The dozens of other tests in this file rely on it not
+    running unless a caller opts in."""
+    assert outlines.validate(sample_outline()) == []
+
+
+# -- #538, the structural Introduction --------------------------------------
+
+
+def test_an_outline_without_an_introduction_is_rejected():
+    """`sample_outline`'s only section is headed "The problem", not
+    "Introduction". The frozen heading order puts Introduction first, right
+    after the Abstract."""
+    errors = outlines.validate(sample_outline(), require_introduction=True)
+    assert any("introduction" in item.lower() for item in errors), errors
+
+
+def test_an_introduction_first_section_passes():
+    drafted = sample_outline(
+        word_target_total=800,
+        sections=[
+            sample_section("intro", heading="Introduction", word_target=400),
+            sample_section("s1", word_target=400),
+        ],
+    )
+    assert outlines.validate(drafted, require_introduction=True) == []
+
+
+def test_an_introduction_in_the_wrong_position_is_rejected():
+    """Position matters as much as presence: an Introduction second, not
+    first, still fails the rule."""
+    drafted = sample_outline(
+        word_target_total=800,
+        sections=[
+            sample_section("s1", word_target=400),
+            sample_section("intro", heading="Introduction", word_target=400),
+        ],
+    )
+    errors = outlines.validate(drafted, require_introduction=True)
+    assert any("introduction" in item.lower() for item in errors), errors
+
+
+def test_require_introduction_is_off_by_default():
+    """`sample_outline`'s only section is headed "The problem". The many
+    other tests in this file rely on this rule not running unless a caller
+    opts in, the same as `require_next_step`."""
+    assert outlines.validate(sample_outline()) == []
+
+
 def test_duplicate_ids_fail():
     drafted = sample_outline(
         word_target_total=800,
@@ -172,6 +244,87 @@ def test_sections_must_be_objects():
     drafted = sample_outline(sections=["just a heading"])
     errors = outlines.validate(drafted)
     assert any("SECTIONS MUST BE OBJECTS" in item for item in errors)
+
+
+# -- #475, evidence requirements per question --------------------------------
+
+
+def _reqs(**over):
+    reqs = {
+        "study_types": ["primary_trial"],
+        "min_count": 2,
+        "recency_years": 10,
+        "populations": [],
+    }
+    reqs.update(over)
+    return reqs
+
+
+def _question(text: str, **over) -> dict:
+    return {"text": text, "kind": "fact", "evidence_requirements": _reqs(**over)}
+
+
+def test_a_question_without_evidence_requirements_is_rejected():
+    """`validate` names the question, off by default so the many outline
+    fixtures that predate this ticket keep validating with no changes."""
+    drafted = sample_outline(
+        sections=[sample_section(key_questions=["what is the problem", "why it fails"])]
+    )
+    assert outlines.validate(drafted, require_evidence_requirements=True) != []
+    errors = outlines.validate(drafted, require_evidence_requirements=True)
+    assert any(
+        "what is the problem" in item and "evidence_requirements" in item for item in errors
+    ), errors
+    # Off by default: the same outline validates clean without the flag.
+    assert outlines.validate(drafted) == []
+
+
+def test_an_old_plan_without_requirements_fails_validation_not_parsing():
+    """A plan authored before #475, every `key_questions` entry a bare
+    string, still parses. `validate` reports the missing field on every
+    question, it never raises."""
+    drafted = sample_outline(
+        sections=[sample_section(key_questions=["what is the problem", "why it fails"])]
+    )
+    errors = outlines.validate(drafted, require_evidence_requirements=True)
+    assert len(errors) == 2
+    assert all("evidence_requirements" in item for item in errors)
+
+
+def test_a_question_with_evidence_requirements_passes():
+    drafted = sample_outline(
+        sections=[
+            sample_section(
+                key_questions=[_question("what is the problem"), _question("why it fails")]
+            )
+        ]
+    )
+    assert outlines.validate(drafted, require_evidence_requirements=True) == []
+
+
+def test_evidence_requirements_names_each_malformed_field():
+    bad_type = _question("q1", study_types=["not-a-real-tier"])
+    bad_count = _question("q2", min_count=0)
+    bad_recency = _question("q3", recency_years=-1)
+    bad_populations = _question("q4", populations="not a list")
+    drafted = sample_outline(
+        sections=[
+            sample_section(key_questions=[bad_type, bad_count, bad_recency, bad_populations]),
+        ]
+    )
+    errors = outlines.validate(drafted, require_evidence_requirements=True)
+    assert any("unknown type" in item for item in errors), errors
+    assert any("min_count" in item for item in errors), errors
+    assert any("recency_years" in item for item in errors), errors
+    assert any("populations" in item for item in errors), errors
+
+
+def test_the_recorded_outline_carries_evidence_requirements_import():
+    """`outline.question_evidence_requirements` round-trips a dict question
+    and returns `{}` for a bare string, never raising on either shape."""
+    assert outlines.question_evidence_requirements("a bare string") == {}
+    assert outlines.question_evidence_requirements(_question("q")) == _reqs()
+    assert outlines.question_evidence_requirements({"text": "q"}) == {}
 
 
 def make_run(work, turns, **kwargs):
@@ -310,7 +463,9 @@ def test_outline_coverage_fails_when_a_key_question_is_missing():
     drafted = sample_outline()
     body = "# T\n\n## The problem\n\nA point [1].\n"
     gaps = checks.outline_coverage_gaps(body, drafted)
-    assert any("never names" in item for item in gaps)
+    # #385: `outline_coverage_gaps` scores token overlap, not the verbatim
+    # question, so a gap is now phrased as never answered, not never named.
+    assert any("never answers" in item for item in gaps)
     score = checks.check(body, ["https://a"], headings=["The problem"], outline=drafted)
     assert "outline_coverage" in score.signature()
 
@@ -465,9 +620,63 @@ def test_the_offline_recorded_outline_still_carries_the_doctrine_question():
     offline = t.OfflineTurns(backend=research.FixtureBackend(fixture))
     drafted = offline.outline("a topic", "")
     all_questions = " ".join(
-        question for section in drafted["sections"] for question in section.get("key_questions", [])
+        outlines.question_text(question)
+        for section in drafted["sections"]
+        for question in section.get("key_questions", [])
     )
     assert t.EXIT_DOCTRINE_QUESTION in all_questions
+
+
+def test_the_recorded_outline_now_ends_in_next_step():
+    """P4's fixture repair: the SDK recorded outline (`OfflineTurns`, the
+    offline backend `task demo` uses) ends its prose on a next-step section,
+    and `validate` accepts it under `require_next_step=True`."""
+    import research  # noqa: PLC0415
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
+    offline = t.OfflineTurns(backend=research.FixtureBackend(fixture))
+    drafted = offline.outline("a topic", "")
+    assert drafted["sections"][-1]["heading"] == "Next step"
+    assert outlines.validate(drafted, require_next_step=True) == []
+
+
+def test_the_recorded_outline_carries_evidence_requirements():
+    """#475's fixture repair: `loop.py`'s real run enforces `require_next_step`
+    and `require_evidence_requirements` together, so the same recorded
+    outline `task demo` uses must clear both at once."""
+    import research  # noqa: PLC0415
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
+    offline = t.OfflineTurns(backend=research.FixtureBackend(fixture))
+    drafted = offline.outline("a topic", "")
+    assert (
+        outlines.validate(drafted, require_next_step=True, require_evidence_requirements=True)
+        == []
+    )
+
+
+def test_the_word_targets_still_sum_within_ten_percent():
+    """The fixture rebalance is correct: adding the next-step section did not
+    push the section word_targets outside `validate`'s ten percent band."""
+    import research  # noqa: PLC0415
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "research.json"
+    offline = t.OfflineTurns(backend=research.FixtureBackend(fixture))
+    drafted = offline.outline("a topic", "", budget={"words": 2000})
+    summed = sum(section["word_target"] for section in drafted["sections"])
+    assert abs(summed - drafted["word_target_total"]) <= 0.10 * drafted["word_target_total"]
+    assert outlines.validate(drafted, word_target_total=2000) == []
+
+
+def test_a_real_run_rejects_an_outline_with_no_next_step_section(work, turns):
+    """`paper.py`'s four `outlines.validate` call sites pass
+    `require_next_step=run.require_next_step`, which `loop.py` sets True for
+    a real run. `turns()`'s stub outline ends on "The problem", so a `Run`
+    built the same way must reject it, not just `outlines.validate` in
+    isolation."""
+    run = make_run(work, turns(), require_next_step=True)
+    with pytest.raises(paper.RunFailed, match="next-step"):
+        paper.plan(run)
 
 
 # -- corpus references ------------------------------------------------------

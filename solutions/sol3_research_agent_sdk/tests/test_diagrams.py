@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 import diagrams
@@ -9,12 +10,19 @@ import pytest
 
 
 class Drawer:
-    def __init__(self):
+    def __init__(self, source=None):
         self.calls = []
+        self.claims_seen = []
+        self.source = source
 
-    def diagram(self, name, concept, feedback=""):
+    def diagram(self, name, concept, feedback="", claims=None):
         self.calls.append(feedback)
-        return {"language": "mermaid", "source": f"flowchart LR\n  A[{name}]", "caption": "Cap."}
+        self.claims_seen.append(list(claims or []))
+        return {
+            "language": "mermaid",
+            "source": self.source or f"flowchart LR\n  A[{name}]",
+            "caption": "Cap.",
+        }
 
 
 @pytest.fixture
@@ -67,6 +75,158 @@ def test_it_stops_after_three_attempts_and_records_the_miss(renderer, tmp_path):
     assert figure.rendered, "the last image is kept, imperfect and labelled"
 
 
+# -- #476: a label must agree with the section's claims -----------------------
+
+
+def test_label_direction_reads_the_three_outcome_buckets():
+    assert diagrams.label_direction("Reported lean mass gain") == "gain"
+    assert diagrams.label_direction("True fat-free loss") == "loss"
+    assert diagrams.label_direction("Lean mass preservation") == "preservation"
+    assert diagrams.label_direction("Corrected comparison") is None
+    assert diagrams.label_direction("A reported strength increase") == "gain"
+
+
+def test_label_direction_inverts_on_negation():
+    """#476 F1. "Did not prevent lean mass loss" is a loss claim, not a
+    preservation claim; the bare word list reads `prevent` the wrong way.
+
+    #476 N1: a negated gain or a negated loss is a preservation claim (a
+    neutral "nothing changed" reading), not each other's opposite. The
+    first cut of `_INVERT_DIRECTION` sent a negated loss to gain, so "no
+    loss of lean mass" read as a gain claim.
+    """
+    assert diagrams.label_direction("Creatine did not prevent lean mass loss") == "loss"
+    assert diagrams.label_direction("The trial found no strength gain") == "preservation"
+    assert diagrams.label_direction("Fails to increase strength") == "preservation"
+    assert diagrams.label_direction("Without a fat-free mass gain") == "preservation"
+    assert diagrams.label_direction("There was no loss of lean mass") == "preservation"
+    # A negation after the outcome word belongs to a different clause.
+    assert diagrams.label_direction("Strength gain, not measured directly") == "gain"
+
+
+def test_node_labels_matches_the_deep_agents_ports_inventory_on_arrows_and_ids():
+    """A label after an arrow (`Start --> Gain[Fat-free mass]`) must not glue
+    to the preceding `-->` or read as the node id `Gain`. Same fixture as the
+    Deep Agents port's `inventory()` test; the two parsers must agree. #476 B1
+    """
+    source = "flowchart LR\n  Start --> Gain[Fat-free mass]\n  Gain --> End[End]\n"
+    assert diagrams.node_labels(source) == ["Fat-free mass", "End"]
+
+
+def test_a_hedged_loss_does_not_back_a_gain_label():
+    """#476 N1: a negated loss is a preservation claim, not a gain claim.
+    `_INVERT_DIRECTION` used to send it the other way, so "there was no
+    loss of lean mass" backed a bare "Lean mass gain" label, the overclaim
+    this ticket exists to stop. Two claims, so a reverted map (which counts
+    both as "gain") clears the single-source "reported" hedge and the
+    mismatch would go unnoticed with only one.
+    """
+    labels = ["Lean mass gain"]
+    claims = [
+        "There was no loss of lean mass in the treatment arm.",
+        "There was no loss of lean mass in the control arm either.",
+    ]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass gain"]
+
+
+def test_a_label_that_contradicts_the_section_claims_fails():
+    labels = ["Lean mass preservation", "Search"]
+    claims = ["The trial could not distinguish water retention from tissue."]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass preservation"]
+
+
+def test_a_single_source_label_needs_the_word_reported():
+    labels = ["True fat-free gain", "Reported fat-free gain"]
+    claims = ["One small trial reported a fat-free mass gain."]
+    assert diagrams.figure_claims(labels, claims) == ["True fat-free gain"]
+
+
+def test_two_claims_backing_a_direction_need_no_hedge():
+    labels = ["Lean mass gain"]
+    claims = ["One trial found a lean mass gain.", "A second trial also found a gain."]
+    assert diagrams.figure_claims(labels, claims) == []
+
+
+def test_a_third_mismatch_drops_the_figure_and_the_image(renderer, tmp_path):
+    """Three attempts, a mismatch every time: no image, no dangling reference."""
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer(source='flowchart LR\n  A["Lean mass preservation"]')
+    out_dir = tmp_path / "diagrams"
+    figure = diagrams.draw(
+        drawer,
+        name="f",
+        concept="c",
+        section="s",
+        topic="t",
+        out_dir=out_dir,
+        claims=["The trial could not distinguish water retention from tissue."],
+    )
+    assert figure.attempts == diagrams.MAX_ATTEMPTS
+    assert not figure.rendered, "a claims mismatch is dropped, not kept imperfect"
+    assert figure.path == ""
+    assert not (out_dir / "f_imagen.png").exists(), "no orphan image file is left behind"
+
+
+def test_a_changed_claim_recommissions_a_previously_dropped_label(renderer, tmp_path):
+    """The same label passes once two independent claims back its direction."""
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer(source='flowchart LR\n  A["Lean mass preservation"]')
+    figure = diagrams.draw(
+        drawer,
+        name="f",
+        concept="c",
+        section="s",
+        topic="t",
+        out_dir=tmp_path / "diagrams",
+        claims=[
+            "One trial found a lean mass preservation across both arms.",
+            "A second trial also found a lean mass preservation.",
+        ],
+    )
+    assert figure.rendered
+    assert figure.path == "diagrams/f_imagen.png"
+
+
+def test_an_outcome_label_with_no_supporting_claims_fails(renderer, tmp_path):
+    """#476 F3: absence of claims is not support. A caller with nothing
+    bound yet does not get a pass, it gets the same drop a real mismatch
+    does."""
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer(source='flowchart LR\n  A["Lean mass preservation"]')
+    figure = diagrams.draw(
+        drawer, name="f", concept="c", section="s", topic="t", out_dir=tmp_path / "diagrams"
+    )
+    assert not figure.rendered
+    assert figure.dropped
+    assert figure.attempts == diagrams.MAX_ATTEMPTS
+
+
+def test_a_structural_label_with_no_outcome_word_needs_no_claims(renderer, tmp_path):
+    """Absence of claims only sinks a label that asserts an outcome. A plain
+    process label (`Plan`, `Search`, ...) has no direction to grade."""
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer(source='flowchart LR\n  A["Plan"] --> B["Search"]')
+    figure = diagrams.draw(
+        drawer, name="f", concept="c", section="s", topic="t", out_dir=tmp_path / "diagrams"
+    )
+    assert figure.rendered
+
+
+def test_the_diagrammer_receives_the_sections_claims(renderer, tmp_path):
+    renderer.setattr(diagrams, "judge", lambda source, png: {"pass": True, "misses": []})
+    drawer = Drawer()
+    diagrams.draw(
+        drawer,
+        name="f",
+        concept="c",
+        section="s",
+        topic="t",
+        out_dir=tmp_path / "diagrams",
+        claims=["Creatine increased fat-free mass."],
+    )
+    assert drawer.claims_seen == [["Creatine increased fat-free mass."]]
+
+
 def test_no_image_backend_stops_immediately(renderer, tmp_path):
     """Redrawing does not add a backend, so it does not ask again."""
     renderer.setattr(diagrams, "render", lambda *a, **k: None)
@@ -77,6 +237,60 @@ def test_no_image_backend_stops_immediately(renderer, tmp_path):
     assert figure.attempts == 1
     assert not figure.rendered
     assert figure.misses == ["the renderer produced no image"]
+
+
+def test_a_failing_image_backend_becomes_a_named_skip(renderer, tmp_path):
+    """#514: `available()` already said yes; `render()` then raising must
+    not crash the run. One figure skipped, named with the backend's own
+    error, not a traceback."""
+
+    def boom(source, topic, out_dir, theme=diagrams.DEFAULT_THEME):
+        raise diagrams.ImageBackendUnavailable(out_dir / "f_imagen.prompt.txt")
+
+    renderer.setattr(diagrams, "render", boom)
+    drawer = Drawer()
+    figure = diagrams.draw(
+        drawer, name="f", concept="c", section="s", topic="t", out_dir=tmp_path / "diagrams"
+    )
+    assert figure.attempts == 1
+    assert not figure.rendered
+    assert figure.path == ""
+    assert "image backend unavailable" in figure.misses[0]
+    assert "every approved image backend failed" in figure.misses[0]
+
+
+def test_available_is_a_real_probe(monkeypatch, tmp_path):
+    """#514: a file-exists check alone reports available on a clone whose
+    live call then fails. `available()` must actually invoke the renderer,
+    and cache the result for the process. A fake `SCRIPTS` folder keeps this
+    independent of whether the real renderer clone is on disk."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "render.py").write_text("")
+    (scripts / "judge.py").write_text("")
+    monkeypatch.setattr(diagrams, "SCRIPTS", scripts)
+    diagrams._probe_backend.cache_clear()
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+    calls = []
+
+    def ok(script, args):
+        calls.append((script, args))
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(diagrams, "_run", ok)
+    assert diagrams.available()
+    assert calls[0][0] == "render.py"
+    assert "--dry-run" in calls[0][1]
+    assert diagrams.available()
+    assert len(calls) == 1, "the probe result is cached for the process"
+    diagrams._probe_backend.cache_clear()
+
+    def fails(script, args):
+        return type("Result", (), {"returncode": 2})()
+
+    monkeypatch.setattr(diagrams, "_run", fails)
+    assert not diagrams.available()
+    diagrams._probe_backend.cache_clear()
 
 
 def test_a_missing_renderer_never_calls_the_model(monkeypatch, tmp_path):
@@ -294,3 +508,31 @@ def test_render_hands_the_backend_the_sanitized_source(tmp_path, monkeypatch):
     handed = pathlib.Path(seen[0][seen[0].index("--source") + 1])
     assert "{Gate}" not in handed.read_text(), handed
     assert handed.name == src.name
+
+
+# -- the live renderer, opt-in only, so `task test` stays deterministic ------
+
+_LIVE_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY")
+# `or`, short-circuited: the cheap env checks run first, so a plain `task
+# test` (opt-in unset) never pays for `diagrams.available()`'s subprocess
+# probe just to decide whether to skip. `task test-live` sets the variable.
+_LIVE_SKIP = (
+    os.environ.get("SOL3_LIVE_TESTS") != "1"
+    or not any(os.environ.get(k) for k in _LIVE_KEYS)
+    or not diagrams.available()
+)
+
+
+@pytest.mark.skipif(
+    _LIVE_SKIP,
+    reason="set SOL3_LIVE_TESTS=1 and a real image backend key to run this (task test-live)",
+)
+def test_a_live_render_when_keys_are_present(tmp_path):
+    """#514: the offline lane never touches this. One real render, only when
+    a key is actually present, covers the renderer itself."""
+    source = tmp_path / "probe.mmd"
+    source.write_text('flowchart LR\n  A["Plan"] --> B["Check"]\n', encoding="utf-8")
+    out_dir = tmp_path / "out"
+    png = diagrams.render(source, "loop safety", out_dir)
+    assert png is not None
+    assert png.exists() and png.stat().st_size >= 32

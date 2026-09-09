@@ -3,25 +3,40 @@
   "loop engineering best practices": {
     "question": "loop engineering best practices",
     "answer": "This repository's paper loop checks done, then cost, then max turns. Done is the deterministic paper-check and judge result, cost is the configured USD ceiling, and max turns is the runtime safety ceiling. These exits are distinct and are evaluated in that order.",
-    "citations": ["https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk"],
+    "citations": [
+      "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk"
+    ],
     "sources": [
-      {"url": "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk", "title": "sol3_research_agent_sdk"}
+      {
+        "url": "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk",
+        "title": "sol3_research_agent_sdk"
+      }
     ]
   },
   "loop engineering best practices common mistake": {
     "question": "loop engineering best practices common mistake",
     "answer": "A reliable loop needs observable checks rather than an untested declaration of success. Google SRE notes that a failing test demonstrates a reliability problem, and that a system-level test can block a push before the bug reaches production.",
-    "citations": ["https://sre.google/sre-book/testing-reliability/"],
+    "citations": [
+      "https://sre.google/sre-book/testing-reliability/"
+    ],
     "sources": [
-      {"url": "https://sre.google/sre-book/testing-reliability/", "title": "Google SRE: Testing for Reliability"}
+      {
+        "url": "https://sre.google/sre-book/testing-reliability/",
+        "title": "Google SRE: Testing for Reliability"
+      }
     ]
   },
-  "loop engineering best practices how to verify": {
-    "question": "loop engineering best practices how to verify",
+  "How does verification work under a finite budget?": {
+    "question": "How does verification work under a finite budget?",
     "answer": "The Model Context Protocol separates resources, prompts, and tools in the host-server boundary. Its specification also assigns the host responsibility for user consent and control over data access and operations.",
-    "citations": ["https://modelcontextprotocol.io/specification/2025-06-18/index"],
+    "citations": [
+      "https://modelcontextprotocol.io/specification/2025-06-18/index"
+    ],
     "sources": [
-      {"url": "https://modelcontextprotocol.io/specification/2025-06-18/index", "title": "Model Context Protocol specification"}
+      {
+        "url": "https://modelcontextprotocol.io/specification/2025-06-18/index",
+        "title": "Model Context Protocol specification"
+      }
     ]
   }
 }

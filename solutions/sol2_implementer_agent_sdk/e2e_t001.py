@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -25,7 +26,10 @@ import roleplan
 from load_agents import DEFAULT_MAX_TURNS
 
 FOLDER = Path(__file__).resolve().parent
-MAX_TOTAL_USD = 2.0
+# #444/#539. Read at import, the same way adapter.QUERY_TIMEOUT_SECONDS is,
+# so the cap a status note reports is a cap an operator actually chose, not
+# a number this file always hardcoded.
+MAX_TOTAL_USD = float(os.environ.get("SOL2_E2E_MAX_USD", "2.0"))
 E2E_MAX_TURNS = DEFAULT_MAX_TURNS
 CONTROLLED_STOPS = frozenset({"max turns", "cost budget spent"})
 
@@ -64,9 +68,12 @@ class Call:
     phase: str
     agent: str
     wrote: list[str]
-    usd: float
+    usd: float | None
     ok: bool
     stop_reason: str | None
+    # #539. The proof, not just the verdict. Dropped here on the old code
+    # path, so a failed live run left nothing for `_write_extras` to write.
+    raw_output: str = ""
 
 
 class AgentSdkE2EBackend(doers.Backend):
@@ -74,30 +81,58 @@ class AgentSdkE2EBackend(doers.Backend):
 
     name = "agent_sdk"
 
-    def __init__(self, backend: Any, *, max_total_usd: float = MAX_TOTAL_USD):
+    def __init__(
+        self,
+        backend: Any,
+        *,
+        max_total_usd: float = MAX_TOTAL_USD,
+        loop_budget_usd: float | None = None,
+        per_query_usd: float | None = None,
+    ):
         self.backend = backend
         self.max_total_usd = max_total_usd
+        # #577. The target repo's own `.loop.yml` `budget.usd`, tighter than
+        # this wrapper's own `max_total_usd` on purpose (room for the judge's
+        # own call on top of the sliced iterations). Checked separately below:
+        # `max_total_usd` alone never caught a single call carrying the
+        # *loop's* own number past its ceiling, which is what round 5 spent
+        # $2.0880 against a $2.00 loop budget doing.
+        self.loop_budget_usd = loop_budget_usd
+        self.per_query_usd = per_query_usd
         self.calls: list[Call] = []
         self.spent_usd = 0.0
+        # #546. A count of turns whose cost came back `None`, so a reader of
+        # the summary can tell `spent_usd` is a floor, not a total, the same
+        # signal `Orchestrator.unknown_spend_turns` already carries one
+        # level up.
+        self.unknown_spend_turns = 0
 
     @property
     def query_failed(self) -> bool:
         return any(not call.ok and call.stop_reason not in CONTROLLED_STOPS for call in self.calls)
 
-    def run(self, *, repo: Path, prompt: str, allow: list[str]):
-        phase, agent = _phase(allow)
-        if self.spent_usd >= self.max_total_usd:
-            result = doers.DoerResult(
-                ok=False,
-                output=f"Agent SDK E2E budget exhausted at ${self.spent_usd:.2f}",
-            )
-            self.calls.append(Call(phase, agent, [], 0.0, False, "cost budget spent"))
-            return result
+    def _bookkeep(self, *, phase: str, agent: str, result: Any) -> float | None:
+        """Record the call and return the usd this turn reported.
 
-        instruction = f"Delegate only to {agent}. {prompt}" if agent else prompt
-        result = self.backend.run(repo=repo, prompt=instruction, allow=allow)
-        usd = float(getattr(result, "usd", 0.0) or 0.0)
-        self.spent_usd += max(usd, 0.0)
+        #539. `None` means the backend never answered; coercing it to 0.0
+        with `or` is the exact silent-zero bug this ticket exists to kill.
+        The budget still moves (an unknown turn spends 0.0 against it), but
+        the number this method returns, and the trace that reads it, keeps
+        the `None`.
+        """
+        raw_usd = getattr(result, "usd", None)
+        usd = None if raw_usd is None else float(raw_usd)
+        # #546. Counted here, not derived later from `self.calls`, so it
+        # stays in lockstep with the same call this method is already
+        # bookkeeping.
+        if usd is None:
+            self.unknown_spend_turns += 1
+        # #539, follow-up 5. The SDK has never emitted a negative cost, but a
+        # bare `+=` would let one walk `spent_usd` backwards and loosen the
+        # `max_total_usd` gate above; `max(usd, 0.0)` is the guard the old
+        # `float(... or 0.0)` line carried before this ticket's rewrite.
+        if usd is not None:
+            self.spent_usd += max(usd, 0.0)
         self.calls.append(
             Call(
                 phase=phase,
@@ -106,8 +141,75 @@ class AgentSdkE2EBackend(doers.Backend):
                 usd=usd,
                 ok=bool(getattr(result, "ok", False)),
                 stop_reason=getattr(result, "stop_reason", None),
+                raw_output=str(getattr(result, "raw_output", "") or ""),
             )
         )
+        return usd
+
+    def _budget_stop(self, *, phase: str, agent: str) -> doers.DoerResult | None:
+        """#577, judge of PR #584. The same pre-call check for every call
+        this wrapper makes, `judge()` included: the judge call was the one
+        place a live run could still spend past the loop's own budget with
+        nothing here to stop it. `None` means there is room, or neither
+        budget figure was given at all -- the behavior before #577.
+        """
+        if self.spent_usd >= self.max_total_usd:
+            # #539, follow-up 4. This call never reaches the backend, so its
+            # cost is known to be exactly zero, not unknown. `usd=None` here
+            # would be the mirror of the defect this ticket exists to fix:
+            # reporting a known number as unreported.
+            #
+            # #577, judge of PR #584. `stop_reason` set here, not left at the
+            # dataclass default of `None`: `_ask_judge` and the code loop
+            # alike read this field to tell a controlled stop from a call
+            # that never answered, and a `None` here used to make a
+            # budget-blocked judge call read as the second, not the first.
+            result = doers.DoerResult(
+                ok=False,
+                usd=0.0,
+                output=f"Agent SDK E2E budget exhausted at ${self.spent_usd:.2f}",
+                stop_reason="cost budget spent",
+            )
+            self.calls.append(Call(phase, agent, [], 0.0, False, "cost budget spent"))
+            return result
+        if (
+            self.loop_budget_usd is not None
+            and self.per_query_usd is not None
+            and self.loop_budget_usd - self.spent_usd < self.per_query_usd
+        ):
+            # #577. The wrapper cap above is deliberately looser than the
+            # loop's own `.loop.yml` budget; a single call that spends up to
+            # the per-query slice can still carry the tighter number past
+            # its ceiling, the exact 4.4% overrun a round-5 trace measured.
+            # Stop before that call instead of after it. A residual overrun
+            # still survives in general: this check bounds the *next* call
+            # from starting, not a call already in flight that spends past
+            # its own slice (round 4 measured 12% over on exactly that
+            # shape). Named as a known ceiling, not closed here.
+            remaining = max(self.loop_budget_usd - self.spent_usd, 0.0)
+            result = doers.DoerResult(
+                ok=False,
+                usd=0.0,
+                output=(
+                    f"loop budget of ${self.loop_budget_usd:.2f} has ${remaining:.2f} left, "
+                    f"under the ${self.per_query_usd:.2f} per-query cap; "
+                    f"${self.spent_usd:.2f} spent so far"
+                ),
+                stop_reason="cost budget spent",
+            )
+            self.calls.append(Call(phase, agent, [], 0.0, False, "cost budget spent"))
+            return result
+        return None
+
+    def run(self, *, repo: Path, prompt: str, allow: list[str]):
+        phase, agent = _phase(allow)
+        stopped = self._budget_stop(phase=phase, agent=agent)
+        if stopped is not None:
+            return stopped
+
+        instruction = f"Delegate only to {agent}. {prompt}" if agent else prompt
+        result = self.backend.run(repo=repo, prompt=instruction, allow=allow)
+        usd = self._bookkeep(phase=phase, agent=agent, result=result)
         return doers.DoerResult(
             wrote=list(getattr(result, "wrote", ()) or ()),
             output=str(getattr(result, "output", "")),
@@ -115,22 +217,15 @@ class AgentSdkE2EBackend(doers.Backend):
             ok=bool(getattr(result, "ok", False)),
             structured=getattr(result, "structured", None),
             stop_reason=getattr(result, "stop_reason", None),
+            raw_output=str(getattr(result, "raw_output", "") or ""),
         )
 
     def judge(self, *, repo: Path, prompt: str):
+        stopped = self._budget_stop(phase="judge", agent="implementer-judge")
+        if stopped is not None:
+            return stopped
         result = self.backend.judge(repo=repo, prompt=prompt)
-        usd = float(getattr(result, "usd", 0.0) or 0.0)
-        self.spent_usd += max(usd, 0.0)
-        self.calls.append(
-            Call(
-                phase="judge",
-                agent="implementer-judge",
-                wrote=[],
-                usd=usd,
-                ok=bool(getattr(result, "ok", False)),
-                stop_reason=getattr(result, "stop_reason", None),
-            )
-        )
+        self._bookkeep(phase="judge", agent="implementer-judge", result=result)
         return result
 
 
@@ -174,13 +269,20 @@ def _instrument_hooks(options, audit: list[dict[str, str | None]]) -> None:
             matchers[index] = replacement
 
 
-def _build_backend(repo: Path, budget: int | None) -> tuple[AgentSdkE2EBackend, list[dict]]:
+def _build_backend(
+    repo: Path, budget: int | None, ticket_id: str
+) -> tuple[AgentSdkE2EBackend, list[dict]]:
     """Build one capped SDK backend for the driver without calling a model."""
     if budget is not None and budget < 1:
         raise ValueError("--budget must be at least 1")
     target = contract.Contract(repo)
     iterations = budget if budget is not None else int(target.budget.get("iterations", 3))
     per_query_usd = MAX_TOTAL_USD / (iterations + 2)
+    # #543. `implementer.run` executes every phase in this worktree, not in
+    # `repo` (the clone). Computed with no side effect, the same path
+    # `implementer._worktree` itself resolves to, so a live query works
+    # where the red gate actually reads from.
+    cwd = implementer._worktree_path(repo, ticket_id)
     audit: list[dict] = []
     phases = {}
     for phase, role_name in (
@@ -188,16 +290,25 @@ def _build_backend(repo: Path, budget: int | None) -> tuple[AgentSdkE2EBackend, 
         ("code", "code_implementer"),
         ("judge", "judge"),
     ):
-        options = sdk_options_with_budget(target, role_name, per_query_usd)
+        options = sdk_options_with_budget(target, role_name, per_query_usd, cwd)
         _instrument_hooks(options, audit)
         phases[phase] = adapter.AgentSdkBackend(options)
     inner = adapter.AgentSdkPhaseBackend(
         test=phases["test"], code=phases["code"], judge=phases["judge"]
     )
-    return AgentSdkE2EBackend(inner), audit
+    # #577. `target.budget.get("usd")` is the loop's own tighter number;
+    # `per_query_usd` is the same slice already handed to every phase's
+    # options above, so the wrapper can stop before a call that would carry
+    # the loop past it, not only after.
+    loop_budget = target.budget.get("usd")
+    loop_budget_usd = float(loop_budget) if loop_budget is not None else None
+    return (
+        AgentSdkE2EBackend(inner, loop_budget_usd=loop_budget_usd, per_query_usd=per_query_usd),
+        audit,
+    )
 
 
-def sdk_options_with_budget(target, role_name: str, per_query_usd: float):
+def sdk_options_with_budget(target, role_name: str, per_query_usd: float, cwd: Path):
     import roles as sdk_roles  # noqa: PLC0415
 
     return sdk_roles.options_for(
@@ -205,31 +316,112 @@ def sdk_options_with_budget(target, role_name: str, per_query_usd: float):
         max_usd=per_query_usd,
         max_turns=E2E_MAX_TURNS,
         role_names=frozenset({role_name}),
+        cwd=cwd,
     )
 
 
-def _write_extras(repo: Path, trace: dict, backend: AgentSdkE2EBackend, audit: list[dict]) -> None:
-    """Write operator-safe evidence next to the shared harness receipt."""
+_KEY_PATTERN = re.compile(r"sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9]+")
+# #545 follow-up. A `~/...` shorthand path never gets caught by the literal
+# `str(Path.home())` replace below: it is a different string for the same
+# place. `Bearer <token>` is the header shape, not a key prefix, so it needs
+# its own pattern rather than a wider `_KEY_PATTERN`.
+_HOME_TILDE_PATTERN = re.compile(r"~/[^\s'\"]*")
+_BEARER_PATTERN = re.compile(r"Bearer\s+\S+")
+# A live run's own tooling (Claude Code's transcript directory, this
+# scratchpad's own tmp path) slugifies the home directory with `-` in place
+# of `/`, so `/Users/<name>/...` never matches there. The bare account name
+# is the one string common to every encoding of the same path.
+_HOME_NAME = Path.home().name
+
+
+def _redact(text: str) -> str:
+    """#543, widened by #545 follow-up. Strip what a durable, checked-in
+    copy must never carry: the operator's own home directory (resolved,
+    `~/`-shorthand, or slugified with `-` in place of `/`), anything shaped
+    like a live key (`sk-ant-...`, `ghp_...`), and a bearer auth header.
+    `docs/status/` is a git-tracked path; the worktree's own copy this
+    replaces stays wherever `--repo` names, cleaned up by hand."""
+    text = text.replace(str(Path.home()), "<HOME>")
+    text = _HOME_TILDE_PATTERN.sub("<HOME>", text)
+    if _HOME_NAME:
+        text = re.sub(re.escape(_HOME_NAME), "<HOME>", text)
+    text = _BEARER_PATTERN.sub("Bearer <REDACTED-TOKEN>", text)
+    return _KEY_PATTERN.sub("<REDACTED-KEY>", text)
+
+
+def _write_extras(
+    repo: Path,
+    trace: dict,
+    backend: AgentSdkE2EBackend,
+    audit: list[dict],
+    *,
+    extra_log_dir: Path | None = None,
+) -> None:
+    """Write operator-safe evidence next to the shared harness receipt.
+
+    #543. `extra_log_dir`, when given, gets a redacted copy of each call's
+    raw event log too. The worktree `.harness/` this always writes to is
+    cleaned up between runs by hand; a status note that only references a
+    path there stops resolving the moment that happens. `extra_log_dir`
+    lets the caller point at somewhere durable, `docs/status/` in this
+    repo, without this file having to know that path exists.
+    """
     out = Path(repo) / ".harness"
     out.mkdir(parents=True, exist_ok=True)
+    if extra_log_dir is not None:
+        extra_log_dir.mkdir(parents=True, exist_ok=True)
     lines = [
         "# Agent SDK T001 E2E",
         "",
         f"gate: {trace.get('gate', 'missing')}",
         f"reason: {trace.get('reason', 'missing')}",
         f"spent_usd: {backend.spent_usd:.4f}",
+        # #546. Echoed next to `spent_usd` so a reader of this file can tell
+        # it is a floor, not a total, without opening `.harness/state.json`.
+        f"unknown_spend_turns: {backend.unknown_spend_turns}",
+        # #539(e). The cap this run actually applied, not a number a status
+        # note has to guess or invent after the fact.
+        f"cap_usd: {backend.max_total_usd:.2f}",
+        # #577. Named beside the wrapper cap above, not only inside
+        # `last-implementer.json`'s own `budget_usd`: this is the file a
+        # status note actually points at, and the two numbers are what
+        # explains why a run can spend under `cap_usd` and still overrun
+        # `.loop.yml`'s own, tighter figure.
+        f"loop_budget_usd: {'unset' if backend.loop_budget_usd is None else format(backend.loop_budget_usd, '.2f')}",
+        # #577, judge of PR #584. Named as a known ceiling, not closed by
+        # this ticket: the pre-call check above only refuses the *next*
+        # call from starting when the remaining loop budget cannot cover
+        # one; a call already in flight can still spend past its own
+        # per-query slice before the SDK's own budget ceiling ends it
+        # (round 4 measured 12% over on exactly that shape). Worst case is
+        # `loop_budget_usd` plus one call's own overshoot.
+        "known ceiling: a single in-flight call can still spend past its "
+        "own per-query slice; this check only stops the *next* call from "
+        "starting when it cannot afford one.",
         f"query_failed: {backend.query_failed}",
         "",
         "## Phases",
     ]
-    for call in backend.calls:
+    for index, call in enumerate(backend.calls):
+        usd_text = "unknown" if call.usd is None else format(call.usd, ".4f")
         lines.extend(
             (
                 f"- {call.phase} via {call.agent or 'unknown'}: ok={call.ok} "
-                f"usd={call.usd:.4f} stop={call.stop_reason or 'none'}",
+                f"usd={usd_text} stop={call.stop_reason or 'none'}",
                 f"  wrote: {', '.join(call.wrote) or 'nothing'}",
             )
         )
+        # #539. The proof, kept even on a failed call. Written per call
+        # rather than inlined: a raw event log can run to hundreds of lines,
+        # and the earlier bug was losing this entirely, not formatting it.
+        if call.raw_output:
+            raw_name = f"last-sdk-e2e-raw-{index}-{call.phase}.txt"
+            (out / raw_name).write_text(call.raw_output, encoding="utf-8")
+            lines.append(f"  raw: .harness/{raw_name}")
+            if extra_log_dir is not None:
+                (extra_log_dir / raw_name).write_text(
+                    _redact(call.raw_output), encoding="utf-8"
+                )
     lines.extend(("", "## Hook audit"))
     for event in audit:
         lines.append(
@@ -253,6 +445,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ticket", default="T001")
     parser.add_argument("--budget", type=int)
     parser.add_argument("--table-only", action="store_true")
+    # #543. The worktree's own copy is cleaned up between runs by hand; a
+    # status note that only references it stops resolving the moment that
+    # happens. Optional and off by default, so a copied-out folder needs no
+    # sibling `docs/status/` to run.
+    parser.add_argument(
+        "--raw-log-dir", default=os.environ.get("SOL2_E2E_RAW_LOG_DIR")
+    )
     args = parser.parse_args(argv)
 
     if args.table_only:
@@ -270,19 +469,30 @@ def main(argv: list[str] | None = None) -> int:
 
     repo = Path(args.repo).expanduser().resolve()
     try:
-        backend, audit = _build_backend(repo, args.budget)
+        backend, audit = _build_backend(repo, args.budget, args.ticket)
         trace = implementer.run(repo=repo, ticket_id=args.ticket, doer=backend, budget=args.budget)
     except Exception as exc:
         print(f"Agent SDK E2E setup failed: {exc}", file=sys.stderr)
         return 2
 
-    _write_extras(repo, trace, backend, audit)
+    # #506. `implementer.run` does all its work in `<repo>.worktrees/<ticket>`
+    # (`_worktree`), never against `repo` itself, and writes `.harness/`
+    # there. `trace["repo"]` is that worktree path; write the summary beside
+    # the `.harness/` the run itself produced, not next to the clone.
+    extra_log_dir = (
+        Path(args.raw_log_dir).expanduser().resolve() if args.raw_log_dir else None
+    )
+    _write_extras(Path(trace["repo"]), trace, backend, audit, extra_log_dir=extra_log_dir)
     print(trace.get("rubric", ""))
     print()
     print(f"gate: {trace.get('gate', 'missing')}")
     print(f"reason: {trace.get('reason', 'missing')}")
     if backend.query_failed:
-        print("Agent SDK query failed; see .harness/last-sdk-e2e.md", file=sys.stderr)
+        # #506 follow-up (judge of PR #527, item 4). A bare relative path
+        # here reads as living next to wherever this command was invoked
+        # from, not the worktree `_write_extras` actually wrote to above.
+        summary_path = Path(trace["repo"]) / ".harness" / "last-sdk-e2e.md"
+        print(f"Agent SDK query failed; see {summary_path}", file=sys.stderr)
         return 2
     return 0 if trace.get("gate") == "pass" else 1
 

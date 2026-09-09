@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import checks
 import diagrams
 import paper
 import pytest
@@ -29,6 +30,19 @@ def test_section_instruction_uses_the_outline_word_target():
     assert "words of section body" in with_target
     assert "Unpack every bound claim" in paper._section_instruction({"heading": "The approach"})
     assert "fix the thing" in paper._section_instruction({"word_target": 400}, "fix the thing")
+
+
+def test_strip_policy_leak_scrubs_a_host_and_a_retrieval_phrase():
+    """#452 #465 #412: a judge's own note, or Python's `policy_leak` report,
+    can name the offending host or phrase while explaining what to fix. The
+    writer must not see either."""
+    note = "policy_leak: search host or retrieval narration in: 'hosted on arxiv.org'"
+    scrubbed = paper._strip_policy_leak(note, ("arxiv.org",))
+    assert "arxiv.org" not in scrubbed
+    assert paper._strip_policy_leak("no host here", ("arxiv.org",)) == "no host here"
+
+    phrase_note = "Section s1 still names its preprint search."
+    assert "preprint search" not in paper._strip_policy_leak(phrase_note, ())
 
 
 @pytest.fixture
@@ -160,6 +174,52 @@ def test_a_verifier_that_fails_leaves_the_claim_unverified(work, turns):
     assert "unavailable" in claims[0]["verifier_excerpt"]
 
 
+# -- attribution moved to the live path: see test_sections.py. `paper.verify`
+# is dead code no `LINEAR` or `CYCLE` stage calls; #471's checks live in
+# `sections.run_section`, where a real run actually records claims.
+
+
+def test_do_sections_carries_the_study_object_into_claims_json(work, turns, monkeypatch):
+    """The SDK schema equivalent of #471's ledger round trip: `study` is
+    unused until #478, and only has to survive to `claims.json`."""
+    import sections
+
+    approved = {"title": "T", "sections": [{"id": "s1", "heading": "One"}]}
+    monkeypatch.setattr(paper, "approved_outline", lambda run: approved)
+    monkeypatch.setattr(sections, "run_section", lambda run, section: {"section": section["id"]})
+
+    knowledge = Path(work) / "knowledge" / "s1"
+    knowledge.mkdir(parents=True)
+    (knowledge / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "s1-f1",
+                        "claim": "The trial enrolled 120 adults.",
+                        "quote": "",
+                        "answers_question": "q",
+                        "study": {"design": "RCT", "n": 120},
+                        "source": {"kind": "web", "url_or_path": "https://a.invalid"},
+                    }
+                ],
+                "coverage_gaps": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = paper.Run(
+        topic="t",
+        work_dir=work,
+        turns=turns(root=work),
+        state=paper.State.load_or_new(work, "t"),
+    )
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert claims[0]["study"] == {"design": "RCT", "n": 120}
+
+
 def test_a_contradicted_claim_never_reaches_the_writer(work, turns, no_renderer):
     claims = [{"text": "A thing is true.", "source_url": "https://e.invalid/d", "quote": ""}]
     run = prepared(work, turns(verdict="contradicts", claims=claims))
@@ -264,6 +324,339 @@ def test_assembly_writes_the_section_heading_the_writer_left_out(work, turns, no
     assert "\n## A sub-point\n" not in body
 
 
+def test_assemble_inserts_a_python_written_introduction_when_the_outline_has_none(
+    work, turns, no_renderer
+):
+    """#538. The default outline here is headed "The problem", not
+    "Introduction": `outline.validate`'s `require_introduction` is off by
+    default, the same as `require_next_step`, so this outline draws no
+    error. `assemble` still inserts one, the way it inserts Methods: no
+    model turn, right after the Abstract and before Methods."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    # PR #554 judge finding F3: a six-word stub failed `has_body`'s 80-word
+    # floor, the same floor every real section clears.
+    thin = checks.sections_without_prose(body, checks.MIN_SECTION_WORDS)
+    assert not any(row.startswith("Introduction") for row in thin), thin
+
+
+def test_assemble_places_a_written_introduction_before_methods(work, turns, no_renderer):
+    """#538. An outline whose first section is headed "Introduction" gets
+    its own written file placed there, not the Python-written stub: the
+    section-writing loop already wrote it like any other section."""
+
+    class WithIntro(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            # Split the one section's word budget in two rather than
+            # copying it, so the total still sums to `word_target_total`
+            # within `validate`'s 10% slack.
+            half = drafted["sections"][0]["word_target"] // 2
+            drafted["sections"][0]["word_target"] -= half
+            drafted["sections"].insert(
+                0,
+                {
+                    "id": "intro",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": half,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, WithIntro())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    intro_path = Path(work) / "sections" / "intro.md"
+    intro_path.write_text("Written introduction text [1].\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "Written introduction text" in introduction, introduction
+    assert body.count("## Introduction") == 1
+
+
+def test_assemble_moves_an_out_of_order_introduction_to_the_front(work, turns, no_renderer):
+    """#538, PR #554 judge finding F2. An outline whose Introduction landed
+    second, not first, still assembles with exactly one `## Introduction`
+    heading, moved to the frozen position, not a second one stacked on top
+    of it. Checking only `sections[0]` missed this: the outliner's own
+    Introduction sat untouched in the body loop and the stub branch added
+    another."""
+
+    class IntroSecond(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            half = drafted["sections"][0]["word_target"] // 2
+            drafted["sections"][0]["word_target"] -= half
+            drafted["sections"].insert(
+                1,
+                {
+                    "id": "intro",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": half,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, IntroSecond())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    intro_path = Path(work) / "sections" / "intro.md"
+    intro_path.write_text("Written introduction text [1].\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "Written introduction text" in introduction, introduction
+
+
+def test_assemble_collapses_a_duplicate_introduction(work, turns, no_renderer):
+    """#559. PR #558's judge found the same gap reopened here: Deep Agents'
+    `stages.normalize_plan` collapses a duplicate `## Introduction`, but the
+    SDK's move rule from PR #554 only popped the first match, leaving a
+    second Introduction to ride through the body-section loop untouched.
+    An outline carrying two now assembles with exactly one, the first in
+    body order, in the frozen position. Copied from Deep Agents'
+    `test_stages.test_normalize_collapses_a_duplicate_introduction`."""
+
+    class TwoIntros(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            third = drafted["sections"][0]["word_target"] // 3
+            drafted["sections"][0]["word_target"] -= 2 * third
+            drafted["sections"].insert(
+                0,
+                {
+                    "id": "intro-first",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            drafted["sections"].append(
+                {
+                    "id": "intro-second",
+                    "heading": "Introduction",
+                    "objective": "Name the problem, again.",
+                    "abstract": "A second introduction section.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, TwoIntros())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    (Path(work) / "sections" / "intro-first.md").write_text(
+        "First written introduction text [1].\n", encoding="utf-8"
+    )
+    (Path(work) / "sections" / "intro-second.md").write_text(
+        "Second written introduction text [1].\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "First written introduction text" in introduction, introduction
+    assert "Second written introduction text" not in body, body
+
+
+def test_assemble_keeps_the_prose_bearing_duplicate_when_the_first_has_no_file(
+    work, turns, no_renderer
+):
+    """#566. The old collapse always kept `intro_indexes[0]`, whether or not
+    that copy ever got a written file. When the first duplicate's own
+    section file was never written (a resumed run whose write turn for it
+    never completed, or was dropped some other way) but a later duplicate
+    under a different id has real prose on disk, the old code still popped
+    both from `body_sections`, found no file for the first, and ran the
+    stub branch, discarding the second copy's real text along with it. The
+    first candidate that actually has a file is now kept, wherever it sits
+    among the duplicates."""
+
+    class TwoIntros(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            third = drafted["sections"][0]["word_target"] // 3
+            drafted["sections"][0]["word_target"] -= 2 * third
+            drafted["sections"].insert(
+                0,
+                {
+                    "id": "intro-first",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            drafted["sections"].append(
+                {
+                    "id": "intro-second",
+                    "heading": "Introduction",
+                    "objective": "Name the problem, again.",
+                    "abstract": "A second introduction section.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, TwoIntros())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    # The first duplicate never got a section file: no write turn for it
+    # completed, or it was removed some other way.
+    (Path(work) / "sections" / "intro-first.md").unlink(missing_ok=True)
+    (Path(work) / "sections" / "intro-second.md").write_text(
+        "Second written introduction text [1].\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "Second written introduction text" in introduction, introduction
+    assert "This paper's outline carried no Introduction" not in body, body
+
+
+def test_assemble_repairs_a_resumed_outline_with_no_introduction(work, turns, no_renderer):
+    """#538, PR #554 judge finding F2. A resume whose `outline.approved.json`
+    was stamped before this rule landed carries no Introduction section at
+    all. `assemble` still produces exactly one, from the Python backstop,
+    not zero and not two."""
+    import outline as outlines  # noqa: PLC0415
+
+    run = make_run(work, turns())
+    old_outline = {
+        "title": "Old topic",
+        "audience": "engineers",
+        "thesis": "An old thesis.",
+        "word_target_total": 400,
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "The problem",
+                "objective": "State it.",
+                "abstract": "States the problem.",
+                "key_questions": ["what is the problem", "why it fails"],
+                "claims_to_support": [],
+                "required_evidence": [],
+                "word_target": 400,
+                "figures": [],
+                "depends_on": [],
+            }
+        ],
+    }
+    run.write_json("outline.approved.json", outlines.stamp(old_outline, approved_by="operator"))
+    run.write_json("claims.json", {"claims": []})
+    (Path(work) / "sections").mkdir(parents=True, exist_ok=True)
+    (Path(work) / "sections" / "s1.md").write_text("The problem is real. [1]\n", encoding="utf-8")
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+
+
+def test_a_term_marker_is_harvested_and_stripped(work, turns, no_renderer):
+    """The writer's `TERM` marker never reaches the reader, and its term
+    reaches the glossary assembly writes."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    section = sorted((Path(work) / "sections").glob("*.md"))[0]
+    text = section.read_text(encoding="utf-8")
+    section.write_text(
+        text + "\n<!-- TERM: orchestrator: the process that sequences roles -->\n",
+        encoding="utf-8",
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert "TERM" not in body
+    assert "**orchestrator.** the process that sequences roles" in body
+
+
+def test_assemble_writes_a_glossary_before_references(work, turns, no_renderer):
+    """Heading order: the last prose section, then Glossary, then References.
+    The writer is denied both trailing headings."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    outline = json.loads((Path(work) / "outline.approved.json").read_text())
+    outline = outline.get("outline", outline)
+    heading = outline["sections"][0]["heading"]
+    section = sorted((Path(work) / "sections").glob("*.md"))[0]
+    text = section.read_text(encoding="utf-8")
+    section.write_text(
+        text + "\n<!-- TERM: orchestrator: the process that sequences roles -->\n",
+        encoding="utf-8",
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    section_at = body.index(f"## {heading}")
+    glossary_at = body.index("## Glossary")
+    references_at = body.index("## References")
+    assert section_at < glossary_at < references_at, body
+
+
+def test_no_glossary_heading_when_no_term_was_captured(work, turns, no_renderer):
+    """No marker, no section. A Glossary with zero entries is not written."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert "## Glossary" not in body
+
+
 def test_a_failed_rewrite_keeps_the_stamped_section_it_was_replacing(work, turns, no_renderer):
     """`write_sections` unlinked the draft and called the writer with no copy kept.
 
@@ -293,6 +686,201 @@ def test_a_failed_rewrite_keeps_the_stamped_section_it_was_replacing(work, turns
     with pytest.raises(Escalate):
         paper.write_sections(run)
     assert section.read_text() == "The stamped draft [1].\n", "the draft was lost on Escalate"
+
+
+# -- #476: the sections_sha guard, and the claims that reach the diagrammer --
+
+
+def _diagram_ready(work, run, monkeypatch):
+    """An outline with one figure, one section, one ledger claim, and the
+    section's body on disk: enough for `paper.diagram` to commission from,
+    without paying for research, write, or a real render.
+
+    Also stubs `diagrams.available()` to `True`, so these tests read the
+    same on a machine with the renderer clone present or absent. A test
+    that specifically exercises no-renderer behaviour (#476 F2) overrides
+    this back to `False` after calling in.
+    """
+    monkeypatch.setattr(paper.diagrams, "available", lambda: True)
+    outline = {
+        "title": "T",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "One",
+                "figures": [{"kind": "diagram", "name": "f1", "shows": "the loop"}],
+            }
+        ],
+    }
+    run.write_json(
+        "paper_ledger.json",
+        {
+            "entries": [
+                {
+                    "section_id": "s1",
+                    "claims": [
+                        {"claim": "Creatine increased fat-free mass.", "ref": "1", "confidence": 0.5}
+                    ],
+                }
+            ]
+        },
+    )
+    sections_dir = Path(work) / "sections"
+    sections_dir.mkdir(parents=True, exist_ok=True)
+    (sections_dir / "s1.md").write_text("Body text.\n", encoding="utf-8")
+    return outline
+
+
+def test_the_diagrammer_receives_the_bound_claims_of_its_section(work, turns, monkeypatch):
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run, monkeypatch)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+
+    calls = []
+
+    def fake_draw(turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None, max_attempts=diagrams.MAX_ATTEMPTS):
+        calls.append(list(claims or []))
+        return diagrams.Figure(name=name, section=section, path=f"diagrams/{name}_imagen.png")
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    assert calls == [["Creatine increased fat-free mass."]]
+
+
+def test_a_second_write_attempt_does_not_recommission_a_figure(work, turns, monkeypatch):
+    """#476's `sections_sha` guard: one diagrammer turn across two calls to
+    `paper.diagram`, when the section files have not changed between them."""
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run, monkeypatch)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+
+    calls = []
+
+    def fake_draw(turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None, max_attempts=diagrams.MAX_ATTEMPTS):
+        calls.append(name)
+        return diagrams.Figure(name=name, section=section, path=f"diagrams/{name}_imagen.png")
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    assert len(calls) == 1
+    paper.diagram(run)
+    assert len(calls) == 1, "an unchanged sections_sha must not recommission a figure"
+
+
+def test_a_changed_section_recommissions_its_figure(work, turns, monkeypatch):
+    """The `sections_sha` guard is not a permanent skip."""
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run, monkeypatch)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+
+    calls = []
+
+    def fake_draw(turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None, max_attempts=diagrams.MAX_ATTEMPTS):
+        calls.append(name)
+        return diagrams.Figure(name=name, section=section, path=f"diagrams/{name}_imagen.png")
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    assert len(calls) == 1
+
+    (Path(work) / "sections" / "s1.md").write_text(
+        "Body text, rewritten.\n", encoding="utf-8"
+    )
+    paper.diagram(run)
+    assert len(calls) == 2, "a changed section must recommission its figure"
+
+
+def test_the_attempt_budget_is_durable_across_a_changed_section(work, turns, monkeypatch):
+    """#476 B2: a figure that can never pass does not get a fresh three
+    every time an unrelated write retry changes the sections hash. Three
+    attempts, ever, is the figure's lifetime budget for the run."""
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run, monkeypatch)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+
+    budgets = []
+
+    def fake_draw(
+        turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None,
+        max_attempts=diagrams.MAX_ATTEMPTS,
+    ):
+        budgets.append(max_attempts)
+        return diagrams.Figure(
+            name=name, section=section, path="", attempts=max_attempts,
+            dropped=True, misses=["mismatch"],
+        )
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    assert budgets == [diagrams.MAX_ATTEMPTS]
+
+    (Path(work) / "sections" / "s1.md").write_text(
+        "Body text, rewritten once more.\n", encoding="utf-8"
+    )
+    paper.diagram(run)
+    assert budgets == [diagrams.MAX_ATTEMPTS], (
+        "an already-exhausted figure must not spend on a two-write-cycle change"
+    )
+
+    recorded = json.loads((Path(work) / "diagrams.json").read_text())
+    assert recorded["figures"][0]["attempts"] == diagrams.MAX_ATTEMPTS
+    assert recorded["figures"][0]["dropped"] is True
+
+
+def test_sections_sha_is_not_recorded_with_no_renderer(work, turns, monkeypatch):
+    """#476 F2: a run with no image backend must not freeze zero figures
+    into the guard. Installing the renderer and resuming has to try again."""
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run, monkeypatch)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+    monkeypatch.setattr(paper.diagrams, "available", lambda: False)
+
+    def fake_draw(turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None, max_attempts=diagrams.MAX_ATTEMPTS):
+        return diagrams.Figure(name=name, section=section, path="", misses=["the renderer is not installed."])
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    recorded = json.loads((Path(work) / "diagrams.json").read_text())
+    assert "sections_sha" not in recorded
+
+
+def test_a_backend_skip_never_sets_dropped_and_keeps_its_earned_attempts(work, turns, monkeypatch):
+    """#482 follow-up: a backend failure is not a label failure. The Deep
+    Agents port once set `dropped` on this path, which (with its durable
+    budget check gated on `dropped`) permanently disqualified a figure
+    that already earned its labels. This port never has, and this locks
+    it in: `dropped` stays false, and the one attempt a backend skip spent
+    carries forward exactly, not reset and not exhausted."""
+    run = make_run(work, turns())
+    outline = _diagram_ready(work, run, monkeypatch)
+    monkeypatch.setattr(paper, "approved_outline", lambda r: outline)
+
+    budgets = []
+
+    def fake_draw(
+        turns_obj, *, name, concept, section, topic, out_dir, theme, claims=None,
+        max_attempts=diagrams.MAX_ATTEMPTS,
+    ):
+        budgets.append(max_attempts)
+        return diagrams.Figure(
+            name=name, section=section, path="", attempts=1, dropped=False,
+            misses=["image backend unavailable: every approved image backend failed"],
+        )
+
+    monkeypatch.setattr(paper.diagrams, "draw", fake_draw)
+    paper.diagram(run)
+    assert budgets == [diagrams.MAX_ATTEMPTS]
+    recorded = json.loads((Path(work) / "diagrams.json").read_text())
+    assert recorded["figures"][0]["dropped"] is False
+    assert recorded["figures"][0]["attempts"] == 1
+
+    (Path(work) / "sections" / "s1.md").write_text(
+        "Body text, rewritten.\n", encoding="utf-8"
+    )
+    paper.diagram(run)
+    assert budgets == [diagrams.MAX_ATTEMPTS, diagrams.MAX_ATTEMPTS - 1], (
+        "the backend skip's one attempt must carry forward, not reset and not exhaust"
+    )
 
 
 # -- the whole run ----------------------------------------------------------
@@ -383,6 +971,34 @@ def test_the_retry_hands_the_writer_only_the_current_issues(work, turns, no_rend
     assert "words of section body" in notes[0]
     assert "fix the thing" in notes[1]
     assert "FINAL ATTEMPT" in notes[1], "the last attempt narrows the ask"
+
+
+def test_the_retry_note_names_no_allowlist_host(work, turns, no_renderer):
+    """A judge's own note can quote a `policy_leak` failure's host back at
+    the writer while explaining what to fix. #452 #465 #412: the retry note
+    the next write attempt receives must not repeat it."""
+    recorder = turns(done=False)
+    run = make_run(work, recorder, max_iterations=2)
+
+    class Noisy(type(recorder)):
+        def review(self, paper_body, report):
+            self.asked.append(("review", report))
+            return {
+                "done": False,
+                "summary": "",
+                "issues": [
+                    {
+                        "severity": "major",
+                        "section": "s1",
+                        "description": "remove the mention of docs.langchain.com",
+                    }
+                ],
+            }
+
+    run.turns = Noisy(done=False)
+    paper.run_paper(run)
+    notes = [args[2] for args in run.turns.asked if args[0] == "write"]
+    assert "docs.langchain.com" not in notes[1], notes[1]
 
 
 # -- resume -----------------------------------------------------------------
@@ -578,7 +1194,7 @@ def test_the_plan_is_held_to_a_question_budget(work, turns):
     paper.prior_art(run)
     paper.plan(run)
     asked = next(args for args in run.turns.asked if args[0] == "outline")
-    assert asked[3] == {"questions": 3, "diagrams": 2, "claims": 40, "words": 2000}
+    assert asked[3] == {"questions": 3, "diagrams": 2, "claims": 40, "words": 2800}
 
 
 def test_truncation_never_leaves_a_heading_with_nothing_under_it(work, turns):
@@ -654,6 +1270,272 @@ def test_a_writer_that_only_answered_still_produces_a_section(work, turns, no_re
     assert run.state.phases["write"]["status"] == "complete"
 
 
+def test_the_abstract_turn_runs_after_the_last_section(work, turns, no_renderer):
+    """P7, #472. The abstract is written from the assembled body, so its
+    turn cannot run until every section is stamped."""
+    recorder = turns()
+    run = make_run(work, recorder)
+    paper.run_paper(run)
+    calls = [args[0] for args in recorder.asked if args[0] in ("write", "write_abstract")]
+    assert calls, "the writer never ran"
+    assert calls[-1] == "write_abstract"
+    assert calls.count("write") >= 1
+
+
+def test_the_abstract_turn_is_not_repeated_when_the_body_is_unchanged(work, turns, no_renderer):
+    """One extra writer turn per run, not one per retry attempt."""
+    recorder = turns()
+    run = make_run(work, recorder)
+    paper.run_paper(run)
+    abstract_calls = [args for args in recorder.asked if args[0] == "write_abstract"]
+    assert len(abstract_calls) == 1
+    paper.write_abstract(run)
+    assert [args for args in recorder.asked if args[0] == "write_abstract"] == abstract_calls, (
+        "an unchanged body spent a second turn"
+    )
+
+
+def test_assemble_prefers_the_written_abstract_over_the_thesis_line(work, turns, no_renderer):
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.write_abstract(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert "A recorded abstract." in body
+    assert "An abstract." not in body
+
+
+def test_the_abstract_gets_the_same_cleanup_pass_as_a_section(work, turns, no_renderer):
+    """A finding-id marker in the abstract resolves to its reference number,
+    the same way `_resolve_markers` already treats a section body: the
+    abstract runs through the same cleanup, not a verbatim insert."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    cited = next(c for c in claims if c.get("source_url"))
+    run.turns.write_abstract = lambda body, ledger=None: f"The result holds [{cited['id']}]."
+    paper.write_abstract(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    abstract = body.split("## Abstract", 1)[1].split("##", 1)[0]
+    assert f"[{cited['id']}]" not in abstract, "the finding id survived assembly"
+    assert "[1]" in abstract
+
+
+# -- P11, methods, conclusion, and the study table --------------------------
+
+
+def test_methods_names_the_admitted_hosts(work, turns, no_renderer):
+    """Methods is Python-written from the run record and names the admitted
+    hosts by design, which is why `policy_leak` exempts it. #478"""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    (Path(work) / "corpus").mkdir(parents=True, exist_ok=True)
+    (Path(work) / "corpus" / "source_allowlist.json").write_text(
+        json.dumps({"admitted": ["docs.example-field.org"], "dropped": []}),
+        encoding="utf-8",
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    methods = body.split("## Methods", 1)[1].split("##", 1)[0]
+    assert "docs.example-field.org" in methods
+    assert not checks.policy_leak_violations(body, ("docs.example-field.org",))
+
+
+def _claim_with_study(claim_id, url, **study_fields):
+    study = {
+        "participants": {"n": study_fields["n"], "population": study_fields["population"]},
+        "duration": study_fields["duration"],
+        "deficit": study_fields["deficit"],
+        "training": study_fields["training"],
+        "assay": study_fields["assay"],
+        "result": study_fields["result"],
+    }
+    return {
+        "id": claim_id,
+        "text": study_fields["result"],
+        "source_url": url,
+        "quote": "",
+        "section": "s1",
+        "status": "verified",
+        "study": study,
+        "evidence_tier": study_fields["tier"],
+    }
+
+
+def _two_study_claims():
+    return [
+        _claim_with_study(
+            "s1-c1",
+            "https://pubmed.ncbi.nlm.nih.gov/one",
+            n=24,
+            population="older men",
+            duration="12 weeks",
+            deficit="500 kcal per day",
+            training=True,
+            assay="DXA",
+            result="preserved lean mass",
+            tier="primary_trial",
+        ),
+        _claim_with_study(
+            "s1-c2",
+            "https://pubmed.ncbi.nlm.nih.gov/two",
+            n=40,
+            population="postmenopausal women",
+            duration="8 weeks",
+            deficit="20 percent caloric restriction",
+            training=False,
+            assay="bioimpedance",
+            result="less lean mass loss",
+            tier="meta_analysis_or_systematic_review",
+        ),
+    ]
+
+
+def test_two_human_study_claims_render_a_two_row_table(work, turns, no_renderer):
+    """The study table is Python from the ledger: one row per human-study
+    claim, reading E3's `study` object and E4's `evidence_tier`. #478"""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    (Path(work) / "claims.json").write_text(
+        json.dumps({"claims": _two_study_claims()}), encoding="utf-8"
+    )
+    # #478, PR #535 judge revision F7: a study row only renders for a claim
+    # some body section's own text actually cites, so the section a real
+    # `write_sections` pass already wrote is given both markers here.
+    (Path(work) / "sections" / "s1.md").write_text(
+        "The trials support the finding. [1][2]\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    table = body.split("## Evidence summary", 1)[1].split("##", 1)[0]
+    rows = [line for line in table.strip().splitlines() if line.strip().startswith("|")]
+    data_rows = rows[2:]
+    assert len(data_rows) == 2, table
+    assert "24 (older men)" in table
+    assert "12 weeks" in table
+    assert "500 kcal per day" in table
+    assert "yes" in table
+    assert "DXA" in table
+    assert "preserved lean mass" in table
+    assert "primary_trial" in table
+    assert "40 (postmenopausal women)" in table
+    assert "meta_analysis_or_systematic_review" in table
+
+
+def test_the_table_sits_after_methods_and_before_the_first_evidence_section(work, turns, no_renderer):
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    (Path(work) / "claims.json").write_text(
+        json.dumps({"claims": _two_study_claims()}), encoding="utf-8"
+    )
+    # #478, PR #535 judge revision F7: a study row only renders for a claim
+    # some body section's own text actually cites, so the section a real
+    # `write_sections` pass already wrote is given both markers here.
+    (Path(work) / "sections" / "s1.md").write_text(
+        "The trials support the finding. [1][2]\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.index("## Methods") < body.index("## Evidence summary") < body.index("## The problem")
+
+
+def test_no_human_study_claim_leaves_a_note_under_methods_and_no_table(work, turns, no_renderer):
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert "## Evidence summary" not in body
+    methods = body.split("## Methods", 1)[1].split("##", 1)[0]
+    assert "No claim in this run carries a recorded human study." in methods
+
+
+def test_methods_prints_the_real_source_count_not_a_claim_count(work, turns, no_renderer):
+    """PR #535 judge revision B3: two claims citing the same source is one
+    admitted reference, not two."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    claims = [
+        {
+            "id": "s1-c1",
+            "text": "A fact.",
+            "source_url": "https://example.invalid/one",
+            "quote": "",
+            "section": "s1",
+            "status": "verified",
+        },
+        {
+            "id": "s1-c2",
+            "text": "A related fact.",
+            "source_url": "https://example.invalid/one",
+            "quote": "",
+            "section": "s1",
+            "status": "verified",
+        },
+    ]
+    (Path(work) / "claims.json").write_text(json.dumps({"claims": claims}), encoding="utf-8")
+    (Path(work) / "sections" / "s1.md").write_text(
+        "Two facts, one source. [1][1]\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    methods = body.split("## Methods", 1)[1].split("##", 1)[0]
+    assert (
+        "Sources admitted to the reference list, after the same host and claim "
+        "checks every finding in this paper passed: 1." in methods
+    ), methods
+
+
+def test_a_conclusion_repeat_is_repaired_and_survives_a_reassemble(work, turns, no_renderer):
+    """PR #535 judge revision B4. `_persist_trim` now stamps
+    `conclusion.json` beside `abstract.json`, so a repeat the whole-paper
+    pass cuts out of the Conclusion does not return on the next
+    `assemble`."""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    section_text = (Path(work) / "sections" / "s1.md").read_text()
+    repeat = "A thing is true."
+    assert repeat in section_text, "the fixture claim text changed; pick a real repeat"
+    run.turns.write_conclusion = lambda body, ledger=None: f"{repeat} [1]"
+    paper.write_conclusion(run)
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    repeats = checks.repeat_shingles(checks.top_level_sections(body))
+    assert repeats, "the fixture body must actually repeat, or this test proves nothing"
+
+    fixed = "As stated above, this point also holds here."
+    run.turns.edit_whole_paper = lambda body, repeats, figures=None: body.replace(
+        f"## Conclusion\n\n{repeat} [1]", f"## Conclusion\n\n{fixed} [1]", 1
+    )
+    result = paper.edit_whole_paper(run, repeats)
+    assert result == {"trimmed": True, "reverted": []}
+
+    stamped = json.loads((Path(work) / "conclusion.json").read_text())
+    assert fixed in stamped["conclusion"]
+
+    paper.assemble(run)
+    after = (Path(work) / "paper.md").read_text()
+    conclusion_section = after.split("## Conclusion", 1)[1].split("##", 1)[0]
+    assert repeat not in conclusion_section, "the untrimmed conclusion.json came back"
+    assert fixed in conclusion_section
+
+
 def test_a_stale_section_from_a_previous_plan_is_removed(work, turns, no_renderer):
     run = make_run(work, turns())
     paper.prior_art(run)
@@ -677,7 +1559,7 @@ def test_the_planner_is_told_what_it_can_afford(work, turns, no_renderer):
     paper.prior_art(run)
     paper.plan(run)
     budget = next(args[3] for args in recorder.asked if args[0] == "outline")
-    assert budget == {"questions": 5, "diagrams": 2, "claims": 40, "words": 2000}
+    assert budget == {"questions": 5, "diagrams": 2, "claims": 40, "words": 2800}
 
 
 # -- the verification budget ------------------------------------------------
@@ -901,3 +1783,63 @@ def test_a_retry_does_not_run_when_the_budget_is_spent(work, turns):
     with pytest.raises(paper.RunFailed):
         paper.do_research(run)
     assert len([a for a in run.turns.asked if a[0] == "research"]) == 1
+
+
+# -- P12, front matter --------------------------------------------------------
+
+
+def test_the_models_named_match_the_role_table(work, turns, no_renderer, monkeypatch):
+    """The byline is not invented: it reads `roleplan.plan()` at assemble
+    time, so a role table's own change is what a reader sees. #479"""
+    import roleplan  # noqa: PLC0415
+
+    fake_roles = {
+        "writer": roleplan.RolePlan(name="writer", purpose="p", tools=(), model="test-fixture-model")
+    }
+    monkeypatch.setattr(roleplan, "plan", lambda contract, loop: fake_roles)
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    paper.assemble(run)
+    front_matter = (Path(work) / "paper.md").read_text().split("## Abstract", 1)[0]
+    assert "writer: test-fixture-model" in front_matter
+    assert "claude-opus-5" not in front_matter
+    assert "claude-sonnet-5" not in front_matter
+
+
+def test_the_provenance_counts_match_the_ledger(work, turns, no_renderer):
+    """Sources retrieved, sources cited, and claims cross-checked come from
+    the run's own ledger, not a guess. #479"""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    sources = json.loads((Path(work) / "sources.json").read_text())
+    sources["sources"].append({"url": "https://example.invalid/unused", "title": "Unused"})
+    (Path(work) / "sources.json").write_text(json.dumps(sources), encoding="utf-8")
+    verdicts = json.loads((Path(work) / "verdicts.json").read_text())
+    verdicts["verdicts"].append(
+        {"claim_id": "past-cap", "status": "unverified", "note": "past verification cap"}
+    )
+    (Path(work) / "verdicts.json").write_text(json.dumps(verdicts), encoding="utf-8")
+    paper.assemble(run)
+    front_matter = (Path(work) / "paper.md").read_text().split("## Abstract", 1)[0]
+    assert (
+        "Sources: 2 retrieved, 1 cited. Verification: 1 claims cross-checked. See Methods."
+        in front_matter
+    ), front_matter
+
+
+def test_the_conflicts_line_is_overridable(work, turns, no_renderer, monkeypatch):
+    """The Taskfile's own `CONFLICTS` variable reaches `assemble` as an
+    environment variable, and a run with no override still states one. #479"""
+    run = prepared(work, turns())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    monkeypatch.setenv("CONFLICTS", "Funded by Example Research Fund.")
+    paper.assemble(run)
+    front_matter = (Path(work) / "paper.md").read_text().split("## Abstract", 1)[0]
+    assert "Funded by Example Research Fund." in front_matter
+    assert "No funding. No conflicts declared." not in front_matter

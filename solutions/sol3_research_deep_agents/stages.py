@@ -18,15 +18,26 @@ buys a new failure mode and no new capability.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import diagrams
 import brief
 import evidence
+import metadata
 import paper_check
+import roleplan
 import source_policy
+
+# #479. The byline names this port's own harness, never a hand-written guess.
+HARNESS_NAME = "LangChain Deep Agents"
+# The Taskfile overrides this through the `CONFLICTS` variable, read as an
+# environment variable at assemble time so a test's `monkeypatch.setenv`
+# takes effect with no module reload.
+DEFAULT_CONFLICTS = "No funding. No conflicts declared."
 
 # A plan that asks fewer than this is not research, it is a lookup.
 MIN_QUESTIONS = 3
@@ -41,10 +52,62 @@ EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, an
 # Sections that bind to no claims of their own. The abstract restates what the
 # body already cited, so binding it would mean listing every claim twice and
 # keeping the two lists in step. References is generated from the ledger.
-UNBOUND_SECTIONS = ("abstract", "references")
+# Methods is Python-written from the run record, never bound to a claim at
+# all. The conclusion restates the body the same way the abstract does. #478
+UNBOUND_SECTIONS = ("abstract", "conclusion", "methods", "references")
 
 FENCED_JSON = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 CITATION = re.compile(r"\[(\d+)\]")
+
+# A domain-shaped token inside a `check` string. Deliberately narrow: it wants
+# a compound host like `arxiv.org` or `pubmed.ncbi.nlm.nih.gov`, not an
+# abbreviation like `e.g.` or a version number. #469
+HOST_LIKE = re.compile(
+    r"\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\."
+    r"(?:com|org|net|gov|edu|int|io|ai|co|biz|info)\b",
+    re.IGNORECASE,
+)
+
+
+def _evidence_requirements_problem(reqs) -> str | None:
+    """What is wrong with a question's `evidence_requirements` block, or
+    `None`. Copied from the Agent SDK port's `outline._evidence_requirements_problem`,
+    never imported: two standalone folders. #475
+
+    Checked only when `plan_gate` is asked to enforce it: an older plan
+    that carries no block at all still parses here, it just names the
+    missing field, never a crash.
+    """
+    if not isinstance(reqs, dict) or not reqs:
+        return "is missing evidence_requirements (study_types, min_count, recency_years, populations)"
+    study_types = reqs.get("study_types")
+    if not isinstance(study_types, list) or not study_types:
+        return "evidence_requirements needs a non-empty study_types list"
+    unknown = [t for t in study_types if t not in source_policy.STUDY_TYPES]
+    if unknown:
+        return f"evidence_requirements study_types names unknown type(s) {unknown}"
+    min_count = reqs.get("min_count")
+    if not isinstance(min_count, int) or isinstance(min_count, bool) or min_count < 1:
+        return "evidence_requirements needs a positive integer min_count"
+    recency_years = reqs.get("recency_years")
+    if not isinstance(recency_years, int) or isinstance(recency_years, bool) or recency_years < 0:
+        return "evidence_requirements needs a non-negative integer recency_years"
+    if not isinstance(reqs.get("populations"), list):
+        return "evidence_requirements needs populations as an array of strings"
+    return None
+
+
+def check_names_host(text: str) -> str:
+    """The host a `check` names, or "".
+
+    A `check` states the observable fact that answers a question. The source
+    boundary is Python's admitted allowlist, decided after the plan exists;
+    a `check` that names a host turns the plan into that boundary instead,
+    which is what let one scout's single admitted host become the paper's
+    only source. #469
+    """
+    match = HOST_LIKE.search(str(text or ""))
+    return match.group(0).rstrip(".").lower() if match else ""
 
 STAGE_ORDER = (
     "corpus",
@@ -54,9 +117,27 @@ STAGE_ORDER = (
     "search",
     "verify",
     "outline",
-    "diagram",
     "charts",
     "write",
+    # `diagram` moved here from right after `outline` (#476): a figure is
+    # commissioned from the bound claims of the section that carries it, and
+    # those claims do not exist until the section is written.
+    #
+    # #464 moved `diagram` ahead of `trim`, the opposite of its #476 order:
+    # `trim` now also adds an in-text `Figure N` mention for every figure a
+    # section carries, which it cannot do before a figure has a number, and
+    # a figure has no number until `diagram` renders it. `stage_diagram`
+    # re-stamps `diagrams.json`'s own `sections_sha` after `trim` finishes
+    # (`_restamp_diagram_guard`), so a caveat cut or an added mention does
+    # not make a future resume's cache look stale and re-spend a render it
+    # does not need.
+    "diagram",
+    # P9, #477. Between diagram and review, not after assemble: `stage_review`
+    # is the reviewer the creatine run's `no_filler` complaint named, and it
+    # grades `self.written` directly, before assembly exists. A repeat
+    # caught after assembly would leave the reviewer grading a body that
+    # already failed this row.
+    "trim",
     "review",
     "assemble",
     "publish",
@@ -66,9 +147,18 @@ STAGE_ORDER = (
 class GateFailed(Exception):
     """The stage produced something unusable. The message is the retry prompt."""
 
-    def __init__(self, message: str, signature: tuple[str, ...] = ()):
+    def __init__(
+        self,
+        message: str,
+        signature: tuple[str, ...] = (),
+        *,
+        score: float | None = None,
+    ):
         super().__init__(message)
         self.signature = signature or (message.split(".", maxsplit=1)[0][:40],)
+        # Set only by `review_gate`, when the reviewer's reply carried one.
+        # `_run_stage` reads it to tell a converging draft from a stalled one.
+        self.score = score
 
 
 @dataclass
@@ -125,12 +215,17 @@ def reply_was_truncated(text: str) -> bool:
 # -- 1. plan --------------------------------------------------------------
 
 
-def plan_gate(plan: dict, *, loop_doctrine: bool = True) -> None:
+def plan_gate(
+    plan: dict, *, loop_doctrine: bool = True, require_evidence_requirements: bool = True
+) -> None:
     """Count what a plan must have. No opinion about whether it is a good plan.
 
     `loop_doctrine` is the seminar's own topic, not a property every paper has.
     Off, any topic's own first question is fine. On, question one is bound to
     this repository's exit order, unchanged from before the flag existed.
+
+    `require_evidence_requirements` names every important question missing
+    its `evidence_requirements` block. #475
     """
     misses = []
     questions = plan.get("questions") or []
@@ -154,6 +249,13 @@ def plan_gate(plan: dict, *, loop_doctrine: bool = True) -> None:
             misses.append(f"{label} has no question text.")
         if not question.get("check", "").strip():
             misses.append(f"{label} has no check. Name the observable fact that answers it.")
+        named_host = check_names_host(question.get("check", ""))
+        if named_host:
+            misses.append(
+                f"{label}'s check names {named_host!r}. A check may not name a host; the "
+                "source boundary is Python's admitted allowlist, decided after the plan "
+                "exists, never the plan itself."
+            )
         if label in seen:
             misses.append(f"{label} is used twice. Every question needs its own id.")
         seen.add(label)
@@ -166,6 +268,12 @@ def plan_gate(plan: dict, *, loop_doctrine: bool = True) -> None:
             f"{MAX_IMPORTANT_QUESTIONS} load-bearing questions important; the rest may still "
             "contribute sources without blocking the paper."
         )
+    if require_evidence_requirements:
+        for question in important:
+            label = question.get("id") or "an important question"
+            problem = _evidence_requirements_problem(question.get("evidence_requirements"))
+            if problem:
+                misses.append(f"{label} {problem}")
     if not plan.get("sections"):
         misses.append("the plan names no sections.")
     for figure in plan.get("diagrams") or []:
@@ -175,13 +283,43 @@ def plan_gate(plan: dict, *, loop_doctrine: bool = True) -> None:
         raise GateFailed(" ".join(misses), tuple(sorted({m.split()[0] for m in misses})))
 
 
-# What the three structural sections are for. A planner does not write these,
-# because `normalize_plan` is what puts them there.
+# What the structural sections are for. A planner does not write these,
+# because `normalize_plan` is what puts them there. Methods is Python-written
+# at assemble time (`Paper.stage_assemble`), never by the writer, so its
+# objective here is never read as a writing instruction; it exists only so
+# `outline_gate` and `stage_outline`'s prompt see a named section like any
+# other. #478
 STRUCTURAL = {
     "abstract": "State the thesis, the evidence behind it, and the limit, in one paragraph.",
     "introduction": "Name the problem, who has it, and what this paper settles about it.",
+    "methods": "Python-written from the run record. No model turn.",
+    "conclusion": "Restate the body's own findings, from the body, with no new citation.",
     "references": "List every source the body cites, in citation order.",
 }
+
+# #560. The frozen heading order, restricted to the structural headings a
+# writer outline turn actually drafts (Methods and Conclusion are named here
+# too, since `outline_gate`, below, still requires them by name even though
+# `stage_assemble` overwrites Methods with Python's own text). Front matter,
+# Evidence summary, and Glossary are never an outline section in this port,
+# so they carry no slot here. `outline_gate` grades a drafted outline's own
+# order against this; `assemble` uses only the "introduction" entry, to find
+# and move that one heading the same way `normalize_plan` already does for
+# the plan.
+FROZEN_ORDER = ("abstract", "introduction", "methods", "conclusion", "next step", "references")
+
+# #566. The frozen order's own "body sections" slot sits between Methods and
+# Conclusion: every heading up to and including Methods must be contiguous,
+# in this order, with no body section wedged in; every heading from
+# Conclusion on must be contiguous too; a topic's own body sections belong
+# only in the gap between the two groups. `outline_gate`'s order row below
+# grades an outline's full shape against this split, not only the relative
+# order of the structural headings against each other -- a relative-order
+# check alone missed a Methods a writer outline turn placed after a body
+# section, because the structural headings it named (Abstract, Introduction,
+# Methods) were still in the right order relative to one another.
+FROZEN_PREFIX = FROZEN_ORDER[: FROZEN_ORDER.index("methods") + 1]
+FROZEN_SUFFIX = FROZEN_ORDER[FROZEN_ORDER.index("methods") + 1 :]
 
 
 def plan_heading(item) -> str:
@@ -231,10 +369,43 @@ def normalize_plan(plan: dict) -> dict:
     if "abstract" not in lowered:
         sections.insert(0, as_section("Abstract", STRUCTURAL["abstract"]))
         lowered.insert(0, "abstract")
-    if "introduction" not in lowered:
+    # #557. A planner-placed Introduction is searched for across every
+    # heading, not only checked for presence, so one the planner put second
+    # (or third, or twice) is moved into the frozen slot instead of left
+    # where it landed while a second copy gets inserted on top of it. First
+    # match keeps its own objective and key questions; any further match is
+    # a duplicate and is dropped. Mirrors the Agent SDK's `assemble` (PR
+    # #554 judge finding F2), copied rather than imported.
+    intro_at = [index for index, heading in enumerate(lowered) if heading == "introduction"]
+    if intro_at:
+        intro_section = sections[intro_at[0]]
+        sections = [entry for index, entry in enumerate(sections) if index not in intro_at]
+        lowered = [heading for index, heading in enumerate(lowered) if index not in intro_at]
+    else:
+        intro_section = as_section("Introduction", STRUCTURAL["introduction"])
+    insert_at = lowered.index("abstract") + 1
+    sections.insert(insert_at, intro_section)
+    lowered.insert(insert_at, "introduction")
+    # #478. Methods sits right after Introduction, the frozen heading
+    # order's own position for it. Conclusion sits right before Next step,
+    # the paper's own last prose heading (P4): second to last, never last.
+    # A plan with no Next step section (an old fixture, or a test outline
+    # that never calls `validate`) puts Conclusion right before References
+    # instead, still ahead of Glossary and References.
+    if "methods" not in lowered:
         sections.insert(
-            lowered.index("abstract") + 1, as_section("Introduction", STRUCTURAL["introduction"])
+            lowered.index("introduction") + 1, as_section("Methods", STRUCTURAL["methods"])
         )
+        lowered.insert(lowered.index("introduction") + 1, "methods")
+    if "conclusion" not in lowered:
+        if "next step" in lowered:
+            insert_at = lowered.index("next step")
+        elif "references" in lowered:
+            insert_at = lowered.index("references")
+        else:
+            insert_at = len(sections)
+        sections.insert(insert_at, as_section("Conclusion", STRUCTURAL["conclusion"]))
+        lowered.insert(insert_at, "conclusion")
     if "references" not in lowered:
         sections.append(as_section("References", STRUCTURAL["references"]))
     plan["sections"] = sections
@@ -243,6 +414,24 @@ def normalize_plan(plan: dict) -> dict:
 
 # -- 2. search ------------------------------------------------------------
 
+# A claim describes the world. These phrases describe the search instead, and
+# a claim built out of one is a narrated retrieval miss, not a finding. The
+# creatine paper this ticket names put two such sentences in the body, each
+# `important: true`: "No arxiv.org source was found that reports a specific
+# quantitative rate/magnitude of lean mass loss...". #469
+RETRIEVAL_PHRASES = (
+    "source was found",
+    "could not be located",
+    "via the search boundary",
+    "search protocol",
+)
+
+
+def is_retrieval_claim(text: str) -> bool:
+    """Whether a claim's text is about the search rather than the topic."""
+    lowered = str(text or "").lower()
+    return any(phrase in lowered for phrase in RETRIEVAL_PHRASES)
+
 
 def record_findings(
     ledger: evidence.Ledger,
@@ -250,12 +439,29 @@ def record_findings(
     reply: dict,
     *,
     seed: tuple[str, ...] | None = None,
+    backend=None,
 ) -> evidence.Finding:
     """Turn one researcher reply into source, claim, and finding records.
 
     A claim with no source id is dropped here rather than carried forward. It
     cannot be corroborated, it cannot be cited, and keeping it only lets it
     reach the writer as something that looks like evidence.
+
+    `backend` is the run's research backend, the same object `Paper.backend`
+    holds. Passing it fetches the source's real title, authors, year, and
+    venue through `metadata.fetch_record` before the source is admitted,
+    which is what replaces the model's word with the record's. Leaving it
+    `None`, as every test that does not care about metadata does, skips the
+    fetch entirely and keeps the model's title exactly as before. #470
+
+    A claim is also checked here against the text that fetch retrieved:
+    `evidence.attributed()` requires the source's own quote (`body`, that
+    source's entry in the researcher's reply) or every one of the claim's
+    numbers to appear in it. A binding whose source text says something else
+    is dropped; a claim left with no binding is dropped and recorded as a
+    gap. A source with no fetched text (no `backend`, or the fetch found
+    nothing) keeps every binding and the claim is noted `unattributed`,
+    because there is nothing here to contradict, only nothing checked. #471
     """
     subject = question.get("subject", "topic")
     supplied_urls = [str(item.get("url", "")) for item in reply.get("sources", [])]
@@ -283,22 +489,52 @@ def record_findings(
                 continue
         elif not source_policy.url_allowed(url, allowlist):
             continue
+        # `add_source` already dedupes by url, so a source this run already
+        # admitted is also a fetch this run already paid for. One fetch per
+        # unique URL per run falls out of the ledger's own dedup, no separate
+        # cache required.
+        existing = ledger.source_for_url(url)
+        if existing is not None:
+            source_ids.append(existing.id)
+            continue
+        model_title = item.get("title") or url
+        fetched = (
+            metadata.fetch_record(url, backend, model_title=model_title)
+            if backend is not None
+            else {}
+        )
         source = ledger.add_source(
             evidence.SourceDocument(
-                title=item.get("title") or url,
+                title=fetched.get("title") or model_title,
                 url=url,
                 subject=subject,
                 vendor=item.get("vendor", ""),
                 body=item.get("quote", ""),
                 located_from=located_from,
+                authors=fetched.get("authors") or [],
+                year=fetched.get("year") or "",
+                venue=fetched.get("venue") or "",
+                note=fetched.get("note") or "",
+                text=fetched.get("text") or "",
+                # A dict lookup on the record's own publication type, never a
+                # model's opinion. `{}` (no backend) tiers `other`, the same
+                # as a fetch that found nothing. #473
+                tier=source_policy.tier_for(fetched),
             )
         )
         source_ids.append(source.id)
 
     claim_ids = []
+    gaps: list[str] = []
     for item in reply.get("claims", []):
         text = str(item.get("text", "")).strip()
         if not text:
+            continue
+        if is_retrieval_claim(text):
+            # Refused, not carried forward as a single-source claim about
+            # nothing. The question this answer was for still has no finding,
+            # which is a coverage gap, not evidence. #469
+            gaps.append(text)
             continue
         # A claim may name its own subset of sources. When it names none, it
         # inherits every source this answer produced.
@@ -312,15 +548,42 @@ def record_findings(
         ]
         if not ids:
             continue
-        claim = ledger.add_claim(
-            evidence.Claim(
-                text=text,
-                subject=subject,
-                source_ids=ids,
-                confidence=float(item.get("confidence", 0.5)),
-                important=bool(question.get("important")),
-            )
+        claim = evidence.Claim(
+            text=text,
+            subject=subject,
+            source_ids=list(ids),
+            confidence=float(item.get("confidence", 0.5)),
+            important=bool(question.get("important")),
+            study=item.get("study") or {},
         )
+        # #471: a binding is only as good as the text fetched for its source.
+        # A source with no fetched text (no backend, or the fetch found
+        # nothing) keeps its binding unchecked rather than dropped.
+        kept_ids: list[str] = []
+        attributed_ids: list[str] = []
+        unattributed_kept = False
+        for sid in ids:
+            source = ledger.sources[sid]
+            if not source.text:
+                kept_ids.append(sid)
+                unattributed_kept = True
+            # `source.body` is the researcher's own quote for this specific
+            # binding, not a `"..."` substring pulled out of the claim's own
+            # text: #471, finding 3.
+            elif evidence.attributed(claim, source.text, quote=source.body):
+                kept_ids.append(sid)
+                attributed_ids.append(sid)
+            # else: the source text does not back this claim. The binding is
+            # dropped, silently at the binding level; only a claim left with
+            # no binding at all is logged, below.
+        if not kept_ids:
+            gaps.append(f"dropped, no source attributes this claim: {text[:80]}")
+            continue
+        claim.source_ids = kept_ids
+        claim.attributed_source_ids = attributed_ids
+        if unattributed_kept:
+            claim.note = "unattributed: attribution not checked"
+        ledger.add_claim(claim)
         evidence.corroborate(claim)
         claim_ids.append(claim.id)
 
@@ -330,12 +593,21 @@ def record_findings(
             subject=subject,
             claim_ids=claim_ids,
             summary=reply.get("answer", ""),
+            gaps=gaps,
         )
     )
 
 
-def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
-    """Every question produced at least one cited claim, or the paper has no evidence."""
+def search_gate(ledger: evidence.Ledger, plan: dict, *, unmet: dict[str, str] | None = None) -> None:
+    """Every question produced at least one cited claim, or the paper has no evidence.
+
+    `unmet`, when given, is `Paper.evidence_shortfall_unmet`: question ids
+    whose one `evidence_requirements` turn is already spent and the block
+    is still short. Judge revision on #520, blocking finding 1: a question
+    in `unmet` is accepted as a named gap, not failed again here, or a
+    shortfall that survives its one turn would end the run instead of
+    travelling as a gap the way the ticket and the plan both require.
+    """
     if not ledger.claims:
         raise GateFailed(
             "no question produced a cited claim. Every claim needs a source URL.",
@@ -353,9 +625,340 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
     if missing:
         raise GateFailed(
             f"these important questions produced nothing: {missing}. "
-            "Search again with narrower wording, or report that no source exists.",
+            "Search again with narrower wording. A claim that no source exists "
+            "is refused; name the coverage gap instead.",
             ("unanswered_important",),
         )
+    unmet = unmet or {}
+    shortfalls = []
+    for question in important:
+        if (question.get("id") or "") in unmet:
+            continue
+        # The doctrine question is a fact read from checked-in Python, not a
+        # researched claim, whatever `evidence_requirements` a plan gives
+        # it; `_research_shortfalls` already exempts it from a turn for the
+        # same reason `stage_search`'s own repository shortcut does.
+        if str(question.get("question", "")).strip() == EXIT_DOCTRINE_QUESTION:
+            continue
+        reason = evidence_shortfall(ledger, question)
+        if reason:
+            shortfalls.append(f"{question.get('id')}: {reason}")
+    if shortfalls:
+        raise GateFailed(
+            f"evidence_requirements shortfall: {'; '.join(shortfalls)}. "
+            "Search again for what is named missing.",
+            ("evidence_requirements_met",),
+        )
+
+
+# -- 1b. evidence requirements, graded against the bound sources ----------
+#
+# #475. `search_gate` names the shortfall; `Paper._research_shortfalls`
+# spends the one extra turn against it before the gate ever sees it.
+
+
+def evidence_shortfall(ledger: evidence.Ledger, question: dict) -> str:
+    """What a question's `evidence_requirements` block still needs against
+    its own bound sources, or `""` when it is met. #475
+
+    `study_types`/`min_count`: how many distinct sources bound to this
+    question's own claims carry a tier (`source.tier`, from
+    `source_policy.tier_for()`, never a note) in the required set. A
+    source that is only there because a follow hit appended the primary
+    study a review or preprint summarizes does not count on its own:
+    `claim.via_source_ids` names it, excluded here the same way
+    `evidence.corroborate` excludes it, so a review plus the primary it
+    routes to is one source, not two. Judge revision on #520, blocking
+    finding 4.
+
+    `recency_years`, when given: a source with a year counts only inside
+    the window. A source with no year does not satisfy a window: there is
+    nothing here to confirm it is recent, so it is dropped from the count
+    rather than assumed to qualify. Judge revision on #520, follow-up 2.
+
+    `populations`: each named term must appear, word-bounded, in the
+    pooled text of only the claims whose sources counted toward
+    `min_count` -- a population named solely by a claim resting on a
+    source the wrong tier, or outside the window, does not satisfy the
+    requirement. Judge revision on #520, follow-up 4.
+
+    An absent or empty block needs nothing: this is a grading function, not
+    the hard requirement, which is `plan_gate`'s job.
+    """
+    reqs = question.get("evidence_requirements") or {}
+    study_types = [str(t) for t in (reqs.get("study_types") or [])]
+    min_count = int(reqs.get("min_count") or 0)
+    if not study_types or min_count < 1:
+        return ""
+    subject = question.get("subject")
+    claim_ids = {
+        cid
+        for finding in ledger.findings.values()
+        if finding.subject == subject
+        for cid in finding.claim_ids
+    }
+    claims = [ledger.claims[cid] for cid in claim_ids if cid in ledger.claims]
+    via = {sid for claim in claims for sid in claim.via_source_ids}
+    source_ids = {sid for claim in claims for sid in claim.source_ids} - via
+    sources = [ledger.sources[sid] for sid in source_ids if sid in ledger.sources]
+
+    recency_years = reqs.get("recency_years")
+    this_year = datetime.now(timezone.utc).year
+
+    def counts(source: evidence.SourceDocument) -> bool:
+        if (source.tier or "") not in study_types:
+            return False
+        if not recency_years:
+            return True
+        year = str(source.year or "").strip()
+        return year.isdigit() and int(year) >= this_year - int(recency_years)
+
+    matched = [source for source in sources if counts(source)]
+    if len(matched) < min_count:
+        return f"needs {min_count} {'/'.join(sorted(set(study_types)))}, has {len(matched)}"
+
+    matched_ids = {source.id for source in matched}
+    pooled = " ".join(claim.text for claim in claims if set(claim.source_ids) & matched_ids)
+    missing_populations = [
+        population
+        for population in (reqs.get("populations") or [])
+        if not re.search(rf"\b{re.escape(str(population))}\b", pooled, re.I)
+    ]
+    if missing_populations:
+        return f"no evidence found for population(s): {', '.join(missing_populations)}"
+    return ""
+
+
+# -- 2b. follow the summary to its primary ---------------------------------
+#
+# #473. A preprint's number is the least trustworthy citation in the paper; a
+# systematic review's is closest to a primary trial's own. Lower sorts
+# first, so a run past `--max-follow` spends its turns on the shakiest
+# claims.
+FOLLOW_TIER_ORDER = {
+    "preprint_or_compilation": 0,
+    "narrative_review": 1,
+    "meta_analysis_or_systematic_review": 2,
+}
+
+
+def claims_needing_a_primary(ledger: evidence.Ledger) -> list[evidence.Claim]:
+    """Numeric claims bound only to a review, a preprint, or a compilation.
+
+    Shakiest tier first. A claim `apply_follow_result` already marked
+    `secondary` is skipped, so a resumed run does not spend a second follow
+    turn on the same miss.
+    """
+    candidates = []
+    for claim in ledger.claims.values():
+        if claim.secondary:
+            continue
+        if not re.search(r"\d", claim.text):
+            continue
+        tiers = [ledger.sources[sid].tier for sid in claim.source_ids if sid in ledger.sources]
+        if tiers and all(tier in source_policy.SECONDARY_TIERS for tier in tiers):
+            candidates.append(claim)
+    return sorted(
+        candidates,
+        key=lambda c: min(
+            FOLLOW_TIER_ORDER.get(ledger.sources[sid].tier, 9)
+            for sid in c.source_ids
+            if sid in ledger.sources
+        ),
+    )
+
+
+def apply_follow_result(ledger: evidence.Ledger, claim: evidence.Claim, result: dict, *, backend=None) -> bool:
+    """Rebind a claim to the primary a follow turn found, or mark it secondary.
+
+    A hit only counts when the found source's own tier is not itself
+    secondary: the same review answering twice, or a different review, must
+    not clear the caveat (#473 item 2). `ledger.source_for_url` may hand
+    back a source this run already tiered elsewhere; that existing tier is
+    consulted the same way a freshly fetched one is.
+
+    A hit whose fetched text contradicts the claim is treated the same as a
+    miss: a primary study's own URL is not a licence to skip the check #471
+    already runs on every other binding. The primary is appended to
+    `source_ids`, never substituted, so a claim two secondaries already
+    corroborated stays corroborated (item 5); `claim.note` is left alone,
+    and a record with no fetched text is never marked attributed (item 4).
+
+    The reviews already bound before this append are recorded on
+    `claim.via_source_ids`: a review and the primary it was found to
+    summarize are one investigation, and `evidence.corroborate` must not
+    count both as independent of each other. #474 item 10
+    """
+    url = str(result.get("url") or "").strip()
+    if result.get("found") and url.lower().startswith(("http://", "https://")):
+        source = ledger.source_for_url(url)
+        if source is None:
+            model_title = result.get("title") or url
+            fetched = metadata.fetch_record(url, backend, model_title=model_title) if backend is not None else {}
+            source = ledger.add_source(
+                evidence.SourceDocument(
+                    title=fetched.get("title") or model_title,
+                    url=url,
+                    subject=claim.subject,
+                    body=result.get("quote", ""),
+                    authors=fetched.get("authors") or [],
+                    year=fetched.get("year") or "",
+                    venue=fetched.get("venue") or "",
+                    note=fetched.get("note") or "",
+                    text=fetched.get("text") or "",
+                    tier=source_policy.tier_for(fetched),
+                )
+            )
+        if source.tier not in source_policy.SECONDARY_TIERS and (
+            not source.text or evidence.attributed(claim, source.text, quote=result.get("quote", ""))
+        ):
+            route = [sid for sid in claim.source_ids if sid != source.id]
+            if source.id not in claim.source_ids:
+                claim.source_ids.append(source.id)
+            if source.text:
+                if source.id not in claim.attributed_source_ids:
+                    claim.attributed_source_ids.append(source.id)
+            else:
+                marker = "unattributed: attribution not checked"
+                if marker not in (claim.note or ""):
+                    claim.note = f"{claim.note}; {marker}" if claim.note else marker
+            # Only when the primary traces to exactly one prior source: with
+            # two or more already bound, which one this primary "is the
+            # route of" is not something a claim-level follow turn ever
+            # asked, and item 5's own claim (two secondaries already
+            # corroborated stays corroborated) must not be disturbed by
+            # excluding one of them from the count on a guess.
+            if len(route) == 1 and route[0] not in claim.via_source_ids:
+                claim.via_source_ids.append(route[0])
+            claim.secondary = False
+            evidence.corroborate(claim)
+            return True
+    claim.secondary = True
+    return False
+
+
+# -- 2c. the counter-evidence pass ------------------------------------------
+#
+# #474. A lever was ruled out from one datapoint (#474's own example:
+# "protein alone did not prevent lean-mass loss" is true of one no-training
+# protocol, not the literature). Word-bounded, so "alone" does not fire
+# inside "standalone" and "never" does not fire inside "nevertheless": both
+# words sit right against the boundary the regex tests, with no space or
+# punctuation to trip it, and both correctly stay unmatched.
+GENERALIZING = re.compile(r"\b(did not|does not|alone|fails to|no effect|always|never)\b", re.I)
+
+# #474. What `claim_brief` shows a claim whose counter-evidence turn never
+# ran: the cap reached it first, so the writer must hedge it the way a
+# single-source claim already is, rather than stating it as settled.
+CAPPED_NOTE = "counter-evidence not searched, run cap reached"
+
+
+def generalizing_claims(ledger: evidence.Ledger) -> list[evidence.Claim]:
+    """Claims whose text generalizes, shakiest first. #474
+
+    A claim that already carries a `counter` state ("hit", "miss", or
+    "capped") is excluded: the pass already reached a verdict on it, and a
+    `stage_search` retry re-entering `Paper._counter_evidence` from the top
+    must not ask it again.
+
+    Single-source and secondary-tier claims sort first, then by fewest
+    bindings (`len(claim.source_ids)`), the measure `verify_batch` already
+    uses for its own shakiest-first order.
+
+    No `claims_to_support` cross-reference here: this pass runs during
+    `stage_search`, before the outline -- and its section-level
+    `claims_to_support` -- exists. Port asymmetry, stated not hidden: the
+    SDK twin runs its counter-evidence pass after its outline is approved
+    and adds that second selection criterion, a claim that is the sole
+    support for one of its section's `claims_to_support` entries.
+    """
+    candidates = [
+        claim
+        for claim in ledger.claims.values()
+        if not claim.counter and GENERALIZING.search(claim.text)
+    ]
+
+    def sort_key(claim: evidence.Claim) -> tuple:
+        single = claim.truth_state == evidence.SINGLE_SOURCE
+        tiers = [ledger.sources[sid].tier for sid in claim.source_ids if sid in ledger.sources]
+        secondary = bool(tiers) and all(tier in source_policy.SECONDARY_TIERS for tier in tiers)
+        return (0 if single else 1, 0 if secondary else 1, len(set(claim.source_ids)))
+
+    return sorted(candidates, key=sort_key)
+
+
+def counter_evidence_for(ledger: evidence.Ledger, claim_id: str) -> evidence.Claim | None:
+    """The claim that contradicts `claim_id`, or `None` when no counter
+    turn found one. #474"""
+    return next(
+        (claim for claim in ledger.claims.values() if claim.counterargument_to == claim_id), None
+    )
+
+
+def apply_counter_result(
+    ledger: evidence.Ledger, claim: evidence.Claim, result: dict, *, backend=None
+) -> bool:
+    """Record a counter-evidence turn's outcome on `claim.counter`. #474
+
+    A dedicated field, not `note`: `apply_verification` overwrites `note` on
+    its `disagreed` and `not_found` branches, and the verifier runs right
+    after this pass on the live `STAGE_ORDER`, so a text marker in `note`
+    was gone before the writer ever saw it. `apply_verification` never
+    touches `counter` or `counter_note`.
+
+    A hit adds a new claim, bound to its own source, `counterargument_to`
+    pointing at the claim it contradicts. The original claim is left exactly
+    as it stood: this is evidence for a condition, not a rebinding of it, the
+    way `apply_follow_result` rebinds a claim to a primary it found.
+
+    A hit whose fetched text does not back the model's own contrary claim,
+    or whose contrary claim is itself a narrated retrieval miss ("no source
+    was found", the same screen #469 already runs on the research path), is
+    treated as a miss: a claim about the search is not evidence about the
+    subject, and a primary study's own URL is not a licence to skip the
+    check #471 already runs on every other binding.
+    """
+    url = str(result.get("url") or "").strip()
+    counter_text = str(result.get("counter_claim") or "").strip()
+    if (
+        result.get("found")
+        and counter_text
+        and not is_retrieval_claim(counter_text)
+        and url.lower().startswith(("http://", "https://"))
+    ):
+        source = ledger.source_for_url(url)
+        if source is None:
+            model_title = result.get("title") or url
+            fetched = metadata.fetch_record(url, backend, model_title=model_title) if backend is not None else {}
+            source = ledger.add_source(
+                evidence.SourceDocument(
+                    title=fetched.get("title") or model_title,
+                    url=url,
+                    subject=claim.subject,
+                    body=result.get("quote", ""),
+                    authors=fetched.get("authors") or [],
+                    year=fetched.get("year") or "",
+                    venue=fetched.get("venue") or "",
+                    note=fetched.get("note") or "",
+                    text=fetched.get("text") or "",
+                    tier=source_policy.tier_for(fetched),
+                )
+            )
+        counter_claim = evidence.Claim(
+            text=counter_text,
+            subject=claim.subject,
+            source_ids=[source.id],
+            counterargument_to=claim.id,
+        )
+        if not source.text or evidence.attributed(counter_claim, source.text, quote=result.get("quote", "")):
+            counter_claim.attributed_source_ids = [source.id] if source.text else []
+            ledger.add_claim(counter_claim)
+            evidence.corroborate(counter_claim)
+            claim.counter = "hit"
+            return True
+    claim.counter = "miss"
+    claim.counter_note = "no contrary evidence found in this search"
+    return False
 
 
 # How many claims one verify stage will cross-check.
@@ -369,6 +972,11 @@ def search_gate(ledger: evidence.Ledger, plan: dict) -> None:
 # Twenty-four is a working default, not a discovered constant. Raise it with
 # `--max-verify` when a paper genuinely rests on more than that many load-bearing
 # facts, and expect the bill to scale with it.
+#
+# This cap bounds the model verifier turn only. `attributed()` in
+# `record_findings` runs on every claim, `important` or not, because it is a
+# fetch and a substring check, not a search: the creatine bug's references 18
+# and 20 were `important: false` and never reached this list at all. #471
 MAX_VERIFY_CLAIMS = 24
 
 
@@ -436,12 +1044,19 @@ def resolve_placeholders(data, ledger: evidence.Ledger):
 # -- 3. verify ------------------------------------------------------------
 
 
-def apply_verification(ledger: evidence.Ledger, report: dict) -> dict:
+def apply_verification(ledger: evidence.Ledger, report: dict, *, backend=None) -> dict:
     """Fold the verifier's report into truth states. Python counts, not the model.
 
     The verifier says `agreed`, `disagreed`, or `not_found`. This function turns
-    that into a truth state by counting distinct source ids, which is why a
-    verifier that says `agreed` twice about the same URL cannot promote a claim.
+    that into a truth state by counting attributed source ids (`corroborate()`,
+    #471), which is why a verifier that says `agreed` twice about the same URL
+    cannot promote a claim.
+
+    `backend` is the run's research backend, the same object `stage_search`
+    already passes to `record_findings`. An `agreed` verdict's second source
+    is fetched through it, same as any other source, so its title, authors,
+    year, and venue come from the record rather than sixty characters of the
+    verifier's own quote. Leaving it `None` keeps the old behaviour. #471
     """
     counts = {"corroborated": 0, "single_source": 0, "contradicted": 0, "unknown": 0}
     for row in report.get("checked", []):
@@ -454,21 +1069,45 @@ def apply_verification(ledger: evidence.Ledger, report: dict) -> dict:
         if status == "agreed":
             url = str(row.get("second_source_url", "")).strip()
             if url.lower().startswith(("http://", "https://")):
-                source = ledger.add_source(
-                    evidence.SourceDocument(
-                        title=row.get("quote", "")[:60] or url,
-                        url=url,
-                        subject=claim.subject or "verification",
-                        body=row.get("quote", ""),
+                source = ledger.source_for_url(url)
+                if source is None:
+                    model_title = row.get("quote", "")[:60] or url
+                    fetched = (
+                        metadata.fetch_record(url, backend, model_title=model_title)
+                        if backend is not None
+                        else {}
                     )
-                )
+                    source = ledger.add_source(
+                        evidence.SourceDocument(
+                            title=fetched.get("title") or model_title,
+                            url=url,
+                            subject=claim.subject or "verification",
+                            body=row.get("quote", ""),
+                            authors=fetched.get("authors") or [],
+                            year=fetched.get("year") or "",
+                            venue=fetched.get("venue") or "",
+                            note=fetched.get("note") or "",
+                            text=fetched.get("text") or "",
+                            tier=source_policy.tier_for(fetched),
+                        )
+                    )
                 if source.id not in claim.source_ids:
                     claim.source_ids.append(source.id)
+                # The verifier independently searched for and quoted this
+                # source. That is the second, independent look `attributed()`
+                # exists to stand in for when nobody else already gave one.
+                if source.id not in claim.attributed_source_ids:
+                    claim.attributed_source_ids.append(source.id)
             evidence.corroborate(claim)
         elif status == "disagreed":
             claim.note = row.get("quote", "a second source disagreed")
             evidence.corroborate(claim, contradicted=True)
         else:
+            # Silence is not a result. `not_found` still names what was
+            # tried, so a reader sees a search happened rather than nothing
+            # at all. #471
+            queries = list(row.get("queries_used") or []) or [claim.text[:80]]
+            claim.note = f"not_found: the verifier searched {queries} and found no second source."
             evidence.corroborate(claim)
         counts[claim.truth_state] = counts.get(claim.truth_state, 0) + 1
     return counts
@@ -518,9 +1157,42 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
 
     required = {plan_heading(item).lower() for item in plan.get("sections", [])}
     present = {str(section.get("heading", "")).lower() for section in sections}
-    for name in ("abstract", "introduction", "references"):
+    for name in ("abstract", "introduction", "methods", "conclusion", "references"):
         if name in required and not any(name in heading for heading in present):
             misses.append(f"the outline is missing the {name} section.")
+
+    # #560. Presence alone let a writer outline turn place its Introduction
+    # after a body section, or draft it twice, and neither showed up here:
+    # the two problems PR #558's judge measured downstream, in the
+    # assembled paper. #566: comparing only the structural headings against
+    # each other missed a Methods a writer placed after a body section,
+    # because Abstract, Introduction, and Methods were still in the right
+    # order relative to one another -- the body section sitting between
+    # Introduction and Methods named no defect from that narrower view. This
+    # row now compares the outline's full shape against the frozen order:
+    # every heading is labelled by its own structural name, or "body" when
+    # it names none; consecutive "body" labels collapse to the one slot the
+    # frozen order actually gives them, between Methods and Conclusion. A
+    # duplicate structural heading still fails here too, the same as before:
+    # a repeated entry can never match a `set`-deduplicated expected group,
+    # no separate duplicate check needed.
+    heading_order = [str(section.get("heading", "")).strip().lower() for section in sections]
+    labelled = [heading if heading in FROZEN_ORDER else "body" for heading in heading_order]
+    collapsed = [
+        label for index, label in enumerate(labelled)
+        if label != "body" or index == 0 or labelled[index - 1] != "body"
+    ]
+    prefix_present = [label for label in labelled if label in FROZEN_PREFIX]
+    suffix_present = [label for label in labelled if label in FROZEN_SUFFIX]
+    expected = sorted(set(prefix_present), key=FROZEN_PREFIX.index)
+    if "body" in collapsed:
+        expected.append("body")
+    expected += sorted(set(suffix_present), key=FROZEN_SUFFIX.index)
+    if collapsed != expected:
+        misses.append(
+            f"the outline's sections are ordered {collapsed}, "
+            f"not the frozen order {expected}."
+        )
 
     for section in sections:
         heading = section.get("heading", "?")
@@ -547,14 +1219,26 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
 # -- 5. diagram -----------------------------------------------------------
 
 
+# #514: the exact text `stage_diagram` matches to tell a live-call failure,
+# on an available renderer, apart from every other complaint this loop can
+# produce.
+BACKEND_FAILURE_MARK = "image backend unavailable: "
+
+
 def render_figures(src_dir: Path, out_dir: Path, topic: str, **kwargs) -> tuple[list, list[str]]:
     """Render every source through imagen-diagrams and its fidelity judge.
 
     A complexity failure is not an exception here. It is a message for the
     diagrammer, and the caller feeds it straight back as the retry prompt.
 
-    A missing plugin or image backend propagates immediately. Redrawing source
-    cannot install a backend, and publication has no SVG fallback.
+    A renderer that is genuinely absent propagates immediately: `available()`
+    already said no, every figure would fail the identical way, and there is
+    no SVG fallback to ship instead (#409's `test_a_missing_image_backend_
+    blocks_the_paper`). A renderer that reported itself available and then
+    had one live call fail (auth, quota, a transient error) is different:
+    #514 traced a whole run crashing over one bad live call, so that one
+    complaint is marked with the caller's own text and this loop keeps
+    going. `stage_diagram` reads the mark and drops just that figure.
     """
     figures, complaints = [], []
     if not src_dir.is_dir():
@@ -571,6 +1255,10 @@ def render_figures(src_dir: Path, out_dir: Path, topic: str, **kwargs) -> tuple[
                 )
         except diagrams.DiagramTooComplex as exc:
             complaints.append(f"{path.name}: {exc}")
+        except diagrams.ImageBackendUnavailable as exc:
+            if not diagrams.available():
+                raise
+            complaints.append(f"{path.name}: {BACKEND_FAILURE_MARK}{exc}")
     return figures, complaints
 
 
@@ -631,6 +1319,30 @@ def claim_brief(ledger: evidence.Ledger, claim_id: str, index: dict[str, int]) -
     caveat = ""
     if claim.truth_state == evidence.SINGLE_SOURCE:
         caveat = "  (SINGLE SOURCE. Say so in the paragraph that uses this.)"
+    if claim.secondary:
+        # #473. A follow turn found no primary, so the writer is told
+        # outright: this number is as summarized by the review or preprint
+        # bound here, not the primary study's own report. A dedicated field,
+        # not `note`: `apply_verification` still owns that one.
+        caveat += f"  (as summarized by {markers}. Say so in the paragraph that uses this.)"
+    # #474. A hit names the contrary claim and its own numbers, so the
+    # writer sees claim and counter-evidence together in one brief line. A
+    # miss says so outright. A claim the run cap reached before its turn is
+    # told to hedge, the same instruction a single-source claim already
+    # gets. The writer card carries the one instruction to state the
+    # condition a hit holds under, so that is not repeated here.
+    if claim.counter == "hit":
+        countered = counter_evidence_for(ledger, claim.id)
+        if countered is not None:
+            counter_markers = "".join(f"[{index[sid]}]" for sid in countered.source_ids if sid in index)
+            caveat += f"  (Contrary evidence {counter_markers}: {countered.text})"
+    elif claim.counter == "miss":
+        caveat += f"  ({claim.counter_note or 'no contrary evidence found in this search'}.)"
+    elif claim.counter == "capped":
+        caveat += (
+            f"  ({claim.counter_note or CAPPED_NOTE}. "
+            "Hedge this the way a single-source claim is hedged.)"
+        )
     return f"- {claim.id}: {claim.text} {markers}{caveat}"
 
 
@@ -713,6 +1425,44 @@ def define_acronym_once(sections: dict[str, str], phrase: str, acronym: str) -> 
 # -- 7. review ------------------------------------------------------------
 
 
+def _split_verdict(verdict: dict) -> tuple[list[str], list[str], float | None]:
+    """Read either reply shape the reviewer skill may hand back.
+
+    Paired: `{"failed_rows": [{"row": "no_filler", "note": "..."}], "score": 0.7}`.
+    The row and its note travel together, so they can never drift apart the
+    way the flat shape's two parallel lists could (#411).
+
+    Legacy: `{"failed_rows": ["no_filler"], "notes": ["..."]}`, with no score.
+    Still accepted, so an older recorded reply still parses.
+    """
+    raw_rows = verdict.get("failed_rows")
+    # A schema violation from a live model, not a Python type Python chose.
+    # Treat anything that is not a list as no failing rows rather than crash.
+    raw_rows = raw_rows if isinstance(raw_rows, list) else []
+    score = verdict.get("score")
+    try:
+        score = None if score is None else max(0.0, min(1.0, float(score)))
+    except (TypeError, ValueError):
+        score = None
+    # Checked per item, not by peeking at the first one: a reviewer that
+    # names one row in the paired shape and one in the legacy shape in the
+    # same reply must not crash `_run_stage` with an `AttributeError` on the
+    # bare string or a `KeyError` on the dict.
+    if any(isinstance(item, dict) for item in raw_rows):
+        rows = [
+            str(item.get("row", "")).strip() if isinstance(item, dict) else str(item).strip()
+            for item in raw_rows
+        ]
+        notes = [
+            str(item.get("note", "")).strip() if isinstance(item, dict) else ""
+            for item in raw_rows
+        ]
+        return rows, notes, score
+    rows = [str(row) for row in raw_rows]
+    notes = [str(note) for note in (verdict.get("notes") or []) if str(note).strip()]
+    return rows, notes, score
+
+
 def review_gate(verdict: dict) -> None:
     """Fail the draft on the reviewer's rows, and never mislabel one.
 
@@ -722,14 +1472,14 @@ def review_gate(verdict: dict) -> None:
     again. A live run stalled that way with `scope_honest` labelled
     "evidence_matches is now fixed" (#326).
 
-    The reviewer skill asks for one sentence per row, so pair them when the
-    counts agree. When they do not, report both lists plainly rather than
-    guessing which sentence belongs to which row.
+    The paired reply shape pairs every row with its note by construction. The
+    legacy flat shape does not, so pair its two lists only when the counts
+    agree; when they do not, report both lists plainly rather than guessing
+    which sentence belongs to which row.
     """
-    rows = verdict.get("failed_rows") or []
+    rows, notes, score = _split_verdict(verdict)
     if not rows:
         return
-    notes = [str(note) for note in (verdict.get("notes") or []) if str(note).strip()]
     if len(notes) == len(rows):
         detail = " ".join(f"{row}: {note}" for row, note in zip(rows, notes, strict=True))
     else:
@@ -740,30 +1490,186 @@ def review_gate(verdict: dict) -> None:
                 f" The reviewer returned {len(notes)} notes for {len(rows)} rows, so"
                 " they are not matched up. All of them: " + " ".join(notes)
             )
-    raise GateFailed(f"the reviewer failed these rows. {detail}", tuple(sorted(rows)))
+    raise GateFailed(f"the reviewer failed these rows. {detail}", tuple(sorted(rows)), score=score)
 
 
 # -- 8. assemble ----------------------------------------------------------
 
 
-def figure_block(figure, figures_dir: str = "figures") -> str:
+def figure_block(figure, number: int, figures_dir: str = "figures") -> str:
+    """The image line and its `Figure N.` caption, from the figure's own
+    alt text. #413, #464.
+    """
     target = figure.best
     if target is None or not target.name.endswith("_imagen.png"):
         raise GateFailed(
             f"figure {figure.name!r} has no judged imagen-diagrams PNG.",
             ("figure_asset",),
         )
-    return f"![{figure.alt}]({figures_dir}/{target.name})"
+    return f"![{figure.alt}]({figures_dir}/{target.name})\n\nFigure {number}. {figure.alt}"
+
+
+def render_reference(source: evidence.SourceDocument) -> str:
+    """One reference line: "Authors (year). Title. Venue. URL."
+
+    Every field is optional and falls back field by field, down to the bare
+    URL when `metadata.fetch_record` found nothing at all. #470
+    """
+    title = source.title.strip() or ""
+    authors = [str(a).strip() for a in (source.authors or []) if str(a).strip()]
+    year = str(source.year or "").strip()
+    venue = str(source.venue or "").strip()
+
+    lead = ", ".join(authors)
+    if year:
+        lead = f"{lead} ({year})" if lead else f"({year})"
+
+    parts = [part for part in (lead, title, venue) if part]
+    if not parts:
+        return source.url
+    text = ". ".join(parts)
+    if not text.endswith("."):
+        text += "."
+    return f"{text} {source.url}"
 
 
 def references_block(urls: list[str], sources: list) -> str:
     rows = ["## References", ""]
     for number, source in enumerate(sources, start=1):
-        title = source.title.strip() or source.url
-        rows.append(f"{number}. {title}. {source.url}")
+        rows.append(f"{number}. {render_reference(source)}")
     if not sources:
         rows += [f"{n}. {url}" for n, url in enumerate(urls, start=1)]
     return "\n".join(rows) + "\n"
+
+
+def front_matter_block(
+    ledger: evidence.Ledger,
+    *,
+    prepared_at: str,
+    conflicts: str | None = None,
+) -> str:
+    """Byline, date, provenance, and conflicts, written above the Abstract.
+
+    The byline names every role's own model straight from `roleplan`, so a
+    reader never sees a name this run did not actually use. The provenance
+    counts come from the same ledger `Paper._methods_lines` reads: sources
+    retrieved, sources cited (the bibliography this run actually built), and
+    claims a verifier actually cross-checked (`Claim.cross_checked`, set
+    only by a real second look, distinct from a corroborated truth state).
+    #479
+    """
+    roles = roleplan.plan(None, "paper")
+    models = ", ".join(f"{name}: {role.model}" for name, role in roles.items())
+    retrieved = len(ledger.sources)
+    cited = len(ledger.bibliography())
+    checked = sum(1 for claim in ledger.claims.values() if claim.cross_checked)
+    conflicts = conflicts if conflicts is not None else (os.environ.get("CONFLICTS") or DEFAULT_CONFLICTS)
+    return "\n\n".join(
+        [
+            f"Prepared by: {HARNESS_NAME} ({models}).",
+            f"Date: {prepared_at}.",
+            f"Generated by an automated research loop. Sources: {retrieved} retrieved, "
+            f"{cited} cited. Verification: {checked} claims cross-checked. See Methods.",
+            conflicts,
+        ]
+    )
+
+
+def study_table(
+    ledger: evidence.Ledger, index: dict[str, int], written: dict[str, str] | None = None
+) -> str:
+    """The Evidence summary table, or "" when the ledger holds no
+    human-study claim. Python from the ledger: one row per usable claim
+    that carries E3's `study` object, reading E4's `SourceDocument.tier`
+    for its own source. Not deduped by study identity: two claims about
+    the same trial are two citations already, the same way the reference
+    list treats them. #478
+
+    `written`, when given, is `self.written`: every body section's own
+    final text, already carrying the writer's own `[N]` markers. A claim
+    with a reference number is not proof any section's prose used it,
+    PR #535 judge revision F7, so a claim renders here only when at least
+    one of its own source numbers is a marker some section actually wrote.
+    `None` skips the filter, for a caller with no written body yet.
+    """
+    cited_numbers = (
+        {int(n) for n in re.findall(r"\[(\d+)\]", "\n".join(written.values()))}
+        if written is not None
+        else None
+    )
+    rows = [
+        claim
+        for claim in ledger.claims.values()
+        if claim.usable
+        and claim.study
+        and (
+            cited_numbers is None
+            or any(index.get(sid) in cited_numbers for sid in claim.source_ids)
+        )
+    ]
+    if not rows:
+        return ""
+    lines = [
+        "## Evidence summary",
+        "",
+        "| Participants | Duration | Deficit | Training | Assay | Result | Tier |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for claim in rows:
+        study = claim.study or {}
+        participants = study.get("participants") or {}
+        n = participants.get("n")
+        population = str(participants.get("population") or "").strip()
+        who = f"{n} ({population})" if n and population else str(n or population or "not reported")
+        duration = str(study.get("duration") or "not reported")
+        deficit = str(study.get("deficit") or "not reported")
+        training = study.get("training")
+        training_cell = "yes" if training is True else "no" if training is False else "not reported"
+        assay = str(study.get("assay") or "not reported")
+        result = str(study.get("result") or claim.text or "not reported")
+        tier = "other"
+        for source_id in claim.source_ids:
+            source = ledger.sources.get(source_id)
+            if source is not None and source.tier:
+                tier = source.tier
+                break
+        markers = "".join(f"[{index[sid]}]" for sid in claim.source_ids if sid in index)
+        lines.append(
+            f"| {who} | {duration} | {deficit} | {training_cell} | {assay} | "
+            f"{result} {markers} | {tier} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _introduction_stub(plan: dict) -> str:
+    """A short Python-written Introduction, for the run whose outline
+    carried none. #560, copied from the Agent SDK's own `paper.
+    _introduction_stub` (`paper.py` near line 2000), not imported: this
+    port's `assemble` hits the identical missing-section case once a writer
+    outline turn lands with no Introduction bound, and the same text answers
+    it.
+
+    A blockquote, not a paragraph: `brief.uncited_claims` already skips a
+    line starting with `>`, so this carries no citation of its own to
+    demand. Long enough to clear `paper_check.MIN_SECTION_WORDS` on its own,
+    the same way the SDK's copy is sized, so `has_body` never has to take
+    this heading's word on faith.
+    """
+    title = str(plan.get("title") or "This paper").strip()
+    return (
+        f"> {title}. This paper's outline carried no Introduction, so no key "
+        "question named it and no writer turn drafted it. Assembly writes "
+        "this paragraph in its place, the same way it writes Methods below: "
+        "from the run's own record, not from a retrieved source, and it "
+        "states no claim beyond the paper's own title. Methods names every "
+        "host this run searched and every source it admitted to the "
+        "reference list, and the Evidence summary, when the run cites a "
+        "human study, sits beside it. A later run whose outline drafts a "
+        "real Introduction replaces this paragraph with the outliner's own "
+        "opening, checked through the same research and review pipeline as "
+        "every other section on the page."
+    )
 
 
 def assemble(
@@ -773,19 +1679,136 @@ def assemble(
     figures: list,
     ledger: evidence.Ledger,
     charts: list | None = None,
+    skipped_figures: list[dict] | None = None,
+    front_matter: str = "",
 ) -> str:
     """Stitch the paper. Pure Python, deterministic, no model call.
 
     Figures land under the section that asked for them, after its prose. The
-    references section is generated from the ledger, never written by the model,
-    because a generated bibliography cannot cite a source that was not retrieved.
+    glossary and the references section are both generated, never written by
+    the model: a generated bibliography cannot cite a source that was not
+    retrieved, and a generated glossary cannot list a term the body never
+    marked.
     """
-    _, urls = numbering(ledger)
+    # #560. `normalize_plan` fixes the plan's own section order before the
+    # writer drafts an outline from it, but the outline is the writer's own
+    # JSON, and a writer turn can still place its Introduction after a body
+    # section, draft it twice, or drop it. `outline_gate` now rejects the
+    # first two for a fresh outline turn, but a resumed run's persisted
+    # `outline.json` can predate that gate, so this pass runs unconditionally
+    # here too, the same defence `stages.normalize_plan`'s own duplicate
+    # collapse (near line 355 above) gives the plan. Local copies: neither
+    # the caller's `outline` nor its `written` dict is mutated.
+    sections = list(outline.get("sections", []))
+    written = dict(written)
+    lowered = [str(section.get("heading", "")).strip().lower() for section in sections]
+    intro_at = [index for index, heading in enumerate(lowered) if heading == "introduction"]
+    if intro_at:
+        intro_section = sections[intro_at[0]]
+        sections = [entry for index, entry in enumerate(sections) if index not in intro_at]
+        lowered = [heading for index, heading in enumerate(lowered) if index not in intro_at]
+        # #566 C1. The heading can be present with no prose behind it: a
+        # partial write, or a `sections.json` persisted before this section
+        # existed (`Paper._need_written` only requires `written` to be
+        # non-empty, never that it covers every outline section). Left
+        # alone this rendered a bare `## Introduction` at 0 words and
+        # `has_body` failed the run. Same backstop as the missing-heading
+        # branch below, keyed by this section's own heading text (its
+        # original casing, since that is the key the render loop below
+        # reads `written` by), the same test the Agent SDK's own
+        # `_render_planned_section` already runs: whether there is prose,
+        # not merely whether the outline names the section.
+        heading_text = str(intro_section.get("heading", "")).strip()
+        if not written.get(heading_text, "").strip():
+            written[heading_text] = _introduction_stub(plan)
+    else:
+        # #560. The same backstop the Agent SDK's `assemble` inserts for the
+        # identical case (`paper.py`'s `_introduction_stub`), copied rather
+        # than imported: no model turn, so it goes straight into `written`
+        # instead of a section the writer never drafted.
+        intro_section = {
+            "heading": "Introduction",
+            "purpose": STRUCTURAL["introduction"],
+            "claim_ids": [],
+            "figures": [],
+        }
+        written.setdefault("Introduction", _introduction_stub(plan))
+    insert_at = lowered.index("abstract") + 1 if "abstract" in lowered else 0
+    sections.insert(insert_at, intro_section)
+
+    # #566. The same move rule, for Methods: a writer outline turn can place
+    # Methods after a body section exactly the way it could place
+    # Introduction after one, and presence-by-name alone never caught it
+    # either. `outline_gate`'s order row now rejects this for a fresh
+    # outline turn, but a resumed run's persisted `outline.json` can predate
+    # it, so this pass runs unconditionally here too. Methods is always
+    # Python-written before `assemble` is ever called (`Paper.stage_assemble`
+    # sets `self.written["Methods"]` first), so there is no stub branch here
+    # the way Introduction needs one: an outline with no Methods heading at
+    # all still gets the bare heading inserted, and `written["Methods"]`
+    # supplies its body. The Evidence summary needs no move of its own: the
+    # loop below splices `table_block` in right after whichever section
+    # carries the "methods" heading, so relocating that heading carries the
+    # table along with it.
+    lowered = [str(section.get("heading", "")).strip().lower() for section in sections]
+    methods_at = [index for index, heading in enumerate(lowered) if heading == "methods"]
+    if methods_at:
+        methods_section = sections[methods_at[0]]
+        sections = [entry for index, entry in enumerate(sections) if index not in methods_at]
+        lowered = [heading for index, heading in enumerate(lowered) if index not in methods_at]
+    else:
+        methods_section = {
+            "heading": "Methods",
+            "purpose": STRUCTURAL["methods"],
+            "claim_ids": [],
+            "figures": [],
+        }
+    insert_at = (
+        lowered.index("introduction") + 1
+        if "introduction" in lowered
+        else (lowered.index("abstract") + 1 if "abstract" in lowered else 0)
+    )
+    sections.insert(insert_at, methods_section)
+    outline = {**outline, "sections": sections}
+
+    index, urls = numbering(ledger)
+    # #478. Python, from the ledger: one row per human-study claim, spliced
+    # in right after Methods, below. "" when the ledger holds none, and the
+    # note that says so lives in Methods' own body, `Paper.stage_assemble`.
+    table_block = study_table(ledger, index, written)
     by_name = {figure.name: figure for figure in figures}
     used_figures: set[str] = set()
     charts = [item for item in (charts or []) if item.get("path")]
+    glossary: dict[str, str] = {}
+    # #464. One counter, spent as charts and diagrams are placed, body
+    # order, contiguous from one. A chart and a diagram share the same
+    # sequence: a reader counts figures on the page, not by kind.
+    figure_number = 0
+    skips = list(skipped_figures or [])
+    noted_skips: set[int] = set()
+    # #464 B1. A rendered figure no planned section names can never receive
+    # an in-text mention: the whole-paper pass only edits a planned
+    # section's own text. That figure is a named skip, not an orphan
+    # `## Figures` block the pass cannot write into. Attributed to the
+    # first planned section, or "methods" when the outline has none.
+    all_names = {
+        name for section in outline.get("sections", []) for name in (section.get("figures") or [])
+    }
+    sections_list = outline.get("sections", [])
+    fallback_section = (
+        str(sections_list[0].get("id") or sections_list[0].get("heading") or "")
+        if sections_list
+        else "methods"
+    )
+    for name, figure in by_name.items():
+        if name not in all_names:
+            skips.append({"name": figure.name, "section": fallback_section, "reason": "no owning section"})
 
     parts = [f"# {plan.get('title', 'Untitled')}", ""]
+    if front_matter:
+        # #479. The byline, date, provenance, and conflicts, above the Abstract.
+        parts.append(front_matter)
+        parts.append("")
     for section in outline.get("sections", []):
         heading = str(section.get("heading", "")).strip()
         if heading.lower() == "references":
@@ -793,8 +1816,17 @@ def assemble(
         parts.append(f"## {heading}")
         parts.append("")
         body = written.get(heading, "").strip()
+        # First use wins. A term marked twice keeps the sentence that
+        # introduced it, not a later restatement.
+        body, term_hits = paper_check.take_terms(body)
+        body = body.strip()
+        for term, definition in term_hits:
+            glossary.setdefault(term, definition)
         if body:
             parts.append(body)
+            parts.append("")
+        if heading.lower() == "methods" and table_block:
+            parts.append(table_block)
             parts.append("")
         sid = str(section.get("id") or "")
         for chart in charts:
@@ -803,24 +1835,50 @@ def assemble(
                 continue
             rel = f"charts/{Path(chart['path']).name}"
             caption = chart.get("caption") or chart.get("name") or rel
+            # #464 B2. The number is spent for every placed figure, whether
+            # this call writes the image line fresh or the line already
+            # sits in `body` from a persisted trim: a slot the counter
+            # does not charge is a slot the next figure duplicates.
+            figure_number += 1
             if rel not in (body or ""):
                 parts.append(f"![{caption}]({rel})")
+                parts.append("")
+                parts.append(f"Figure {figure_number}. {caption}")
                 parts.append("")
         for name in section.get("figures", []) or []:
             figure = by_name.get(name)
             if figure is not None and name not in used_figures:
-                parts.append(figure_block(figure))
+                figure_number += 1
+                parts.append(figure_block(figure, figure_number))
                 parts.append("")
                 used_figures.add(name)
+        # #386, #464. A skip is not silence: it is named, with its reason,
+        # under the section that asked for it. A blockquote so `cited`
+        # never reads it as an unsourced claim, the same free ride an
+        # image's own caption paragraph already gets.
+        for skip in skips:
+            if skip.get("section") not in (sid, heading) or id(skip) in noted_skips:
+                continue
+            noted_skips.add(id(skip))
+            parts.append(f"> {skip['name']} was not shown: {skip['reason']}.")
+            parts.append("")
 
-    # A rendered figure the outline never placed still belongs in the paper. It
-    # cost a render, and dropping it silently hides that the outline drifted.
-    orphans = [f for name, f in by_name.items() if name not in used_figures]
-    if orphans:
-        parts.append("## Figures")
+    # A skip with no owning section (an empty `section`, or one that never
+    # matched a planned section id) still gets a note, not silence, just
+    # not one a specific section can claim.
+    for skip in skips:
+        if id(skip) in noted_skips:
+            continue
+        parts.append(f"> {skip['name']} was not shown: {skip['reason']}.")
         parts.append("")
-        for figure in orphans:
-            parts.append(figure_block(figure))
+
+    # No captured term means no section, not an empty one. Alphabetical, case
+    # insensitive, so "Loop" and "loop" do not sort by accident of case.
+    if glossary:
+        parts.append("## Glossary")
+        parts.append("")
+        for term in sorted(glossary, key=str.casefold):
+            parts.append(f"**{term}.** {glossary[term]}")
             parts.append("")
 
     parts.append(references_block(urls, ledger.bibliography()))
@@ -834,6 +1892,8 @@ def assemble_gate(
     allowed_domains: tuple[str, ...] | None = None,
     *,
     loop_doctrine: bool = True,
+    outline: dict | None = None,
+    skipped_figures: list[dict] | None = None,
 ) -> paper_check.PaperScore:
     _, urls = numbering(ledger)
     score = paper_check.check(
@@ -842,8 +1902,16 @@ def assemble_gate(
         ledger=ledger,
         charts=charts,
         allowed_domains=allowed_domains,
+        enforce_structure=True,
         located=[source.url for source in ledger.bibliography() if source.located_from],
         loop_doctrine=loop_doctrine,
+        # The plan carries `key_questions` per section, the same shape the
+        # SDK's `approved_outline(run)` hands to `checks.check`. #463: with
+        # no outline, `question_heading` only catches a heading ending in
+        # "?"; this lets it also catch a heading that repeats a key
+        # question verbatim without the question mark.
+        outline=outline,
+        skipped_figures=skipped_figures,
     )
     if not score.passed:
         raise GateFailed(

@@ -13,6 +13,20 @@ import adapter
 import doers
 import gates
 import loop_roles
+import pytest
+import roles
+import steps
+
+try:
+    import langchain_core.callbacks  # noqa: F401
+
+    HAS_LANGCHAIN = True
+except ImportError:
+    HAS_LANGCHAIN = False
+
+NEEDS_LANGCHAIN = pytest.mark.skipif(
+    not HAS_LANGCHAIN, reason="needs langchain_core, installed only by `task setup`"
+)
 
 
 class Block:
@@ -208,7 +222,21 @@ def test_phase_backend_sets_the_documented_recursion_limit(tmp_path):
 
     backend.run(repo=tmp_path, prompt="write code", allow=["app/**"])
 
-    assert agent.calls[0][1] == {"recursion_limit": 16}
+    # #543. Membership, not exact equality: `config` also carries a
+    # `callbacks` key when `langchain_core` is installed (it captures
+    # `usage_metadata` for a recursion failure), and this test only pins
+    # the recursion limit's own wiring.
+    assert agent.calls[0][1]["recursion_limit"] == 16
+
+
+def test_the_live_recursion_limit_gives_room_for_a_t001_code_phase():
+    """#539, ruling on PR #540. LangGraph counts super-steps, roughly two
+    per model turn before deepagents' own middleware take their own, so 16
+    was six to eight usable turns against the SDK twin's 12-turn budget.
+    Pinned here so a future edit has to mean it, not drift back down."""
+    import harness  # noqa: PLC0415
+
+    assert harness.LIVE_RECURSION_LIMIT >= 32
 
 
 def test_the_judge_graph_is_the_one_that_answers(tmp_path):
@@ -243,6 +271,309 @@ def test_the_backend_reports_what_the_run_cost(tmp_path):
     assert result.ok
     assert result.usd == 1.25
     assert result.output == "wrote it"
+
+
+def test_the_backend_keeps_the_raw_message_log(tmp_path):
+    """#539, follow-up 3. Only the SDK port populated `raw_output`; a failed
+    Deep Agents run's `.harness/` had nothing of the turn to cite."""
+    result = adapter.DeepAgentsBackend(FakeAgent("wrote it", usd=1.25)).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert "wrote it" in result.raw_output
+    assert "assistant" in result.raw_output
+
+
+def test_the_judge_keeps_the_raw_message_log(tmp_path):
+    judge = FakeAgent('{"done": true, "why": "the diff matches"}')
+    result = adapter.DeepAgentsBackend(FakeAgent(), judge_agent=judge).judge(
+        repo=tmp_path, prompt="grade this"
+    )
+    assert "the diff matches" in result.raw_output
+
+
+def test_raw_log_dir_writes_one_redacted_call(tmp_path):
+    """#562. Mirrors the SDK port's `--raw-log-dir`: the same `_redact`
+    (copied here, never imported -- this port has no e2e script of its own
+    to hold it) strips a live key and the operator's own home directory from
+    a durable, checked-in copy of the call's usage_metadata and message
+    sequence."""
+    secret = f"sk-ant-{'a' * 20}"
+    home = str(Path.home())
+    raw_dir = tmp_path / "raw"
+    backend = adapter.DeepAgentsBackend(
+        FakeAgent(f"wrote it, key={secret}, under {home}/project", usd=0.01),
+        raw_log_dir=raw_dir,
+    )
+
+    result = backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert result.ok
+    files = list(raw_dir.iterdir())
+    assert len(files) == 1
+    content = files[0].read_text(encoding="utf-8")
+    assert secret not in content
+    assert home not in content
+    assert "<REDACTED-KEY>" in content
+    assert "<HOME>" in content
+    # The evidence itself must still be legible, just scrubbed.
+    assert "wrote it" in content
+
+
+def test_raw_log_dir_untouched_when_not_set(tmp_path):
+    """Optional and off by default, the same as the SDK port's own flag: no
+    `.harness/`-adjacent side effect for a run that never asked for one."""
+    result = adapter.DeepAgentsBackend(FakeAgent("wrote it", usd=0.01)).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert result.ok
+    assert not (tmp_path / "raw").exists()
+
+
+# -- #539: a raised backend never claims a silent 0.0 -----------------------
+
+
+class RaisingAgent:
+    """A Deep Agents graph whose `invoke()` never answers."""
+
+    def __init__(self, exc: Exception):
+        self.exc = exc
+
+    def invoke(self, payload, config=None):
+        raise self.exc
+
+
+def test_a_backend_that_raises_reports_usd_as_none_not_zero(tmp_path):
+    """A raise means `agent.invoke()` never answered. `usd=0.0` there reads
+    as "this turn was free", which the judge of PR #537 could not tell apart
+    from an honest empty reply."""
+    result = adapter.DeepAgentsBackend(RaisingAgent(RuntimeError("boom"))).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert not result.ok
+    assert result.usd is None
+
+
+def test_raw_log_dir_writes_on_a_raising_call_too(tmp_path):
+    """#562, judge of PR #565. `agent.invoke()` returns no state on a raise,
+    so `_raw_messages(result)` has nothing to read there -- the run most in
+    need of evidence, the one that just died, used to leave none. The
+    exception name and whatever the usage callback already saw before the
+    raise now land in the raw log directory instead."""
+    raw_dir = tmp_path / "raw"
+    result = adapter.DeepAgentsBackend(
+        RaisingAgent(RuntimeError("boom")), raw_log_dir=raw_dir
+    ).run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert not result.ok
+    files = list(raw_dir.iterdir())
+    assert len(files) == 1
+    content = files[0].read_text(encoding="utf-8")
+    assert "RuntimeError: boom" in content
+
+
+def test_raw_log_dir_writes_on_a_raising_judge_call_too(tmp_path):
+    """Same fix, the judge-only path."""
+    raw_dir = tmp_path / "raw"
+    judge = RaisingAgent(RuntimeError("judge boom"))
+    result = adapter.DeepAgentsBackend(FakeAgent(), judge_agent=judge, raw_log_dir=raw_dir).judge(
+        repo=tmp_path, prompt="grade this"
+    )
+
+    assert not result.ok
+    files = list(raw_dir.iterdir())
+    assert len(files) == 1
+    assert "RuntimeError: judge boom" in files[0].read_text(encoding="utf-8")
+
+
+def test_a_backend_failure_names_the_exception_class(tmp_path):
+    """A `GraphRecursionError` must read as one, and name the limit it hit,
+    not the driver's generic 'returned no files' wording."""
+
+    class GraphRecursionError(RuntimeError):
+        pass
+
+    exc = GraphRecursionError("Recursion limit of 16 reached without hitting a stop condition.")
+    result = adapter.DeepAgentsBackend(RaisingAgent(exc)).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+    assert "GraphRecursionError" in result.output
+    assert "Recursion limit of 16" in result.output
+
+
+@NEEDS_LANGCHAIN
+def test_a_recursion_failure_after_reported_usage_returns_the_spend_not_none(tmp_path):
+    """#543. `agent.invoke()` discards its return value on a raise, but the
+    callback's `on_llm_end` already fired for whatever turns did complete
+    first. A `GraphRecursionError` after real usage must report that spend,
+    not the generic "never answered" `None` #539 reserved for a truly empty
+    turn."""
+
+    class RaisesAfterUsageAgent:
+        def invoke(self, payload, config=None):
+            for callback in (config or {}).get("callbacks", []):
+                callback.on_llm_end(FakeLLMResult({"total_cost": 0.42}))
+            raise RuntimeError("GraphRecursionError: Recursion limit of 32 reached")
+
+    result = adapter.DeepAgentsBackend(RaisesAfterUsageAgent()).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+
+    assert not result.ok
+    assert result.usd == 0.42
+    assert "RuntimeError" in result.output
+
+
+class FakeMessage:
+    def __init__(self, usage_metadata):
+        self.usage_metadata = usage_metadata
+
+
+class FakeGeneration:
+    def __init__(self, message):
+        self.message = message
+
+
+class FakeLLMResult:
+    def __init__(self, usage_metadata):
+        self.generations = [[FakeGeneration(FakeMessage(usage_metadata))]]
+
+
+def _fire_llm_end(callback, usage_metadata):
+    """#549, judge of PR #552. `callback.on_llm_end(...)` directly bypasses
+    the callback manager LangChain actually puts between a model and a
+    handler in a real run, and that manager swallows a handler's exception
+    unless `raise_error` is set. Driving the fake agent through the real
+    `handle_event` is what proves the cutoff fires in production, not just
+    in a test that skips the one thing the judge found broken."""
+    from langchain_core.callbacks.manager import handle_event  # noqa: PLC0415
+
+    handle_event([callback], "on_llm_end", "ignore_llm", FakeLLMResult(usage_metadata))
+
+
+@NEEDS_LANGCHAIN
+def test_a_call_that_passes_its_dollar_cap_stops_with_budget_exhausted(tmp_path):
+    """#549. The Deep Agents twin of the SDK port's per-query
+    `asyncio.wait_for` timeout: a call that keeps spending past its own cap
+    stops mid-call and reports the spend so far, named `budget_exhausted`,
+    instead of running all the way to the recursion limit. A live run spent
+    $4.56 against a $3.00 cap before that structural ceiling ever fired."""
+
+    class MultiTurnAgent:
+        """Reports usage turn by turn, through the real callback manager,
+        the way a real graph's callback fires once per completed model
+        call, not once per invoke()."""
+
+        def invoke(self, payload, config=None):
+            callbacks = (config or {}).get("callbacks", [])
+            for cost in (0.5, 0.6):
+                for callback in callbacks:
+                    _fire_llm_end(callback, {"total_cost": cost})
+            return {"messages": [{"role": "assistant", "content": "should not get here"}]}
+
+    result = adapter.DeepAgentsBackend(MultiTurnAgent(), max_call_usd=1.0).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+
+    assert not result.ok
+    assert result.usd == 1.1
+    assert "budget_exhausted" in result.output
+    assert result.stop_reason == "cost budget spent"
+
+
+@NEEDS_LANGCHAIN
+def test_a_call_under_its_dollar_cap_answers_normally(tmp_path):
+    """The cutoff must not fire early. A call that never crosses its cap
+    answers the way it always did, driven through the real callback
+    manager the same as the test above."""
+
+    class OneTurnAgent:
+        def invoke(self, payload, config=None):
+            for callback in (config or {}).get("callbacks", []):
+                _fire_llm_end(callback, {"total_cost": 0.4})
+            return {"messages": [{"role": "assistant", "content": "done"}]}
+
+    result = adapter.DeepAgentsBackend(OneTurnAgent(), max_call_usd=1.0).run(
+        repo=tmp_path, prompt="go", allow=["app/**"]
+    )
+
+    assert result.ok
+    assert result.output == "done"
+
+
+def test_the_loop_budget_stops_a_call_that_would_overrun_it(tmp_path):
+    """#577. `harness.backend()` already slices `.loop.yml`'s own
+    `budget.usd` into `max_call_usd` for every call alike; a call that
+    spends right up to that slice can still carry the *cumulative* total
+    past the loop's own number, the same 4.4% overrun the SDK port's own
+    round-5 trace measured. With $0.50 left against a $0.66 per-call cap,
+    the next call must not even reach the graph."""
+    agent = FakeAgent("should not run", usd=0.0)
+    backend = adapter.DeepAgentsBackend(agent, max_call_usd=0.66, loop_budget_usd=2.00)
+    backend.spent_usd = 1.50
+
+    result = backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert not result.ok
+    assert result.usd == 0.0
+    assert result.stop_reason == "cost budget spent"
+    assert agent.calls == []
+    assert "1.50" in result.output
+
+
+def test_a_call_that_fits_the_remaining_loop_budget_still_runs(tmp_path):
+    """The cutoff must not fire early: room enough for one more per-call
+    slice must still reach the graph, and the running total keeps
+    accumulating past it."""
+    agent = FakeAgent("done", usd=0.4)
+    backend = adapter.DeepAgentsBackend(agent, max_call_usd=0.66, loop_budget_usd=2.00)
+    backend.spent_usd = 1.00
+
+    result = backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert result.ok
+    assert len(agent.calls) == 1
+    assert backend.spent_usd == 1.40
+
+
+def test_the_running_total_accumulates_across_every_call_on_one_backend(tmp_path):
+    """`harness.backend()` builds exactly one `DeepAgentsBackend`, reused
+    for the test phase and every code-loop iteration `implementer.py`
+    drives; `spent_usd` has to reflect every call that instance makes, not
+    reset between them, or `_budget_stop` always compares against zero."""
+    agent = FakeAgent("done", usd=0.5)
+    backend = adapter.DeepAgentsBackend(agent, max_call_usd=1.0, loop_budget_usd=10.0)
+
+    backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+    backend.run(repo=tmp_path, prompt="go", allow=["app/**"])
+
+    assert backend.spent_usd == 1.0
+
+
+def test_the_judge_call_is_guarded_by_the_loop_budget_too(tmp_path):
+    """#577, judge of PR #584. `_budget_stop()` guards `run()` and `judge()`
+    alike; a judge call the remaining loop budget cannot cover must refuse
+    before ever reaching the graph, reporting the same controlled stop
+    `run()`'s own guard does, not a crash."""
+    judge_agent = FakeAgent("should not run", usd=0.0)
+    backend = adapter.DeepAgentsBackend(
+        FakeAgent(), judge_agent=judge_agent, max_call_usd=0.66, loop_budget_usd=2.00
+    )
+    backend.spent_usd = 1.50
+
+    result = backend.judge(repo=tmp_path, prompt="grade this")
+
+    assert not result.ok
+    assert result.stop_reason == "cost budget spent"
+    assert judge_agent.calls == []
+
+
+def test_a_judge_that_raises_reports_usd_as_none(tmp_path):
+    result = adapter.DeepAgentsBackend(
+        FakeAgent(), judge_agent=RaisingAgent(RuntimeError("judge boom"))
+    ).judge(repo=tmp_path, prompt="grade this")
+    assert not result.ok
+    assert result.usd is None
+    assert "RuntimeError: judge boom" in result.output
 
 
 def test_a_spent_budget_now_escalates(tmp_path):
@@ -455,7 +786,7 @@ class WritingAgent:
         self.text = text
         self.usd = usd
 
-    def invoke(self, _payload):
+    def invoke(self, _payload, config=None):
         target = self.repo / self.relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(self.text, encoding="utf-8")
@@ -483,3 +814,114 @@ def test_an_out_of_scope_untracked_file_is_not_claimed(tmp_path):
     assert result.ok
     assert "app/model.py" not in result.wrote
     assert (repo / "app" / "model.py").exists()
+
+
+# -- A9 (#437 #422): the planner scope and the planner graph -----------------
+
+
+def test_the_planner_scope_routes_to_the_plan_agent():
+    """`steps.jsonl` is the planner's whole write scope. `_agent_for` must
+    route on it before the tests/ and app/ branches, and refuse a scope no
+    branch names, the same as before this unit."""
+    test_agent = FakeAgent("test phase")
+    plan_agent = FakeAgent("the plan")
+    backend = adapter.DeepAgentsBackend(
+        phase_agents={"test": test_agent, "code": FakeAgent("code phase"), "plan": plan_agent}
+    )
+
+    assert backend._agent_for([steps.STEPS_FILE]) is plan_agent
+    assert backend._agent_for(["tests/**"]) is test_agent
+    with pytest.raises(ValueError, match="no Deep Agents graph"):
+        backend._agent_for(["reports/**"])
+
+
+def test_an_unconfigured_planner_fails_closed(tmp_path):
+    """`run()` wraps `_agent_for` in the same try/except every other scope
+    failure already goes through, so this comes back as a failed `DoerResult`,
+    not a raised exception -- the existing DA convention, unchanged by A9."""
+    backend = adapter.DeepAgentsBackend(
+        phase_agents={"test": FakeAgent(), "code": FakeAgent()}
+    )
+    result = backend.plan(repo=tmp_path, prompt="plan it")
+    assert not result.ok
+    assert "no Deep Agents planner graph" in result.output
+
+
+def test_plan_runs_the_plan_agent_with_its_own_scope(tmp_path):
+    """`plan()` is `run()` scoped to `steps.jsonl`, the same shape as
+    `judge()` scoping to the judge graph."""
+    plan_agent = FakeAgent("wrote the plan")
+    backend = adapter.DeepAgentsBackend(
+        phase_agents={"test": FakeAgent(), "code": FakeAgent(), "plan": plan_agent}
+    )
+
+    result = backend.plan(repo=tmp_path, prompt="write steps.jsonl")
+
+    assert result.ok
+    assert result.output == "wrote the plan"
+    assert plan_agent.calls[0][0]["messages"][0]["content"] == "write steps.jsonl"
+
+
+def test_planner_deep_with_doer_deep_invokes_the_planner_graph(contract, monkeypatch, tmp_path):
+    """A9 (#437 #422), test 2 of 5. `--planner deep --doer deep` must reach
+    the planner subagent, not the test, code, or judge one.
+
+    `fake_deepagents`'s own `create_deep_agent` spy is overwritten on every
+    call, so the graph `harness.backend` builds last (judge) is the only one
+    it would show. Spying on `roles.build_agent` itself, the way
+    `harness.backend` calls it, proves which named subagent each phase
+    reaches instead.
+    """
+    import harness  # noqa: PLC0415  (only this test needs it)
+
+    class RecordingAgent:
+        def __init__(self, label: str):
+            self.label = label
+
+        def invoke(self, payload, config=None):
+            return {"messages": [{"role": "assistant", "content": self.label}]}
+
+    calls: list[str] = []
+
+    def fake_build_agent(contract_arg, loop=None, model="x", subagent_names=None, cwd=None):
+        label = sorted(subagent_names)[0]
+        calls.append(label)
+        return RecordingAgent(f"built:{label}")
+
+    monkeypatch.setattr(harness.deep, "build_agent", fake_build_agent)
+
+    backend = harness.backend(contract, "T001")
+    result = backend.plan(repo=tmp_path, prompt="write the plan")
+
+    assert "planner" in calls
+    assert result.ok
+    assert result.output == "built:planner"
+
+
+def test_the_real_build_agent_accepts_planner_and_rejects_unknown_names(contract, monkeypatch):
+    """A9 (#437 #422). The test above monkeypatches `roles.build_agent`
+    itself, so it never proves the real one recognizes "planner" as a
+    subagent name. `deepagents` is installed in this environment, so run it
+    for real here, skipped only where it is not.
+
+    `create_deep_agent` and `register_harness_profile` are patched, not
+    `deepagents` itself: everything else `build_agent` builds -- the
+    subagent list, the permissions, the harness profile -- is still the
+    real package's own types, the same split `test_the_real_types_keep_the_fence`
+    in `tests/test_roles.py` uses.
+    """
+    deepagents = pytest.importorskip("deepagents")
+
+    def create_deep_agent(**kwargs):
+        return "agent"
+
+    def register_harness_profile(model, profile):
+        pass
+
+    monkeypatch.setattr(deepagents, "create_deep_agent", create_deep_agent)
+    monkeypatch.setattr(deepagents, "register_harness_profile", register_harness_profile)
+
+    assert roles.build_agent(contract, subagent_names=frozenset({"planner"})) == "agent"
+
+    with pytest.raises(ValueError, match="unknown Deep Agents subagent"):
+        roles.build_agent(contract, subagent_names=frozenset({"not-a-real-role"}))

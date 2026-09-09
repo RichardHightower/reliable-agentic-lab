@@ -17,6 +17,7 @@ from pathlib import Path
 
 import evidence
 import paper_check
+import source_policy
 from paper_check import Check, PaperScore
 
 STUB = re.compile(r"\bTODO\b|\[placeholder\]|lorem ipsum", re.I)
@@ -24,10 +25,31 @@ CITATION = re.compile(r"\[(\d+)\]")
 EM_DASH = re.compile(r"\s*—\s*")
 SECOND_PERSON = re.compile(r"\b(you|your|yours)\b", re.I)
 RHETORICAL = re.compile(r"\?\s*$")
-STOP = {
-    "a", "an", "the", "is", "are", "of", "in", "on", "to", "and", "or", "for",
-    "what", "how", "why", "does", "do", "this", "that", "with", "from",
-}
+# #510. A judge on PR #508 scored the #385 gist question "Which trace
+# counts were reported by the MAST taxonomy paper?" as answered by a body
+# that shares only "paper" with it, because this list missed ordinary
+# function words: `was`, `were`, `which`, `when`, `has`, `not`, `also`,
+# `more`, `should`. `paper_check.STE_FUNCTION_WORDS` already names every
+# one of those.
+#
+# It also names `run`, `calls`, `names`, `uses`, and `holds`, the STE-S5
+# noun-stack row's own verb-suffix exceptions, not a question's function
+# words. This repo's own papers are about a loop that runs, a section that
+# calls a turn, a term a glossary names: a coverage row that stops those
+# words scores a question about them on almost nothing. A judge on PR #529
+# found exactly that on the SDK twin: "How many tool calls does a run use
+# before it holds?" fell to one content term. `_COVERAGE_VERB_EXCEPTIONS`
+# is that verb block, subtracted back out, so a domain verb stays a
+# content word here even though it is not one for the noun-stack row it
+# was written for. Copied from the SDK port, not imported.
+_COVERAGE_VERB_EXCEPTIONS = frozenset(
+    """
+    run runs use uses need needs want wants show shows name names hold holds
+    take takes give gives get gets know knows see sees say says call calls
+    make makes made
+    """.split()
+)
+STOP = paper_check.STE_FUNCTION_WORDS - _COVERAGE_VERB_EXCEPTIONS
 
 SLOT_BUDGETS = (
     ("register", 2500),
@@ -147,6 +169,142 @@ def _terms(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOP and len(w) > 2}
 
 
+def _coverage_needed(terms: set[str]) -> int:
+    """A third of the question's content terms, floored at two, and never
+    more than the question actually has to give. #510
+
+    A fifteen-term question used to need two incidental matches, the same
+    floor a two-term question needed. Scaling the requirement with the
+    question closes that gap while a short question still only has to name
+    what it actually asks: `min(2, len(terms))` was already the answer for
+    `len(terms) <= 2`, and stays that answer here. Copied from the SDK
+    port's `checks.py`, not imported.
+    """
+    if not terms:
+        return 0
+    return min(len(terms), max(2, -(-len(terms) // 3)))
+
+
+# #473. What names a section's own topic as safety, dosing, or protocol.
+GUIDELINE_TOPIC_WORDS = ("safety", "dosing", "protocol")
+
+
+def _is_guideline_topic(section: dict) -> bool:
+    heading = str(section.get("heading") or "").lower()
+    parts = [heading]
+    for item in section.get("key_questions") or []:
+        text = item if not isinstance(item, dict) else item.get("text") or item.get("question") or ""
+        parts.append(str(text))
+    return any(word in " ".join(parts).lower() for word in GUIDELINE_TOPIC_WORDS)
+
+
+def guideline_ledger_sources(ledger, index: dict[str, int]) -> list[dict]:
+    """Every `position_stand_or_guideline`-tier source in the whole run's
+    ledger, not only this section's own findings. #517
+
+    `index` is `stages.numbering(ledger)`'s own map, source id to reference
+    number: a source no claim has cited yet (`stages.numbering` only
+    numbers `ledger.bibliography()`) carries `number: 0` here rather than
+    being dropped, so `guideline_cited` can still see it exists and the
+    brief can still name it, even with nothing yet to cite it by.
+    """
+    out = []
+    for source in ledger.sources.values():
+        if source.tier != "position_stand_or_guideline":
+            continue
+        out.append(
+            {
+                "url": source.url,
+                "title": source.title,
+                "abstract": source.text,
+                "tier": source.tier,
+                "number": index.get(source.id) or 0,
+            }
+        )
+    return out
+
+
+def guideline_ledger_matches(ledger_sources: list[dict], section: dict, topic: str = "") -> list[dict]:
+    """The run's ledger-wide guideline sources this section must reckon with. #517
+
+    #473's own wiring graded a section against its own evidence alone, so a
+    position stand retrieved for the introduction and never cited by the
+    safety section it actually answers passed unnoticed. `ledger_sources`
+    (`guideline_ledger_sources`, above) is every such source the whole run
+    has retrieved, whichever section's research found it.
+
+    A source only counts here when the section itself is about safety,
+    dosing, or protocol (`_is_guideline_topic`) and its title or abstract
+    shares at least two content terms, `STOP` applied the same way `_terms`
+    already applies it, with the paper topic or this section's own key
+    questions. One shared word is not on topic.
+
+    `source_policy.GUIDELINE_VOCABULARY` (position, stand, guideline,
+    consensus, statement, practice, clinical) is dropped from both sides
+    before the overlap is counted. #517 follow-up 1: without this, a key
+    question that names the tier itself, "what does the position stand say
+    about training load", shared "position" and "stand" with any title
+    beginning "Position Stand on ...", pulling in a guideline from any
+    unrelated field.
+
+    Called from `section_check`'s `guideline_cited` and `grounded` rows, and
+    from `guideline_brief`'s writer hint, so the row that requires a
+    citation and the row that would otherwise call it dangling never
+    disagree about which sources are in play.
+    """
+    if not ledger_sources or not _is_guideline_topic(section):
+        return []
+
+    def content_terms(text: str) -> set[str]:
+        return _terms(text) - source_policy.GUIDELINE_VOCABULARY
+
+    parts = [str(topic or "")]
+    for item in section.get("key_questions") or []:
+        text = item if not isinstance(item, dict) else item.get("text") or item.get("question") or ""
+        if str(text).strip():
+            parts.append(str(text))
+    target_terms = content_terms(" ".join(parts))
+    if not target_terms:
+        return []
+    matches = []
+    for source in ledger_sources:
+        if not isinstance(source, dict) or source.get("tier") != "position_stand_or_guideline":
+            continue
+        source_terms = content_terms(f"{source.get('title') or ''} {source.get('abstract') or ''}")
+        if len(source_terms & target_terms) >= 2:
+            matches.append(source)
+    return matches
+
+
+def guideline_brief(ledger, section: dict, topic: str, index: dict[str, int], allowed: list[int]) -> tuple[str, list[int]]:
+    """The writer's ledger-guideline hint, and `allowed` widened to name it. #517
+
+    `allowed` already lists every reference number this section's own bound
+    claims may cite; `stages.write_gate` rejects any other number before
+    this section's own `section_check` ever runs. A ledger guideline this
+    function tells the writer to cite has to be added here too, or the row
+    that requires the citation and the gate that would call it stray
+    disagree.
+    """
+    matches = guideline_ledger_matches(guideline_ledger_sources(ledger, index), section, topic)
+    already = set(allowed)
+    lines = [
+        f"- {source['title'] or source['url']} [{source['number']}]"
+        for source in matches
+        if source["number"] and source["number"] not in already
+    ]
+    widened = sorted(already | {source["number"] for source in matches if source["number"]})
+    if not lines:
+        return "", widened
+    note = (
+        "The ledger already holds these guideline or position-stand sources, "
+        "retrieved while researching another section, on this section's own "
+        "topic. Every one listed here must be cited, by its reference "
+        "number:\n" + "\n".join(lines)
+    )
+    return note, widened
+
+
 def section_check(
     body: str,
     *,
@@ -154,8 +312,10 @@ def section_check(
     findings: list | None = None,
     evidence_blob: str = "",
     word_target: int = 0,
+    ledger_sources: list[dict] | None = None,
+    topic: str = "",
 ) -> PaperScore:
-    """Eight deterministic rows on one section, before any judge.
+    """Ten deterministic rows on one section, before any judge.
 
     `stub` is hard. Length, coverage, and figures are recorded but soft on
     this port so the existing writer fixtures still finish; the SDK port
@@ -163,6 +323,10 @@ def section_check(
     """
     section = section or {}
     findings = findings or []
+    # #517. Computed once, reused by `grounded` (so a citation `guideline_cited`
+    # demands below is never also read back as a dangling marker) and by
+    # `guideline_cited` itself.
+    ledger_guidelines = guideline_ledger_matches(ledger_sources or [], section, topic)
     checks: list[Check] = []
     target = int(word_target or section.get("word_target") or 0)
     words = paper_check.word_count(body)
@@ -194,7 +358,7 @@ def section_check(
     body_terms = _terms(body)
     for question in questions:
         terms = _terms(question)
-        if terms and len(terms & body_terms) < min(2, len(terms)):
+        if terms and len(terms & body_terms) < _coverage_needed(terms):
             missing_q.append(question)
     checks.append(
         Check(
@@ -220,6 +384,10 @@ def section_check(
     )
 
     numbers = {str(f.get("number") or "") for f in findings if f.get("number")}
+    # #517. A ledger guideline `guideline_cited` requires below is a real,
+    # run-wide reference number even when it never reached this section's
+    # own findings. Without this, citing it here read as dangling.
+    numbers |= {str(source.get("number")) for source in ledger_guidelines if source.get("number")}
     dangling = [f"[{m}]" for m in CITATION.findall(body) if m not in numbers and numbers]
     checks.append(
         Check(
@@ -282,14 +450,88 @@ def section_check(
     checks.append(
         Check("style", not style_hits, "clean" if not style_hits else ", ".join(style_hits))
     )
+
+    # #473 #517. A section about safety, dosing, or protocol re-derives from
+    # primaries exactly what a position stand or guideline already answers,
+    # unless it is made to cite one. Graded against `findings` (this call's
+    # own evidence) and, since #517, `ledger_guidelines`: every on-topic
+    # `position_stand_or_guideline` source the whole run has retrieved so
+    # far, whichever section's research found it. A guideline retrieved for
+    # the introduction and never cited by the safety section it actually
+    # answers now fails here, naming the source and its number. A section
+    # with neither kind of guideline source passes, as before.
+    named_guidelines: dict[int, str] = {}
+    for f in findings:
+        if f.get("evidence_tier") != "position_stand_or_guideline" or not f.get("number"):
+            continue
+        try:
+            number = int(f["number"])
+        except (TypeError, ValueError):
+            # A truthy, non-numeric `number` is not this row's problem to
+            # raise on; every current producer supplies an int. #473
+            continue
+        named_guidelines.setdefault(number, str(f.get("title") or ""))
+    for source in ledger_guidelines:
+        number = source.get("number")
+        if not number:
+            # Not yet in the run's bibliography. The writer brief
+            # (`guideline_brief`) still names it; nothing here can fail a
+            # section on a number that does not exist yet. #517
+            continue
+        try:
+            number = int(number)
+        except (TypeError, ValueError):
+            continue
+        named_guidelines.setdefault(number, str(source.get("title") or ""))
+    missing_guideline = (
+        sorted((number, title) for number, title in named_guidelines.items() if f"[{number}]" not in body)
+        if named_guidelines and _is_guideline_topic(section)
+        else []
+    )
+    checks.append(
+        Check(
+            "guideline_cited",
+            not missing_guideline,
+            "every position stand is cited"
+            if not missing_guideline
+            else "missing: " + ", ".join(f"{title or 'untitled'} [{number}]" for number, title in missing_guideline),
+        )
+    )
+
+    # #474. `findings_from_claims` below sets `generalizing` from
+    # `stages.GENERALIZING`, and `counter` from `claim.counter`: "hit",
+    # "miss", or "capped", the counter-evidence pass's own three possible
+    # outcomes. A finding left with none of those, and no
+    # `counterargument_to` of its own, is a generalizing claim the pass
+    # never reached at all, not one the run cap simply priced out. A
+    # `capped` claim passes: the pass did look at it, and its brief
+    # (`stages.claim_brief`) already tells the writer to hedge it.
+    uncountered = [
+        f.get("claim") or f.get("id") or ""
+        for f in findings
+        if f.get("generalizing") and not f.get("counter") and not f.get("counterargument_to")
+    ]
+    checks.append(
+        Check(
+            "counterweighed",
+            not uncountered,
+            "every generalizing claim was checked for counter-evidence"
+            if not uncountered
+            else f"missing: {uncountered[:2]}",
+        )
+    )
     return PaperScore(checks=checks)
 
 
 def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
     """Turn the section's bound claims into the finding shape the writer already cites."""
+    import stages as stages_mod  # noqa: PLC0415  (avoids a sections<->stages cycle)
+
     claim_ids = list(section.get("claim_ids") or [])
     heading = (section.get("heading") or "").lower()
-    if heading in ("abstract", "references"):
+    # #478. The conclusion restates the body the same way the abstract
+    # does, so it gets the same all-usable-claims binding.
+    if heading in ("abstract", "conclusion", "references"):
         claim_ids = [c.id for c in paper.ledger.claims.values() if c.usable]
     out = []
     number = 1
@@ -318,6 +560,14 @@ def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
                 "numbers": [],
                 "number": index.get(source_id) if source_id in index else number,
                 "status": claim.truth_state,
+                # `source.tier` (#473), not `source["tier"]` above: that key
+                # already means "corpus vs web citation weight" and predates
+                # this ticket. Read by `section_check`'s `guideline_cited` row.
+                "evidence_tier": source.tier if source is not None else "",
+                # Read by `section_check`'s `counterweighed` row. #474
+                "generalizing": bool(stages_mod.GENERALIZING.search(claim.text)),
+                "counter": claim.counter,
+                "counterargument_to": claim.counterargument_to or "",
             }
         )
         number += 1
@@ -327,8 +577,17 @@ def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
 def close_section(paper, section: dict, body: str, *, force: bool = False) -> float:
     """Write findings, check, judge, and ledger for one accepted section.
 
-    Returns USD spent on the judge and ledger turns. Stub failures raise
-    GateFailed so a retry rewrites only this section.
+    Returns USD spent on the judge and ledger turns. Any hard row's failure
+    (`stub`, `cited`, `style`, `counterweighed`, `guideline_cited` -- every
+    `Check` this file does not mark `hard=False`) raises `GateFailed` so a
+    retry rewrites only this section. `evidence_requirements_met` is not
+    one of this file's own rows; it is graded in `stages.search_gate`,
+    against the whole plan, not one section. #517 follow-up: before this,
+    `close_section` raised only for `stub`; every other hard row was
+    written to `section-check.json` and never read back, so a section
+    that failed `guideline_cited` still
+    shipped. The SDK twin already enforces every hard row this way,
+    through `check_failed = bool(last_score.signature())`.
     """
     import stages as stages_mod  # noqa: PLC0415
     from stages import GateFailed  # noqa: PLC0415
@@ -359,7 +618,17 @@ def close_section(paper, section: dict, body: str, *, force: bool = False) -> fl
     pack = work / "corpus" / "brain-pack.md"
     if pack.exists():
         blob += "\n" + pack.read_text(encoding="utf-8")
-    score = section_check(body, section=section, findings=findings, evidence_blob=blob)
+    # #517. Every on-topic guideline this run has already retrieved for a
+    # different section, so `guideline_cited` can require it here too.
+    ledger_sources = guideline_ledger_sources(paper.ledger, index)
+    score = section_check(
+        body,
+        section=section,
+        findings=findings,
+        evidence_blob=blob,
+        ledger_sources=ledger_sources,
+        topic=paper.topic,
+    )
     (knowledge / "section-check.json").write_text(
         json.dumps(
             {
@@ -372,8 +641,8 @@ def close_section(paper, section: dict, body: str, *, force: bool = False) -> fl
         + "\n",
         encoding="utf-8",
     )
-    if "stub" in score.signature():
-        raise GateFailed(score.report(), ("stub",))
+    if not score.passed:
+        raise GateFailed(score.report(), score.signature())
 
     usd = 0.0
     reply = paper._ask(

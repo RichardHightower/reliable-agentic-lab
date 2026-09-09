@@ -1,0 +1,12 @@
+{
+  "_comment": "Crossref reply for https://doi.org/10.1000/xyz123, recorded for tests/test_metadata.py #473 adds crossref_type for source_policy.tier_for(); Crossref's type alone cannot tell a position stand from a primary trial, so this fixture still tiers 'other' -- see the PR's limitations.",
+  "title": "Position Stand on Creatine Supplementation and Lean Mass",
+  "authors": [
+    "Jane Smith",
+    "Miguel Alvarez"
+  ],
+  "year": "2021",
+  "venue": "International Journal of Sports Nutrition",
+  "text": "This position stand reviews evidence that 3 to 5 grams per day of creatine monohydrate preserves lean body mass during periods of caloric restriction in resistance trained adults.",
+  "crossref_type": "journal-article"
+}

@@ -55,3 +55,7 @@ For each question, return:
 - every URL the source gave you
 - a `quote` from the source for each claim you want the writer to use
 - `confidence`, and say plainly when it is low
+- `study`, when the source reports a human study behind the claim: population,
+  design, and sample size, for example `{"design": "RCT", "n": 42, "weeks": 8}`.
+  Omit it entirely when the source gives none of this. Do not guess a number
+  the source never stated.

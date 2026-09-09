@@ -271,6 +271,18 @@ def _score(text: str, query_terms: list[str]) -> int:
     return sum(1 for term in query_terms if term in lowered)
 
 
+def _relevance_floor(n_terms: int) -> float:
+    """The `score` a hit needs to count toward "thick" (#405).
+
+    A big brain matches one term of almost any topic; count alone is not
+    relevance. Two distinct terms clears it, or half the terms when the
+    topic is short enough that two of them is not a fair bar.
+    """
+    if 0 < n_terms < 4:
+        return n_terms / 2
+    return 2
+
+
 def _links(meta: dict, rel: str) -> list[str]:
     out = []
     for item in meta.get("links") or []:
@@ -496,7 +508,10 @@ def pack(
     """Write `brain-pack.md` and `brain-pack.json` under dest.
 
     The pack is prior conclusions and vocabulary, not verified fact. A missing
-    root is recorded as a note. Fewer than ten hits sets `corpus_thin`.
+    root is recorded as a note. Fewer than ten *relevant* hits sets
+    `corpus_thin` (#405): a hit counts only when its `score` clears
+    `_relevance_floor`, so a big brain matching one term of an unrelated
+    topic does not read as thick.
     """
     dest_dir = Path(dest)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -514,11 +529,15 @@ def pack(
     for hit in hits:
         by_subject[hit.subject or "unsorted"] = by_subject.get(hit.subject or "unsorted", 0) + 1
 
+    floor = _relevance_floor(len(terms(topic)))
+    relevant = sum(1 for hit in hits if hit.score >= floor)
+
     payload = {
         "topic": topic,
         "roots": [str(path) for path in existing],
         "missing": notes,
-        "corpus_thin": len(hits) < 10,
+        "corpus_thin": relevant < 10,
+        "relevant": relevant,
         "subjects": by_subject,
         "hits": [hit.as_dict() for hit in hits],
         "keys": [hit.key for hit in hits],

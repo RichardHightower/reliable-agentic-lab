@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import checks
@@ -22,8 +23,10 @@ import citations
 import corpus
 import gates
 import locate
+import metadata
 import outline as outlines
 import rkc
+import source_policy
 from turns import Escalate, TurnFailed
 
 LIVE_SEARCHES_PER_QUESTION = 2
@@ -99,6 +102,11 @@ def question_list(section: dict) -> list[dict]:
                 "id": f"{section['id']}-q{index}",
                 "text": text,
                 "kind": outlines.question_kind(raw),
+                # #475. `{}` for a bare-string question, an older outline, or
+                # one this test built directly: the run pass below treats an
+                # empty block as nothing required, the same as `checks
+                # .evidence_requirements_met` does.
+                "evidence_requirements": outlines.question_evidence_requirements(raw),
             }
         )
     return out
@@ -164,16 +172,481 @@ def _finding_from_claim(claim: dict, section_id: str, question: str, index: int)
         "numbers": claim.get("numbers") or [],
         "origin": "corpus" if kind == "corpus" else "web",
         "epistemic": claim.get("epistemic") or "",
+        # Population, design, and sample size, when the model reported one.
+        # Unused until #478's study table; carried here only so it survives
+        # to `claims.json`. #471
+        "study": claim.get("study") or {},
     }
+
+
+def enrich_source_metadata(findings: list[dict], run) -> None:
+    """Replace each web finding's title with the record's, in place. #470
+
+    One call, over every finding a section produced, whichever research path
+    built it: the per-question `research()` loop through
+    `findings_from_research`, the base `Turns.research_section` default (which
+    calls that same function), or the live `SdkTurns.research_section`, which
+    hands back the identical `_SOURCE_SCHEMA` shape straight from the model.
+    A single choke point here, after every path has converged on one finding
+    shape, beats fetching inside each path separately and disagreeing about
+    which title is "the model's" once a run enriches the same finding twice.
+
+    `run` is `None` in every test and call site that predates this ticket,
+    which is a no-op: the model's title stands exactly as before. The same
+    holds for a `run.turns` that declares no `backend` at all, which is every
+    hand-built test double in this suite that is not modelling the research
+    backend. Treating "no backend concept" as "live, go fetch" would send a
+    real DNS query for every `https://example.invalid/...` those tests
+    construct.
+
+    Only a `turns` that actually holds a `backend` attribute, fixture or
+    live, is enriched. The fetch is cached per work directory
+    (`metadata.cached_fetch`), so a source two sections cite, or a resumed
+    run reloading a stamped section, pays for it once.
+    """
+    if run is None or not hasattr(getattr(run, "turns", None), "backend"):
+        return
+    backend = run.turns.backend
+    for finding in findings:
+        source = finding.get("source") or {}
+        url = str(source.get("url_or_path") or "")
+        # Not `kind == "web"`: `locate_cabinet_findings` relabels a matched
+        # cabinet source `kind = "corpus"` even once it carries a real public
+        # URL, and that source is just as fetchable as one the researcher
+        # found directly. The scheme is the actual gate: a corpus key or a
+        # `brain:` reference is never `http(s)://`, and `metadata.fetch_record`
+        # refuses anything else anyway, this check only saves the call.
+        if not url.lower().startswith(("http://", "https://")):
+            continue
+        fetched = metadata.cached_fetch(
+            run.work_dir, url, backend, model_title=source.get("title") or ""
+        )
+        source["title"] = fetched.get("title") or source.get("title") or ""
+        source["authors"] = fetched.get("authors") or []
+        source["year"] = fetched.get("year") or ""
+        source["venue"] = fetched.get("venue") or ""
+        source["note"] = fetched.get("note") or ""
+        # The abstract or page text the fetch carried. #471's `attributed()`
+        # reads this, never the researcher's own quote.
+        source["text"] = fetched.get("text") or ""
+        # A dict lookup on the record's own publication type, never the
+        # model's opinion. Named `evidence_tier`, not `tier`: this schema
+        # already carries a numeric `tier` (a corpus-vs-web citation weight,
+        # `_finding_from_claim` above), and the two are unrelated. #473
+        source["evidence_tier"] = source_policy.tier_for(fetched)
+        finding["source"] = source
+
+
+# #471: the claim's own quote, or all of its numbers, must appear in the text
+# `enrich_source_metadata` just fetched for the source it names. Lives here,
+# not in `paper.py`: `run_section` is the path a real run executes, and
+# `paper.verify` is dead code no `LINEAR` or `CYCLE` stage calls.
+_NUMBER = re.compile(r"\d[\d,.]*\d|\d")
+
+
+def _numbers(text: str) -> set[str]:
+    return {token.replace(",", "") for token in _NUMBER.findall(text or "")}
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").lower()).strip()
+
+
+def attributed(finding: dict, source_text: str) -> bool:
+    """Does the text fetched for a finding's own cited source back it?
+
+    The finding's own `quote` (the researcher's excerpt) must appear in
+    `source_text`, or every one of the claim's numbers must -- one shared
+    number out of several is not enough: a source that only says "a 12 week
+    study" does not back "creatine adds 1.2 kg over 12 weeks" merely because
+    12 appears in both. Neither a quote nor a number is not a failure: a
+    purely qualitative claim carries nothing this cheap, model-free check
+    can contradict, and dropping it here would invent a mismatch that was
+    never checked. #471
+    """
+    quote = str(finding.get("quote") or "").strip()
+    numbers = _numbers(finding.get("claim") or "")
+    if not quote and not numbers:
+        return True
+    normalized_source = _normalize(source_text)
+    if quote and _normalize(quote) in normalized_source:
+        return True
+    return bool(numbers) and numbers <= _numbers(source_text)
+
+
+def _flatten_for_grading(findings: list[dict]) -> list[dict]:
+    """Raw findings, reduced to the `{tier, year, text, url}` shape
+    `checks.evidence_requirements_met` grades. `url` is what that function
+    dedupes `min_count` on: two findings citing one URL are one source, not
+    two. #475"""
+    flattened = []
+    for finding in findings:
+        source = finding.get("source") or {}
+        flattened.append(
+            {
+                "tier": source.get("evidence_tier") or "",
+                "year": source.get("year") or "",
+                "text": f"{finding.get('claim') or ''} {finding.get('quote') or ''}",
+                "url": source.get("url_or_path") or "",
+            }
+        )
+    return flattened
+
+
+def attribute_findings(run, findings: list[dict], sid: str) -> list[dict]:
+    """Drop a finding whose own cited source does not back it. #471
+
+    Python only, no model call, so it runs over every finding here,
+    unconditionally, before `run.max_claims` caps the model verify turn
+    below. Gated the same way `enrich_source_metadata` is: a `run.turns`
+    with no `backend` attribute at all (every pre-#471 test double) is
+    untouched, so old behaviour is unchanged byte for byte.
+    """
+    if not hasattr(getattr(run, "turns", None), "backend"):
+        return findings
+    kept: list[dict] = []
+    dropped: list[str] = []
+    for finding in findings:
+        source = finding.get("source") or {}
+        source_text = str(source.get("text") or "")
+        if source_text and not attributed(finding, source_text):
+            dropped.append(finding.get("claim") or finding.get("id") or "")
+            continue
+        if not source_text:
+            note = "unattributed: attribution not checked"
+            source["note"] = f"{source['note']}; {note}" if source.get("note") else note
+            finding["source"] = source
+        kept.append(finding)
+    if dropped:
+        run.log(f"    {sid} attribution: dropped {len(dropped)} claim(s) the cited source does not say: {dropped}")
+    return kept
+
+
+# #473. A preprint's number is the least trustworthy citation in the paper; a
+# systematic review's is closest to a primary trial's own. Lower sorts first,
+# so a run past `--max-follow` spends its turns on the shakiest claims.
+_FOLLOW_ORDER = {
+    "preprint_or_compilation": 0,
+    "narrative_review": 1,
+    "meta_analysis_or_systematic_review": 2,
+}
+
+
+def _follow_candidates(findings: list[dict]) -> list[dict]:
+    """Numeric findings bound only to a review, a preprint, or a compilation."""
+    candidates = [
+        finding
+        for finding in findings
+        if _numbers(finding.get("claim") or "")
+        and (finding.get("source") or {}).get("evidence_tier") in source_policy.SECONDARY_TIERS
+    ]
+    candidates.sort(
+        key=lambda f: (
+            _FOLLOW_ORDER.get((f.get("source") or {}).get("evidence_tier"), 9),
+            float(f.get("evidence_strength") or 0.5),
+        )
+    )
+    return candidates
+
+
+def _apply_follow_result(run, finding: dict, result: dict) -> bool:
+    """Rebind a finding to the primary a follow turn found, or mark it secondary.
+
+    A hit only counts when the found source's own tier is not itself
+    secondary: the same review answering twice, or a different review, must
+    not clear the caveat (#473 item 2). A hit whose fetched text contradicts
+    the claim is treated the same as a miss: a primary study's own URL is
+    not a licence to skip the check #471 already runs on every other
+    binding.
+
+    The original review survives under `finding["via"]`, not discarded
+    (item 5): the paper can still say the number arrived through it. The
+    new source's own `note` is computed fresh, including the same
+    `unattributed: attribution not checked` marker `attribute_findings`
+    writes, so a rebind to a record with no fetched text is never carried
+    as if it had been attributed (item 4).
+    """
+    url = str(result.get("url") or "").strip()
+    if result.get("found") and url.lower().startswith(("http://", "https://")):
+        backend = run.turns.backend
+        model_title = result.get("title") or url
+        fetched = metadata.cached_fetch(run.work_dir, url, backend, model_title=model_title)
+        tier = source_policy.tier_for(fetched)
+        if tier not in source_policy.SECONDARY_TIERS:
+            quote = str(result.get("quote") or "")
+            fetched_text = fetched.get("text") or ""
+            probe = {"quote": quote, "claim": finding.get("claim") or ""}
+            if not fetched_text or attributed(probe, fetched_text):
+                note = fetched.get("note") or ""
+                if not fetched_text:
+                    marker = "unattributed: attribution not checked"
+                    note = f"{note}; {marker}" if note else marker
+                finding["via"] = finding.get("source") or {}
+                finding["source"] = {
+                    "kind": "web",
+                    "ref": url,
+                    "title": fetched.get("title") or model_title,
+                    "url_or_path": url,
+                    "vendor": "",
+                    "tier": 1,
+                    "evidence_tier": tier,
+                    "authors": fetched.get("authors") or [],
+                    "year": fetched.get("year") or "",
+                    "venue": fetched.get("venue") or "",
+                    "note": note,
+                    "text": fetched_text,
+                }
+                if quote:
+                    finding["quote"] = quote
+                finding["secondary"] = False
+                return True
+    finding["secondary"] = True
+    return False
+
+
+def follow_primary_sources(run, findings: list[dict], sid: str) -> None:
+    """One follow turn per shaky numeric claim, capped at `run.max_follow`
+    across the whole run. #473
+
+    A claim whose only bound source is a review, a preprint, or a
+    compilation is asked once for the primary study behind its number. A hit
+    rebinds the finding to that primary; a miss is recorded, `secondary`, so
+    the writer is told outright rather than left to infer it, and the brief
+    says "as summarized by [n]" (`_claims_for_writer`).
+
+    The cap is per run, not per section: `run.follow_used` is the running
+    count across every section's call, the field `--max-follow` bounds.
+
+    Gated the same way `attribute_findings` is: a `run.turns` with no
+    `backend` attribute at all (every pre-#470 test double) is a no-op.
+    """
+    if not hasattr(getattr(run, "turns", None), "backend"):
+        return
+    candidates = _follow_candidates(findings)
+    if not candidates:
+        return
+    remaining = max(0, run.max_follow - run.follow_used)
+    followed = candidates[:remaining]
+    run.log(
+        f"    {sid} follow: {len(followed)} of {len(candidates)} candidate(s), "
+        f"{run.follow_used + len(followed)}/{run.max_follow} used this run"
+    )
+    for finding in followed:
+        source = finding.get("source") or {}
+        try:
+            result = run.turns.follow_primary(
+                finding.get("claim") or "", source.get("title") or "", source.get("evidence_tier") or ""
+            )
+        except (TurnFailed, Escalate):
+            result = {"found": False}
+        _apply_follow_result(run, finding, result)
+        run.follow_used += 1
+        run.state.follow_used = run.follow_used
+        try:
+            run.state.save(run.work_dir)
+        except OSError:
+            pass  # telemetry never fails a run
+
+
+# #474. A generalizing claim ruled a lever out from one datapoint (#474's own
+# example: "protein alone did not prevent lean-mass loss" is true of one
+# no-training protocol, not the literature). Word-bounded, so "alone" does
+# not fire inside "standalone" and "never" does not fire inside
+# "nevertheless": both words sit right against the boundary the regex
+# tests, with no space or punctuation to trip it, and both correctly stay
+# unmatched.
+GENERALIZING = re.compile(r"\b(did not|does not|alone|fails to|no effect|always|never)\b", re.I)
+
+# #474. What the writer's brief carries for a claim the counter-evidence
+# pass never reached because the run cap was already spent.
+CAPPED_NOTE = "counter-evidence not searched, run cap reached"
+
+
+def _shares_terms(a: str, b: str) -> bool:
+    """Loose overlap: at least one word of length 4+ in common."""
+    left = {w for w in re.findall(r"[a-z]{4,}", (a or "").lower())}
+    right = {w for w in re.findall(r"[a-z]{4,}", (b or "").lower())}
+    return bool(left & right)
+
+
+def generalizing_claims(findings: list[dict], section: dict) -> list[dict]:
+    """Findings whose claim generalizes, or is the sole support for a
+    `claims_to_support` item, shakiest first. #474
+
+    Every qualifying finding is tagged `generalizing: True` in place, whether
+    or not the run cap below ends up spending a turn on it: a candidate the
+    cap left unprocessed still has to fail `checks.section_check`'s
+    `counterweighed` row, naming a claim nobody checked.
+
+    A finding that already carries a `counter` state ("hit", "miss", or
+    "capped") is excluded: the pass already reached a verdict on it, and a
+    resumed section reloading old findings must not spend a second turn
+    asking the same claim.
+
+    "Bindings" has no per-finding analogue in this port: a finding carries
+    exactly one source, where the Deep Agents twin's `Claim` can carry
+    several. The nearest signal available is how many findings back the same
+    `claims_to_support` assertion; a claim not tied to any assertion is not
+    thin by that measure, so it sorts after every claim that is. Port
+    asymmetry, stated not hidden: the Deep Agents twin runs its
+    counter-evidence pass during `stage_search`, before its outline (and its
+    section-level `claims_to_support`) exists, so it selects by the regex
+    alone.
+    """
+    to_support = section.get("claims_to_support") or []
+    support_count: dict[int, int] = {}
+    for target in to_support:
+        supporters = [f for f in findings if _shares_terms(f.get("claim") or "", target)]
+        for finding in supporters:
+            support_count[id(finding)] = len(supporters)
+
+    candidates = [
+        finding
+        for finding in findings
+        if not finding.get("counter")
+        and (GENERALIZING.search(finding.get("claim") or "") or support_count.get(id(finding)) == 1)
+    ]
+    for finding in candidates:
+        finding["generalizing"] = True
+
+    def sort_key(finding: dict) -> tuple:
+        tier = (finding.get("source") or {}).get("evidence_tier") or ""
+        bindings = support_count.get(id(finding), 99)
+        return (0 if bindings == 1 else 1, 0 if tier in source_policy.SECONDARY_TIERS else 1, bindings)
+
+    return sorted(candidates, key=sort_key)
+
+
+def counter_evidence_pass(run, findings: list[dict], section: dict) -> None:
+    """One counter-evidence turn per generalizing claim, capped at
+    `run.max_counter` across the whole run. #474
+
+    A hit appends a new finding, `counterargument_to` pointing at the claim
+    it contradicts, so the two reach the writer together
+    (`_claims_for_writer`). A miss is recorded on the claim itself
+    (`finding["counter"] = "miss"`, never a free-text note), so
+    `checks.section_check`'s `counterweighed` row can tell "never checked"
+    from "checked, found nothing", and the writer's brief says "no contrary
+    evidence found in this search".
+
+    A candidate the cap does not reach this call is marked `"capped"`
+    immediately, deterministically, with no model turn:
+    `counterweighed` must find every generalizing claim in one of `hit`,
+    `miss`, or `capped` once this pass has run over it, and a `capped`
+    claim's brief tells the writer to hedge it like a single-source claim.
+
+    Gated the same way `follow_primary_sources` is.
+    """
+    if not hasattr(getattr(run, "turns", None), "backend"):
+        return
+    sid = section.get("id") or ""
+    candidates = generalizing_claims(findings, section)
+    if not candidates:
+        return
+    remaining = max(0, run.max_counter - run.counter_used)
+    selected = candidates[:remaining]
+    for finding in candidates[remaining:]:
+        finding["counter"] = "capped"
+    run.log(
+        f"    {sid} counter: {len(selected)} of {len(candidates)} candidate(s), "
+        f"{run.counter_used + len(selected)}/{run.max_counter} used this run"
+    )
+    next_index = len(findings) + 1
+    for finding in selected:
+        try:
+            result = run.turns.counter_search(finding.get("claim") or "")
+        except (TurnFailed, Escalate):
+            result = {"found": False}
+        url = str(result.get("url") or "").strip()
+        counter_text = str(result.get("counter_claim") or "").strip()
+        hit = False
+        if (
+            result.get("found")
+            and counter_text
+            and not is_retrieval_claim(counter_text)
+            and url.lower().startswith(("http://", "https://"))
+        ):
+            backend = run.turns.backend
+            model_title = result.get("title") or url
+            fetched = metadata.cached_fetch(run.work_dir, url, backend, model_title=model_title)
+            quote = str(result.get("quote") or "")
+            probe = {"quote": quote, "claim": counter_text}
+            # A hit whose fetched text does not back the model's own contrary
+            # claim is treated as a miss, the same way `_apply_follow_result`
+            # treats a fetched page that contradicts the primary it named.
+            if not fetched.get("text") or attributed(probe, fetched.get("text") or ""):
+                findings.append(
+                    {
+                        "id": f"{sid}-cf{next_index}",
+                        "section_id": sid,
+                        "answers_question": finding.get("answers_question") or "",
+                        "claim": counter_text,
+                        "quote": quote,
+                        "source": {
+                            "kind": "web",
+                            "ref": url,
+                            "title": fetched.get("title") or model_title,
+                            "url_or_path": url,
+                            "vendor": "",
+                            "tier": 1,
+                            "evidence_tier": source_policy.tier_for(fetched),
+                            "authors": fetched.get("authors") or [],
+                            "year": fetched.get("year") or "",
+                            "venue": fetched.get("venue") or "",
+                            "note": fetched.get("note") or "",
+                            "text": fetched.get("text") or "",
+                        },
+                        "evidence_strength": 0.5,
+                        "counterargument_to": finding.get("id") or "",
+                        "numbers": [],
+                        "origin": "web",
+                        "epistemic": "",
+                        "study": {},
+                    }
+                )
+                finding["counter_url"] = url
+                hit = True
+        finding["counter"] = "hit" if hit else "miss"
+        run.counter_used += 1
+        run.state.counter_used = run.counter_used
+        try:
+            run.state.save(run.work_dir)
+        except OSError:
+            pass  # telemetry never fails a run
+
+
+# A claim describes the world. These phrases describe the search instead, and
+# a claim built out of one is a narrated retrieval miss, not a finding. The
+# creatine paper this ticket names put two such sentences in the body, each
+# `important: true`: "No arxiv.org source was found that reports a specific
+# quantitative rate/magnitude of lean mass loss...". #469
+RETRIEVAL_PHRASES = (
+    "source was found",
+    "could not be located",
+    "via the search boundary",
+    "search protocol",
+)
+
+
+def is_retrieval_claim(text: str) -> bool:
+    """Whether a claim's text is about the search rather than the topic."""
+    lowered = str(text or "").lower()
+    return any(phrase in lowered for phrase in RETRIEVAL_PHRASES)
 
 
 def findings_from_research(result: dict, section_id: str, question: str, start: int = 1) -> list[dict]:
     out = []
     for offset, claim in enumerate(result.get("claims") or [], start=start):
+        text = claim.get("text") or claim.get("claim") or ""
+        if is_retrieval_claim(text):
+            # Refused, not carried forward as a single-source claim about
+            # nothing. The gap pass below sees this question still has no
+            # finding and researches it again instead. #469
+            continue
         out.append(_finding_from_claim(claim, section_id, question, offset))
     if not out and (result.get("answer") or result.get("findings")):
         for offset, item in enumerate(result.get("findings") or [], start=start):
-            if isinstance(item, dict) and item.get("claim"):
+            if isinstance(item, dict) and item.get("claim") and not is_retrieval_claim(item.get("claim")):
                 item = dict(item)
                 item.setdefault("section_id", section_id)
                 item.setdefault("answers_question", question)
@@ -199,27 +672,86 @@ def _claims_for_writer(
     `None` means the caller has no registry, which is the offline and unit-test
     path. The old local numbering stands in there.
     """
+    local_numbers: dict[str, int] = {}
+    if numbers is None:
+        # #474. A claim's own citation and its counter-evidence's citation
+        # can be numbered out of order: the counter finding a hit appends
+        # is reached later in this same loop than the claim it answers.
+        # Pre-number every kept, non-contradicted finding once, by url, so
+        # either citation can be resolved regardless of which is processed
+        # first. Fixes a bug where the fallback path cited the claim's own
+        # number in place of the counter finding's.
+        n = 1
+        for finding in findings:
+            status = (verdicts.get(finding["id"]) or {}).get("state") or "unverified"
+            if status == "contradicted":
+                continue
+            url = (finding.get("source") or {}).get("url_or_path") or ""
+            local_numbers[url] = n
+            n += 1
+
+    def cite_for(url: str) -> int:
+        return local_numbers.get(url, 0) if numbers is None else numbers.get(url, 0)
+
     usable = []
-    number = 1
     for finding in findings:
         status = (verdicts.get(finding["id"]) or {}).get("state") or "unverified"
         if status == "contradicted":
             continue
-        url = (finding.get("source") or {}).get("url_or_path") or ""
-        cite = number if numbers is None else numbers.get(url, 0)
+        source = finding.get("source") or {}
+        url = source.get("url_or_path") or ""
+        cite = cite_for(url)
+        text = finding.get("claim") or ""
+        if finding.get("secondary"):
+            # #473. `follow_primary_sources` left this bound to the review or
+            # preprint it started with; the writer is told so outright,
+            # deterministically, rather than trusted to infer it from a
+            # status value it was never taught.
+            text = f"{text} (as summarized by [{cite}])."
+        counter = finding.get("counter") or ""
+        if counter == "hit":
+            # #474. `counter_evidence_pass` found contrary evidence; point the
+            # writer at its own citation number, not the claim's. The writer
+            # card carries the one instruction to state the condition, so it
+            # is not repeated here.
+            counter_cite = cite_for(finding.get("counter_url") or "")
+            text = f"{text} Contrary evidence in [{counter_cite}]."
+        elif counter == "miss":
+            text = f"{text} (no contrary evidence found in this search)."
+        elif counter == "capped":
+            text = f"{text} ({CAPPED_NOTE}; hedge like a single source)."
+        shortfall = finding.get("evidence_shortfall") or ""
+        if shortfall:
+            # #475, judge revision on #520, blocking finding 1: the one
+            # shortfall turn is spent and the block is still short. The
+            # writer is told outright, the same way `secondary` and
+            # `capped` already are, rather than left to infer a gap it was
+            # never taught.
+            text = f"{text} (evidence requirement not fully met: {shortfall}. Hedge accordingly.)"
         usable.append(
             {
                 "id": finding["id"],
-                "text": finding.get("claim") or "",
+                "text": text,
                 "source_url": url,
                 "quote": finding.get("quote") or "",
                 "question_id": finding.get("answers_question") or "",
                 "section": section_id,
                 "status": status,
                 "number": cite,
+                # Read by `checks.section_check`'s `guideline_cited` row, not
+                # sent to the writer: `WRITER_CLAIM_FIELDS` in `turns.py`
+                # still names only `id, number, text, status`. #473
+                "tier": source.get("evidence_tier") or "",
+                # Read by `checks.section_check`'s `evidence_requirements_met`
+                # row, same reason `tier` above is. #475
+                "year": source.get("year") or "",
+                # Read by `checks.section_check`'s `counterweighed` row, same
+                # reason. #474
+                "generalizing": bool(finding.get("generalizing")),
+                "counter": counter,
+                "counterargument_to": finding.get("counterargument_to") or "",
             }
         )
-        number += 1
     return usable
 
 
@@ -361,6 +893,116 @@ def _write_findings(run, section_id: str, payload: dict) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     path = dest / "findings.json"
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _ledger_guideline_sources(run, section_id: str) -> list[dict]:
+    """Every `position_stand_or_guideline`-tier source an earlier section has
+    already retrieved, by the approved outline's own order. #517
+
+    Sections run forward-only (`paper.do_sections`), one fully finished
+    before the next starts, so on a fresh run every earlier section's
+    `findings.json` is already on disk and no later one is. #517 follow-up
+    6: a resumed or `--reuse-research` run can already hold a later
+    section's `findings.json` from an earlier, interrupted pass, so
+    filtering by disk presence alone would show this section a guideline
+    a fresh run never would have. The outline's own order, not the
+    filesystem, decides "earlier": a section not in `order` at all (a test
+    double with no approved outline) falls back to every other file, the
+    behaviour before this ticket.
+
+    This section's own findings reach `checks.section_check` through
+    `findings` already, so they are excluded here rather than counted
+    twice, whichever branch decides "earlier".
+
+    Each entry is registered for a citation number here, the same call
+    `run_section` already makes for this section's own findings, so a
+    guideline the writer is told to cite is never one `citations.register`
+    has not yet given a number. Registration is idempotent by construction
+    (`citations.register` reuses a url's existing number), so calling this
+    again on a resume never re-adds or renumbers a guideline it already
+    gave one to.
+    """
+    root = run.file("knowledge")
+    if not root.is_dir():
+        return []
+    try:
+        import paper as paper_mod  # noqa: PLC0415
+
+        order = [item["id"] for item in paper_mod.approved_outline(run).get("sections") or []]
+    except Exception:
+        order = []
+    position = {sid: index for index, sid in enumerate(order)}
+    limit = position.get(section_id)
+
+    seen: dict[str, dict] = {}
+    for fpath in sorted(root.glob("*/findings.json")):
+        sid = fpath.parent.name
+        if sid == section_id:
+            continue
+        if limit is not None and position.get(sid, -1) >= limit:
+            continue
+        try:
+            payload = json.loads(fpath.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for finding in payload.get("findings") or []:
+            source = finding.get("source") or {}
+            if source.get("evidence_tier") != "position_stand_or_guideline":
+                continue
+            url = str(source.get("url_or_path") or "")
+            if not url or url in seen:
+                continue
+            # #517 follow-up 5. `citations.register` below raises on anything
+            # that is not `http(s)`. A live run's own locator already drops a
+            # corpus key or `brain:` reference before it ever reaches
+            # `findings.json`, so this is a defence against a stale or
+            # hand-edited work directory, not a path a fresh run takes: skip
+            # the source rather than let one unrelated section's guideline
+            # crash a later section's own check.
+            if not url.lower().startswith(("http://", "https://")):
+                run.log(f"    {section_id} ledger scan: skipping {url!r}, not a url a reader can open")
+                continue
+            seen[url] = {
+                "url": url,
+                "title": source.get("title") or "",
+                "abstract": source.get("text") or "",
+                "tier": "position_stand_or_guideline",
+            }
+    if not seen:
+        return []
+    numbers = citations.register(run.work_dir, list(seen.keys()))
+    for url, source in seen.items():
+        source["number"] = numbers.get(url) or 0
+    return list(seen.values())
+
+
+def _guideline_brief(section: dict, ledger_sources: list[dict], topic: str, bound: list[dict]) -> str:
+    """Tell a safety or dosing section's writer which ledger guidelines it
+    may cite, one line each, by the number `checks.section_check`'s
+    `guideline_cited` row will hold it to. #517
+
+    `checks.guideline_ledger_matches` is the one place that decides which
+    ledger sources are on topic; this only turns its answer into prose the
+    writer reads, and skips a source `bound` already carries: nothing new
+    to tell the writer about a claim it already has.
+    """
+    matches = checks.guideline_ledger_matches(ledger_sources, section, topic)
+    if not matches:
+        return ""
+    already = {str(f.get("number")) for f in bound if f.get("number")}
+    lines = [
+        f"- {source.get('title') or source.get('url')} [{source.get('number')}]"
+        for source in matches
+        if source.get("number") and str(source.get("number")) not in already
+    ]
+    if not lines:
+        return ""
+    return (
+        "The ledger already holds these guideline or position-stand sources, "
+        "retrieved while researching another section, on this section's own "
+        "topic. Every one listed here must be cited, by its reference "
+        "number:\n" + "\n".join(lines)
+    )
 
 
 def _pack_hits(run) -> list[dict]:
@@ -597,29 +1239,99 @@ def run_section(run, section: dict) -> dict:
     findings, unlocated = locate_cabinet_findings(run, findings)
     run.write_json(f"knowledge/{sid}/{UNRESOLVED_FILE}", {"unresolved": unlocated})
 
-    # 3c gap pass
+    # 3b-ter metadata, early. `evidence_requirements_met` below needs
+    # `evidence_tier`, which only exists after this runs; the full pass at
+    # 3c-bis below (idempotent, cache-backed) covers whatever the gap loop
+    # adds. #475
+    enrich_source_metadata(findings, run)
+
+    # 3c gap pass. A question with no finding at all is researched once, the
+    # existing behavior; a question with findings that still fall short of
+    # its own `evidence_requirements` block is researched once more too,
+    # naming the shortfall. Either way it is one extra turn per question,
+    # consumed here, not retried: `do_sections` runs this section's loop
+    # once, forward only, never re-entering it mid-run. #475
     gaps = [
         item
         for item in (loaded.get("coverage_gaps") or [])
         if not _answered(findings, item.get("question") or "")
     ]
     answered = {f.get("answers_question") for f in findings if f.get("claim")}
+    unmet_shortfalls = getattr(getattr(run, "state", None), "evidence_shortfall_unmet", None) or {}
     for question in questions:
-        if question["text"] in answered or _answered(findings, question["text"]):
+        bound = [f for f in findings if f.get("answers_question") == question["text"]]
+        unanswered = question["text"] not in answered and not _answered(findings, question["text"])
+        requirements = question.get("evidence_requirements") or {}
+        # #475, judge revision on #520, blocking finding 1 and 2. A question
+        # already graded and accepted as unmet is not asked again, and does
+        # not fail the section a second time: the shortfall already
+        # travelled as a named coverage gap once, the one turn it gets.
+        already_unmet = question["text"] in unmet_shortfalls
+        met, reason = (
+            (True, "")
+            if not requirements or already_unmet
+            else checks.evidence_requirements_met(requirements, _flatten_for_grading(bound))
+        )
+        if not unanswered and met:
             continue
+        note = "" if unanswered else f"evidence_requirements shortfall: {reason}. Search again naming what is missing."
         try:
             if hasattr(run.turns, "gap_research"):
-                raw = run.turns.gap_research(section, question, queries, note="")
+                raw = run.turns.gap_research(section, question, queries, note=note)
             else:
-                raw = run.turns.research(question["text"], "gap: restated, previous queries listed")
+                raw = run.turns.research(
+                    question["text"], note or "gap: restated, previous queries listed"
+                )
         except (TurnFailed, Escalate):
             raw = {"claims": [], "findings": []}
         extra = findings_from_research(raw, sid, question["text"], start=len(findings) + 1)
         if extra:
+            enrich_source_metadata(extra, run)
             findings.extend(extra)
-        else:
+        bound = [f for f in findings if f.get("answers_question") == question["text"]]
+        met, reason = (
+            (True, "")
+            if not requirements
+            else checks.evidence_requirements_met(requirements, _flatten_for_grading(bound))
+        )
+        if unanswered and not extra:
             gaps.append({"question": question["text"], "queries": list(queries)})
+        elif not met:
+            gaps.append({"question": question["text"], "queries": list(queries), "reason": reason})
+            if requirements and hasattr(run, "state"):
+                # The one shot is spent and it is still short. Persist so a
+                # resume or `--reuse-research` does not spend a second turn
+                # on the same question, and stamp every bound finding so
+                # the writer's brief carries the hedge the way a
+                # single-source claim is hedged.
+                run.state.evidence_shortfall_unmet[question["text"]] = reason
+                try:
+                    run.state.save(run.work_dir)
+                except OSError:
+                    pass
+                for finding in bound:
+                    finding["evidence_shortfall"] = reason
         queries.append(question["text"])
+
+    # 3c-bis metadata. One pass, after every research path for this section
+    # has converged on the same finding shape, replaces each web source's
+    # title with the record's. #470
+    enrich_source_metadata(findings, run)
+
+    # 3c-ter attribution. A finding whose own cited source does not say what
+    # its claim says is dropped here, before it is written to disk, so
+    # `do_sections`'s aggregation downstream never sees it. #471
+    findings = attribute_findings(run, findings, sid)
+
+    # 3c-quater follow. A numeric finding bound only to a review, a preprint,
+    # or a compilation gets one turn asking for the primary study behind its
+    # number, before verify spends its own turns on the same findings. #473
+    follow_primary_sources(run, findings, sid)
+
+    # 3c-quinquies counter. A generalizing claim gets one turn asking for
+    # evidence it is not the case, or holds only under conditions, still
+    # before verify spends its own turns on the same findings. #474
+    counter_evidence_pass(run, findings, section)
 
     payload = {
         "section_id": sid,
@@ -687,11 +1399,18 @@ def run_section(run, section: dict) -> dict:
         else:
             state = "unverified"
         queries_used = verdict.get("queries_used") or []
+        # Silence is not a result. A `not_found`-shaped verdict still names
+        # what the verifier tried, so the record shows a search happened
+        # rather than nothing at all. #471
+        note = verdict.get("excerpt") or ""
+        if not note and state == "unverified":
+            queries = list(queries_used) or [(finding.get("claim") or "")[:80]]
+            note = f"not_found: searched {queries}"
         verdicts[finding["id"]] = {
             "finding_id": finding["id"],
             "state": state,
             "queries_used": queries_used,
-            "note": verdict.get("excerpt") or "",
+            "note": note,
         }
     (knowledge / "verdicts.json").write_text(
         json.dumps({"verdicts": list(verdicts.values())}, indent=2) + "\n",
@@ -706,6 +1425,10 @@ def run_section(run, section: dict) -> dict:
         [(f.get("source") or {}).get("url_or_path") or "" for f in findings],
     )
     bound = _claims_for_writer(findings, verdicts, sid, numbers)
+    # #517. Every on-topic guideline this run has already retrieved for a
+    # different section, so `checks.section_check`'s `guideline_cited` row
+    # can require it here too, and the writer's brief can name it.
+    ledger_sources = _ledger_guideline_sources(run, sid)
     figures = []
     diagrams_path = run.file("diagrams.json")
     if diagrams_path.exists():
@@ -743,7 +1466,9 @@ def run_section(run, section: dict) -> dict:
     except Exception:
         pass
 
-    from paper import _section_instruction  # noqa: PLC0415
+    from paper import _section_instruction, _strip_policy_leak  # noqa: PLC0415
+
+    guideline_note = _guideline_brief(section, ledger_sources, run.topic, bound)
 
     previous_sig: tuple[str, ...] | None = None
     previous_gaps: dict[str, float] = {}
@@ -762,6 +1487,10 @@ def run_section(run, section: dict) -> dict:
             retry_note = last_score.report()
         if last_verdict.get("failed_rows"):
             retry_note = (retry_note + "\n" + " ".join(last_verdict.get("notes") or [])).strip()
+        # #452 #465 #412. A `cited` failure quotes the offending sentence into
+        # `report()`, host and all, and a judge's own notes can repeat one
+        # back too. Neither may reach the writer's next attempt.
+        retry_note = _strip_policy_leak(retry_note, run.allowed_domains)
         slots, cuts = assemble_context(
             outline=approved,
             ledger=ledger,
@@ -772,6 +1501,8 @@ def run_section(run, section: dict) -> dict:
         for line in cuts:
             run.log(f"    {sid} context: {line}")
         instruction = _section_instruction(section, retry_note)
+        if guideline_note:
+            instruction = f"{instruction}\n\n{guideline_note}"
         edit_rows = _rows_for_editor(last_score, last_verdict)
         edit_verdict = {**last_verdict, "failed_rows": edit_rows}
         if edit_rows:
@@ -801,7 +1532,7 @@ def run_section(run, section: dict) -> dict:
                     existing,
                     edit_verdict,
                     relative,
-                    note=last_score.report() if last_score else "",
+                    note=_strip_policy_leak(last_score.report(), run.allowed_domains) if last_score else "",
                     claims=bound,
                 )
             else:
@@ -836,6 +1567,18 @@ def run_section(run, section: dict) -> dict:
                 run.log(f"    {sid}: the writer produced nothing on the first attempt.")
                 path.unlink(missing_ok=True)
         body = path.read_text(encoding="utf-8") if path.exists() else ""
+        # #517 follow-up 2. `assemble` strips em dashes deterministically at
+        # `paper.py`'s own call to `checks.strip_em_dashes`; `style` already
+        # fails a section over one. Normalized here too, before the section
+        # is graded, so a writer's em dash never costs an attempt over
+        # something `assemble` would have fixed silently anyway. The writer
+        # can hold `Write` on `path` directly, so the file, not only the
+        # return value, is what gets rewritten.
+        if body:
+            normalized = checks.strip_em_dashes(body)
+            if normalized != body:
+                body = normalized
+                path.write_text(body, encoding="utf-8")
         last_score = checks.section_check(
             body,
             section=section,
@@ -843,6 +1586,11 @@ def run_section(run, section: dict) -> dict:
             evidence=_evidence_blob(run, sid, findings),
             word_target=int(section.get("word_target") or 0),
             figures_given=figures,
+            evidence_requirements_unmet=getattr(
+                getattr(run, "state", None), "evidence_shortfall_unmet", None
+            ),
+            ledger_sources=ledger_sources,
+            topic=run.topic,
         )
         (knowledge / "section-check.json").write_text(
             json.dumps(last_score.to_dict(), indent=2) + "\n", encoding="utf-8"

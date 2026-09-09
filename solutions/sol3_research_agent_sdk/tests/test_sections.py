@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import types
 from pathlib import Path
 
 import checks
@@ -55,9 +56,44 @@ def test_section_check_stub_fails_on_todo():
 
 
 def test_section_check_coverage_fails_when_a_question_is_missing():
+    """#385: `coverage` scores token overlap, not the verbatim question. The
+    body must share no term with the missing question, not merely omit its
+    exact wording, for the row to fail."""
     body = "what failed is named [1]. " + ("word " * 80)
-    score = checks.section_check(body, section=_section(word_target=80), findings=[{"number": 1}])
+    section = _section(word_target=80, key_questions=["what failed", "why the deploy stalled"])
+    score = checks.section_check(body, section=section, findings=[{"number": 1}])
     assert "coverage" in score.signature()
+
+
+def test_section_check_coverage_passes_when_the_body_answers_the_question():
+    """The exact-string rule this replaces would have failed this body: the
+    question never appears verbatim, but its terms do. #385."""
+    body = "A rubric computed in code decides when the loop stops [1]. " + ("word " * 80)
+    section = _section(
+        word_target=80, key_questions=["What stops the loop from running forever?"]
+    )
+    score = checks.section_check(body, section=section, findings=[{"number": 1}])
+    assert "coverage" not in score.signature(), score.to_dict()["checks"]
+
+
+def test_section_check_coverage_needs_a_third_of_the_questions_terms():
+    """#510. `section_check`'s own coverage row scales with the question the
+    same way `checks.outline_coverage_gaps` does: a nine-term question
+    needs a third of its terms, not the old flat floor of two.
+    """
+    long_question = (
+        "How does the retry ledger track a stale approval stamp across a "
+        "resumed run and an escalation boundary?"
+    )
+    section = _section(word_target=80, key_questions=[long_question])
+
+    two_terms = "The retry path checks a stamp before it runs again [1]. " + ("word " * 80)
+    score = checks.section_check(two_terms, section=section, findings=[{"number": 1}])
+    assert "coverage" in score.signature()
+
+    three_terms = "The retry ledger checks a stamp before an escalation [1]. " + ("word " * 80)
+    score = checks.section_check(three_terms, section=section, findings=[{"number": 1}])
+    assert "coverage" not in score.signature(), score.to_dict()["checks"]
 
 
 def test_section_check_cited_accepts_the_finding_id_the_writer_holds():
@@ -175,6 +211,123 @@ def test_findings_from_research_names_every_finding_itself():
     assert [f["id"] for f in out] == ["s1-f1", "s1-f2"]
 
 
+def test_finding_from_claim_carries_the_study_object():
+    """#471: unused until #478, and only has to survive to the finding."""
+    finding = sections._finding_from_claim(
+        {"text": "A fact.", "source_url": "https://a.invalid", "study": {"design": "RCT", "n": 40}},
+        "s1",
+        "q1",
+        1,
+    )
+    assert finding["study"] == {"design": "RCT", "n": 40}
+
+
+def test_finding_from_claim_with_no_study_defaults_empty():
+    finding = sections._finding_from_claim({"text": "A fact.", "source_url": "https://a.invalid"}, "s1", "q1", 1)
+    assert finding["study"] == {}
+
+
+def test_enrich_source_metadata_with_no_run_keeps_the_model_title():
+    """The default. Every caller that predates #470 must see no change."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "source": {"kind": "web", "url_or_path": "https://a.example", "title": "The Model's Guess"},
+        }
+    ]
+    sections.enrich_source_metadata(findings, None)
+    assert findings[0]["source"]["title"] == "The Model's Guess"
+    assert "authors" not in findings[0]["source"]
+
+
+def test_enrich_source_metadata_replaces_the_title_from_the_record(tmp_path, monkeypatch):
+    """#470: the record replaces the model's title on the source, once a run
+    (and therefore a backend and a work directory) is on hand.
+
+    Every research path this ticket names -- the per-question `research()`
+    loop, the base `Turns.research_section` default, and the live
+    `SdkTurns.research_section` -- converges on the same `_finding_from_claim`
+    / `_SOURCE_SCHEMA` shape before `run_section` calls this. One test against
+    that shape covers all three.
+    """
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        assert backend is not None
+        return {
+            "title": "The Record's Actual Title",
+            "authors": ["Jane Doe"],
+            "year": "2021",
+            "venue": "A Journal",
+            "note": "",
+        }
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    class FakeBackend:
+        name = "perplexity"
+
+    class FakeTurns:
+        backend = FakeBackend()
+
+    class FakeRun:
+        work_dir = tmp_path
+        turns = FakeTurns()
+
+    findings = [
+        {
+            "id": "s1-f1",
+            "source": {"kind": "web", "url_or_path": "https://a.example", "title": "The Model's Guess"},
+        },
+        # A corpus finding is never fetched: no page to fetch from.
+        {
+            "id": "s1-f2",
+            "source": {"kind": "corpus", "url_or_path": "brain:knowledge:claim.x", "title": "x"},
+        },
+    ]
+    sections.enrich_source_metadata(findings, FakeRun())
+    web_source = findings[0]["source"]
+    assert web_source["title"] == "The Record's Actual Title"
+    assert web_source["authors"] == ["Jane Doe"]
+    assert web_source["year"] == "2021"
+    assert web_source["venue"] == "A Journal"
+    assert findings[1]["source"]["title"] == "x"
+
+
+def test_enrich_source_metadata_fetches_a_located_corpus_source_with_a_public_url(tmp_path, monkeypatch):
+    """#470 follow-up: `locate_cabinet_findings` relabels a matched cabinet
+    source `kind = "corpus"` even once it carries a real public URL. That
+    source is just as fetchable as one the researcher found directly; the
+    scheme is the real gate, not the `kind` label."""
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        return {"title": "The Record's Actual Title", "authors": [], "year": "", "venue": "", "note": ""}
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    class FakeBackend:
+        name = "perplexity"
+
+    class FakeTurns:
+        backend = FakeBackend()
+
+    class FakeRun:
+        work_dir = tmp_path
+        turns = FakeTurns()
+
+    findings = [
+        {
+            "id": "s1-f1",
+            "source": {
+                "kind": "corpus",
+                "url_or_path": "https://public.example/paper",
+                "title": "The Model's Guess",
+            },
+        }
+    ]
+    sections.enrich_source_metadata(findings, FakeRun())
+    assert findings[0]["source"]["title"] == "The Record's Actual Title"
+
+
 def test_section_check_figures_grades_what_the_writer_was_handed():
     """`diagram` runs after `sections`, so the first pass hands the writer none.
 
@@ -285,6 +438,373 @@ def test_section_check_sourced_fails_on_a_version_not_in_evidence():
     )
     assert "sourced" in score.signature()
     assert any("3.13" in c.detail for c in score.checks if c.name == "sourced")
+
+
+def test_a_safety_section_without_a_position_stand_fails():
+    """#473: a safety, dosing, or protocol section must cite every
+    position-stand or guideline source it was handed. A section with no such
+    source among its own findings passes trivially."""
+    section = _section(
+        heading="Dosing and safety",
+        key_questions=["what dose is safe"],
+        word_target=0,
+    )
+    guideline = [{"id": "s1-f1", "number": 1, "tier": "position_stand_or_guideline"}]
+
+    missing = checks.section_check(
+        "A claim about the safe dose that never names the position stand.",
+        section=section,
+        findings=guideline,
+    )
+    assert "guideline_cited" in missing.signature()
+
+    cited = checks.section_check(
+        "A claim about the safe dose, per the position stand [1].",
+        section=section,
+        findings=guideline,
+    )
+    assert "guideline_cited" not in cited.signature()
+
+    no_guideline_source = checks.section_check(
+        "A claim about the safe dose with no guideline source in the ledger.",
+        section=section,
+        findings=[{"id": "s1-f1", "number": 1, "tier": "primary_trial"}],
+    )
+    assert "guideline_cited" not in no_guideline_source.signature()
+
+    off_topic = checks.section_check(
+        "A claim about something else entirely that never cites [1].",
+        section=_section(heading="Background", key_questions=["what is the mechanism"]),
+        findings=guideline,
+    )
+    assert "guideline_cited" not in off_topic.signature()
+
+
+def test_guideline_cited_skips_a_non_numeric_number_rather_than_raising():
+    """#473 item 7: every current producer supplies an int, but a truthy,
+    non-numeric `number` must not crash the row."""
+    section = _section(heading="Dosing and safety", key_questions=["what dose is safe"], word_target=0)
+    findings = [{"id": "s1-f1", "number": "not-a-number", "tier": "position_stand_or_guideline"}]
+    score = checks.section_check(
+        "A claim about the safe dose.",
+        section=section,
+        findings=findings,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
+_LEDGER_TITLE = "Position Stand on Creatine Supplementation and Lean Mass"
+
+
+def _safety_section(**kwargs):
+    kwargs.setdefault("heading", "Dosing and safety")
+    kwargs.setdefault("key_questions", ["does creatine preserve lean mass safely"])
+    kwargs.setdefault("word_target", 0)
+    return _section(**kwargs)
+
+
+def test_a_guideline_retrieved_elsewhere_must_be_cited_by_the_safety_section():
+    """#517: `guideline_cited` grades the whole run's ledger, not only this
+    section's own findings. A position stand retrieved for another section
+    (the introduction, say) that is on this section's own topic still has
+    to be cited here."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/xyz123",
+            "title": _LEDGER_TITLE,
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 7,
+        }
+    ]
+    missing = checks.section_check(
+        "A claim about the safe dose that never names the position stand.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" in missing.signature()
+    detail = next(c.detail for c in missing.checks if c.name == "guideline_cited")
+    assert _LEDGER_TITLE in detail
+    assert "[7]" in detail
+
+
+def test_the_same_section_citing_it_passes():
+    """#517: citing the ledger guideline's own reference number passes the
+    row, and the number is never flagged dangling either -- the row that
+    requires the citation and the row that would call it ungrounded agree."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/xyz123",
+            "title": _LEDGER_TITLE,
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 7,
+        }
+    ]
+    score = checks.section_check(
+        "A claim about the safe dose, per the position stand [7].",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+    assert "grounded" not in score.signature()
+
+
+def test_an_off_topic_guideline_is_not_required():
+    """#517: on topic means at least two shared content terms, not one. A
+    ledger guideline sharing only "dose" with the section's key question is
+    not required."""
+    section = _safety_section(key_questions=["what dose of creatine is safe"])
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/other",
+            "title": "Position Stand on Recovery Dose Protocols",
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 3,
+        }
+    ]
+    score = checks.section_check(
+        "A claim about the safe dose that never names the other guideline.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
+def test_a_position_stand_about_an_unrelated_field_is_off_topic():
+    """#517 follow-up 1: the tier's own naming words (position, stand,
+    guideline, consensus, statement, practice, clinical) do not count
+    toward the two-term overlap. A key question that literally names the
+    tier, "what does the position stand say", shares "position" and
+    "stand" with any title beginning "Position Stand on ...", whatever
+    that title is actually about; those two words must not be enough."""
+    section = _safety_section(
+        key_questions=["what does the position stand say about training load"]
+    )
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/unrelated",
+            "title": "Position Stand on Vitamin D and Bone Density",
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 9,
+        }
+    ]
+    score = checks.section_check(
+        "A claim about training load that never cites the unrelated guideline.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
+def test_a_ledger_with_no_guideline_passes():
+    """#517: a ledger holding no `position_stand_or_guideline` source at
+    all passes, the same as no ledger."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/primary",
+            "title": "A Randomized Trial of Creatine Dosing and Lean Mass",
+            "abstract": "",
+            "tier": "primary_trial",
+            "number": 2,
+        }
+    ]
+    score = checks.section_check(
+        "A claim about the safe dose.",
+        section=section,
+        findings=[],
+        ledger_sources=ledger_sources,
+    )
+    assert "guideline_cited" not in score.signature()
+
+
+def test_the_safety_brief_lists_the_ledger_guidelines():
+    """#517: the writer brief for a safety or dosing section names each
+    on-topic ledger guideline it has not already cited, with its reference
+    number, so the writer can cite it. A source this section's own findings
+    already bound has nothing new to say."""
+    section = _safety_section()
+    ledger_sources = [
+        {
+            "url": "https://doi.org/10.1000/xyz123",
+            "title": _LEDGER_TITLE,
+            "abstract": "",
+            "tier": "position_stand_or_guideline",
+            "number": 7,
+        }
+    ]
+    note = sections._guideline_brief(section, ledger_sources, "", bound=[])
+    assert _LEDGER_TITLE in note
+    assert "[7]" in note
+
+    assert sections._guideline_brief(section, ledger_sources, "", bound=[{"number": 7}]) == ""
+
+
+def test_ledger_guideline_sources_reads_every_other_sections_findings(tmp_path):
+    """#517: the ledger scan picks up a guideline-tier source another
+    section already retrieved and wrote to disk, gives it a citation
+    number the same way `run_section` numbers its own findings, skips a
+    non-guideline source, and never re-reads this section's own file."""
+
+    class FakeRun:
+        work_dir = tmp_path
+
+        def file(self, name):
+            return tmp_path / name
+
+    intro = tmp_path / "knowledge" / "introduction"
+    intro.mkdir(parents=True)
+    (intro / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "source": {
+                            "url_or_path": "https://doi.org/10.1000/xyz123",
+                            "title": _LEDGER_TITLE,
+                            "text": "an abstract",
+                            "evidence_tier": "position_stand_or_guideline",
+                        }
+                    },
+                    {
+                        "source": {
+                            "url_or_path": "https://a.example/trial",
+                            "title": "A Trial",
+                            "evidence_tier": "primary_trial",
+                        }
+                    },
+                ]
+            }
+        )
+    )
+    safety = tmp_path / "knowledge" / "safety"
+    safety.mkdir(parents=True)
+    (safety / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "source": {
+                            "url_or_path": "https://doi.org/10.1000/own",
+                            "title": "Own Guideline",
+                            "evidence_tier": "position_stand_or_guideline",
+                        }
+                    }
+                ]
+            }
+        )
+    )
+
+    found = sections._ledger_guideline_sources(FakeRun(), "safety")
+    assert [source["url"] for source in found] == ["https://doi.org/10.1000/xyz123"]
+    assert found[0]["title"] == _LEDGER_TITLE
+    assert found[0]["abstract"] == "an abstract"
+    assert found[0]["number"] == 1
+
+
+def test_ledger_guideline_sources_skips_a_non_http_url_instead_of_raising(tmp_path):
+    """#517 follow-up 5: `citations.register` raises `RuntimeError` on a
+    URL that is not `http(s)`. A live run's own locator never lets one
+    reach `findings.json`, but a stale or hand-edited work directory can
+    hold one; the scan skips it, with a note, rather than crashing an
+    unrelated later section's own check."""
+
+    class FakeRun:
+        work_dir = tmp_path
+        logged: list[str] = []
+
+        def file(self, name):
+            return tmp_path / name
+
+        def log(self, message):
+            self.logged.append(message)
+
+    other = tmp_path / "knowledge" / "other"
+    other.mkdir(parents=True)
+    (other / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "source": {
+                            "url_or_path": "corpus:knowledge:claim.x",
+                            "title": "A Stale Corpus Reference",
+                            "evidence_tier": "position_stand_or_guideline",
+                        }
+                    }
+                ]
+            }
+        )
+    )
+
+    run = FakeRun()
+    found = sections._ledger_guideline_sources(run, "safety")
+    assert found == []
+    assert any("corpus:knowledge:claim.x" in message for message in run.logged)
+
+
+def test_ledger_guideline_sources_is_forward_only_by_outline_position_not_disk(tmp_path):
+    """#517 follow-up 6: a resumed or `--reuse-research` run can already
+    hold a later section's `findings.json` from an earlier, interrupted
+    pass. The scan is forward-only by the approved outline's own order,
+    not by which files happen to exist on disk, so a section sees the same
+    ledger on a resume that it would have seen on a fresh run, and never
+    re-adds or renumbers a guideline it already gave a reference number."""
+
+    class FakeRun:
+        work_dir = tmp_path
+
+        def file(self, name):
+            return tmp_path / name
+
+        def read_json(self, name):
+            return json.loads((tmp_path / name).read_text())
+
+    (tmp_path / "outline.approved.json").write_text(
+        json.dumps({"sections": [{"id": "intro"}, {"id": "safety"}, {"id": "later"}]})
+    )
+
+    def write_guideline(sid: str, url: str, title: str) -> None:
+        dest = tmp_path / "knowledge" / sid
+        dest.mkdir(parents=True)
+        (dest / "findings.json").write_text(
+            json.dumps(
+                {
+                    "findings": [
+                        {
+                            "source": {
+                                "url_or_path": url,
+                                "title": title,
+                                "evidence_tier": "position_stand_or_guideline",
+                            }
+                        }
+                    ]
+                }
+            )
+        )
+
+    write_guideline("intro", "https://a.example/earlier", "Earlier Guideline")
+    # "later" comes after "safety" in the approved outline, but its file is
+    # already on disk, the way a resumed run leaves one from a prior,
+    # interrupted pass.
+    write_guideline("later", "https://a.example/later", "Later Guideline")
+
+    found = sections._ledger_guideline_sources(FakeRun(), "safety")
+    assert [source["url"] for source in found] == ["https://a.example/earlier"]
+
+    # Idempotent: calling it again (as a retry or a resume would) neither
+    # adds the excluded "later" source nor renumbers the one it already has.
+    again = sections._ledger_guideline_sources(FakeRun(), "safety")
+    assert again == found
 
 
 def test_section_check_figures_fails_when_a_planned_figure_is_missing():
@@ -410,6 +930,1592 @@ def test_the_ledger_appends_one_entry_per_section(work, turns, no_renderer):
     assert (Path(work) / "knowledge" / "s1" / "findings.json").is_file()
 
 
+def test_an_em_dash_is_normalized_before_the_section_is_graded(work, turns, no_renderer):
+    """#517 follow-up 2: `style` is a hard row, and `paper.assemble` strips
+    em dashes deterministically anyway (`checks.strip_em_dashes`). A
+    writer's em dash must not cost a section an attempt over something the
+    paper would have fixed silently. Normalized before `section_check`
+    grades the body, so `style` passes at write time and the assembled
+    paper carries no em dash either."""
+
+    class DashTurns(turns):
+        def write(self, section, claims, figures, notes, path=""):
+            body = super().write(section, claims, figures, notes, path)
+            return body.replace(" [", " — noted [", 1)
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=DashTurns(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    section_body = (Path(work) / "sections" / "s1.md").read_text(encoding="utf-8")
+    assert "—" not in section_body
+
+    score = json.loads((Path(work) / "knowledge" / "s1" / "section-check.json").read_text())
+    assert "style" not in score["signature"]
+
+    paper.assemble(run)
+    assembled = (Path(work) / "paper.md").read_text(encoding="utf-8")
+    assert "—" not in assembled
+
+
+def test_run_section_enriches_metadata_through_the_real_pipeline(work, turns, no_renderer, monkeypatch):
+    """#470, the call site, not the helper (same shape of gap as #355 finding 6).
+
+    `test_enrich_source_metadata_replaces_the_title_from_the_record` proved the
+    function. This proves `run_section` actually calls it, by running the real
+    section loop with a `turns` that carries a `backend`, and reading the
+    `findings.json` `run_section` wrote.
+    """
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        assert backend is not None
+        return {
+            "title": "The Record's Actual Title",
+            "authors": ["Jane Doe"],
+            "year": "2021",
+            "venue": "A Journal",
+            "note": "",
+        }
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    class FakeBackend:
+        name = "perplexity"
+
+    class WithBackend(turns):
+        backend = FakeBackend()
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithBackend(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    payload = json.loads((Path(work) / "knowledge" / "s1" / "findings.json").read_text())
+    source = payload["findings"][0]["source"]
+    assert source["title"] == "The Record's Actual Title"
+    assert source["authors"] == ["Jane Doe"]
+
+
+def test_do_sections_fails_an_uncited_ledger_guideline_and_briefs_it(work, turns, no_renderer, monkeypatch):
+    """#517 follow-up 3. `_ledger_guideline_sources`/`_guideline_brief`'s
+    call sites inside `run_section` are what a live run actually executes,
+    not only the unit calls to `checks.section_check`/`sections._guideline_brief`.
+    A guideline retrieved by the first section, on topic for a later safety
+    section and never cited by it, fails `guideline_cited` on that
+    section's own `section-check.json`, and the writer's own instruction
+    for that section names the source and its number.
+    """
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        if "guideline" in url:
+            return {
+                "title": "Practice Guideline on Verification Checkpoint Safety",
+                "authors": [],
+                "year": "",
+                "venue": "",
+                "note": "",
+                "text": "",
+            }
+        return {
+            "title": model_title or "Doc",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+        }
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    class FakeBackend:
+        name = "perplexity"
+
+    class TwoSectionTurns(turns):
+        backend = FakeBackend()
+
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            words = int((budget or {}).get("words") or 400)
+            base = {
+                "id": "x",
+                "objective": "x",
+                "abstract": "x",
+                "claims_to_support": [],
+                "required_evidence": [],
+                "word_target": words,
+                "figures": [],
+                "depends_on": [],
+            }
+            return {
+                "title": f"On {topic}",
+                "audience": "engineers",
+                "thesis": "An abstract.",
+                "word_target_total": words * 2,
+                "sections": [
+                    {
+                        **base,
+                        "id": "intro",
+                        "heading": "Introduction",
+                        "key_questions": ["what is the background", "why does it matter"],
+                    },
+                    {
+                        **base,
+                        "id": "safety",
+                        "heading": "Dosing and safety",
+                        "key_questions": [
+                            "what does the verification checkpoint require for safety",
+                            "how is the checkpoint enforced",
+                        ],
+                    },
+                ],
+            }
+
+        def plan(self, topic, prior_art, budget=None, note="", brief=""):
+            return self.outline(topic, prior_art, budget, note, brief)
+
+        def research(self, question, note=""):
+            self.asked.append(("research", question, note))
+            if "background" in question:
+                return {
+                    "answer": "A practice guideline sets the checkpoint bar.",
+                    "sources": [{"url": "https://example.invalid/guideline", "title": "..."}],
+                    "claims": [
+                        {
+                            "text": "A practice guideline sets the checkpoint bar.",
+                            "source_url": "https://example.invalid/guideline",
+                            "quote": "",
+                        }
+                    ],
+                }
+            return {
+                "answer": "Creatine is generally well tolerated.",
+                "sources": [{"url": "https://example.invalid/trial", "title": "Trial"}],
+                "claims": [
+                    {
+                        "text": "Creatine is generally well tolerated.",
+                        "source_url": "https://example.invalid/trial",
+                        "quote": "",
+                    }
+                ],
+            }
+
+    run = paper.Run(
+        topic="creatine safety",
+        work_dir=work,
+        turns=TwoSectionTurns(),
+        state=paper.State.load_or_new(work, "creatine safety"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    score = json.loads((Path(work) / "knowledge" / "safety" / "section-check.json").read_text())
+    assert "guideline_cited" in score["signature"]
+
+    write_call = next(item for item in run.turns.asked if item[0] == "write" and item[1] == "safety")
+    notes = write_call[2]
+    assert "Practice Guideline on Verification Checkpoint Safety" in notes
+
+
+# -- attribution: the verifier checks the cited source says the claim, on
+# the live path a real run actually executes. #471
+#
+# A previous version of these tests drove `paper.verify` directly. That
+# function is dead code: no `LINEAR` or `CYCLE` stage calls it, and the
+# fixture stage log never names it. The checks below drive `paper.do_sections`
+# (which calls `sections.run_section` for real), same as
+# `test_run_section_enriches_metadata_through_the_real_pipeline` above.
+
+
+class _FakeBackend:
+    name = "perplexity"
+
+
+def _fake_fetch(text: str = "", **extra):
+    def fetch(work_dir, url, backend, *, model_title=""):
+        record = {"title": model_title or "Doc", "authors": [], "year": "", "venue": "", "note": "", "text": text}
+        record.update(extra)
+        return record
+
+    return fetch
+
+
+def _one_claim_run(work, turns, claims, monkeypatch, *, fetch_text="", verdict="supports"):
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch(fetch_text))
+
+    class WithBackend(turns):
+        backend = _FakeBackend()
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithBackend(claims=claims, verdict=verdict),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    return run
+
+
+def test_a_quote_absent_from_the_source_loses_the_binding(work, turns, monkeypatch):
+    """`attributed()` drops the binding on the live path. The claim's own
+    cited source does not say what the claim says, so it never reaches the
+    model verifier, and `do_sections` never writes it to `claims.json`."""
+    claims = [
+        {
+            "text": "This source reports guanidinoacetic acid clearance, not creatine.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "guanidinoacetic acid clearance",
+        }
+    ]
+    run = _one_claim_run(
+        work,
+        turns,
+        claims,
+        monkeypatch,
+        fetch_text="This is a position stand on creatine monohydrate and lean body mass.",
+    )
+    try:
+        paper.do_sections(run)
+    except paper.RunFailed:
+        pass
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved == []
+
+
+def test_a_claim_with_no_attributed_binding_is_dropped_and_logged(work, turns, monkeypatch):
+    """The drop is recorded, not silent."""
+    notes: list[str] = []
+    claims = [
+        {
+            "text": "The response rate was 87 percent.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "",
+        }
+    ]
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("Nothing here mentions that number."))
+
+    class WithBackend(turns):
+        backend = _FakeBackend()
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithBackend(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=notes.append,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    try:
+        paper.do_sections(run)
+    except paper.RunFailed:
+        pass
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved == []
+    assert any("dropped" in note for note in notes), "the drop was never logged"
+
+
+def test_a_numeric_unimportant_claim_still_reaches_attribution(work, turns, monkeypatch):
+    """`run.max_claims` bounds the model verifier turn only. A miscited
+    numeric claim is dropped by `attributed()` even at `max_claims=0`, where
+    it would never have reached the model verify step at all."""
+    claims = [
+        {
+            "text": "The cohort included 9001 participants.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "",
+        }
+    ]
+    run = _one_claim_run(
+        work, turns, claims, monkeypatch, fetch_text="The cohort included far fewer participants than planned."
+    )
+    run.max_claims = 0
+    try:
+        paper.do_sections(run)
+    except paper.RunFailed:
+        pass
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved == [], "attribution ran despite the claim never reaching the verify cap"
+
+
+def test_an_unattributable_source_keeps_the_binding_and_notes_it(work, turns, monkeypatch):
+    """A source with a backend but no fetched text (the fetch found nothing)
+    keeps its claim: nothing here contradicts it, only nothing was checked."""
+    claims = [
+        {
+            "text": "The cohort included 9001 participants.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "",
+        }
+    ]
+    run = _one_claim_run(work, turns, claims, monkeypatch, fetch_text="")
+    paper.do_sections(run)
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved, "the claim was dropped with nothing to check it against"
+    assert "unattributed: attribution not checked" in saved[0]["note"]
+
+
+def test_two_urls_in_one_reply_stay_single_source(work, turns, monkeypatch):
+    """Passing attribution is not corroboration or verification. A claim
+    whose own citation is attributed stays `unverified`, not `verified`,
+    until a real, separate verifier turn actually agrees."""
+    claims = [
+        {
+            "text": "Creatine monohydrate preserves lean body mass during caloric restriction.",
+            "source_url": "https://example.invalid/doc",
+            "quote": "preserves lean body mass",
+        }
+    ]
+    run = _one_claim_run(
+        work,
+        turns,
+        claims,
+        monkeypatch,
+        fetch_text="This position stand says creatine monohydrate preserves lean body mass in trained adults.",
+        verdict="unclear",
+    )
+    paper.do_sections(run)
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved, "the attributed claim was dropped, not merely left unverified"
+    assert saved[0]["status"] == "unverified", "attribution alone is not corroboration"
+
+
+def test_not_found_writes_the_queries_into_the_note(work, turns, monkeypatch):
+    """Silence is not a result."""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("a thing is true, and more"))
+
+    class Silent(turns):
+        backend = _FakeBackend()
+
+        def verify(self, claim):
+            return {
+                "verdict": "unclear",
+                "source_url": "",
+                "excerpt": "",
+                "queries_used": ["creatine alternate wording", "creatine site:example.org"],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=Silent(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert "creatine alternate wording" in claims[0]["note"]
+    assert "creatine site:example.org" in claims[0]["note"]
+
+
+def test_not_found_with_no_reported_queries_still_names_the_claim(work, turns, monkeypatch):
+    """A verifier that reports no queries at all still leaves a real note."""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("a thing is true, and more"))
+
+    class Silent(turns):
+        backend = _FakeBackend()
+
+        def verify(self, claim):
+            return {"verdict": "unclear", "source_url": "", "excerpt": ""}
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=Silent(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert "A thing is true" in claims[0]["note"]
+
+
+def test_all_the_claims_numbers_must_appear_not_just_one():
+    """One shared number is not enough. A source that only says "a 12 week
+    study" does not back "creatine adds 1.2 kg over 12 weeks" just because
+    12 appears in both."""
+    finding = {"claim": "Creatine adds 1.2 kg of lean mass over 12 weeks.", "quote": ""}
+    assert not sections.attributed(finding, "This was a 12 week study of resistance-trained adults.")
+    assert sections.attributed(finding, "Over 12 weeks, creatine added 1.2 kg of lean mass on average.")
+
+
+# -- #473: follow a summary to its primary ----------------------------------
+
+
+def test_a_follow_miss_marks_the_claim_secondary():
+    """A miss leaves the finding bound to the review it started with, and the
+    writer's brief carries "as summarized by [n]" for that same number."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "The effect was 20 percent.",
+            "source": {
+                "url_or_path": "https://example.invalid/review",
+                "evidence_tier": "narrative_review",
+            },
+            "secondary": True,
+        }
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1", {"https://example.invalid/review": 3})
+    assert "as summarized by [3]" in bound[0]["text"]
+    assert bound[0]["tier"] == "narrative_review"
+
+
+def test_an_evidence_shortfall_hedges_the_writer_brief():
+    """#475, judge revision on #520: a finding whose evidence_requirements
+    fell short carries the reason and an explicit hedge instruction into the
+    writer's brief, the same way `secondary` and `capped` already are."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "The effect was 20 percent.",
+            "source": {"url_or_path": "https://example.invalid/review"},
+            "evidence_shortfall": "needs 1 other, has 0",
+        }
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1")
+    assert "evidence requirement not fully met: needs 1 other, has 0" in bound[0]["text"]
+    assert "Hedge accordingly" in bound[0]["text"]
+
+
+def test_a_follow_miss_survives_the_live_path_into_the_writer_brief(work, turns, monkeypatch):
+    """#473 item 1's live-path shape for the SDK: the "as summarized by"
+    annotation, built after the follow miss, still reaches the writer once
+    `run_section`'s verify loop runs, since the SDK verifier writes into
+    `verdicts.json`, never into the finding dict `_claims_for_writer` reads.
+    Deep Agents needed a dedicated `Claim.secondary` field because its
+    verifier writes into the same `claim.note` the follow pass used; the
+    SDK has no such collision, and this proves it end to end."""
+    records = {"https://example.invalid/review": {"category": "cs.AI"}}
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    captured: dict = {}
+
+    class WithFollow(turns):
+        backend = _FakeBackend()
+
+        def follow_primary(self, claim, source_title, source_tier):
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+        def write(self, section, claims, figures, notes, path=""):
+            captured["claims"] = claims
+            return super().write(section, claims, figures, notes, path)
+
+    claims = [
+        {"text": "The effect was 20 percent.", "source_url": "https://example.invalid/review", "quote": ""}
+    ]
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithFollow(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert captured.get("claims"), "the writer was never called"
+    assert any("as summarized by" in c["text"] for c in captured["claims"])
+
+
+def test_a_numeric_preprint_claim_gets_one_follow_turn(work, turns, monkeypatch):
+    """A numeric claim bound only to a preprint gets one follow turn. A hit
+    rebinds the finding to the primary study it names."""
+    records = {
+        "https://example.invalid/preprint": {"category": "cs.AI"},
+        "https://example.invalid/primary": {
+            "title": "The Primary Trial",
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "the dose increased 42 percent",
+        },
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    follow_log: list[tuple] = []
+
+    class WithFollow(turns):
+        backend = _FakeBackend()
+
+        def follow_primary(self, claim, source_title, source_tier):
+            follow_log.append((claim, source_tier))
+            return {"found": True, "url": "https://example.invalid/primary", "title": "The Primary Trial", "quote": ""}
+
+    claims = [
+        {
+            "text": "The dose increased 42 percent.",
+            "source_url": "https://example.invalid/preprint",
+            "quote": "",
+        }
+    ]
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithFollow(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert len(follow_log) == 1, "exactly one follow turn for the one candidate"
+    saved = json.loads((Path(work) / "claims.json").read_text())["claims"]
+    assert saved[0]["source_url"] == "https://example.invalid/primary"
+    assert saved[0]["evidence_tier"] == "primary_trial"
+    assert "; " not in saved[0]["note"] and "secondary" not in saved[0]["note"]
+
+
+class _FakeFollowRun:
+    """The slice of `run` `_apply_follow_result` actually reads."""
+
+    def __init__(self, backend):
+        self.turns = types.SimpleNamespace(backend=backend)
+        self.work_dir = "/nonexistent"
+
+
+def test_a_follow_hit_keeps_the_review_under_via(monkeypatch):
+    """#473 item 5: a rebind keeps the original binding under `finding["via"]`
+    instead of discarding it, so the paper can still say the number arrived
+    through the review."""
+    records = {
+        "https://example.invalid/primary": {
+            "title": "The Primary Trial",
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "the dose increased 42 percent",
+        }
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    finding = {
+        "claim": "The dose increased 42 percent.",
+        "source": {
+            "url_or_path": "https://example.invalid/review",
+            "title": "A Review",
+            "evidence_tier": "narrative_review",
+        },
+    }
+    run = _FakeFollowRun(_FakeBackend())
+    hit = sections._apply_follow_result(
+        run, finding, {"found": True, "url": "https://example.invalid/primary", "title": "The Primary Trial", "quote": ""}
+    )
+    assert hit
+    assert finding["source"]["url_or_path"] == "https://example.invalid/primary"
+    assert finding["via"]["url_or_path"] == "https://example.invalid/review"
+    assert finding["via"]["title"] == "A Review"
+
+
+def test_a_follow_hit_that_is_itself_secondary_does_not_clear_the_caveat(monkeypatch):
+    """#473 item 2: a follow turn that answers with another review must not
+    clear the caveat."""
+    records = {
+        "https://example.invalid/another-review": {
+            "title": "Another Review",
+            "pubtype": ["Review"],
+            "text": "",
+        }
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    original_source = {
+        "url_or_path": "https://example.invalid/review",
+        "title": "A Review",
+        "evidence_tier": "narrative_review",
+    }
+    finding = {"claim": "The effect was 20 percent.", "source": dict(original_source)}
+    run = _FakeFollowRun(_FakeBackend())
+    hit = sections._apply_follow_result(
+        run,
+        finding,
+        {"found": True, "url": "https://example.invalid/another-review", "title": "Another Review", "quote": ""},
+    )
+    assert not hit
+    assert finding["secondary"]
+    assert finding["source"] == original_source
+    assert "via" not in finding
+
+
+def test_a_rebind_with_no_fetched_text_is_not_carried_as_attributed(monkeypatch):
+    """#473 item 4: a rebind to a record with no fetched text is not carried
+    as if it had been attributed."""
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        return {
+            "title": "The Primary Trial",
+            "authors": [],
+            "year": "",
+            "venue": "",
+            "note": "",
+            "text": "",
+            "pubtype": ["Randomized Controlled Trial"],
+        }
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    finding = {
+        "claim": "The dose increased 42 percent.",
+        "source": {"url_or_path": "https://example.invalid/review", "evidence_tier": "narrative_review"},
+    }
+    run = _FakeFollowRun(_FakeBackend())
+    hit = sections._apply_follow_result(
+        run, finding, {"found": True, "url": "https://example.invalid/primary", "title": "The Primary Trial", "quote": ""}
+    )
+    assert hit
+    assert "unattributed: attribution not checked" in finding["source"]["note"]
+
+
+def test_the_follow_pass_stops_at_the_run_cap(work, turns, monkeypatch):
+    """Seven candidates, six turns: the run-wide cap, shakiest tier first."""
+    records: dict[str, dict] = {}
+    claims = []
+    for i in range(3):
+        url = f"https://example.invalid/preprint{i}"
+        records[url] = {"category": "cs.AI"}
+        claims.append({"text": f"The result changed {10 + i} percent.", "source_url": url, "quote": ""})
+    for i in range(3):
+        url = f"https://example.invalid/review{i}"
+        records[url] = {"pubtype": ["Review"]}
+        claims.append({"text": f"The rate moved {20 + i} percent.", "source_url": url, "quote": ""})
+    records["https://example.invalid/meta0"] = {"pubtype": ["Systematic Review"]}
+    claims.append({"text": "The effect was 99 percent.", "source_url": "https://example.invalid/meta0", "quote": ""})
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    follow_log: list[str] = []
+
+    class WithFollow(turns):
+        backend = _FakeBackend()
+
+        def follow_primary(self, claim, source_title, source_tier):
+            follow_log.append(source_tier)
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+    logs: list[str] = []
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithFollow(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=logs.append,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert len(follow_log) == run.max_follow == 6
+    # The shakiest tiers exhaust the cap; the least shaky candidate, the one
+    # systematic review, is the one left out.
+    assert follow_log.count("preprint_or_compilation") == 3
+    assert follow_log.count("narrative_review") == 3
+    assert "meta_analysis_or_systematic_review" not in follow_log
+    assert any("follow" in line and "6/6" in line for line in logs), logs
+
+
+# -- #474: the counter-evidence pass -----------------------------------------
+
+
+def test_a_sole_support_claim_is_a_generalizing_candidate():
+    """A finding that is the only support for a `claims_to_support` item is
+    selected even with no generalizing phrase in its text. Port-specific:
+    the Deep Agents twin has no outline yet at this pipeline stage, so it
+    selects by the regex alone."""
+    section = _section(claims_to_support=["The problem is structural."])
+    findings = [
+        {"id": "s1-f1", "claim": "The problem is structural because of the retry loop."},
+        {"id": "s1-f2", "claim": "A separate finding about something else."},
+    ]
+    candidates = sections.generalizing_claims(findings, section)
+    assert [f["id"] for f in candidates] == ["s1-f1"]
+    assert findings[0]["generalizing"] is True
+    assert not findings[1].get("generalizing")
+
+
+def test_a_generalizing_claim_with_no_counter_search_fails():
+    """`counterweighed` names the claim when a generalizing finding carries
+    no `counter` state at all. A recorded `hit`, `miss`, or `capped` passes."""
+    generalizing = {
+        "id": "s1-f1",
+        "text": "Protein alone did not prevent lean-mass loss.",
+        "generalizing": True,
+    }
+    missing = checks.section_check(
+        "Protein alone did not prevent lean-mass loss [1].",
+        section=_section(),
+        findings=[generalizing],
+    )
+    assert "counterweighed" in missing.signature()
+
+    for state in ("hit", "miss", "capped"):
+        checked = checks.section_check(
+            "Protein alone did not prevent lean-mass loss [1].",
+            section=_section(),
+            findings=[{**generalizing, "counter": state}],
+        )
+        assert "counterweighed" not in checked.signature(), state
+
+
+def test_a_counter_miss_passes_and_the_brief_says_so():
+    """A recorded miss carries "no contrary evidence found in this search"
+    in the writer's brief, and `counterweighed` passes."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "Protein alone did not prevent lean-mass loss.",
+            "source": {"url_or_path": "https://example.invalid/no-training", "evidence_tier": "other"},
+            "generalizing": True,
+            "counter": "miss",
+        }
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1", {"https://example.invalid/no-training": 1})
+    assert "no contrary evidence found in this search" in bound[0]["text"]
+
+    passed = checks.section_check(
+        f"{bound[0]['text']} [1].",
+        section=_section(),
+        findings=bound,
+    )
+    assert "counterweighed" not in passed.signature()
+
+
+def test_a_counter_hit_cites_its_own_number_not_the_claims(work):
+    """#474 follow-up F2: on the `numbers is None` fallback path (offline
+    and unit tests), a hit must cite the counter finding's own number, not
+    the claim's. `run_section` always passes `numbers`, so the bug was
+    invisible on the live path and only bit `paper._numbered`'s unit tests
+    and any offline reader of `_claims_for_writer` on its own."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "Protein alone did not prevent lean-mass loss.",
+            "source": {"url_or_path": "https://example.invalid/no-training"},
+            "counter": "hit",
+            "counter_url": "https://example.invalid/longland",
+        },
+        {
+            "id": "s1-cf1",
+            "claim": "Protein with resistance training preserved lean mass (Longland 2016).",
+            "source": {"url_or_path": "https://example.invalid/longland"},
+            "counterargument_to": "s1-f1",
+        },
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1")
+    original, counter = bound
+    assert original["number"] == 1
+    assert counter["number"] == 2
+    assert "Contrary evidence in [2]" in original["text"], original["text"]
+
+
+def test_a_capped_claim_passes_and_the_brief_says_so_and_hedges():
+    """#474 decision item 3: a candidate the run cap does not reach is
+    `capped`, not unchecked. `counterweighed` passes it, and the brief
+    tells the writer to hedge it like a single-source claim."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "Protein alone did not prevent lean-mass loss.",
+            "source": {"url_or_path": "https://example.invalid/no-training", "evidence_tier": "other"},
+            "generalizing": True,
+            "counter": "capped",
+        }
+    ]
+    bound = sections._claims_for_writer(findings, {}, "s1", {"https://example.invalid/no-training": 1})
+    assert "counter-evidence not searched, run cap reached" in bound[0]["text"]
+    assert "hedge" in bound[0]["text"].lower()
+
+    passed = checks.section_check(
+        f"{bound[0]['text']} [1].",
+        section=_section(),
+        findings=bound,
+    )
+    assert "counterweighed" not in passed.signature()
+
+
+def test_a_generalizing_claim_gets_one_counter_turn(work, turns, monkeypatch):
+    """"protein alone did not prevent lean-mass loss" gets exactly one
+    counter turn, and the contrary finding binds with `counterargument_to`.
+
+    Also the live-path proof #474 blocking item 1 asked for: `run_section`
+    runs research, the counter pass, then verify, then the writer, in that
+    order (the live `STAGE_ORDER`-equivalent for one section). Unlike Deep
+    Agents, `finding["counter"]` cannot collide with verify's own state: the
+    verify loop below writes only into the separate `verdicts` dict, never
+    back onto the finding dict, so there is no shared field for it to erase.
+    The assertion on `verdicts.json` and the final written `body` (both
+    produced after verify runs) is the proof."""
+    records = {
+        "https://example.invalid/no-training": {"category": "cs.AI"},
+        "https://example.invalid/longland": {
+            "title": "Longland 2016",
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "protein with resistance training preserved lean mass",
+        },
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    counter_log: list[str] = []
+
+    class WithCounter(turns):
+        backend = _FakeBackend()
+
+        def counter_search(self, claim):
+            counter_log.append(claim)
+            return {
+                "found": True,
+                "counter_claim": "Protein with resistance training preserved lean mass (Longland 2016).",
+                "url": "https://example.invalid/longland",
+                "title": "Longland 2016",
+                "quote": "protein with resistance training preserved lean mass",
+            }
+
+    claims = [
+        {
+            "text": "Protein alone did not prevent lean-mass loss.",
+            "source_url": "https://example.invalid/no-training",
+            "quote": "",
+        }
+    ]
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithCounter(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert len(counter_log) == 1, "exactly one counter turn for the one candidate"
+    findings = json.loads((Path(work) / "knowledge/s1/findings.json").read_text())["findings"]
+    counter_finding = next(f for f in findings if f.get("counterargument_to"))
+    assert counter_finding["counterargument_to"] == "s1-f1"
+    original = next(f for f in findings if f["id"] == "s1-f1")
+    assert original["counter"] == "hit"
+    verdicts = json.loads((Path(work) / "knowledge/s1/verdicts.json").read_text())["verdicts"]
+    assert any(v["finding_id"] == counter_finding["id"] for v in verdicts), (
+        "verify never reached the counter finding"
+    )
+    # The suffix and the counter finding both live in the writer's bound
+    # list, not in `findings.json`'s raw `claim` text (the same place
+    # `follow_primary_sources`'s "as summarized by" lives). The offline
+    # writer renders every bound claim's `text` straight into the body.
+    body = (Path(work) / "sections/s1.md").read_text(encoding="utf-8")
+    assert "Contrary evidence in [" in body
+    assert "Longland 2016" in body
+
+
+def test_a_retrieval_narrated_counter_claim_is_a_miss(work):
+    """#474 follow-up F3: the model's own `counter_claim` is screened with
+    `is_retrieval_claim`, the same screen #469 runs on the research path. A
+    narrated retrieval miss is not evidence about the subject, and does not
+    become a citable body claim."""
+    findings = [
+        {
+            "id": "s1-f1",
+            "claim": "Protein alone did not prevent lean-mass loss.",
+            "answers_question": "q",
+            "source": {"url_or_path": "https://example.invalid/no-training"},
+        }
+    ]
+
+    class Turns:
+        backend = _FakeBackend()
+
+        def counter_search(self, claim):
+            return {
+                "found": True,
+                "counter_claim": "No source was found that addresses this directly.",
+                "url": "https://example.invalid/nothing",
+                "title": "T",
+                "quote": "",
+            }
+
+    run = paper.Run(
+        topic="t",
+        work_dir=work,
+        turns=Turns(),
+        state=paper.State.load_or_new(work, "t"),
+        log=lambda *a: None,
+    )
+    section = _section()
+    sections.counter_evidence_pass(run, findings, section)
+    assert findings[0]["counter"] == "miss"
+    assert not any(f.get("counterargument_to") for f in findings), "no counter finding was appended"
+
+
+def test_the_counter_pass_stops_at_the_run_cap(work, turns, monkeypatch):
+    """Seven generalizing claims, `--max-counter 6`, six turns. The seventh
+    is `capped`, the section still passes `counterweighed`, and its brief
+    carries the cap sentence with the hedge instruction. #474 decision item 3"""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch(""))
+    claims = [
+        {
+            "text": f"The result never changed by more than {i} percent.",
+            "source_url": f"https://example.invalid/c{i}",
+            "quote": "",
+        }
+        for i in range(7)
+    ]
+
+    counter_log: list[str] = []
+
+    class WithCounter(turns):
+        backend = _FakeBackend()
+
+        def counter_search(self, claim):
+            counter_log.append(claim)
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+    logs: list[str] = []
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithCounter(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=logs.append,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    assert len(counter_log) == run.max_counter == 6
+    assert any("counter" in line and "6/6" in line for line in logs), logs
+
+    findings = json.loads((Path(work) / "knowledge/s1/findings.json").read_text())["findings"]
+    states = [f["counter"] for f in findings if f.get("generalizing")]
+    assert states.count("capped") == 1
+    assert set(states) <= {"miss", "capped"}
+
+    score = json.loads((Path(work) / "knowledge/s1/section-check.json").read_text())
+    assert "counterweighed" not in score["signature"]
+
+    body = (Path(work) / "sections/s1.md").read_text(encoding="utf-8")
+    assert "counter-evidence not searched, run cap reached" in body
+    assert "hedge" in body.lower()
+
+
+# -- item 11, PR #518 re-verification follow-up ------------------------------
+
+
+def test_a_fresh_run_reloads_follow_and_counter_used_from_state(work):
+    """A fresh `Run` built on a work dir that already spent some of the
+    per-run follow and counter budget must see that spend, not start a new
+    process with a fresh `max_follow`/`max_counter`. #473 #474, follow-up
+    to the #518 re-verification: this closes the SDK's own gap -- these
+    counters had nowhere to persist to before now."""
+    state = paper.State.load_or_new(work, "a topic")
+    run = paper.Run(topic="a topic", work_dir=work, turns=object(), state=state, brain=None, log=lambda *a: None)
+    run.follow_used = 3
+    run.state.follow_used = 3
+    run.counter_used = 2
+    run.state.counter_used = 2
+    run.state.save(work)
+
+    reloaded_state = paper.State.load_or_new(work, "a topic")
+    resumed = paper.Run(
+        topic="a topic", work_dir=work, turns=object(), state=reloaded_state, brain=None, log=lambda *a: None
+    )
+    assert resumed.follow_used == 3
+    assert resumed.counter_used == 2
+
+
+def test_a_negative_max_counter_clamps_to_zero_not_a_tail_slice(work, turns):
+    """`remaining = max(0, run.max_counter - run.counter_used)` already
+    clamps a negative `max_counter` to zero before it ever reaches a slice
+    bound; a bare `candidates[:run.max_counter]` would instead have sliced
+    off all but the last `|max_counter|` candidates, Python's own footgun
+    for a negative index. Locked in against a regression, item 11c of the
+    #518 re-verification follow-up."""
+    claims = [
+        {
+            "text": f"The result never changed by more than {i} percent.",
+            "source_url": f"https://example.invalid/c{i}",
+            "quote": "",
+        }
+        for i in range(3)
+    ]
+    counter_log: list[str] = []
+
+    class WithCounter(turns):
+        backend = _FakeBackend()
+
+        def counter_search(self, claim):
+            counter_log.append(claim)
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithCounter(claims=claims),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        max_counter=-1,
+    )
+    findings = [{"id": f"s1-f{i}", "claim": c["text"]} for i, c in enumerate(claims)]
+    sections.counter_evidence_pass(run, findings, {"id": "s1", "claims_to_support": []})
+    assert counter_log == []
+
+
+# -- #475: evidence requirements per question -------------------------------
+
+
+def test_question_list_carries_evidence_requirements():
+    """A bare-string question carries `{}`; a dict question's block survives
+    into `question_list`'s flattened shape, which the gap pass reads."""
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+    section = _section(
+        key_questions=[
+            {"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs},
+            "a bare-string question",
+        ]
+    )
+    questions = sections.question_list(section)
+    assert questions[0]["evidence_requirements"] == reqs
+    assert questions[1]["evidence_requirements"] == {}
+
+
+def test_a_met_requirement_passes_the_gate():
+    """A section whose bound findings satisfy the block passes."""
+    reqs = {"study_types": ["primary_trial"], "min_count": 1, "recency_years": 10, "populations": []}
+    section = _section(
+        key_questions=[{"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs}]
+    )
+    findings = [{"id": "s1-f1", "number": 1, "question_id": "what is the effect", "tier": "primary_trial", "year": "2024"}]
+    passed = checks.section_check(
+        "The effect was measured [1].", section=section, findings=findings
+    )
+    assert "evidence_requirements_met" not in passed.signature()
+
+
+def test_a_shortfall_names_the_missing_study_type():
+    """A shortfall names the missing type and how many were found."""
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+    section = _section(
+        key_questions=[{"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs}]
+    )
+    findings = [
+        {"id": "s1-f1", "number": 1, "question_id": "what is the effect", "tier": "preprint_or_compilation", "year": "2024"}
+    ]
+    failed = checks.section_check(
+        "The effect was measured [1].", section=section, findings=findings
+    )
+    assert "evidence_requirements_met" in failed.signature()
+    row = next(c for c in failed.checks if c.name == "evidence_requirements_met")
+    assert "primary_trial" in row.detail
+    assert "needs 2" in row.detail and "has 0" in row.detail
+
+
+def test_evidence_requirements_met_grades_recency_and_population():
+    """`checks.evidence_requirements_met` directly: a stale source does not
+    count toward the window, and a missing population is named."""
+    old = [{"tier": "primary_trial", "year": "1990", "text": "a fact"}]
+    fresh = [{"tier": "primary_trial", "year": "2024", "text": "a fact about older adults"}]
+    reqs = {"study_types": ["primary_trial"], "min_count": 1, "recency_years": 5, "populations": []}
+    met, reason = checks.evidence_requirements_met(reqs, old)
+    assert not met and "needs 1" in reason
+
+    met, reason = checks.evidence_requirements_met(reqs, fresh)
+    assert met and reason == ""
+
+    reqs_pop = {**reqs, "populations": ["women"]}
+    met, reason = checks.evidence_requirements_met(reqs_pop, fresh)
+    assert not met and "women" in reason
+
+    reqs_pop_hit = {**reqs, "populations": ["older adults"]}
+    met, reason = checks.evidence_requirements_met(reqs_pop_hit, fresh)
+    assert met
+
+
+def test_evidence_requirements_met_passes_trivially_with_no_block():
+    assert checks.evidence_requirements_met({}, []) == (True, "")
+    assert checks.evidence_requirements_met({"study_types": []}, []) == (True, "")
+
+
+def test_evidence_requirements_met_counts_distinct_urls_not_findings():
+    """Two claims lifted from one reply cite one URL and must count as one
+    source, not two. Judge revision on #520, blocking finding 3."""
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 0, "populations": []}
+    one_source_two_claims = [
+        {"tier": "primary_trial", "url": "https://a.invalid/x", "text": "claim a"},
+        {"tier": "primary_trial", "url": "https://a.invalid/x", "text": "claim b"},
+    ]
+    met, reason = checks.evidence_requirements_met(reqs, one_source_two_claims)
+    assert not met and "has 1" in reason
+
+    two_sources = [
+        {"tier": "primary_trial", "url": "https://a.invalid/x", "text": "claim a"},
+        {"tier": "primary_trial", "url": "https://a.invalid/y", "text": "claim b"},
+    ]
+    met, reason = checks.evidence_requirements_met(reqs, two_sources)
+    assert met and reason == ""
+
+
+def test_a_shortfall_gets_one_extra_gap_research_turn(work, turns, monkeypatch):
+    """A question answered by one preprint gets one more research turn
+    naming the shortfall; two primary trials clear it, and no coverage gap
+    is recorded."""
+    records = {
+        "https://example.invalid/preprint": {"category": "cs.AI"},
+        "https://example.invalid/rct1": {
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "the trial found a 22 percent effect",
+        },
+        "https://example.invalid/rct2": {
+            "pubtype": ["Randomized Controlled Trial"],
+            "text": "the trial found a 19 percent effect",
+        },
+    }
+
+    def fake_cached_fetch(work_dir, url, backend, *, model_title=""):
+        base = {"title": model_title, "authors": [], "year": "2024", "venue": "", "note": "", "text": ""}
+        base.update(records.get(url, {}))
+        return base
+
+    monkeypatch.setattr(sections.metadata, "cached_fetch", fake_cached_fetch)
+
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+    research_log: list[tuple] = []
+
+    class WithGap(turns):
+        backend = _FakeBackend()
+
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            return {
+                "title": f"On {topic}",
+                "audience": "engineers",
+                "thesis": "An abstract.",
+                "word_target_total": 400,
+                "sections": [
+                    {
+                        "id": "s1",
+                        "heading": "The problem",
+                        "objective": "State it.",
+                        "abstract": "This section states the problem.",
+                        "key_questions": [
+                            {"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs},
+                            "why does it fail",
+                        ],
+                        "claims_to_support": ["The problem is structural."],
+                        "required_evidence": ["a primary specification"],
+                        "word_target": 400,
+                        "figures": [],
+                        "depends_on": [],
+                    }
+                ],
+            }
+
+        def plan(self, topic, prior_art, budget=None, note="", brief=""):
+            return self.outline(topic, prior_art, budget, note, brief)
+
+        def follow_primary(self, claim, source_title, source_tier):
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+        def counter_search(self, claim):
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+        def research(self, question, note=""):
+            research_log.append((question, note))
+            if question != "what is the effect":
+                return {"answer": "", "sources": [], "claims": []}
+            calls = sum(1 for item in research_log if item[0] == question)
+            if calls == 1:
+                return {
+                    "answer": "",
+                    "sources": [{"url": "https://example.invalid/preprint", "title": "A Preprint"}],
+                    "claims": [
+                        {
+                            "text": "The effect was 20 percent.",
+                            "source_url": "https://example.invalid/preprint",
+                            "quote": "",
+                        }
+                    ],
+                }
+            return {
+                "answer": "",
+                "sources": [
+                    {"url": "https://example.invalid/rct1", "title": "Trial One"},
+                    {"url": "https://example.invalid/rct2", "title": "Trial Two"},
+                ],
+                "claims": [
+                    {
+                        "text": "Trial one found a 22 percent effect.",
+                        "source_url": "https://example.invalid/rct1",
+                        "quote": "",
+                    },
+                    {
+                        "text": "Trial two found a 19 percent effect.",
+                        "source_url": "https://example.invalid/rct2",
+                        "quote": "",
+                    },
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithGap(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    calls_for_q = [item for item in research_log if item[0] == "what is the effect"]
+    assert len(calls_for_q) == 2, "one initial call, one shortfall-driven gap call, consumed once"
+    assert "evidence_requirements shortfall" in calls_for_q[1][1]
+    assert "primary_trial" in calls_for_q[1][1]
+
+    payload = json.loads((Path(work) / "knowledge/s1/findings.json").read_text())
+    for_question = [
+        f for f in payload["findings"] if f.get("answers_question") == "what is the effect"
+    ]
+    assert sum(1 for f in for_question if f["source"]["evidence_tier"] == "primary_trial") == 2
+    assert not any(g.get("question") == "what is the effect" for g in payload["coverage_gaps"])
+
+
+def test_a_persistent_shortfall_is_a_named_gap(work, turns, monkeypatch):
+    """A shortfall the one extra turn does not resolve is a named coverage
+    gap, not a silent pass, and no third turn is spent on it."""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("", category="cs.AI"))
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+    research_log: list[tuple] = []
+
+    class NeverResolves(turns):
+        backend = _FakeBackend()
+
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            return {
+                "title": f"On {topic}",
+                "audience": "engineers",
+                "thesis": "An abstract.",
+                "word_target_total": 400,
+                "sections": [
+                    {
+                        "id": "s1",
+                        "heading": "The problem",
+                        "objective": "State it.",
+                        "abstract": "This section states the problem.",
+                        "key_questions": [
+                            {"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs},
+                            "why does it fail",
+                        ],
+                        "claims_to_support": ["The problem is structural."],
+                        "required_evidence": ["a primary specification"],
+                        "word_target": 400,
+                        "figures": [],
+                        "depends_on": [],
+                    }
+                ],
+            }
+
+        def plan(self, topic, prior_art, budget=None, note="", brief=""):
+            return self.outline(topic, prior_art, budget, note, brief)
+
+        def follow_primary(self, claim, source_title, source_tier):
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+        def counter_search(self, claim):
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+        def research(self, question, note=""):
+            research_log.append((question, note))
+            if question != "what is the effect":
+                return {"answer": "", "sources": [], "claims": []}
+            calls = sum(1 for item in research_log if item[0] == question)
+            return {
+                "answer": "",
+                "sources": [{"url": f"https://example.invalid/p{calls}", "title": "A Preprint"}],
+                "claims": [
+                    {
+                        "text": "The effect was 20 percent.",
+                        "source_url": f"https://example.invalid/p{calls}",
+                        "quote": "",
+                    }
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=NeverResolves(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    calls_for_q = [item for item in research_log if item[0] == "what is the effect"]
+    assert len(calls_for_q) == 2, "one initial call, one shortfall call, no third"
+
+    payload = json.loads((Path(work) / "knowledge/s1/findings.json").read_text())
+    gap = next(g for g in payload["coverage_gaps"] if g.get("question") == "what is the effect")
+    assert "needs 2" in gap.get("reason", "")
+
+
+def test_a_persistent_shortfall_does_not_end_the_run_when_enforced(work, turns, monkeypatch):
+    """Judge revision on #520, blocking finding 1: with
+    `enforce_research_policy=True`, the flag every real run sets, the row
+    the judge's own probe found stuck twice in a row must not stall the
+    section. A shortfall the one turn does not resolve is accepted as a
+    named gap and the section's Python check passes on `evidence_requirements_met`."""
+    monkeypatch.setattr(sections.metadata, "cached_fetch", _fake_fetch("", category="cs.AI"))
+    reqs = {"study_types": ["primary_trial"], "min_count": 2, "recency_years": 10, "populations": []}
+
+    class NeverResolves(turns):
+        backend = _FakeBackend()
+
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            return {
+                "title": f"On {topic}",
+                "audience": "engineers",
+                "thesis": "An abstract.",
+                "word_target_total": 400,
+                "sections": [
+                    {
+                        "id": "s1",
+                        "heading": "The problem",
+                        "objective": "State it.",
+                        "abstract": "This section states the problem.",
+                        "key_questions": [
+                            {"text": "what is the effect", "kind": "fact", "evidence_requirements": reqs},
+                            "why does it fail",
+                        ],
+                        "claims_to_support": ["The problem is structural."],
+                        "required_evidence": ["a primary specification"],
+                        "word_target": 400,
+                        "figures": [],
+                        "depends_on": [],
+                    }
+                ],
+            }
+
+        def plan(self, topic, prior_art, budget=None, note="", brief=""):
+            return self.outline(topic, prior_art, budget, note, brief)
+
+        def follow_primary(self, claim, source_title, source_tier):
+            return {"found": False, "url": "", "title": "", "quote": ""}
+
+        def counter_search(self, claim):
+            return {"found": False, "counter_claim": "", "url": "", "title": "", "quote": ""}
+
+        def research(self, question, note=""):
+            if question != "what is the effect":
+                return {"answer": "", "sources": [], "claims": []}
+            return {
+                "answer": "",
+                "sources": [{"url": "https://example.invalid/p", "title": "A Preprint"}],
+                "claims": [
+                    {"text": "The effect was 20 percent.", "source_url": "https://example.invalid/p", "quote": ""}
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=NeverResolves(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    paper.do_sections(run)  # must not raise Escalate/RunFailed
+
+    assert "what is the effect" in run.state.evidence_shortfall_unmet
+    score = json.loads((Path(work) / "knowledge/s1/section-check.json").read_text())
+    assert "evidence_requirements_met" not in score["signature"]
+
+
+def test_an_unretrieved_scout_title_is_a_named_gap(work, turns, monkeypatch):
+    """A scout title with no bound source is a named skip, with a reason. A
+    title that shares a distinctive word with an admitted source's fetched
+    title counts as retrieved."""
+    monkeypatch.setattr(
+        sections.metadata, "cached_fetch", _fake_fetch("", **{"title": "The Longland Trial"})
+    )
+
+    class WithBriefing(turns):
+        backend = _FakeBackend()
+
+        def scout(self, topic, note=""):
+            return {
+                "headings": ["Background"],
+                "domains": [],
+                "titles": ["The Longland Trial", "A Paper Nobody Retrieved"],
+            }
+
+        def research(self, question, note=""):
+            return {
+                "answer": "",
+                "sources": [{"url": "https://example.invalid/retrieved", "title": "unused"}],
+                "claims": [
+                    {"text": "A fact.", "source_url": "https://example.invalid/retrieved", "quote": ""}
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=WithBriefing(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    run.write_json("corpus/brain-pack.json", {"corpus_thin": True, "hits": []})
+    paper.scout(run)
+    paper.plan(run)
+    paper.do_sections(run)
+
+    scout_titles = json.loads((Path(work) / "sources.json").read_text())["scout_titles"]
+    by_title = {item["title"]: item for item in scout_titles}
+    assert by_title["The Longland Trial"]["retrieved"] is True
+    assert by_title["The Longland Trial"]["reason"] == ""
+    assert by_title["A Paper Nobody Retrieved"]["retrieved"] is False
+    assert by_title["A Paper Nobody Retrieved"]["reason"]
+
+
+def test_attribute_findings_is_a_noop_with_no_backend():
+    """A `run.turns` with no `backend` attribute at all (every pre-#471 test
+    double) is untouched, so old behaviour is unchanged byte for byte."""
+
+    class NoBackend:
+        pass
+
+    class Run:
+        turns = NoBackend()
+
+    findings = [{"claim": "x", "quote": "", "source": {"url_or_path": "https://example.invalid/doc"}}]
+    assert sections.attribute_findings(Run(), findings, "s1") == findings
+
+
+# -- metadata finding 2: PubMed's abstract comes from efetch, not the rare
+# esummary field, and attribution reads whatever that fetch actually found.
+
+
+class _MetaFixtureBackend:
+    name = "fixture"
+
+
+def test_a_pubmed_source_with_an_abstract_attributes_a_quote_from_it(work):
+    """The recorded PubMed fixture carries an efetch-shaped abstract. A claim
+    whose quote is in it is attributed, on the real `enrich_source_metadata`
+    plus `attribute_findings` pipeline, no monkeypatch."""
+
+    class Run:
+        class turns:
+            backend = _MetaFixtureBackend()
+
+        work_dir = str(work)
+
+    finding = {
+        "claim": "The intervention produced a 15 percent improvement in muscle protein synthesis.",
+        "quote": "15 percent improvement in muscle protein synthesis",
+        "source": {"url_or_path": "https://pubmed.ncbi.nlm.nih.gov/12345678/", "title": "Model's Guess"},
+    }
+    sections.enrich_source_metadata([finding], Run())
+    assert "42 adults" in finding["source"]["text"]
+    kept = sections.attribute_findings(Run(), [finding], "s1")
+    assert kept == [finding]
+    assert "unattributed" not in finding["source"].get("note", "")
+
+
+def test_a_pubmed_source_with_no_abstract_keeps_the_binding_unattributed(tmp_path, monkeypatch):
+    """esummary alone, with efetch giving nothing (a fixture recorded before
+    #471, or a live efetch failure): the binding survives and says so."""
+    no_abstract = tmp_path / "no_abstract.json"
+    no_abstract.write_text(json.dumps({"title": "A Paper", "authors": [], "year": "2020", "venue": "J Test"}))
+    monkeypatch.setattr(sections.metadata, "_fixture_path", lambda url: no_abstract)
+
+    class Run:
+        class turns:
+            backend = _MetaFixtureBackend()
+
+        work_dir = str(tmp_path)
+
+    finding = {
+        "claim": "The trial enrolled 42 adults.",
+        "quote": "",
+        "source": {"url_or_path": "https://pubmed.ncbi.nlm.nih.gov/11111111/", "title": "Model's Guess"},
+    }
+    sections.enrich_source_metadata([finding], Run())
+    assert finding["source"]["text"] == ""
+    kept = sections.attribute_findings(Run(), [finding], "s1")
+    assert kept == [finding], "the binding was dropped with nothing to check it against"
+    assert "unattributed: attribution not checked" in finding["source"]["note"]
+
+
 def test_resume_keeps_findings_when_the_draft_is_gone(work, turns, no_renderer):
     """A section whose draft is wrong still has research that was paid for."""
     run = paper.Run(
@@ -524,6 +2630,57 @@ def test_a_coverage_gap_is_recorded_when_a_question_has_no_finding(work, turns):
     if path.exists():
         payload = json.loads(path.read_text())
         assert payload["coverage_gaps"]
+
+
+def test_findings_from_research_drops_a_retrieval_claim():
+    """A claim about the search, not the topic, is not a finding. #469"""
+    result = {
+        "claims": [
+            {
+                "text": "No arxiv.org source was found that reports a specific rate.",
+                "source_url": "https://example.invalid/doc",
+            }
+        ]
+    }
+    assert sections.findings_from_research(result, "s1", "what is the rate?") == []
+
+
+def test_a_retrieval_claim_records_a_gap_not_a_claim(work, turns):
+    """A search miss narrated as a claim is refused; a gap is recorded
+    instead. #469"""
+
+    class RetrievalOnly(turns):
+        def research(self, question, note=""):
+            self.asked.append(("research", question, note))
+            return {
+                "answer": "",
+                "sources": [{"url": "https://example.invalid/doc", "title": "Doc"}],
+                "claims": [
+                    {
+                        "text": "No arxiv.org source was found that reports a specific rate.",
+                        "source_url": "https://example.invalid/doc",
+                    }
+                ],
+            }
+
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=RetrievalOnly(),
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    try:
+        paper.do_sections(run)
+    except paper.RunFailed:
+        pass
+    path = Path(work) / "knowledge" / "s1" / "findings.json"
+    payload = json.loads(path.read_text())
+    assert not any("arxiv.org" in (f.get("claim") or "") for f in payload["findings"])
+    assert payload["coverage_gaps"]
 
 
 def test_the_section_loop_escalates_on_a_repeated_failing_verdict(work, turns):
@@ -741,6 +2898,84 @@ def test_the_editor_is_told_the_deterministic_row_it_must_fix(work, turns):
     assert recorder.edit_verdicts, "the editor never received a verdict"
     rows = recorder.edit_verdicts[0].get("failed_rows") or []
     assert "length" in rows, rows
+
+
+class _HostLeak(_Recorder):
+    """A `cited` failure that quotes an uncited sentence naming a host."""
+
+    def write(self, section, claims, figures, notes, path=""):
+        self.calls.append(("write", section["id"]))
+        body = "The 2019 trial on arxiv.org reported strong effects. " + ("word " * 400)
+        target = Path(self.root) / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+        return body
+
+    def judge_section(self, section, body, findings, note=""):
+        self.calls.append(("judge_section", section["id"]))
+        return {"passed": True, "failed_rows": []}
+
+
+def test_a_retry_note_naming_a_host_reaches_the_editor_scrubbed(work, turns):
+    """PR #511 judge reproduction: a `cited` failure quotes the offending
+    sentence into `last_score.report()`, host and all. That report becomes
+    the editor's `note=` on the next attempt, and the writer's `instruction`
+    on the one after. Neither may carry the host. #452 #465 #412."""
+    recorder = _HostLeak(turns(root=work), work)
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+        allowed_domains=("arxiv.org",),
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+    assert recorder.edit_notes, "the editor never ran"
+    assert "arxiv.org" not in recorder.edit_notes[0], recorder.edit_notes[0]
+
+
+def test_a_retry_instruction_naming_a_host_reaches_the_writer_scrubbed(work, turns):
+    """The `write()` retry path, taken when `run.turns` has no `edit_section`.
+    Same reproduction as `_HostLeak`, on the other branch of the same `if`.
+    #452 #465 #412."""
+
+    class HostLeakWriter(turns):
+        def write(self, section, claims, figures, notes, path=""):
+            self.asked.append(("write", section["id"], notes, path))
+            attempt = sum(1 for item in self.asked if item[0] == "write")
+            if attempt == 1:
+                body = "The 2019 trial on arxiv.org reported strong effects. " + ("word " * 400)
+            else:
+                body = "The result held under load [1]. " + ("word " * 400)
+            target = Path(work) / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
+            return body
+
+    recorder = HostLeakWriter()
+    run = paper.Run(
+        topic="a topic",
+        work_dir=work,
+        turns=recorder,
+        state=paper.State.load_or_new(work, "a topic"),
+        brain=None,
+        log=lambda *a: None,
+        enforce_research_policy=True,
+        allowed_domains=("arxiv.org",),
+    )
+    paper.prior_art(run)
+    paper.plan(run)
+    with contextlib.suppress(Escalate, paper.RunFailed):
+        paper.do_sections(run)
+    notes = [item[2] for item in recorder.asked if item[0] == "write"]
+    assert len(notes) >= 2, notes
+    assert "arxiv.org" not in notes[1], notes[1]
 
 
 def test_rows_for_editor_names_a_python_only_failure():

@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import adapter
-from conftest import FakeResultMessage
+from conftest import FakeResultMessage, FakeTaskNotification, FakeTaskStarted
 
 
 def test_it_reads_the_result_message_not_its_repr(fake_sdk, work):
@@ -137,11 +137,19 @@ def test_a_hung_query_times_out(fake_sdk, work, monkeypatch):
 def test_the_timeout_names_the_role_the_elapsed_time_and_the_event_count(
     fake_sdk, work, monkeypatch
 ):
-    """A timeout that says only "timed out" leaves nothing to diagnose (#305)."""
+    """A timeout that says only "timed out" leaves nothing to diagnose (#305).
+
+    #571: a `ResultMessage` is now terminal on arrival, so the event ahead
+    of the hang has to be something else -- a stream event, never the
+    answer -- for the hang to still happen at all."""
+
+    class StreamEvent:
+        pass
+
     module = fake_sdk([])
 
     async def query(*, prompt, options):
-        yield FakeResultMessage(result="partial")
+        yield StreamEvent()
         await adapter.asyncio.sleep(1)
 
     module.query = query
@@ -158,6 +166,100 @@ def test_the_timeout_names_the_role_the_elapsed_time_and_the_event_count(
     assert result.prompt_chars == len("a long prompt")
     # The diagnostics carry the shape of the prompt, never the prompt itself.
     assert "a long prompt" not in result.output
+
+
+# -- #571: `collect()` returns on the terminal ResultMessage -----------------
+
+
+def test_a_budget_stop_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    fake_sdk, work, monkeypatch
+):
+    """#571, copying sol2's #568 fix. A terminal `ResultMessage` naming a
+    controlled cost stop must end the turn right there, well inside this
+    test's own generous timeout, not because the stream finally closed or
+    the timeout ceiling finally fired. The turn record it returns still
+    carries `elapsed_s`, `prompt_chars`, and `cost_reported` the way #305
+    wired the timeout path to, because the break exits through this port's
+    ordinary finished-turn return."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(
+            result="", total_cost_usd=0.3914, subtype="error_max_budget_usd"
+        )
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeResultMessage(result="never reached", total_cost_usd=99.0)
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    elapsed = time.monotonic() - started
+
+    assert result.stop_reason == "cost budget spent"
+    assert result.usd == 0.3914
+    assert result.cost_reported is True
+    assert not result.ok
+    assert result.elapsed_s > 0
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_successful_result_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    fake_sdk, work, monkeypatch
+):
+    """#571. Not only a controlled stop: a plain, successful terminal
+    `ResultMessage` followed by a quiet stream must also end the turn right
+    there, with the answer, rather than wait out the ceiling and lose it."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result="the answer", total_cost_usd=0.05)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    elapsed = time.monotonic() - started
+
+    assert result.ok
+    assert result.output == "the answer"
+    assert result.usd == 0.05
+    assert result.stop_reason is None
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_result_with_a_task_in_flight_does_not_end_the_run(fake_sdk, work, monkeypatch):
+    """#578. A `ResultMessage` that arrives while a delegated `Task` this
+    run spawned is still going only closes that turn, not the run: the
+    installed SDK's own `Query._read_messages` (upstream #1088) holds the
+    close back the same way, and a later result frame arrives once the
+    task drains. The first result here must not be mistaken for the
+    answer, and the stream must not be cut off before the second, real
+    terminal result arrives -- nor should `collect()` wait out the
+    ceiling once that second result is in hand."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted()
+        yield FakeResultMessage(result="turn one", total_cost_usd=0.10)
+        yield FakeTaskNotification()
+        yield FakeResultMessage(result="the real answer", total_cost_usd=0.20)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    elapsed = time.monotonic() - started
+
+    assert result.ok
+    assert result.output == "the real answer"
+    assert result.usd == 0.20
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
 
 
 def test_a_slow_query_writes_a_heartbeat(fake_sdk, work, monkeypatch, capsys):
@@ -177,22 +279,30 @@ def test_a_slow_query_writes_a_heartbeat(fake_sdk, work, monkeypatch, capsys):
     assert "[sol3] t+" in capsys.readouterr().err
 
 
-def test_the_heartbeat_says_unknown_cost_not_zero(fake_sdk, work, monkeypatch, capsys):
-    """`usd=0.00` for ten minutes reads as free. It means nothing told us yet."""
+def test_the_heartbeat_never_reports_zero_before_a_cost_is_known(
+    fake_sdk, work, monkeypatch, capsys
+):
+    """`usd=0.00` for ten minutes reads as free. It means nothing told us yet.
+
+    #571: the only cost signal in this port is the terminal `ResultMessage`,
+    and that message now ends the turn on arrival, so a heartbeat can no
+    longer fire once the cost is known -- only ever before it."""
     module = fake_sdk([])
 
     async def query(*, prompt, options):
         await adapter.asyncio.sleep(0.08)
         yield FakeResultMessage(result="done", total_cost_usd=0.5)
-        await adapter.asyncio.sleep(0.08)
 
     module.query = query
     monkeypatch.setattr(adapter, "HEARTBEAT_SECONDS", 0.02)
-    adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[], role="outliner")
+    result = adapter.AgentSdkBackend(object()).run(
+        root=work, prompt="p", allow=[], role="outliner"
+    )
     beats = [line for line in capsys.readouterr().err.splitlines() if "[sol3] t+" in line]
-    assert any("usd=?" in line for line in beats), beats
-    assert any("usd=0.50" in line for line in beats), beats
+    assert beats, "no heartbeat fired before the terminal result arrived"
+    assert all("usd=?" in line for line in beats), beats
     assert not any("usd=0.00" in line for line in beats), beats
+    assert result.usd == 0.5
 
 
 def test_the_query_timeout_reads_the_environment(monkeypatch):
@@ -213,6 +323,38 @@ def test_the_default_timeout_clears_one_real_outline_query():
     assert adapter.QUERY_TIMEOUT_SECONDS >= 900
 
 
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#553. A non-integer (or non-positive) value must not raise at import
+    and take the whole module down with it. Covers `_timeout_env`'s own
+    branches (unset, non-integer); the real variable is driven through a
+    reload by the test below."""
+    assert adapter._timeout_env("SOL3_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL3_QUERY_TIMEOUT_SECONDS_TEST", "abc")
+    assert adapter._timeout_env("SOL3_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "abc" in capsys.readouterr().err
+
+
+def test_the_real_timeout_variable_set_to_abc_leaves_the_default_and_imports(
+    monkeypatch, capsys
+):
+    """#553, judge of PR #556. The test above proves `_timeout_env`'s
+    branches but never touches `SOL3_QUERY_TIMEOUT_SECONDS` itself, so
+    reverting `QUERY_TIMEOUT_SECONDS` to the unguarded
+    `int(os.environ.get(...))` left it green while
+    `SOL3_QUERY_TIMEOUT_SECONDS=abc python -c "import adapter"` still
+    raised. Drive the real variable through a reload instead."""
+    import importlib  # noqa: PLC0415
+
+    monkeypatch.setenv("SOL3_QUERY_TIMEOUT_SECONDS", "abc")
+    reloaded = importlib.reload(adapter)
+    try:
+        assert reloaded.QUERY_TIMEOUT_SECONDS == 900
+        assert "abc" in capsys.readouterr().err
+    finally:
+        monkeypatch.delenv("SOL3_QUERY_TIMEOUT_SECONDS")
+        importlib.reload(adapter)
+
+
 def test_a_missing_cost_field_is_not_a_free_turn(fake_sdk, work):
     fake_sdk([FakeResultMessage(result="x")])
     result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
@@ -221,3 +363,265 @@ def test_a_missing_cost_field_is_not_a_free_turn(fake_sdk, work):
     reported = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
     assert reported.cost_reported is True
     assert reported.usd == 0.0
+
+
+# -- a transient provider error at the model-call boundary (#409) -----------
+
+
+def test_a_transient_connection_error_twice_then_an_answer_completes_the_turn(
+    fake_sdk, work, monkeypatch
+):
+    """A dropped CLI connection twice, then a normal reply. Both retries are
+    logged and the turn carries their count."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise module.CLIConnectionError("dropped")
+        yield FakeResultMessage(result="the answer", total_cost_usd=0.10)
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.output == "the answer"
+    assert result.retries == 2
+    assert waits == [5.0, 15.0]
+    assert calls["n"] == 3
+
+
+def test_each_retry_is_logged_with_its_wait(fake_sdk, work, monkeypatch, capsys):
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise module.CLIConnectionError("dropped")
+        yield FakeResultMessage(result="ok")
+
+    module.query = query
+    monkeypatch.setattr(adapter, "_sleep", lambda seconds: None)
+
+    adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[], role="writer")
+    err = capsys.readouterr().err
+    assert "role=writer" in err
+    assert "retry 1/3" in err and "after 5s" in err
+    assert "retry 2/3" in err and "after 15s" in err
+
+
+def test_the_backoff_sequence_is_five_fifteen_forty_five(fake_sdk, work, monkeypatch):
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise module.CLIConnectionError("dropped")
+        yield FakeResultMessage(result="ok", total_cost_usd=0.01)
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+    assert result.ok
+    assert result.retries == 3
+    assert waits == [5.0, 15.0, 45.0]
+
+
+def test_a_transient_error_four_times_ends_the_turn_gracefully(fake_sdk, work, monkeypatch):
+    """A fourth failure is not retried a fourth time. It is not silently
+    dropped either: it surfaces as this port's ordinary graceful turn
+    failure (the same path any other backend exception already takes), which
+    the caller retries at the unit level, not by resending the same request."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise module.CLIConnectionError("dropped")
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert "dropped" in result.output
+    assert calls["n"] == 4, "every attempt must actually have been made"
+    assert waits == [5.0, 15.0, 45.0]
+
+
+def test_a_plain_bug_is_not_retried(fake_sdk, work, monkeypatch):
+    """A non-transient exception must escape on the first raise, with no
+    backoff sleep, the same way a gate failure would."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise ValueError("not a transient error")
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert calls["n"] == 1, "a non-transient error must not be retried"
+    assert waits == []
+
+
+def test_a_missing_cli_is_not_retried(fake_sdk, work, monkeypatch):
+    """`CLINotFoundError` is a `CLIConnectionError`, but a permanent one: no
+    installed binary is not fixed by resending the same request."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise module.CLINotFoundError("not found")
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert calls["n"] == 1
+    assert waits == []
+
+
+def test_a_max_turns_result_error_is_not_retried(fake_sdk, work, monkeypatch):
+    """A `ResultError` for `error_max_turns` is a legitimate stop, not a
+    dropped connection or a rate limit."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise module.ResultError("too many turns", terminal_reason="error_max_turns")
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert calls["n"] == 1
+    assert waits == []
+
+
+def test_an_api_error_result_is_retried(fake_sdk, work, monkeypatch):
+    """A `ResultError` for `api_error` is the CLI reporting a live provider
+    failure (overloaded, rate limited, or a dropped connection) mid-run."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise module.ResultError("rate limited", terminal_reason="api_error")
+        yield FakeResultMessage(result="ok")
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.retries == 1
+    assert waits == [5.0]
+
+
+def test_a_401_is_not_retried(fake_sdk, work, monkeypatch):
+    """#482: a `ResultError` with `terminal_reason == "api_error"` used to
+    retry unconditionally, so a bad key burned the whole 65-second backoff
+    and four attempts before it finally failed. `api_error_status` is
+    already on the exception; a 4xx other than 408 or 429 is the provider
+    rejecting the request, not a dropped connection, and escapes on the
+    first raise with no sleep."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        raise module.ResultError(
+            "invalid x-api-key (401)", terminal_reason="api_error", api_error_status=401
+        )
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert not result.ok
+    assert calls["n"] == 1, "a permanent 4xx must not be retried"
+    assert waits == []
+    assert "401" in result.output
+
+
+def test_a_429_is_still_retried(fake_sdk, work, monkeypatch):
+    """429 is the one 4xx a retry can plausibly outlive."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise module.ResultError(
+                "rate limited", terminal_reason="api_error", api_error_status=429
+            )
+        yield FakeResultMessage(result="ok")
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.retries == 1
+    assert waits == [5.0]
+
+
+def test_a_5xx_api_error_is_still_retried(fake_sdk, work, monkeypatch):
+    """A 5xx is the provider's own failure, not the request's. Still
+    transient."""
+    module = fake_sdk([])
+    calls = {"n": 0}
+
+    async def query(*, prompt, options):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise module.ResultError(
+                "overloaded", terminal_reason="api_error", api_error_status=529
+            )
+        yield FakeResultMessage(result="ok")
+
+    module.query = query
+    waits: list[float] = []
+    monkeypatch.setattr(adapter, "_sleep", waits.append)
+
+    result = adapter.AgentSdkBackend(object()).run(root=work, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.retries == 1
+    assert waits == [5.0]

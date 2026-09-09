@@ -3,33 +3,53 @@
   "loop engineering exit criteria": {
     "question": "loop engineering exit criteria",
     "answer": "This repository's paper loop checks done, then cost, then max turns. Done means the deterministic paper checks and judge agree; cost means the configured USD ceiling is spent; max turns is the runtime safety ceiling. These exits are distinct and are evaluated in that order.",
-    "citations": ["https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk"],
+    "citations": [
+      "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk"
+    ],
     "sources": [
-      {"url": "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk", "title": "sol3_research_agent_sdk"}
+      {
+        "url": "https://github.com/RichardHightower/reliable-agentic-lab/tree/main/solutions/sol3_research_agent_sdk",
+        "title": "sol3_research_agent_sdk"
+      }
     ]
   },
   "loop engineering exit criteria common mistake": {
     "question": "loop engineering exit criteria common mistake",
     "answer": "The common mistake is trusting a model to report that it is finished. A stop condition a model evaluates is a stop condition a model can talk past, so a reliable loop computes done from a rubric in code and treats the model's claim as input rather than as the verdict.",
-    "citations": ["https://github.com/anthropics/claude-agent-sdk-python"],
+    "citations": [
+      "https://github.com/anthropics/claude-agent-sdk-python"
+    ],
     "sources": [
-      {"url": "https://github.com/anthropics/claude-agent-sdk-python", "title": "claude-agent-sdk-python"}
+      {
+        "url": "https://github.com/anthropics/claude-agent-sdk-python",
+        "title": "claude-agent-sdk-python"
+      }
     ]
   },
   "loop engineering exit criteria how to verify": {
     "question": "loop engineering exit criteria how to verify",
     "answer": "Verify an exit by making it observable. Record the failure signature of each attempt, compare it with the previous attempt, and stop when two attempts fail in exactly the same way, because a loop that repeats a failure is not converging and the remaining budget buys nothing.",
-    "citations": ["https://github.com/anthropics/claude-agent-sdk-python"],
+    "citations": [
+      "https://github.com/anthropics/claude-agent-sdk-python"
+    ],
     "sources": [
-      {"url": "https://github.com/anthropics/claude-agent-sdk-python", "title": "claude-agent-sdk-python"}
+      {
+        "url": "https://github.com/anthropics/claude-agent-sdk-python",
+        "title": "claude-agent-sdk-python"
+      }
     ]
   },
-  "mcp tool boundary": {
+  "Where does this pipeline refuse to guess?": {
     "question": "mcp tool boundary",
     "answer": "The Model Context Protocol defines how a host exposes tools, resources, and prompts to a model over a transport, which lets a loop name its boundary once and stay ignorant of what is behind it.",
-    "citations": ["https://modelcontextprotocol.io/specification"],
+    "citations": [
+      "https://modelcontextprotocol.io/specification"
+    ],
     "sources": [
-      {"url": "https://modelcontextprotocol.io/specification", "title": "Model Context Protocol specification"}
+      {
+        "url": "https://modelcontextprotocol.io/specification",
+        "title": "Model Context Protocol specification"
+      }
     ]
   }
 }

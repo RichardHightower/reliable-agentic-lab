@@ -8,6 +8,17 @@ import signal
 import time
 import pytest
 
+try:
+    import langchain_core.callbacks  # noqa: F401
+
+    HAS_LANGCHAIN = True
+except ImportError:
+    HAS_LANGCHAIN = False
+
+NEEDS_LANGCHAIN = pytest.mark.skipif(
+    not HAS_LANGCHAIN, reason="needs langchain_core, installed only by `task setup`"
+)
+
 # -- shapes a LangChain run actually returns -------------------------------
 
 
@@ -54,7 +65,7 @@ class FakeAgent:
         self.result = result
         self.calls = []
 
-    def invoke(self, payload):
+    def invoke(self, payload, config=None):
         self.calls.append(payload)
         if self.raises is not None:
             raise self.raises
@@ -119,6 +130,38 @@ def test_a_failing_agent_returns_not_ok(tmp_path, monkeypatch):
     assert "no key" in result.output
 
 
+# -- #541: a raised backend never claims a silent 0.0 -----------------------
+
+
+def test_a_backend_that_raises_reports_usd_as_none_not_zero(tmp_path, monkeypatch):
+    """A raise means `agent.invoke()` never answered. `usd=0.0` there reads
+    as "this turn was free", indistinguishable from an honest empty reply."""
+    _diffs(monkeypatch, before=set(), after=set())
+    backend = adapter.DeepAgentsBackend(FakeAgent(raises=RuntimeError("no key")))
+
+    result = backend.run(repo=tmp_path, prompt="enhance", allow=["tickets/**"])
+
+    assert result.ok is False
+    assert result.usd is None
+
+
+def test_a_backend_failure_names_the_exception_class(tmp_path, monkeypatch):
+    """A `GraphRecursionError` must read as one, not survive only in the
+    driver's generic wording."""
+    _diffs(monkeypatch, before=set(), after=set())
+
+    class GraphRecursionError(RuntimeError):
+        pass
+
+    exc = GraphRecursionError("Recursion limit of 16 reached without hitting a stop condition.")
+    backend = adapter.DeepAgentsBackend(FakeAgent(raises=exc))
+
+    result = backend.run(repo=tmp_path, prompt="enhance", allow=["tickets/**"])
+
+    assert "GraphRecursionError" in result.output
+    assert "Recursion limit of 16" in result.output
+
+
 def test_a_timeout_returns_a_distinct_fail_closed_result(tmp_path, monkeypatch):
     _diffs(monkeypatch, before=set(), after=set())
 
@@ -134,7 +177,85 @@ def test_a_timeout_returns_a_distinct_fail_closed_result(tmp_path, monkeypatch):
 
     assert result.ok is False
     assert result.timed_out is True
+    assert result.usd is None
     assert "exceeded 180 seconds" in result.output
+
+
+@NEEDS_LANGCHAIN
+def test_a_timeout_reports_elapsed_events_and_spend_so_far(tmp_path, monkeypatch):
+    """#541. A wall-clock timeout that interrupts `agent.invoke()` mid-call
+    must not lose what those calls already cost, the way the Agent SDK
+    twin's timeout keeps the spend a partial event stream already reported."""
+    _diffs(monkeypatch, before=set(), after=set())
+
+    class FakeMessage:
+        def __init__(self, usage_metadata):
+            self.usage_metadata = usage_metadata
+
+    class FakeGeneration:
+        def __init__(self, message):
+            self.message = message
+
+    class FakeLLMResult:
+        def __init__(self, usage_metadata):
+            self.generations = [[FakeGeneration(FakeMessage(usage_metadata))]]
+
+    class PartialAgent:
+        def invoke(self, payload, config=None):
+            for callback in (config or {}).get("callbacks", []):
+                callback.on_llm_end(FakeLLMResult({"total_cost": 0.33}))
+            raise adapter.QueryTimedOut("Deep Agents query exceeded 180 seconds")
+
+    result = adapter.DeepAgentsBackend(PartialAgent()).run(
+        repo=tmp_path, prompt="enhance", allow=["tickets/**"]
+    )
+
+    assert result.ok is False
+    assert result.timed_out is True
+    assert result.usd == 0.33
+    assert "elapsed=" in result.output
+    assert "events=1" in result.output
+    assert "usd=0.3300" in result.output
+
+
+@NEEDS_LANGCHAIN
+def test_a_raise_after_reported_usage_returns_the_spend_not_none(tmp_path, monkeypatch):
+    """A crash after a model call already reported a cost must not erase it."""
+    _diffs(monkeypatch, before=set(), after=set())
+
+    class FakeMessage:
+        def __init__(self, usage_metadata):
+            self.usage_metadata = usage_metadata
+
+    class FakeGeneration:
+        def __init__(self, message):
+            self.message = message
+
+    class FakeLLMResult:
+        def __init__(self, usage_metadata):
+            self.generations = [[FakeGeneration(FakeMessage(usage_metadata))]]
+
+    class RaisesAfterUsageAgent:
+        def invoke(self, payload, config=None):
+            for callback in (config or {}).get("callbacks", []):
+                callback.on_llm_end(FakeLLMResult({"total_cost": 0.42}))
+            raise RuntimeError("boom after spend")
+
+    result = adapter.DeepAgentsBackend(RaisesAfterUsageAgent()).run(
+        repo=tmp_path, prompt="enhance", allow=["tickets/**"]
+    )
+
+    assert not result.ok
+    assert result.usd == 0.42
+    assert "boom after spend" in result.output
+
+
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#541. A non-integer value must not raise at import and kill the run."""
+    assert adapter._timeout_env("SOL1_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL1_QUERY_TIMEOUT_SECONDS_TEST", "not-a-number")
+    assert adapter._timeout_env("SOL1_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "not-a-number" in capsys.readouterr().err
 
 
 @pytest.mark.skipif(not hasattr(signal, "SIGALRM"), reason="SIGALRM is unavailable on Windows")
@@ -142,7 +263,7 @@ def test_the_wall_clock_guard_interrupts_a_blocked_sync_invoke(tmp_path, monkeyp
     _diffs(monkeypatch, before=set(), after=set())
 
     class SlowAgent:
-        def invoke(self, _payload):
+        def invoke(self, _payload, config=None):
             time.sleep(1)
 
     started = time.monotonic()

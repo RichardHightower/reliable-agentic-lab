@@ -44,7 +44,15 @@ PROFILES = {
         "max_claims": 40,
         "max_usd": 12.0,
         "max_iterations": 3,
-        "word_target_total": 2000,
+        # #538, PR #554 judge finding F4. Five sections now share this
+        # budget, Introduction included, where four did before #538. Raised
+        # from 2000 so the split still clears `checks.MIN_WORDS` (2000):
+        # this is the same fixed floor either way, and five sections
+        # dividing the old total, plus the fixture's own four-answer
+        # research.json feeding ten key questions instead of eight, gave
+        # `checks.py`'s repeat-collapse pass more to trim than four
+        # sections sharing it did.
+        "word_target_total": 2800,
     },
     "paper": {
         "max_questions": 20,
@@ -162,6 +170,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-diagrams", type=int, default=None, help="cap on the figure list")
     parser.add_argument(
         "--max-claims", type=int, default=None, help="cap on how many claims get a second opinion"
+    )
+    parser.add_argument(
+        "--max-follow",
+        type=int,
+        default=None,
+        help="cap on how many secondary-tier claims get a follow turn for the primary, per run",
+    )
+    parser.add_argument(
+        "--max-counter",
+        type=int,
+        default=None,
+        help="cap on how many generalizing claims get a counter-evidence turn, per run",
     )
     parser.add_argument(
         "--word-target",
@@ -290,6 +310,8 @@ def main(argv: list[str] | None = None) -> int:
         max_questions=profile["max_questions"],
         max_diagrams=profile["max_diagrams"],
         max_claims=profile["max_claims"],
+        max_follow=args.max_follow if args.max_follow is not None else paper.MAX_FOLLOW,
+        max_counter=args.max_counter if args.max_counter is not None else paper.MAX_COUNTER,
         word_target_total=profile["word_target_total"],
         brief=brief,
         should_publish=args.publish,
@@ -299,6 +321,9 @@ def main(argv: list[str] | None = None) -> int:
         reuse_drafts=args.reuse_drafts,
         enforce_research_policy=True,
         enforce_loop_doctrine=args.enforce_loop_doctrine,
+        require_next_step=True,
+        require_evidence_requirements=True,
+        require_introduction=True,
         brain=brains[0] if brains else None,
         brains=brains,
         corpus_subjects=subjects,

@@ -23,6 +23,8 @@ module calls a model. `subagents_for` returns configuration.
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 from roleplan import DEFAULT_LOOP, RolePlan, plan
@@ -32,6 +34,33 @@ HERE = Path(__file__).resolve().parent
 SKILLS_DIR = HERE / "skills"
 MEMORY_FILE = HERE / "AGENTS.md"
 DEFAULT_MODEL = "anthropic:claude-sonnet-5"
+
+
+def _timeout_env(name: str, default: int) -> int:
+    """Read a positive-integer timeout from the environment, never raising
+    at import.
+
+    #553, matching the `_timeout_env()` shape sol1 and sol4 landed for
+    #541. A bad value here used to raise `ValueError` at import time and
+    take the whole module down with it. A logged fallback keeps the process
+    alive, the same way a missing dependency reports as a result, not a
+    traceback.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = None
+    if value is None or value <= 0:
+        print(
+            f"[sol3] {name}={raw!r} is not a positive integer; using the default {default}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        return default
+    return value
 
 # The outline judge grades what the planner produced, and the editor repairs it.
 # Give the editor the stronger model: a Sonnet planner re-emitting every section
@@ -58,7 +87,14 @@ WRITER_MAX_TOKENS = 4_096
 # more sections without raising it for every other, much smaller, structured
 # reply (a judge verdict, a research finding, a chart spec).
 OUTLINE_MAX_TOKENS = 8_192
-MODEL_TIMEOUT_SECONDS = 120
+# #553, judge of PR #556. Was a bare `120`. Env-configurable so a slow live
+# corpus does not need a code change to clear, and a bad value falls back
+# instead of raising at import. Its own variable name, not
+# `SOL3_QUERY_TIMEOUT_SECONDS`: that name already drives the SDK port's
+# per-query wall-clock ceiling, a different unit of work from this port's
+# per-model-call HTTP timeout, and sharing the name would let one export
+# silently move both.
+MODEL_TIMEOUT_SECONDS = _timeout_env("SOL3_DA_CALL_TIMEOUT_SECONDS", 120)
 MODEL_MAX_RETRIES = 0
 
 # Built-in harness tools that write or execute. The orchestrator must not hold
@@ -182,8 +218,31 @@ REVIEWER_RESPONSE = {
         "Do not decide whether to ship. Do not decide whether to retry."
     ),
     "properties": {
-        "failed_rows": {"type": "array", "items": {"type": "string"}},
+        # A row name on its own (the legacy shape), or an object pairing the
+        # row with its own note (#411), so the two can never drift apart.
+        "failed_rows": {
+            "type": "array",
+            "items": {
+                "oneOf": [
+                    {"type": "string"},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "row": {"type": "string"},
+                            "note": {"type": "string"},
+                        },
+                        "required": ["row"],
+                        "additionalProperties": False,
+                    },
+                ]
+            },
+        },
+        # The legacy shape's parallel list, one sentence per `failed_rows` entry.
         "notes": {"type": "array", "items": {"type": "string"}},
+        # How close the draft is to passing every row. Optional: absent on a
+        # legacy reply, and `gates.decide`'s `progressed` check falls back to
+        # the failed-row count alone.
+        "score": {"type": "number", "minimum": 0, "maximum": 1},
     },
     "required": ["failed_rows"],
     "additionalProperties": False,

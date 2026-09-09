@@ -12,6 +12,7 @@ port for #304, not imported.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from urllib.parse import urlparse, urlsplit
 
@@ -83,6 +84,48 @@ ALLOWED_TLDS = frozenset({".gov", ".edu", ".int"})
 
 # Below this many admitted hosts the run keeps the seed instead.
 MIN_ADMITTED = 3
+
+# The scout's own fallback when the model proposes no host at all. Distinct
+# from SEED_ALLOWLIST above, which is this workshop's own vendor-doc default
+# and never changes with the paper's topic. Before this, the scout forced
+# `arxiv.org` onto every field, including one that does not publish there: a
+# biomedical topic got an empty preprint search and the plan then treated
+# arxiv.org as the paper's only source boundary. `arxiv.org` may still be
+# proposed and admitted for any field; it is only the automatic seed for
+# software and physics. #469
+FIELD_SEEDS: dict[str, tuple[dict[str, str], ...]] = {
+    "software": ({"host": "arxiv.org", "org_type": "preprint"},),
+    "physics": ({"host": "arxiv.org", "org_type": "preprint"},),
+    "biomedical": (
+        {"host": "pubmed.ncbi.nlm.nih.gov", "org_type": "government"},
+        {"host": "pmc.ncbi.nlm.nih.gov", "org_type": "government"},
+        {"host": "doi.org", "org_type": "standards_body"},
+        {"host": "cochranelibrary.com", "org_type": "professional_society"},
+        {"host": "jissn.biomedcentral.com", "org_type": "peer_reviewed_publisher"},
+    ),
+}
+# A field the model names that has no specific list above, economics, law,
+# and general among them, still gets a general scholarly host rather than
+# nothing: doi.org resolves a paper in any field. This is never the vendor
+# doc SEED_ALLOWLIST above; that fallback belongs to a run whose librarian
+# also comes up short, and only on the software field.
+GENERAL_FIELD_SEED: tuple[dict[str, str], ...] = ({"host": "doi.org", "org_type": "standards_body"},)
+
+
+def seed_for_field(field: str) -> tuple[dict, ...]:
+    """The scout's own fallback proposal when the model names no host.
+
+    A blank or missing field seeds nothing: defaulting an undetermined field
+    to software's arxiv.org was the same field-blindness this ticket
+    reported, one layer up. A field the model does name gets FIELD_SEEDS's
+    own list when there is one, biomedical among them, and the general
+    scholarly seed otherwise. #469
+    """
+    key = str(field or "").strip().lower()
+    if not key:
+        return ()
+    return FIELD_SEEDS.get(key, GENERAL_FIELD_SEED)
+
 
 _GITHUB_ORGS = frozenset(
     entry.rsplit("/", 1)[1].lower() for entry in SEED_ALLOWLIST if entry.startswith("github.com/")
@@ -280,3 +323,99 @@ def run_allowlist(admitted: Iterable[str]) -> tuple[str, ...]:
     if len(hosts) < MIN_ADMITTED:
         return SEED_ALLOWLIST
     return hosts[:MAX_PERPLEXITY_DOMAINS]
+
+
+# What kind of source this is, from the record's own publication type, never
+# a model's opinion. #473. Keys are the raw, lower-cased strings
+# `metadata.fetch_record` carries: PubMed and PMC's `pubtype` entries, and
+# Crossref's `type`. arXiv carries no comparable enum -- every arXiv record
+# is an unreviewed preprint whatever its `category`, so `tier_for` treats any
+# non-empty `category` as `preprint_or_compilation` directly, without a table
+# entry per subject area.
+#
+# A Crossref `type` of `journal-article` is deliberately absent: Crossref
+# alone cannot tell a primary trial from a position stand published in the
+# same kind of journal, so a DOI-only source with no PubMed pubtype falls
+# through to `other` rather than guessing.
+TIERS: dict[str, str] = {
+    # PubMed / PMC publication types (esummary's or efetch's `pubtype`)
+    "randomized controlled trial": "primary_trial",
+    "clinical trial": "primary_trial",
+    "clinical trial, phase i": "primary_trial",
+    "clinical trial, phase ii": "primary_trial",
+    "clinical trial, phase iii": "primary_trial",
+    "clinical trial, phase iv": "primary_trial",
+    "observational study": "primary_trial",
+    "systematic review": "meta_analysis_or_systematic_review",
+    "meta-analysis": "meta_analysis_or_systematic_review",
+    "practice guideline": "position_stand_or_guideline",
+    "guideline": "position_stand_or_guideline",
+    "consensus development conference": "position_stand_or_guideline",
+    "review": "narrative_review",
+    "preprint": "preprint_or_compilation",
+    # Crossref `type`
+    "posted-content": "preprint_or_compilation",
+}
+
+# A claim resting on one of these alone is resting on a summary, not the
+# primary study. #473's follow pass exists for exactly this set.
+SECONDARY_TIERS = frozenset(
+    {"narrative_review", "meta_analysis_or_systematic_review", "preprint_or_compilation"}
+)
+
+# Crossref's `type` enum has no guideline value, so a position stand or
+# consensus statement reached only by DOI, the ISSN one the ticket names
+# among them, tiers `other` from `TIERS` alone. #473 item 6: a title match
+# closes that gap without widening what `guideline_cited` grades.
+GUIDELINE_TITLE = re.compile(
+    r"\b(position stand|consensus statement|practice guideline|clinical guideline)\b", re.IGNORECASE
+)
+
+# #517 follow-up 1. The exact words `GUIDELINE_TITLE` matches on, extracted
+# from the pattern rather than retyped so the two can never drift apart. A
+# title heuristic that admits a source must not also let its own naming
+# vocabulary count as evidence that the source is on some section's topic:
+# a key question that literally asks about "the position stand" shares
+# "position" and "stand" with any title beginning "Position Stand on ...",
+# whatever that title is actually about. `sections.guideline_ledger_matches`
+# drops these words from both sides of its two-term test before comparing.
+GUIDELINE_VOCABULARY = frozenset(
+    word
+    for phrase in GUIDELINE_TITLE.pattern.removeprefix(r"\b(").removesuffix(r")\b").split("|")
+    for word in phrase.split()
+)
+
+# #475. The vocabulary a planner's `evidence_requirements.study_types` may
+# name: `TIERS`'s own values, plus `other`, the untiered default `tier_for`
+# returns. One source of truth for the planner card's schema and
+# `plan_gate`'s check alike, so a new tier added to `TIERS` never has to be
+# repeated here.
+STUDY_TYPES: tuple[str, ...] = tuple(sorted(set(TIERS.values()) | {"other"}))
+
+
+def tier_for(record: dict) -> str:
+    """The source's tier, from its own record. No model.
+
+    Checks every PubMed/PMC `pubtype` entry against `TIERS` first, since a
+    record commonly carries several ("Journal Article", "Randomized
+    Controlled Trial") and the more specific one should win over the generic
+    one. Then Crossref's `type`. Then the title against `GUIDELINE_TITLE`,
+    the one title-based rule this function has, for exactly the case
+    neither raw field can name. Then arXiv's `category`: present at all
+    means an unreviewed preprint, whatever the subject. No match anywhere:
+    `other`.
+    """
+    for raw in record.get("pubtype") or []:
+        tier = TIERS.get(str(raw).strip().lower())
+        if tier:
+            return tier
+    crossref_type = str(record.get("crossref_type") or "").strip().lower()
+    if crossref_type:
+        tier = TIERS.get(crossref_type)
+        if tier:
+            return tier
+    if GUIDELINE_TITLE.search(str(record.get("title") or "")):
+        return "position_stand_or_guideline"
+    if str(record.get("category") or "").strip():
+        return "preprint_or_compilation"
+    return "other"

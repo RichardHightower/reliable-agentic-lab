@@ -186,6 +186,12 @@ def run(  # noqa: PLR0913, PLR0912, PLR0915
             allow=list(coder.scope.allow),
         )
         boss.spend(result.usd)
+        # #541. `write_scope.Orchestrator.spend()` promises the `None` a
+        # failed turn reports "never a silent 0.0". That promise held only
+        # for the budget until now: `last-fixer.json` recorded `wrote` and
+        # `gate` but never `usd`, so an unknown-cost attempt was invisible
+        # in the one place a reader would look for it.
+        attempt["usd"] = result.usd
         attempt["wrote"] = result.wrote
         attempt["gate"] = decision.gate
         trace["attempts"].append(attempt)

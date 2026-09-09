@@ -79,6 +79,8 @@ def run_paper(args) -> int:
         brain=Path(args.brains[0]) if args.brains else second_brain(),
         max_usd=args.max_usd,
         max_verify=args.max_verify,
+        max_follow=args.max_follow,
+        max_counter=args.max_counter,
         attempts=args.attempts,
         theme=args.theme,
         publish=args.publish,
@@ -87,6 +89,7 @@ def run_paper(args) -> int:
         require_approval=args.approve,
         resume=args.resume,
         loop_doctrine=args.loop_doctrine,
+        require_evidence_requirements=True,
     )
     try:
         return run.run()
@@ -115,6 +118,18 @@ def main(argv: list[str] | None = None) -> int:
         default=24,
         help="how many claims one verify stage cross-checks. The verifier "
         "searches once per claim, so this is the size of the work.",
+    )
+    paper_args.add_argument(
+        "--max-follow",
+        type=int,
+        default=6,
+        help="how many secondary-tier claims get a follow turn for the primary, per run",
+    )
+    paper_args.add_argument(
+        "--max-counter",
+        type=int,
+        default=6,
+        help="how many generalizing claims get a counter-evidence turn, per run",
     )
     paper_args.add_argument("--theme", default="spillwave-light")
     paper_args.add_argument("--publish", action="store_true", help="push to a secret gist")

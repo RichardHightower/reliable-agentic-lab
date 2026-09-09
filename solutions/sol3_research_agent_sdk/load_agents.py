@@ -46,6 +46,35 @@ def _schema(properties: dict, required: list[str]) -> dict:
 
 _STRINGS = {"type": "array", "items": {"type": "string"}}
 
+# #475. `study_types` is a closed set: `source_policy.STUDY_TYPES`, the same
+# vocabulary `tier_for()` assigns, so a planner cannot name a tier the run
+# will never produce.
+_EVIDENCE_REQUIREMENTS_SCHEMA = _schema(
+    {
+        "study_types": {
+            "type": "array",
+            "items": {"type": "string", "enum": list(source_policy.STUDY_TYPES)},
+        },
+        "min_count": {"type": "integer"},
+        "recency_years": {"type": "integer"},
+        "populations": _STRINGS,
+    },
+    ["study_types", "min_count", "recency_years", "populations"],
+)["schema"]
+
+# #475. A key question, structured so `evidence_requirements` is required on
+# every one, not a section-level afterthought a model could skip. `kind`
+# already existed as an unenforced convention `outline.question_kind` read
+# off a hand-built dict; this is the first schema that actually asks for it.
+_QUESTION_SCHEMA = _schema(
+    {
+        "text": {"type": "string"},
+        "kind": {"type": "string", "enum": ["fact", "mechanism", "comparison", "data"]},
+        "evidence_requirements": _EVIDENCE_REQUIREMENTS_SCHEMA,
+    },
+    ["text", "kind", "evidence_requirements"],
+)["schema"]
+
 # The old planner shape, kept so a reader comparing this port to an earlier
 # revision can see what the outliner replaced. Nothing calls it.
 PLAN_SCHEMA = _schema(
@@ -106,7 +135,7 @@ _SECTION_SCHEMA = _schema(
         "heading": {"type": "string"},
         "objective": {"type": "string"},
         "abstract": {"type": "string"},
-        "key_questions": _STRINGS,
+        "key_questions": {"type": "array", "items": _QUESTION_SCHEMA},
         "claims_to_support": _STRINGS,
         "required_evidence": _STRINGS,
         "word_target": {"type": "integer"},
@@ -198,6 +227,10 @@ RESEARCH_SCHEMA = _schema(
                     "text": {"type": "string"},
                     "source_url": {"type": "string"},
                     "quote": {"type": "string"},
+                    # Population, design, and sample size, when there is one.
+                    # Optional: unused until #478's study table, and most
+                    # claims carry none. #471
+                    "study": {"type": "object"},
                 },
                 ["text", "source_url", "quote"],
             )["schema"],
@@ -214,6 +247,9 @@ VERIFY_SCHEMA = _schema(
         "verdict": {"type": "string", "enum": ["supports", "contradicts", "unclear"]},
         "source_url": {"type": "string"},
         "excerpt": {"type": "string"},
+        # Optional: the searches tried. #471's `not_found`-shaped miss writes
+        # these into the claim's record; silence is not a result.
+        "queries_used": {"type": "array", "items": {"type": "string"}},
     },
     ["verdict", "source_url", "excerpt"],
 )
@@ -227,6 +263,34 @@ LOCATE_SCHEMA = _schema(
         "excerpt": {"type": "string"},
     },
     ["url", "supports", "excerpt"],
+)
+
+# #473. A hit names the primary study a review, a preprint, or a compilation
+# cited for one numeric claim; a miss is a first-class answer, the same as
+# `unclear` above, not something to force into a fabricated URL.
+FOLLOW_SCHEMA = _schema(
+    {
+        "found": {"type": "boolean"},
+        "url": {"type": "string"},
+        "title": {"type": "string"},
+        "quote": {"type": "string"},
+    },
+    ["found", "url", "title", "quote"],
+)
+
+# #474. A hit names a counterargument to a generalizing claim, with the
+# contrary claim's own text, not only a URL: the writer needs a sentence to
+# state, not a citation to reason from on its own. A miss is a first-class
+# answer, the same as `found: false` above.
+COUNTER_SCHEMA = _schema(
+    {
+        "found": {"type": "boolean"},
+        "counter_claim": {"type": "string"},
+        "url": {"type": "string"},
+        "title": {"type": "string"},
+        "quote": {"type": "string"},
+    },
+    ["found", "counter_claim", "url", "title", "quote"],
 )
 
 DIAGRAM_SCHEMA = _schema(
@@ -418,6 +482,10 @@ GROUNDING = (
     "flag it with <!-- NEEDS-SOURCE: ... -->. Never guess a plausible-looking "
     "value. A fabricated citation or statistic is a critical failure, worse "
     "than a vaguer but true statement.\n"
+    "On the first use of a term a busy colleague outside this seminar would "
+    "not already treat as ordinary English, define it in that sentence, then "
+    "add <!-- TERM: name: definition --> once for that term. Assembly builds "
+    "the glossary from these marks and strips them from the page.\n"
     "</grounding_contract>"
 )
 

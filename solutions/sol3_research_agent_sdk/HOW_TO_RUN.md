@@ -55,12 +55,16 @@ task table
 task checks
 task test
 task demo
+task test-live
 ```
 
-`task demo` runs the recorded fixture. No key, no network. `task table`
+`task demo` runs the recorded fixture. No key, no network. `task test-live`
+runs the one live renderer test, skipped otherwise so `task test` stays
+deterministic; set `SOL3_LIVE_TESTS=1` and a real image backend key first.
+`task table`
 prints the role table. The writer is the only role that prints `yes` in the
 writes column. A paper run is supposed to produce a document a colleague can
-use, not a cited brief: 2000 words, with each body section unpacked from its
+use, not a cited brief: 2800 words, with each body section unpacked from its
 claims. Saturday Lab 3 is still the short brief.
 
 ## White-paper acceptance runs
@@ -96,7 +100,7 @@ research tools, so it requires `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, the
 renderer, and an approved image backend. It never publishes a gist. The live
 lane passes `--profile paper` (4000 words, 20 questions, 60 claims) and does
 not clamp those numbers; the fixture lane stays on demo. The outline judge
-scores `flow`, `completeness`, `titles`, and `corpus_fit` — the same four
+scores `flow`, `completeness`, `titles`, and `corpus_fit`, the same four
 rows as the Deep Agents twin. The resulting figures must have no fidelity misses, be embedded in the paper,
 and meet the resolution floor recorded in `e2e-report.json`.
 
@@ -119,6 +123,14 @@ is 900 seconds.
 Both E2E lanes render article figures with imagen-diagrams' built-in
 `arctic-fox` theme. The acceptance report rejects a figure whose render sidecar
 records another theme.
+
+## House style and the evidence contract
+
+The paper follows one house style, published once on the wiki as [Sol-3-White-Paper-Style](https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style). The check module grades third person and no marketing verb (`person`, `marketing`), no contraction and no Latin abbreviation (`ste_language`), and a heading that answers its own question (`question_heading`). The body names no search host (`policy_leak`) and states a caveat once (`caveat_once`). A first-use term earns a `TERM:` marker and a Glossary entry (`glossary_complete`, `glossary_exact`). A figure earns a caption and a mention in its own section (`captioned`, `figure_referenced`). The body carries Methods and, for a human study, a study table (`methods_present`, `study_table`), with front matter above the Abstract (`front_matter`). The last body section is a next step, never a sale (`next_step`, `cta_language`), and the abstract is written last, graded against the body (`abstract_matches_body`).
+
+The evidence contract is arithmetic, not a promise from the model. `source_policy.py` seeds the allowlist by field (`seed_for_field`), bans a host outright (`DENYLIST`), and grades a source's tier (`tier_for`). A shaky numeric claim spends one follow turn. Before the paper states that an intervention has no effect, the counter-evidence pass searches for the other side; the `counterweighed` row names a claim nobody checked. A safety claim needs a cited guideline (`guideline_cited`), and a question with stated evidence requirements needs `evidence_requirements_met`. A citation's title, authors, and year come from the fetched record, never the model's guess, and a claim earns attribution only when the fetched text supports it. A diagram is graded against the section's own claims before it is embedded.
+
+The glossary, front-matter, next-step, and study-table rows (`glossary_complete`, `glossary_exact`, `methods_present`, `conclusion_present`, `study_table`, `front_matter`, `next_step`, `cta_language`) sit behind `enforce_structure`, off by default. Every `task demo` lane runs with it on, offline included; only a direct call to `check()` in a test leaves it off.
 
 ## Export and publish an existing report
 
@@ -151,7 +163,7 @@ task publish --
 ```
 
 `task run` refuses if you skipped `task setup`. It defaults to `--profile demo`
-(2000 words, 12 questions, 40 verified claims, $12). A paper run is supposed
+(2800 words, 12 questions, 40 verified claims, $12). A paper run is supposed
 to produce a document a colleague can use, not a cited brief. Saturday Lab 3
 is still the short brief.
 

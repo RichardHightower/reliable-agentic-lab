@@ -14,8 +14,29 @@ import json
 import re
 from datetime import datetime, timezone
 
+import source_policy
+
 # Prompt-side checklist, not a hard validator rule. The outliner is told this.
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
+
+# P4, the last prose section is a next step, not a restated conclusion. "Next"
+# is in the list because the house style's own recommended heading for this
+# section is literally "Next step". `require_next_step` gates the rule below,
+# so the dozens of existing outline fixtures that end on an arbitrary heading
+# keep validating with no changes.
+NEXT_STEP_VERBS = ("Next", "Evaluate", "Run", "Compare", "Try", "Measure", "Adopt", "Pilot")
+
+
+def is_bare_conclusion(heading: str) -> bool:
+    """A last section headed exactly `Conclusion`, which only restates the
+    abstract and is banned as the paper's closing prose section."""
+    return str(heading or "").strip().lower() == "conclusion"
+
+
+def starts_with_next_step_verb(heading: str) -> bool:
+    """The heading's first word is a next-step verb, case insensitive."""
+    first = re.match(r"[A-Za-z]+", str(heading or "").strip())
+    return bool(first) and first.group(0).lower() in {verb.lower() for verb in NEXT_STEP_VERBS}
 
 
 def canonical(outline: dict) -> str:
@@ -84,7 +105,15 @@ def _cycle(ids: list[str], edges: dict[str, list[str]]) -> str | None:
     return None
 
 
-def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys: list[str] | None = None) -> list[str]:
+def validate(
+    outline: dict,
+    *,
+    word_target_total: int | None = None,
+    corpus_keys: list[str] | None = None,
+    require_next_step: bool = False,
+    require_evidence_requirements: bool = False,
+    require_introduction: bool = False,
+) -> list[str]:
     """Return human-readable errors. Empty means the outline is usable.
 
     The exact strings are the retry instruction handed back to the outliner.
@@ -105,6 +134,27 @@ def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys
             )
     if errors:
         return errors
+
+    # #538. The plan's frozen heading order is Front matter, Abstract,
+    # Introduction, Methods, Evidence summary, body sections, Conclusion,
+    # Next step, Glossary, References. Abstract, Methods, Evidence summary,
+    # Conclusion, Glossary, and References are Python's own, never an
+    # outline section in this port; Introduction is the one structural
+    # heading the outliner still has to draft, and position matters as much
+    # as presence: it has to be first, the same as Deep Agents'
+    # `stages.normalize_plan` puts it right after its own Abstract section.
+    # Copied, not imported, per the house rule against a shared loop
+    # package. Gated the same way `require_next_step` is, so the many
+    # single-section outline stubs across this test suite keep validating
+    # with no changes.
+    if require_introduction:
+        heading = str(sections[0].get("heading") or "").strip()
+        if heading.lower() != "introduction":
+            errors.append(
+                f"the first section is headed {heading!r}, not 'Introduction'. "
+                "The frozen heading order puts Introduction first, right after "
+                "the Abstract. Head the first section 'Introduction'."
+            )
 
     ids = [section.get("id") for section in sections]
     if any(not sid for sid in ids):
@@ -176,6 +226,13 @@ def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys
                 f"section {sid!r} has {len(questions)} key_questions; every section "
                 "needs at least two."
             )
+        if require_evidence_requirements:
+            for q_index, raw_question in enumerate(questions, start=1):
+                problem = _evidence_requirements_problem(raw_question)
+                if problem:
+                    errors.append(
+                        f"section {sid!r} question {q_index} ({question_text(raw_question)!r}) {problem}"
+                    )
         figures = section.get("figures") or []
         if figures and not isinstance(figures, list):
             errors.append(f"section {sid!r} figures must be an array of objects")
@@ -195,6 +252,22 @@ def validate(outline: dict, *, word_target_total: int | None = None, corpus_keys
             refs = []
         if corpus_keys is not None:
             errors.extend(_check_refs(section, sid, refs, corpus_keys))
+
+    if require_next_step:
+        heading = str(sections[-1].get("heading") or "").strip()
+        if is_bare_conclusion(heading):
+            errors.append(
+                f"the last section is headed {heading!r}, a bare Conclusion that "
+                "only restates the abstract. Head it with a next-step verb "
+                "instead, for example 'Evaluate X on a live ticket' or 'Next step'."
+            )
+        elif not starts_with_next_step_verb(heading):
+            errors.append(
+                f"the last section is headed {heading!r}. The paper's last prose "
+                "section must tell a colleague what to do next, headed with a "
+                f"next-step verb such as {', '.join(NEXT_STEP_VERBS[1:4])}, for "
+                "example 'Evaluate X on a live ticket' or 'Next step'."
+            )
 
     return errors
 
@@ -277,6 +350,46 @@ def question_kind(question) -> str:
         kind = str(question.get("kind") or "fact").strip().lower()
         return kind if kind in {"fact", "mechanism", "comparison", "data"} else "fact"
     return "fact"
+
+
+def question_evidence_requirements(question) -> dict:
+    """A key question's `evidence_requirements` block, or `{}`.
+
+    A bare string question -- every pre-#475 fixture, and an older outline
+    replayed through `--resume` -- carries none. #475
+    """
+    if isinstance(question, dict):
+        reqs = question.get("evidence_requirements")
+        return reqs if isinstance(reqs, dict) else {}
+    return {}
+
+
+def _evidence_requirements_problem(question) -> str | None:
+    """What is wrong with a question's `evidence_requirements` block, or
+    `None`. #475
+
+    Checked only when `validate` is asked to enforce it: an older plan or
+    outline that carries no block at all still parses here, it just names
+    the missing field, the same as every other shape check in this module.
+    """
+    reqs = question_evidence_requirements(question)
+    if not reqs:
+        return "is missing evidence_requirements (study_types, min_count, recency_years, populations)"
+    study_types = reqs.get("study_types")
+    if not isinstance(study_types, list) or not study_types:
+        return "evidence_requirements needs a non-empty study_types list"
+    unknown = [t for t in study_types if t not in source_policy.STUDY_TYPES]
+    if unknown:
+        return f"evidence_requirements study_types names unknown type(s) {unknown}"
+    min_count = _as_int(reqs.get("min_count"))
+    if min_count is None or min_count < 1:
+        return "evidence_requirements needs a positive integer min_count"
+    recency_years = _as_int(reqs.get("recency_years"))
+    if recency_years is None or recency_years < 0:
+        return "evidence_requirements needs a non-negative integer recency_years"
+    if not isinstance(reqs.get("populations"), list):
+        return "evidence_requirements needs populations as an array of strings"
+    return None
 
 
 def questions(outline: dict) -> list[dict]:
@@ -381,7 +494,7 @@ def to_markdown(outline: dict) -> str:
             "",
         ]
         for index, question in enumerate(section.get("key_questions") or [], start=1):
-            lines.append(f"{index}. {question}")
+            lines.append(f"{index}. {question_text(question)}")
         lines += ["", "**Claims to support**", ""]
         for claim in section.get("claims_to_support") or []:
             lines.append(f"- {claim}")

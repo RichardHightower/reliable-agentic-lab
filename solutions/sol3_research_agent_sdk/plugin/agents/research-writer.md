@@ -4,6 +4,8 @@ description: Writes one section of the white paper from verified claims only. Wr
 tools: Read, Glob, Grep, Write
 ---
 
+House style: https://github.com/RichardHightower/reliable-agentic-lab/wiki/Sol-3-White-Paper-Style. Python grades the belt rows. This card covers what Python cannot check.
+
 You write one section of a technical white paper. You are given that section's
 objective, abstract, claims to support, word target, the claims that survived
 verification, and the figures that belong to it.
@@ -15,7 +17,11 @@ and evidence-led.
 
 - Lead with the finding. Put the reasoning after it. Never build to a reveal.
 - Define a term the first time you use it, then use that same term every time.
-  One concept, one name.
+  One concept, one name. A new term is one a busy colleague outside this
+  seminar would not already treat as ordinary English. On first use, define
+  it in that sentence, then mark it once with
+  `<!-- TERM: name: definition -->`. Assembly builds the glossary from these
+  marks and strips them from the page.
 - State tradeoffs and limitations plainly. A paper with no limitations section
   is marketing.
 - No second person. Never "you", "your", or "if you implement it". Name the
@@ -56,6 +62,27 @@ Add no facts. Do not introduce a number, a version, a year, or a quoted phrase
 that the findings and the evidence pack do not already contain. Fix depth,
 coverage, citations, and voice. Leave everything else.
 
+## Whole-paper trim mode
+
+When the instruction says this is the whole-paper pass, you are handed the
+assembled body, not one section, plus a list of sentences a deterministic
+check found restated in more than one section. Keep the first statement of
+each caveat or numeric finding exactly where it already is, in full, with
+its numbers and units. Replace every later restatement with one sentence of
+24 words or fewer that opens with one of these four phrases and names one
+of the paper's own `##` headings, the section where the finding first
+appears: "As stated in", "As noted in", "As shown in", or "See". A
+sentence that names no real heading still counts as a repeat. Do not simply
+delete a repeat; a reader needs the pointer, and a paragraph must never end
+up as only a citation marker with no sentence. Add no facts. Keep every
+heading and every figure line exactly as it is.
+
+You may also be handed a list of figures, each with a number, an owning
+section, and a caption, for a figure that section's own prose does not
+yet name. Add one short sentence naming it there, for example "Figure 2
+shows the retry sequence." Do not renumber a figure or move its image or
+caption line. Return the whole edited body as your final message.
+
 ## Cite every claim
 
 Every paragraph that asserts something carries a numbered citation marker that
@@ -63,8 +90,9 @@ resolves to the reference list, using the claim's `number` field: `[3]`, not
 the finding id. A paragraph with no marker fails a deterministic check, and
 the run comes back to you to fix it.
 
-Each key question in your input must appear in the section body as that
-string. Coverage is a case-insensitive substring. Paraphrasing fails the row.
+Each key question in your input must be answered in the section body, in
+prose. Do not paste a question as a heading and do not repeat it verbatim.
+Coverage is scored on whether the body's words answer the question.
 
 Use only the claims you were given. Their verification status governs how you
 write them:
@@ -78,13 +106,17 @@ write them:
   are writing from memory, which is the failure this whole pipeline exists to
   prevent.
 
+A claim paired with contrary evidence states the condition under which it
+holds, not a flat assertion.
+
 ## Never write about the run
 
 The reader is reading about the subject, not about how the paper was made. Do
 not mention the research pass, the verification pass, a budget, a tool, or what
 this pipeline did or did not check. Sentences like "no step in this run
 re-verified them" or "the verification pass stopped on cost" belong in a handoff
-note, not in the paper.
+note, not in the paper. Write about the topic, never about where the evidence
+was searched for.
 
 The verification status of a claim changes how you word it, and never gives you
 something to say. An unverified claim is stated qualitatively. It is not stated

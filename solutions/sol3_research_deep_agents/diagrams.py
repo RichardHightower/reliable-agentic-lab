@@ -9,13 +9,17 @@ Only ``imagen-diagrams`` v0.2.0+ may create a diagram PNG for the paper.
 ``image-gen`` is deliberately absent from this module. That plugin owns cover
 and non-diagram artwork. It must not become an alternate diagram renderer.
 
-If the renderer or its image backend is unavailable, the run fails closed with
+If the renderer is genuinely absent, the run fails closed with
 ``<stem>_imagen.prompt.txt`` retained. There is no SVG or deterministic PNG
-fallback that can accidentally leak into the PDF.
+fallback that can accidentally leak into the PDF. If the renderer reports
+itself available and one live call still fails (auth, quota, a transient
+error), ``stages.render_figures`` and ``paper.stage_diagram`` degrade that
+one figure to a named skip instead (#514); every other figure still ships.
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -23,8 +27,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import evidence
 
 HERE = Path(__file__).resolve().parent
 RENDERER = HERE / ".cache" / "imagen-diagrams"
@@ -167,6 +174,104 @@ def ordered_exit_checks(source: str) -> bool:
     return bool(done and cost and turns and cost in edges.get(done, ()) and turns in edges.get(cost, ()))
 
 
+# -- #476: a label must agree with the section's claims -----------------------
+
+# Three attempts at a label the claims support, then the figure is dropped.
+# Distinct from the plugin's own render/fidelity retry, which is driven by
+# `GateFailed` at the stage level: a claims mismatch on one figure must not
+# escalate the whole stage, it drops that one figure and moves on.
+MAX_LABEL_ATTEMPTS = 3
+
+# Word-bounded so "alone" does not fire on "alone time" and "increase" does not
+# fire on "increases" reading only its stem. Three buckets: the real defect
+# this ticket names is two arms both labeled a gain, and an ending labeled a
+# preservation the body refuses to claim.
+OUTCOME_WORD = re.compile(
+    r"\b(gain|loss|preservation|preserve|increase|decrease|improve|improves|"
+    r"prevent|prevents|reduce|reduces)\b",
+    re.I,
+)
+_DIRECTION_OF = {
+    "gain": "gain",
+    "increase": "gain",
+    "improve": "gain",
+    "improves": "gain",
+    "loss": "loss",
+    "decrease": "loss",
+    "reduce": "loss",
+    "reduces": "loss",
+    "preservation": "preservation",
+    "preserve": "preservation",
+    "prevent": "preservation",
+    "prevents": "preservation",
+}
+
+
+# #476 F1. "Creatine did not prevent lean mass loss" reads `prevent` as
+# preservation-direction on the bare word list, and the sentence actually
+# says loss happened. Checked only in the text before the outcome word: a
+# negation after it belongs to a different clause.
+NEGATION_WORD = re.compile(r"\b(no|not|without|fails to)\b", re.I)
+# #476 N1. A negated loss is "no loss", a preservation claim, not a gain
+# claim; the first cut of this table sent it to gain, which let "there was
+# no loss of lean mass" back a bare "Lean mass gain" label, the overclaim
+# this ticket exists to stop, in this ticket's own domain. A negated gain
+# is "no gain", the same neutral preservation claim, not a loss. Negating
+# preservation still means the bad outcome happened, loss, which the F1
+# fixture ("did not prevent lean mass loss") already confirmed correct.
+_INVERT_DIRECTION = {"gain": "preservation", "loss": "preservation", "preservation": "loss"}
+
+
+def label_direction(label: str) -> str | None:
+    """Which outcome direction a label or a claim's text asserts, or `None`.
+
+    First outcome word wins. A label naming two directions in one clause is
+    rare, and untangling it is the caption's job, not this gate's.
+    """
+    text = label or ""
+    match = OUTCOME_WORD.search(text)
+    if not match:
+        return None
+    direction = _DIRECTION_OF[match.group(1).lower()]
+    if NEGATION_WORD.search(text[: match.start()]):
+        return _INVERT_DIRECTION.get(direction, direction)
+    return direction
+
+
+def figure_claims(labels: list[str], claims: list) -> list[str]:
+    """Node labels no claim in `claims` backs, direction by direction.
+
+    `claims` are `evidence.Claim` objects, not raw text: the single-source
+    rule reads `truth_state`, the field this port already tracks, not a
+    text-count proxy. #476 B4.
+
+    A label whose direction (gain, loss, or preservation) no claim in this
+    section asserts fails outright. When every claim backing a direction is
+    `evidence.SINGLE_SOURCE` -- this section's only support for it, however
+    many claims restate it -- the label must say "reported"; stated
+    plainly, it reads as a settled fact only one source made. A direction
+    with at least one claim past single-source needs no hedge.
+    """
+    supports: dict[str, list] = {}
+    for claim in claims:
+        direction = label_direction(getattr(claim, "text", "") or "")
+        if direction:
+            supports.setdefault(direction, []).append(claim)
+    mismatches = []
+    for label in labels:
+        direction = label_direction(label)
+        if direction is None:
+            continue
+        backers = supports.get(direction) or []
+        if not backers:
+            mismatches.append(label)
+            continue
+        single_source = all(getattr(c, "truth_state", None) == evidence.SINGLE_SOURCE for c in backers)
+        if single_source and "reported" not in label.lower():
+            mismatches.append(label)
+    return mismatches
+
+
 def simplify_instruction(inv: Inventory) -> str:
     surplus = inv.labels[MAX_NODES:]
     return (
@@ -186,8 +291,43 @@ def alt_text(inv: Inventory, topic: str) -> str:
 
 
 def available() -> bool:
-    """Whether the pinned renderer and its fidelity judge are installed."""
-    return (SCRIPTS / "render.py").is_file() and (SCRIPTS / "judge.py").is_file()
+    """Whether the pinned renderer is installed and its backend actually runs.
+
+    A file-exists check alone reports available on a clone whose live call
+    then fails; #514 traced flaky CI to exactly that gap (keys set, the
+    clone present, the backend call itself erroring). The probe below is
+    cached for the life of the process: `stage_diagram` asks this once per
+    figure, and a subprocess round trip is not free.
+    `_probe_backend.cache_clear()` forgets it, for a test that changes what
+    the machine can do mid-run.
+    """
+    if not ((SCRIPTS / "render.py").is_file() and (SCRIPTS / "judge.py").is_file()):
+        return False
+    return _probe_backend()
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_backend() -> bool:
+    """A cheap `render.py --dry-run` call. No image is generated."""
+    ensure_theme()
+    with tempfile.TemporaryDirectory() as scratch:
+        probe_source = Path(scratch) / "probe.mmd"
+        probe_source.write_text("flowchart LR\n  A[A] --> B[B]\n", encoding="utf-8")
+        try:
+            proc = _run(
+                "render.py",
+                [
+                    "--source", str(probe_source),
+                    "--topic", "probe",
+                    "--theme", DEFAULT_THEME,
+                    "--density", "article",
+                    "--output-dir", scratch,
+                    "--dry-run",
+                ],
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+    return proc.returncode == 0
 
 
 def ensure_theme() -> None:
@@ -428,6 +568,29 @@ def demo() -> None:
     assert figure.best == Path("loop_imagen.png")
     figure.png = Path("loop.png")
     assert figure.best is None, "a non-plugin PNG must never become the published figure"
+
+    # #476: a node label must agree with the section's claims.
+    assert label_direction("Lean mass preservation") == "preservation"
+    assert label_direction("Corrected comparison") is None
+    assert label_direction("Creatine did not prevent lean mass loss") == "loss", "F1: negation"
+
+    def claim(text, truth_state=evidence.CORROBORATED):
+        return evidence.Claim(text=text, subject="demo", truth_state=truth_state)
+
+    mismatch = figure_claims(
+        ["Lean mass preservation"],
+        [claim("The trial could not distinguish water retention from tissue.")],
+    )
+    assert mismatch == ["Lean mass preservation"]
+    assert figure_claims(
+        ["Reported fat-free gain"],
+        [claim("One small trial reported a fat-free mass gain.", evidence.SINGLE_SOURCE)],
+    ) == []
+    assert figure_claims(
+        ["Fat-free gain"],
+        [claim("One small trial reported a fat-free mass gain.", evidence.SINGLE_SOURCE)],
+    ) == ["Fat-free gain"], "B4: a single-source claim needs the word reported"
+    assert figure_claims(["Fat-free gain"], []) == ["Fat-free gain"], "F3: absence is not support"
 
 
 def main(argv: list[str] | None = None) -> int:

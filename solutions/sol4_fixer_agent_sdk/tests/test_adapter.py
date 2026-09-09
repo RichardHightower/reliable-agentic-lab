@@ -8,7 +8,7 @@ from pathlib import Path
 import adapter
 import gates
 import pytest
-from conftest import FakeResultMessage
+from conftest import FakeResultMessage, FakeTaskNotification, FakeTaskStarted
 
 
 @pytest.fixture
@@ -120,6 +120,189 @@ def test_a_hung_query_times_out(fake_sdk, repo, monkeypatch):
     assert result.stop_reason == "query timeout"
     assert "timed out" in result.output
     assert "never reached" not in result.output
+
+
+# -- #541: a failure path never claims a silent 0.0 -------------------------
+
+
+def test_a_timed_out_query_reports_elapsed_and_the_event_count(fake_sdk, repo, monkeypatch):
+    """#571. Since #571, a `ResultMessage` (even a "partial"-looking one)
+    is a terminal record and ends the turn immediately, so it can no longer
+    stand in for progress that arrives before a genuine hang. A non-terminal
+    stream event ahead of the hang still counts toward `events`, and the
+    timeout diagnostics still name the elapsed time; the cost stays unknown
+    because no `ResultMessage` ever answered (see the "no cost message"
+    test below for that assertion in full)."""
+
+    class StreamEvent:
+        pass
+
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield StreamEvent()
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached", total_cost_usd=0.99)
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 0.05)
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert not result.ok
+    assert result.stop_reason == "query timeout"
+    assert result.usd is None
+    assert "elapsed=" in result.output
+    assert "events=1" in result.output
+    assert "usd=unknown" in result.output
+
+
+def test_a_timed_out_query_with_no_cost_message_reports_usd_as_none(fake_sdk, repo, monkeypatch):
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        await adapter.asyncio.sleep(1)
+        yield FakeResultMessage(result="never reached")
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 0.05)
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert result.usd is None
+    assert "usd=unknown" in result.output
+
+
+def test_a_message_with_no_cost_field_reports_usd_as_none_not_zero(fake_sdk, repo):
+    """`total_cost_usd=None` is "the SDK never told us", not "this was free"."""
+    fake_sdk([FakeResultMessage(result="x", total_cost_usd=None)])
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert result.usd is None
+
+
+def test_a_backend_that_raises_after_spending_reports_the_spend(fake_sdk, repo, monkeypatch):
+    """A crash after the query answered must not erase what it already cost."""
+    fake_sdk([FakeResultMessage(result="x", total_cost_usd=0.77)])
+    calls = {"n": 0}
+    real_changed_files = adapter._changed_files
+
+    def flaky(target_repo):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_changed_files(target_repo)
+        raise RuntimeError("boom after spend")
+
+    monkeypatch.setattr(adapter, "_changed_files", flaky)
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert not result.ok
+    assert result.usd == 0.77
+    assert "boom after spend" in result.output
+
+
+def test_a_failed_backend_never_crashes_the_money_gate(fake_sdk, repo):
+    """`fixer.py` calls `boss.spend(result.usd)` unconditionally. `spend`
+    must tolerate the `None` a failed turn now reports instead of raising."""
+    import write_scope as roles  # noqa: PLC0415
+
+    boss = roles.Orchestrator(name="orchestrator", repo=repo)
+    fake_sdk([])
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    assert result.usd is None
+    boss.spend(result.usd)  # must not raise
+    assert boss.spent_usd == 0.0
+
+
+# -- #571: `collect()` returns on the terminal ResultMessage ----------------
+
+
+def test_a_budget_stop_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    fake_sdk, repo, monkeypatch
+):
+    """#571, copying sol2's #568 fix. A terminal `ResultMessage` naming a
+    controlled cost stop must end the turn right there, well inside this
+    test's own generous timeout, not because the stream finally closed or
+    the timeout ceiling finally fired."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(
+            result="", total_cost_usd=0.3914, subtype="error_max_budget_usd"
+        )
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeResultMessage(result="never reached", total_cost_usd=99.0)
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.stop_reason == "cost budget spent"
+    assert result.usd == 0.3914
+    assert not result.ok
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_successful_result_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    fake_sdk, repo, monkeypatch
+):
+    """#571. Not only a controlled stop: a plain, successful terminal
+    `ResultMessage` followed by a quiet stream must also end the turn right
+    there, with the answer, rather than wait out the ceiling and lose it."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result="the answer", total_cost_usd=0.05)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.ok
+    assert result.output == "the answer"
+    assert result.usd == 0.05
+    assert result.stop_reason is None
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_result_with_a_task_in_flight_does_not_end_the_run(fake_sdk, repo, monkeypatch):
+    """#578. A `ResultMessage` that arrives while a delegated `Task` this
+    run spawned is still going only closes that turn, not the run: the
+    installed SDK's own `Query._read_messages` (upstream #1088) holds the
+    close back the same way, and a later result frame arrives once the
+    task drains. The first result here must not be mistaken for the
+    answer, and the stream must not be cut off before the second, real
+    terminal result arrives -- nor should `collect()` wait out the
+    ceiling once that second result is in hand."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted()
+        yield FakeResultMessage(result="turn one", total_cost_usd=0.10)
+        yield FakeTaskNotification()
+        yield FakeResultMessage(result="the real answer", total_cost_usd=0.20)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.ok
+    assert result.output == "the real answer"
+    assert result.usd == 0.20
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#541. A non-integer value must not raise at import and kill the run."""
+    assert adapter._timeout_env("SOL4_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL4_QUERY_TIMEOUT_SECONDS_TEST", "not-a-number")
+    assert adapter._timeout_env("SOL4_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "not-a-number" in capsys.readouterr().err
 
 
 def test_it_reads_structured_output(fake_sdk, repo):

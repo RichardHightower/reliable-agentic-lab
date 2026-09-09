@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import diagrams
+import evidence
 import pytest
 
 SIMPLE = 'flowchart LR\n  A["Plan"] --> B["Search"]\n  B --> C{"Grounded?"}\n'
@@ -106,6 +108,40 @@ def test_available_requires_both_plugin_scripts(monkeypatch, tmp_path):
     assert not diagrams.available()
     (scripts / "judge.py").write_text("")
     assert diagrams.available()
+
+
+def test_available_is_a_real_probe(monkeypatch, tmp_path):
+    """#514: a file-exists check alone reports available on a clone whose
+    live call then fails. `available()` must actually invoke the renderer,
+    and cache the result for the process. A fake `SCRIPTS` folder keeps this
+    independent of whether the real renderer clone is on disk."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "render.py").write_text("")
+    (scripts / "judge.py").write_text("")
+    monkeypatch.setattr(diagrams, "SCRIPTS", scripts)
+    monkeypatch.setattr(diagrams, "ensure_theme", lambda: None)
+    diagrams._probe_backend.cache_clear()
+    calls = []
+
+    def ok(script, args):
+        calls.append((script, args))
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(diagrams, "_run", ok)
+    assert diagrams.available()
+    assert calls[0][0] == "render.py"
+    assert "--dry-run" in calls[0][1]
+    assert diagrams.available()
+    assert len(calls) == 1, "the probe result is cached for the process"
+    diagrams._probe_backend.cache_clear()
+
+    def fails(script, args):
+        return type("Result", (), {"returncode": 2})()
+
+    monkeypatch.setattr(diagrams, "_run", fails)
+    assert not diagrams.available()
+    diagrams._probe_backend.cache_clear()
 
 
 def test_renderer_child_receives_the_imagen_06_key_alias(monkeypatch):
@@ -351,6 +387,95 @@ def test_matching_accepted_hash_reuses_the_plugin_png(monkeypatch, tmp_path):
     assert reused.note == "unchanged, reused"
 
 
+# -- #476: a label must agree with the section's claims -----------------------
+
+
+def _claim(text, truth_state=evidence.CORROBORATED):
+    return evidence.Claim(text=text, subject="t", truth_state=truth_state)
+
+
+def test_label_direction_reads_the_three_outcome_buckets():
+    assert diagrams.label_direction("Reported strength increase") == "gain"
+    assert diagrams.label_direction("True fat-free loss") == "loss"
+    assert diagrams.label_direction("Lean mass preservation") == "preservation"
+    assert diagrams.label_direction("Corrected comparison") is None
+
+
+def test_label_direction_inverts_on_negation():
+    """#476 F1. "Did not prevent lean mass loss" is a loss claim, not a
+    preservation claim; the bare word list reads `prevent` the wrong way.
+
+    #476 N1: a negated gain or a negated loss is a preservation claim (a
+    neutral "nothing changed" reading), not each other's opposite. The
+    first cut of `_INVERT_DIRECTION` sent a negated loss to gain, so "no
+    loss of lean mass" read as a gain claim.
+    """
+    assert diagrams.label_direction("Creatine did not prevent lean mass loss") == "loss"
+    assert diagrams.label_direction("The trial found no strength gain") == "preservation"
+    assert diagrams.label_direction("Fails to increase strength") == "preservation"
+    assert diagrams.label_direction("Without a fat-free mass gain") == "preservation"
+    assert diagrams.label_direction("There was no loss of lean mass") == "preservation"
+    assert diagrams.label_direction("Strength gain, not measured directly") == "gain"
+
+
+def test_a_hedged_loss_does_not_back_a_gain_label():
+    """#476 N1: a negated loss is a preservation claim, not a gain claim.
+    `_INVERT_DIRECTION` used to send it the other way, so "there was no
+    loss of lean mass" backed a bare "Lean mass gain" label, the overclaim
+    this ticket exists to stop."""
+    labels = ["Lean mass gain"]
+    claims = [_claim("There was no loss of lean mass.")]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass gain"]
+
+
+def test_a_label_that_contradicts_the_section_claims_fails():
+    labels = ["Lean mass preservation", "Search"]
+    claims = [_claim("The trial could not distinguish water retention from tissue.")]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass preservation"]
+
+
+def test_a_single_source_label_needs_the_word_reported():
+    """#476 B4: read from `truth_state`, not a text-count proxy."""
+    labels = ["True fat-free gain", "Reported fat-free gain"]
+    claims = [_claim("One small trial reported a fat-free mass gain.", evidence.SINGLE_SOURCE)]
+    assert diagrams.figure_claims(labels, claims) == ["True fat-free gain"]
+
+
+def test_a_corroborated_claim_backing_a_direction_needs_no_hedge():
+    labels = ["Lean mass gain"]
+    claims = [
+        _claim("One trial found a lean mass gain.", evidence.SINGLE_SOURCE),
+        _claim("A second, corroborated trial also found a gain.", evidence.CORROBORATED),
+    ]
+    assert diagrams.figure_claims(labels, claims) == []
+
+
+def test_two_single_source_claims_still_need_the_word_reported():
+    """#476 B4: the rule reads `truth_state`, not how many claims restate
+    the same direction. Two single-source claims are still zero corroborated
+    sources; a count-based proxy would wrongly wave a bare label through."""
+    labels = ["Lean mass gain"]
+    claims = [
+        _claim("One trial found a lean mass gain.", evidence.SINGLE_SOURCE),
+        _claim("A second, uncorroborated trial also found a gain.", evidence.SINGLE_SOURCE),
+    ]
+    assert diagrams.figure_claims(labels, claims) == ["Lean mass gain"]
+
+
+def test_an_outcome_label_with_no_claims_fails():
+    """#476 F3: absence of claims is not support."""
+    assert diagrams.figure_claims(["Lean mass gain"], []) == ["Lean mass gain"]
+
+
+def test_node_labels_matches_the_sdk_ports_node_labels_on_arrows_and_ids():
+    """A label after an arrow (`Start --> Gain[Fat-free mass]`) must not glue
+    to the preceding `-->` or read as the node id `Gain`. Same fixture as the
+    Agent SDK port's `node_labels` test; the two parsers must agree. #476 B1
+    """
+    source = "flowchart LR\n  Start --> Gain[Fat-free mass]\n  Gain --> End[End]\n"
+    assert diagrams.inventory(source, "mermaid").labels == ["Fat-free mass", "End"]
+
+
 def test_main_returns_two_for_a_missing_backend(monkeypatch, tmp_path):
     source = tmp_path / "figure.mmd"
     source.write_text(SIMPLE)
@@ -363,3 +488,30 @@ def test_main_returns_two_for_a_missing_backend(monkeypatch, tmp_path):
 
     monkeypatch.setattr(diagrams, "render", unavailable)
     assert diagrams.main(["--src", str(source), "--out", str(prompt.parent)]) == 2
+
+
+# -- the live renderer, opt-in only, so `task test` stays deterministic ------
+
+_LIVE_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY")
+# `or`, short-circuited: the cheap env checks run first, so a plain `task
+# test` (opt-in unset) never pays for `diagrams.available()`'s subprocess
+# probe just to decide whether to skip. `task test-live` sets the variable.
+_LIVE_SKIP = (
+    os.environ.get("SOL3_LIVE_TESTS") != "1"
+    or not any(os.environ.get(k) for k in _LIVE_KEYS)
+    or not diagrams.available()
+)
+
+
+@pytest.mark.skipif(
+    _LIVE_SKIP,
+    reason="set SOL3_LIVE_TESTS=1 and a real image backend key to run this (task test-live)",
+)
+def test_a_live_render_when_keys_are_present(tmp_path):
+    """#514: the offline lane never touches this. One real render, only when
+    a key is actually present, covers the renderer itself."""
+    source = tmp_path / "probe.mmd"
+    source.write_text(SIMPLE, encoding="utf-8")
+    figure = diagrams.render(source, tmp_path / "out", topic="loop safety", force=True)
+    assert figure.png is not None
+    assert figure.png.exists() and figure.png.stat().st_size >= 4096

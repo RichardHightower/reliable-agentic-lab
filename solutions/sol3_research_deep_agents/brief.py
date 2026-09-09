@@ -81,6 +81,9 @@ def ungrounded_citations(body: str, sources: list[str]) -> list[str]:
     return [f"[{n}]" for n in sorted(used - available)]
 
 
+FIGURE_CAPTION = re.compile(r"^Figure \d+\.")
+
+
 def uncited_claims(body: str) -> list[str]:
     """Body paragraphs that assert something and cite nothing.
 
@@ -95,6 +98,10 @@ def uncited_claims(body: str) -> list[str]:
         # image markup first so a paragraph that is only a figure drops out.
         text = IMAGE.sub("", block).strip()
         if not text or text.startswith(("#", "-", "*", ">", "|", "```")):
+            continue
+        # A figure's own `Figure N.` caption names the figure, not a claim
+        # the body has to source separately. #464.
+        if FIGURE_CAPTION.match(text):
             continue
         # A numbered list is the source list itself, or a set of steps. Neither
         # is a claim, and demanding a citation on the bibliography is silly.

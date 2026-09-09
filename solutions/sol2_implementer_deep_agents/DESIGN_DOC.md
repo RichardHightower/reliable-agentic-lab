@@ -29,6 +29,10 @@ This is the complete LangChain Deep Agents implementation loop for a ready ticke
 - Apply a ten-row rubric, then ask the judge subagent. Unparseable is `done=False`.
 - Feed failed rubric rows and failing test ids back on retry.
 - Write the three-claim receipt. Stop when the same failure signature repeats or the retry budget is spent.
+- Run every attempt inside its own git worktree, so the target repo you pass
+  in stays untouched.
+- Write `.harness/state.json` beside the receipt, and resume a killed run
+  from it with `--resume`.
 
 ### Quality requirements
 
@@ -163,7 +167,7 @@ classDiagram
     Harness --> GateDecision
 ```
 
-The durable data is scoped repository files plus the JUnit report and plan. No relational schema applies. Source: [`docs/diagrams/model.mmd`](docs/diagrams/model.mmd).
+The durable data is scoped repository files, the JUnit report, the plan, and `.harness/state.json` plus `.harness/receipt.json`. All of it lives in the run's own git worktree, never in the target repository you passed in. No relational schema applies. Source: [`docs/diagrams/model.mmd`](docs/diagrams/model.mmd).
 
 ![Deep Agents implementer use cases](docs/diagrams/use-cases.svg)
 
@@ -179,6 +183,9 @@ Use `task test` and `task table` without optional dependencies. `task setup` ins
 | No test is red after the test-writing stage | The red gate exposes the missing evidence. |
 | The same failure repeats | `gates.decide` escalates rather than spending more attempts. |
 | The judge tries a mutation | Its tool list contains read capability only. |
+| Every attempt | The loop runs in `<repo>.worktrees/<ticket>`, on branch `implementer/<ticket>`. The target repo stays clean. |
+| A killed run | `--resume` re-enters from `.harness/state.json`. A corrupt `state.json` starts no work. |
+| A finished run | `main` exits `0` on pass, `2` on escalate, `1` on a contract error or corrupt state. |
 
 Risks include target-contract drift, runtime tool-list changes, and incomplete ticket acceptance criteria. The explicit role table, fixture tests, and red gate make those failures diagnosable.
 
@@ -190,3 +197,5 @@ Risks include target-contract drift, runtime tool-list changes, and incomplete t
 | Planner | The only role allowed to write the implementation plan. |
 | Test implementer | The only role allowed to change test files. |
 | Code implementer | The role allowed to fix application files but denied test files. |
+| Worktree | The isolated git worktree at `<repo>.worktrees/<ticket>` where a run happens. Never the target repo. |
+| `state.json` | The resume checkpoint beside the receipt: run count, last gate, last reason, last run time, loop, phase, and the fields a `--resume` needs. |

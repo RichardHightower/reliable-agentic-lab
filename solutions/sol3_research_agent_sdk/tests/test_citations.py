@@ -137,6 +137,192 @@ def test_assembly_numbers_the_bibliography_from_the_registry(work):
     assert [r["number"] for r in refs] == [1, 2]
 
 
+def test_numbered_carries_the_fetched_metadata_into_the_reference(work):
+    """#470: `_numbered` is the seam that will hand `render_reference` its
+    fields once `assemble` is switched to call it. This is what E2 tests
+    without touching `assemble`."""
+    claims = [
+        {
+            "id": "s1-f1",
+            "text": "A fact.",
+            "source_url": "https://a.invalid",
+            "section": "s1",
+            "status": "verified",
+            "title": "The Record's Title",
+            "authors": ["Jane Doe"],
+            "year": "2020",
+            "venue": "A Journal",
+        },
+    ]
+    planned = {"sections": [{"id": "s1"}]}
+    _, refs = paper._numbered(claims, planned, work)
+    assert refs[0]["title"] == "The Record's Title"
+    assert refs[0]["authors"] == ["Jane Doe"]
+    assert refs[0]["year"] == "2020"
+    assert refs[0]["venue"] == "A Journal"
+    assert citations.render_reference(refs[0]) == (
+        "Jane Doe (2020). The Record's Title. A Journal. https://a.invalid"
+    )
+
+
+def test_numbered_carries_the_tier_into_the_reference(work):
+    """#473: the tier `source_policy.tier_for()` gave a source survives into
+    the reference `_numbered` builds, the SDK twin of the ledger round trip."""
+    claims = [
+        {
+            "id": "s1-f1",
+            "text": "A fact.",
+            "source_url": "https://a.invalid",
+            "section": "s1",
+            "status": "verified",
+            "evidence_tier": "position_stand_or_guideline",
+        },
+    ]
+    planned = {"sections": [{"id": "s1"}]}
+    _, refs = paper._numbered(claims, planned, work)
+    assert refs[0]["evidence_tier"] == "position_stand_or_guideline"
+
+
+def test_do_sections_carries_metadata_from_findings_into_claims(work, turns, monkeypatch):
+    """#470: the title, authors, year, and venue `metadata.fetch_record` found
+    on a finding's source survive `do_sections`'s aggregation into
+    `claims.json`, which is what `_numbered` then reads."""
+    approved = {"title": "T", "sections": [{"id": "s1", "heading": "One"}]}
+    monkeypatch.setattr(paper, "approved_outline", lambda run: approved)
+    monkeypatch.setattr(sections, "run_section", lambda run, section: {"section": section["id"]})
+
+    knowledge = Path(work) / "knowledge" / "s1"
+    knowledge.mkdir(parents=True)
+    (knowledge / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "s1-f1",
+                        "claim": "A fact.",
+                        "quote": "",
+                        "answers_question": "q",
+                        "source": {
+                            "kind": "web",
+                            "url_or_path": "https://a.invalid",
+                            "title": "The Record's Title",
+                            "authors": ["Jane Doe"],
+                            "year": "2020",
+                            "venue": "A Journal",
+                            "note": "",
+                        },
+                    }
+                ],
+                "coverage_gaps": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = paper.Run(
+        topic="t",
+        work_dir=work,
+        turns=turns(root=work),
+        state=paper.State.load_or_new(work, "t"),
+    )
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text(encoding="utf-8"))["claims"]
+    assert claims[0]["title"] == "The Record's Title"
+    assert claims[0]["authors"] == ["Jane Doe"]
+    assert claims[0]["year"] == "2020"
+    assert claims[0]["venue"] == "A Journal"
+
+
+def test_do_sections_carries_the_tier_from_findings_into_claims(work, monkeypatch):
+    """#473: the SDK record twin of `test_tier_survives_a_ledger_round_trip`.
+    A finding's `evidence_tier` survives `do_sections`'s aggregation into
+    `claims.json` the same way title, authors, year, and venue already do."""
+    approved = {"title": "T", "sections": [{"id": "s1", "heading": "One"}]}
+    monkeypatch.setattr(paper, "approved_outline", lambda run: approved)
+    monkeypatch.setattr(sections, "run_section", lambda run, section: {"section": section["id"]})
+
+    knowledge = Path(work) / "knowledge" / "s1"
+    knowledge.mkdir(parents=True)
+    (knowledge / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "s1-f1",
+                        "claim": "A fact.",
+                        "quote": "",
+                        "answers_question": "q",
+                        "source": {
+                            "kind": "web",
+                            "url_or_path": "https://a.invalid",
+                            "title": "A Guideline",
+                            "note": "",
+                            "evidence_tier": "position_stand_or_guideline",
+                        },
+                    }
+                ],
+                "coverage_gaps": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = paper.Run(
+        topic="t",
+        work_dir=work,
+        turns=object(),
+        state=paper.State.load_or_new(work, "t"),
+    )
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text(encoding="utf-8"))["claims"]
+    assert claims[0]["evidence_tier"] == "position_stand_or_guideline"
+
+
+def test_do_sections_carries_the_via_title_from_a_rebound_finding(work, monkeypatch):
+    """#474 item 10: `_apply_follow_result` keeps the review a rebound claim
+    came from under `finding["via"]`. `do_sections` is the field's only
+    production reader; before this it was written and never read."""
+    approved = {"title": "T", "sections": [{"id": "s1", "heading": "One"}]}
+    monkeypatch.setattr(paper, "approved_outline", lambda run: approved)
+    monkeypatch.setattr(sections, "run_section", lambda run, section: {"section": section["id"]})
+
+    knowledge = Path(work) / "knowledge" / "s1"
+    knowledge.mkdir(parents=True)
+    (knowledge / "findings.json").write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "id": "s1-f1",
+                        "claim": "A fact.",
+                        "quote": "",
+                        "answers_question": "q",
+                        "source": {
+                            "kind": "web",
+                            "url_or_path": "https://a.invalid/primary",
+                            "title": "The Primary Trial",
+                            "note": "",
+                        },
+                        "via": {"title": "A Review", "url_or_path": "https://a.invalid/review"},
+                    }
+                ],
+                "coverage_gaps": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = paper.Run(
+        topic="t",
+        work_dir=work,
+        turns=object(),
+        state=paper.State.load_or_new(work, "t"),
+    )
+    paper.do_sections(run)
+    claims = json.loads((Path(work) / "claims.json").read_text(encoding="utf-8"))["claims"]
+    assert claims[0]["via_title"] == "A Review"
+
+
 def test_a_bare_number_never_binds_to_a_finding_id_that_ends_in_it(work):
     """`[1]` is a reference number. It is not a suffix of `s1-1`.
 
@@ -489,3 +675,36 @@ def test_the_pdf_keeps_the_number_the_reference_list_carries():
         (1, "https://a.invalid"),
         (3, "https://c.invalid"),
     ], labels
+
+
+# -- render_reference: authors, year, venue, from the record, not the model.
+# P3 has not landed `## Glossary` or the `assemble` seam yet, so E2 creates
+# `render_reference` fully implemented and exercises it directly. #470
+
+
+def test_the_reference_block_carries_authors_and_years():
+    ref = {
+        "url": "https://a.invalid",
+        "title": "A Study of Creatine and Muscle Loss",
+        "authors": ["Jane Doe", "John Smith"],
+        "year": "2020",
+        "venue": "Journal of Things",
+    }
+    assert citations.render_reference(ref) == (
+        "Jane Doe, John Smith (2020). A Study of Creatine and Muscle Loss. "
+        "Journal of Things. https://a.invalid"
+    )
+
+
+def test_render_reference_falls_back_field_by_field():
+    assert citations.render_reference({"url": "https://a.invalid"}) == "https://a.invalid"
+    assert citations.render_reference(
+        {"url": "https://a.invalid", "title": "A Study"}
+    ) == "A Study. https://a.invalid"
+    assert citations.render_reference(
+        {"url": "https://a.invalid", "title": "A Study", "year": "2020"}
+    ) == "(2020). A Study. https://a.invalid"
+    # A year with no authors still renders, alone in its own parens.
+    assert citations.render_reference(
+        {"url": "https://a.invalid", "year": "2020"}
+    ) == "(2020). https://a.invalid"

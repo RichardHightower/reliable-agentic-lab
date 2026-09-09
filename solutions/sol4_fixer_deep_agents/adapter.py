@@ -23,7 +23,11 @@ from write_scope import WriteScope
 class DoerResult:
     wrote: list[str] = field(default_factory=list)
     output: str = ""
-    usd: float = 0.0
+    # #541. `None` means the backend never answered a turn (a raised
+    # exception), which is not the same as an answered turn that cost
+    # nothing. The default stays 0.0: an offline classroom backend really
+    # did answer, for free.
+    usd: float | None = 0.0
     ok: bool = True
 
 
@@ -178,6 +182,13 @@ def last_usd(result) -> float:
     return total
 
 
+def _describe_exc(exc: Exception) -> str:
+    """#541, matching #539's fix in sol2. The exception's own class name
+    first, so a raised backend reads as one, instead of surviving only in a
+    message a reader would have to already know to look for."""
+    return f"{type(exc).__name__}: {exc}"
+
+
 class DeepAgentsBackend(Backend):
     """Runs the code_implementer role through a Deep Agents agent's `.invoke`.
 
@@ -198,4 +209,10 @@ class DeepAgentsBackend(Backend):
             wrote = [path for path in sorted(_changed_files(repo) - before) if scope.permits(path)]
             return DoerResult(wrote=wrote, output=last_ai_text(result), usd=last_usd(result))
         except Exception as exc:  # graceful failure, mirrors CliBackend.run
-            return DoerResult(ok=False, output=f"deep agents backend failed: {exc}")
+            # #541. A raise means `invoke()` never answered, so `usd` is
+            # `None`, not the 0.0 that reads as "this turn was free";
+            # `_describe_exc` names the exception class so a caller does not
+            # have to guess whether this was a raised backend or an honest
+            # empty reply.
+            message = f"deep agents backend failed: {_describe_exc(exc)}"
+            return DoerResult(ok=False, usd=None, output=message)
