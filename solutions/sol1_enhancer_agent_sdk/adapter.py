@@ -9,6 +9,19 @@ subagent. Joining every event is how Grep output became an issue body.
 `structured` is filled from `structured_output` when the judge query set
 `output_format`. `stop_reason` is set when the SDK ended the query on
 max turns or max budget, so Python can escalate rather than retry.
+
+#571, copying sol2's #568 fix. `collect()` returns the moment a
+`ResultMessage` arrives, success, an error, or a controlled stop (max turns
+or cost budget) alike, instead of continuing to ask the generator for
+whatever comes next. A query that ends on `error_max_budget_usd` in under a
+minute and then sits open, quiet, used to run until `QUERY_TIMEOUT_SECONDS`
+turned a one-minute, evidenced "cost budget spent" into a 900-second "query
+timeout", discarding the real reason; a successful query followed by a
+quiet stream lost its answer the same way. A stream with no terminal
+`ResultMessage` at all is unaffected: nothing here short-circuits that
+wait, and `asyncio.wait_for`'s own ceiling is still what ends it. A partial,
+non-terminal event (a stream event, a subagent message) is never a
+`ResultMessage` and so can never end the stream early either.
 """
 
 from __future__ import annotations
@@ -209,6 +222,16 @@ class AgentSdkBackend(Backend):
                     if stop:
                         reason = stop
                         ok = False
+                    # #571. `message` is a `ResultMessage`: the SDK's one
+                    # terminal record for this query, success, an error, or
+                    # a controlled ceiling alike. Stop asking the generator
+                    # for anything past it rather than trust the stream to
+                    # close on its own, which can take the rest of the
+                    # timeout window. A non-`ResultMessage` event above never
+                    # reaches here (the `continue` at the top sends it back
+                    # around), so a partial, non-terminal event cannot end
+                    # the stream early.
+                    break
                 if return_subagent_text:
                     output = (
                         result_text
