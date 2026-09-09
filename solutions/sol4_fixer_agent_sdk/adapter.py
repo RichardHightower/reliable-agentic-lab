@@ -15,6 +15,20 @@ The SDK is optional and not installed in this environment, so the import
 stays lazy (same style `roles.py` already uses for `AgentDefinition` et al.).
 Nothing here is exercised without it: `python loop.py --table-only` never
 touches this module's `run()`.
+
+#571, copying sol2's #568 fix. `collect()` returns the moment a
+`ResultMessage` arrives, success, an error, or a controlled stop (max turns
+or cost budget) alike, instead of continuing to ask the generator for
+whatever comes next. A `ResultMessage` is the SDK's one terminal record for
+a query; nothing legitimate follows it. A query that ends on
+`error_max_budget_usd` in under a minute and then sits open, quiet, used to
+turn a one-minute, evidenced "cost budget spent" into a 900-second "query
+timeout", discarding the real reason; a successful query followed by a
+quiet stream lost its answer the same way. A stream with no terminal
+`ResultMessage` at all is unaffected: nothing here short-circuits that
+wait, and `asyncio.wait_for`'s own ceiling is still what ends it. A
+partial, non-terminal event is never a `ResultMessage`, so it still cannot
+end the stream early.
 """
 
 from __future__ import annotations
@@ -203,6 +217,17 @@ class AgentSdkBackend(Backend):
                     if stop:
                         reason = stop
                         ok = False
+                    if isinstance(message, ResultMessage):
+                        # #571. A `ResultMessage` is the SDK's one terminal
+                        # record for this query: success, an error, or a
+                        # controlled ceiling (max turns or cost budget)
+                        # alike. Stop asking the generator for anything
+                        # past it rather than trust the stream to close on
+                        # its own, which can take the rest of the timeout
+                        # window. A bare `str` is accepted above for its
+                        # text but is never terminal, so it cannot end the
+                        # stream early.
+                        break
                 return result_text, usd, structured, ok, reason
 
             started = time.monotonic()
