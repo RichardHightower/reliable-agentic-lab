@@ -8,7 +8,7 @@ from pathlib import Path
 import adapter
 import gates
 import pytest
-from conftest import FakeResultMessage
+from conftest import FakeResultMessage, FakeTaskNotification, FakeTaskStarted
 
 
 @pytest.fixture
@@ -263,6 +263,37 @@ def test_a_successful_result_returns_immediately_instead_of_waiting_for_the_stre
     assert result.output == "the answer"
     assert result.usd == 0.05
     assert result.stop_reason is None
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_result_with_a_task_in_flight_does_not_end_the_run(fake_sdk, repo, monkeypatch):
+    """#578. A `ResultMessage` that arrives while a delegated `Task` this
+    run spawned is still going only closes that turn, not the run: the
+    installed SDK's own `Query._read_messages` (upstream #1088) holds the
+    close back the same way, and a later result frame arrives once the
+    task drains. The first result here must not be mistaken for the
+    answer, and the stream must not be cut off before the second, real
+    terminal result arrives -- nor should `collect()` wait out the
+    ceiling once that second result is in hand."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted()
+        yield FakeResultMessage(result="turn one", total_cost_usd=0.10)
+        yield FakeTaskNotification()
+        yield FakeResultMessage(result="the real answer", total_cost_usd=0.20)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+
+    module.query = query
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object()).run(repo=repo, prompt="p", allow=[])
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.ok
+    assert result.output == "the real answer"
+    assert result.usd == 0.20
     assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
 
 
