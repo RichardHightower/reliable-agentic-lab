@@ -58,6 +58,10 @@ def _new_test_ids(before: set[str], after_failed: set[str]) -> set[str]:
 HARNESS_DIR = ".harness/"
 _STATE_FILE = HARNESS_DIR + "state.json"
 _LAST_TRACE_FILE = HARNESS_DIR + "last-implementer.json"
+# #562. `_checkpoint_spend` appends here every turn, same as `state.json` is
+# rewritten every turn: neither is a role's write, and both legitimately
+# change between one scan and the next within a single run.
+_TURNS_FILE = HARNESS_DIR + "turns.jsonl"
 
 # #546. A backend can set `ok=False` on purpose: the SDK's own subtype named
 # a ceiling ("max turns", "cost budget spent") instead of staying silent.
@@ -73,7 +77,9 @@ _CONTROLLED_STOP_REASONS = frozenset({"max turns", "cost budget spent"})
 # .harness/planted.py with no violation, and a doer overwriting
 # .harness/state.json with forged red_ids and preexisting that survived
 # _finish's merge and were trusted by the next --resume.
-_LOOP_OUTPUTS = frozenset({steps.STEPS_FILE, _STATE_FILE, _LAST_TRACE_FILE, receipt.RECEIPT})
+_LOOP_OUTPUTS = frozenset(
+    {steps.STEPS_FILE, _STATE_FILE, _LAST_TRACE_FILE, receipt.RECEIPT, _TURNS_FILE}
+)
 
 # The three named outputs a doer can reach without ever touching a path
 # state.json's own dedicated mechanism (_state_tampered, the checkpoint's
@@ -768,6 +774,17 @@ def run(  # noqa: PLR0915
                 repo=target, prompt=_test_prompt(the_ticket, plan), allow=list(tester.scope.allow)
             )
             boss.spend(test_result.usd)
+            # #562. Before anything else this turn can raise or be killed:
+            # the number is already correct in `boss`, and only `_finish`
+            # -- which never runs on a killed run -- wrote it out before.
+            # Checked for tampering the same way `_write_checkpoint` just
+            # below is, and for the same reason: a doer that reached
+            # `.harness/state.json` during this very `backend.run()` call is
+            # caught here, on the first write after it, not trusted.
+            last_state_bytes, spend_tampered = _checkpoint_spend(
+                harness_dir, boss, phase="test", role="test_implementer",
+                usd=test_result.usd, last_written=last_state_bytes,
+            )
             after_tests = contract.run("test")
             red_ids = _new_test_ids(known_ids, after_tests.junit.failed_ids)
 
@@ -788,6 +805,7 @@ def run(  # noqa: PLR0915
             scope_violations = sorted(
                 set(tester.violations(sorted(after_test_phase)))
                 | _tampered_outputs(target, last_output_bytes)
+                | ({_STATE_FILE} if spend_tampered else set())
             )
             trace["test_phase"] = {
                 "attempts": attempt,
@@ -818,7 +836,7 @@ def run(  # noqa: PLR0915
                 test_phase_attempts=attempt,
                 last_written=last_state_bytes,
             )
-            if tampered:
+            if tampered or spend_tampered:
                 scope_violations = sorted(set(scope_violations) | {_STATE_FILE})
                 trace["test_phase"]["violations"] = list(scope_violations)
 
@@ -970,6 +988,16 @@ def run(  # noqa: PLR0915
             repo=target, prompt=prompt, allow=list(coder.scope.allow)
         )
         boss.spend(code_result.usd)
+        # #562. The code loop checkpoints nothing else per iteration; this is
+        # the only thing standing between a completed iteration and a killed
+        # one losing it. Checked for tampering the same way `_tampered_outputs`
+        # below covers the other three named outputs: a doer that reached
+        # `.harness/state.json` during this iteration's own `backend.run()`
+        # is caught here, the code loop's only checkpoint of any kind.
+        last_state_bytes, spend_tampered = _checkpoint_spend(
+            harness_dir, boss, phase="code", role="code_implementer",
+            usd=code_result.usd, last_written=last_state_bytes,
+        )
 
         test_run = contract.run("test")
         e2e_run = contract.run("e2e")
@@ -990,6 +1018,8 @@ def run(  # noqa: PLR0915
         code_scope_violations |= set(coder.violations(code_phase)) | _tampered_outputs(
             target, last_output_bytes
         )
+        if spend_tampered:
+            code_scope_violations |= {_STATE_FILE}
         violations = sorted(set(scope_violations) | code_scope_violations)
 
         # `_mark_proven` is this loop's own rewrite of steps.jsonl, the same
@@ -1021,6 +1051,12 @@ def run(  # noqa: PLR0915
                 changed=code_phase, plan=plan,
             )
             boss.spend(judge_usd)
+            last_state_bytes, judge_spend_tampered = _checkpoint_spend(
+                harness_dir, boss, phase="judge", role="judge",
+                usd=judge_usd, last_written=last_state_bytes,
+            )
+            if judge_spend_tampered:
+                code_scope_violations |= {_STATE_FILE}
             trace["judge"] = judge_payload
         decision = gates.decide(
             passed=score.passed,
@@ -1135,6 +1171,12 @@ _STATE_FIELD_TYPES: dict[str, type | tuple[type, ...]] = {
     "preexisting": list,
     "test_phase_files": list,
     "test_phase_attempts": int,
+    # #562. Written by `_checkpoint_spend`, every turn, before `_finish` ever
+    # runs. Optional on an old `state.json` predating this ticket: absent is
+    # never corrupt, only a wrong type for a key that is present is.
+    "spent_usd": (int, float),
+    "unknown_spend_turns": int,
+    "turns": int,
 }
 
 
@@ -1202,6 +1244,70 @@ def _write_checkpoint(
     return payload, tampered
 
 
+def _checkpoint_spend(
+    harness_dir: Path,
+    boss: roles.Orchestrator,
+    *,
+    phase: str,
+    role: str,
+    usd: float | None,
+    last_written: bytes | None,
+) -> tuple[bytes, bool]:
+    """The spend funnel every turn passes through (#562).
+
+    Appends one `.harness/turns.jsonl` row and merges the running total into
+    `state.json`, right after `boss.spend`, before the next turn can even
+    start. `boss.spent_usd` was already correct in memory the moment a turn
+    answered; only `_finish` ever wrote it to disk, and `_finish` never runs
+    when the process dies (or is killed) mid-loop -- the code loop in
+    particular checkpoints nothing else per iteration. Copies the shape
+    `solutions/sol3_research_agent_sdk/paper.py`'s `Run.spend` landed for
+    #305: an append-only turn log plus a merged state write, never a
+    from-scratch replace the way `_finish`'s terminal write is.
+
+    Merged onto whatever `state.json` already holds, the same way
+    `_write_checkpoint` merges: only this function's three keys are
+    replaced, so this never erases `_write_checkpoint`'s phase/red_ids
+    fields, or vice versa, regardless of call order within one turn.
+
+    Checked for tampering the same way `_write_checkpoint` is, and for the
+    same reason: the code loop has no other checkpoint of its own, so this
+    call is the first (and, until the next one, the only) chance to notice
+    a doer that overwrote `state.json` on a code turn. This always still
+    writes the true numbers from `boss` -- a tampered read never survives
+    into the trace or a resume -- but reports the tamper back to the caller
+    to escalate, the same as `_write_checkpoint`'s own forged-overwrite
+    story.
+
+    Returns the bytes just written, so the caller can carry them forward as
+    the next `last_written` a tamper check compares against -- otherwise
+    this function's own legitimate write would read as a doer's.
+    """
+    harness_dir.mkdir(parents=True, exist_ok=True)
+    state_path = harness_dir / "state.json"
+    tampered = _state_tampered(state_path, last_written)
+    state = _read_state(state_path) or {}
+    state["spent_usd"] = boss.spent_usd
+    state["unknown_spend_turns"] = boss.unknown_spend_turns
+    state["turns"] = boss.turns
+    payload = json.dumps(state, indent=2).encode("utf-8")
+    state_path.write_bytes(payload)
+
+    row = {
+        "turn": boss.turns,
+        "at": time.time(),
+        "phase": phase,
+        "role": role,
+        # Null, never zero. A zero here reads as a free turn and hides a
+        # cost field the backend never reported.
+        "usd": usd,
+        "spent_usd": round(boss.spent_usd, 6),
+    }
+    with (harness_dir / "turns.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row) + "\n")
+    return payload, tampered
+
+
 def _finish(
     contract: Contract,
     trace: dict,
@@ -1266,6 +1372,13 @@ def _finish(
             "test_phase_files": sorted(test_phase_files),
             "test_phase_attempts": test_phase_attempts,
         }
+        # #562. Carried into the terminal write too, or a passing run's own
+        # `state.json` would lose the numbers `_checkpoint_spend` put there
+        # the moment this run's own last turn finished cleanly.
+        if boss is not None:
+            state["spent_usd"] = boss.spent_usd
+            state["unknown_spend_turns"] = boss.unknown_spend_turns
+            state["turns"] = boss.turns
         state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
     if source_repo is not None:
         # Never removed automatically. `cleanup` is the one explicit flag
