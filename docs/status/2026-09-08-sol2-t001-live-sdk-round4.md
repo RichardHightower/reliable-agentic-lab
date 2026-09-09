@@ -20,31 +20,44 @@ Main sha: c1f63656fd29dada53e7615e884ffe0c97d7956c
 
 A first attempt at this cap, under an outer `timeout 1800`, was killed by
 that wrapper before it returned a decision and produced no usable
-evidence; that timeout was too tight for two 900-second query ceilings
-plus overhead, and the rerun below, under `timeout 3600`, is the real
-result for this round.
+evidence; the rerun below, under `timeout 3600`, is the recorded result
+for this round.
 
-Two test-implementer queries ran and both spent real money: $0.3914 and
-$0.3997. Each hit `SOL2_QUERY_TIMEOUT_SECONDS` (900 seconds, the default)
-before it produced a final answer: `agent sdk query timed out after 900
-seconds (elapsed=900s, events=45, usd=0.3997)`. Neither wrote a test, so
-the loop escalated naming the timeout rather than the generic red-gate
-wording. The code phase never started. `cap_usd` echoed 1.75 and matches
-what this run was invoked with.
+## What the raw logs actually show
 
-## A query timeout is not a `cost budget spent` stop
+Both test-implementer queries ended on the SDK's own per-query dollar
+ceiling in about a minute, not on a 900-second wall clock. The checked-in
+raw logs carry the terminal `ResultMessage` for each: `subtype
+'error_max_budget_usd'`, `terminal_reason 'budget_exhausted'`, `errors
+['Reached maximum budget ($0.35)']`, `duration_ms 59317` and `71806`, and
+`total_cost_usd 0.39136775` and `0.399731`, the exact numbers `$0.3914`
+and `$0.3997` this trace reports as spend. $0.35 is `SOL2_E2E_MAX_USD /
+(iterations + 2)`, 1.75 / 5.
 
-`e2e_t001.CONTROLLED_STOPS` only names `"max turns"` and `"cost budget
-spent"` as deliberate cutoffs; `"query timeout"` is not among them, so
-`AgentSdkE2EBackend.query_failed` reads `True` here and `e2e_t001.main`
-exits 2 ("Agent SDK query failed"), the same as a crashed query would.
-The loop's own gate, read from `implementer.run`'s trace, is still
-`escalate`: a real, evidenced stop with real spend and a named reason,
-not a hang and not a silent zero. This run does not confirm the SDK
-port's own dollar ceiling firing mid-turn; every prior round already
-covers that (see `2026-09-08-sol2-t001-live-sdk.md`). It confirms the
-15-minute per-query wall clock does what its own code says, twice in a
-row, at a $1.75 total cap.
+The trace's own reported reason, "agent sdk query timed out after 900
+seconds", is wrong about the cause. `AgentSdkBackend.collect` does not
+stop at the terminal `ResultMessage`; it keeps iterating the event stream
+until the generator ends, and the stream in both raw logs goes quiet
+after the query already finished, so `asyncio.wait_for`'s 900-second
+timeout fires on a query that had already ended a minute in. The
+"cost budget spent" reason `collect` had already set from the terminal
+message is discarded when the timeout branch runs and replaced with
+`stop_reason "query timeout"`. Because "query timeout" is not one of
+`e2e_t001.CONTROLLED_STOPS`, the wrapper reports `query_failed: True` and
+exits 2 for what was a controlled cost stop. Filed as #568.
+
+Neither query wrote a test, but not for lack of trying. Each attempted a
+`Write` to `tests/test_due_date.py` inside the worktree, and each write
+came back `is_error=True`, `File is in a directory that is denied by your
+permission settings.` The fixture's own tracked `.claude/settings.json`
+denies `Write(./tests/**)` and `Edit(./tests/**)`, and
+`roles.options_for` passes `setting_sources=["project"]`, so the CLI
+loads that deny list and applies it to the test implementer, whose
+entire scope is `tests/**`. The write target was correctly resolved
+inside `work/northwind-field-crm.worktrees/T001`, confirming #543 holds
+on aim; the write was refused before it ever reached disk, so the red
+gate had nothing to see. Filed as #567. No live sdk round can reach the
+code phase until it lands.
 
 Both queries' raw event logs are checked in beside this file
 (`last-sdk-e2e-raw-0-test-round4.txt`, `last-sdk-e2e-raw-1-test-round4.txt`), copied via
@@ -58,6 +71,12 @@ this run and empty after. The loop's own writes landed only in
 `work/northwind-field-crm.worktrees/T001` (a linked worktree, not the
 clone): `steps.jsonl`, the same artifact every prior sdk round has
 produced.
+
+## Limitations
+
+This trace corrects the stated cause; it does not rerun the doer. A
+final sdk-only confirming run follows #567 (the project deny list) and
+#568 (`collect` past the terminal message), not before.
 
 The deep doer's confirming run for the same day is
 `docs/status/2026-09-08-sol2-t001-live-deep-round4.md`.
