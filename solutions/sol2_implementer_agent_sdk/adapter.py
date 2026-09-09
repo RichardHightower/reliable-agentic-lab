@@ -18,13 +18,18 @@ continuing to ask the generator for whatever comes next. The round-4 raw
 logs show a query that ended on `error_max_budget_usd` in under a minute and
 then sat open, quiet, until the 900 second ceiling: the terminal record was
 already in hand, and the only thing `collect()` was still waiting on was the
-stream closing itself, which this port has no control over. The real SDK
-never yields more than one `ResultMessage`, and it is always the terminal
-one, controlled stop or a plain success alike; the first fix here only broke
-on a controlled stop, which the judge of PR #570 caught still running a
-successful turn to the same ceiling. A stream with no terminal result at all
-is unaffected: nothing here short-circuits that wait, and
-`asyncio.wait_for`'s own ceiling is still what ends it.
+stream closing itself, which this port has no control over. A stream with
+no terminal result at all is unaffected: nothing here short-circuits that
+wait, and `asyncio.wait_for`'s own ceiling is still what ends it.
+
+#578. Not every `ResultMessage` the installed SDK yields is the run's last
+one. The installed `claude_agent_sdk`'s own `Query._read_messages` (upstream
+#1088) holds a result frame back from closing the run while a delegated
+`Task` it spawned is still running, and lets a later result frame close it
+once that work drains. The run boundary is delegated-task bookkeeping, not
+the result's own shape. `collect()` mirrors that bookkeeping here so a
+`Task` still in flight cannot truncate the run at its first, mid-flight
+result.
 
 Write tracking unions the untracked listing into the diff. `git diff
 --name-only` sees tracked changes only, and this loop's whole job is creating
@@ -50,12 +55,13 @@ from write_scope import WriteScope
 _TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
 _COST_STOP = {"error_max_budget_usd", "error_max_budget"}
 
-# #568 follow-up (judge of PR #570, item 1). Every `ResultMessage` the real
-# SDK ever yields is already the terminal record of its query -- there is no
-# such thing as a partial one. `"partial"` exists only so this port's own
-# tests can still model a message that reports progress before the real
-# terminal record arrives, without that message ending collection early.
-_NON_TERMINAL_SUBTYPES = {"partial"}
+# #578. Matches the installed SDK's own `DEFERRING_TASK_TYPES` and
+# `TERMINAL_TASK_STATUSES` (see `Query._track_task_lifecycle`, upstream
+# #1088): only a delegated `Task` of one of these types can hold a result
+# frame back from ending the run, and only these statuses count as it
+# having finished.
+_DEFERRING_TASK_TYPES = frozenset({"local_agent", "local_workflow"})
+_TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "stopped", "killed"})
 
 
 def _timeout_env(name: str, default: int) -> int:
@@ -139,6 +145,45 @@ def _from_result(result) -> tuple[str, float | None, dict | None, bool | None, s
     return str(text), usd, structured, is_error, reason
 
 
+def _track_task_lifecycle(message, inflight: set[str]) -> None:
+    """Mirror the installed SDK's own task bookkeeping for one message.
+
+    #578. `Query._track_task_lifecycle` (upstream #1088) holds a result
+    frame back from closing the run while a delegated `Task` it spawned is
+    still running: `task_started` marks one in flight, and a
+    `task_notification` or a `task_updated` patch naming a terminal status
+    clears it (`discard` keeps the pair idempotent, since not every
+    terminal task emits both). Only `local_agent`/`local_workflow` task
+    types are tracked, matching the SDK's own `DEFERRING_TASK_TYPES`; a
+    background shell or a long-lived monitor never reaches a terminal
+    status and would otherwise hold the run open forever.
+    """
+    task_id = getattr(message, "task_id", None)
+    if not task_id:
+        return
+    subtype = getattr(message, "subtype", None)
+    if subtype == "task_started":
+        if getattr(message, "task_type", None) in _DEFERRING_TASK_TYPES:
+            inflight.add(task_id)
+    elif subtype == "task_notification":
+        inflight.discard(task_id)
+    elif subtype == "task_updated":
+        if getattr(message, "status", None) in _TERMINAL_TASK_STATUSES:
+            inflight.discard(task_id)
+
+
+def _is_run_boundary(message, inflight: set[str]) -> bool:
+    """Whether a terminal `ResultMessage` ends the run, not just a turn.
+
+    #578. Mirrors `Query._read_messages` (upstream #1088): a result that
+    arrives while a delegated task is still in flight only closes one turn,
+    and a later result closes the run once it drains. `terminal_reason` is
+    the CLI's own signal that the query loop ended, and is honored on its
+    own even if this port's bookkeeping has not caught up.
+    """
+    return not inflight or bool(getattr(message, "terminal_reason", None))
+
+
 def _raw_event(message) -> str:
     """A local diagnostic record, intentionally never used as a candidate."""
     return f"## {type(message).__name__}\n\n{message!r}\n"
@@ -184,15 +229,22 @@ class AgentSdkBackend(Backend):
             started = time.monotonic()
 
             async def collect() -> tuple[str, float | None, dict | None, bool, str | None]:
+                """#578 follow-up. A deferring task stuck with no
+                `terminal_reason` reads to the `QUERY_TIMEOUT_SECONDS`
+                ceiling instead of returning early, an inherited SDK limit
+                until the CLI sends its own run-boundary signal.
+                """
                 result_text = ""
                 usd = None
                 structured = None
                 ok = True
                 reason = None
                 saw_result = False
+                inflight_tasks: set[str] = set()
                 try:
                     async for message in query(prompt=prompt, options=options):
                         raw_events.append(_raw_event(message))
+                        _track_task_lifecycle(message, inflight_tasks)
                         if not isinstance(message, (ResultMessage, str)):
                             continue
                         saw_result = saw_result or isinstance(message, ResultMessage)
@@ -220,12 +272,14 @@ class AgentSdkBackend(Backend):
                         # *successful* terminal `ResultMessage` still left
                         # `collect()` waiting on a stream that round 4 shows
                         # can sit open for the rest of the timeout window.
-                        # Every `ResultMessage` that is not this port's own
-                        # test-only `"partial"` marker is terminal; stop
-                        # asking the generator for anything past it.
-                        if (
-                            isinstance(message, ResultMessage)
-                            and message.subtype not in _NON_TERMINAL_SUBTYPES
+                        # #578: not every `ResultMessage` is that terminal
+                        # record, though -- one can arrive while a delegated
+                        # `Task` this run spawned is still going, and closes
+                        # only that turn. Stop asking the generator for
+                        # anything past a `ResultMessage` only once
+                        # `_is_run_boundary` says the run itself is done.
+                        if isinstance(message, ResultMessage) and _is_run_boundary(
+                            message, inflight_tasks
                         ):
                             break
                 except ResultError:
