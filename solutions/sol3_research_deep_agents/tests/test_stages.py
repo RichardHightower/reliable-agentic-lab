@@ -456,6 +456,57 @@ def test_normalize_leaves_a_complete_plan_alone():
     assert headings(stages.normalize_plan({"questions": [], "sections": list(given)})) == given
 
 
+def test_normalize_moves_a_misplaced_introduction_to_the_front():
+    """#557, matching the Agent SDK's `assemble` (PR #554 judge finding F2):
+    an Introduction the planner placed second, not first, is moved into the
+    frozen slot instead of left where it landed. The planner's own object
+    keeps its objective and key questions; only its position changes."""
+    written = {
+        "heading": "Introduction",
+        "objective": "Name the problem.",
+        "abstract": "The introduction names the problem.",
+        "key_questions": ["what is the problem"],
+    }
+    out = stages.normalize_plan(
+        {"questions": [], "sections": ["Abstract", "Body", written, "References"]}
+    )
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
+    kept = [item for item in out["sections"] if item["heading"] == "Introduction"][0]
+    assert kept == written
+
+
+def test_normalize_collapses_a_duplicate_introduction():
+    """#557. Two headings named Introduction collapse to the first, moved
+    into the frozen slot, not stacked as a body section on top of it."""
+    out = stages.normalize_plan(
+        {"questions": [], "sections": ["Abstract", "Introduction", "Body", "Introduction", "References"]}
+    )
+    assert headings(out) == ["Abstract", "Introduction", "Methods", "Body", "Conclusion", "References"]
+
+
+def test_a_resumed_plan_missing_its_introduction_is_repaired(tmp_path):
+    """#557. Mirrors the Agent SDK's own resume test for the same case (PR
+    #554 judge finding F2): a `plan.json` stamped before this rule landed
+    carries no Introduction at all. `_need_plan`'s `normalize_plan` call,
+    the code path an actual `--resume` runs, still produces exactly one, in
+    the frozen slot."""
+    old_plan = {
+        "title": "Old topic",
+        "sections": [{"heading": "Abstract"}, {"heading": "The problem"}, {"heading": "References"}],
+    }
+    (tmp_path / "plan.json").write_text(json.dumps(old_plan), encoding="utf-8")
+    run = build_run(tmp_path)
+    run._need_plan()
+    assert headings(run.plan) == [
+        "Abstract",
+        "Introduction",
+        "Methods",
+        "The problem",
+        "Conclusion",
+        "References",
+    ]
+
+
 def test_a_planner_section_object_keeps_its_objective_and_questions():
     """The planner writes these now. Nothing may flatten them back to a heading."""
     written = {

@@ -345,11 +345,23 @@ def normalize_plan(plan: dict) -> dict:
     if "abstract" not in lowered:
         sections.insert(0, as_section("Abstract", STRUCTURAL["abstract"]))
         lowered.insert(0, "abstract")
-    if "introduction" not in lowered:
-        sections.insert(
-            lowered.index("abstract") + 1, as_section("Introduction", STRUCTURAL["introduction"])
-        )
-        lowered.insert(lowered.index("abstract") + 1, "introduction")
+    # #557. A planner-placed Introduction is searched for across every
+    # heading, not only checked for presence, so one the planner put second
+    # (or third, or twice) is moved into the frozen slot instead of left
+    # where it landed while a second copy gets inserted on top of it. First
+    # match keeps its own objective and key questions; any further match is
+    # a duplicate and is dropped. Mirrors the Agent SDK's `assemble` (PR
+    # #554 judge finding F2), copied rather than imported.
+    intro_at = [index for index, heading in enumerate(lowered) if heading == "introduction"]
+    if intro_at:
+        intro_section = sections[intro_at[0]]
+        sections = [entry for index, entry in enumerate(sections) if index not in intro_at]
+        lowered = [heading for index, heading in enumerate(lowered) if index not in intro_at]
+    else:
+        intro_section = as_section("Introduction", STRUCTURAL["introduction"])
+    insert_at = lowered.index("abstract") + 1
+    sections.insert(insert_at, intro_section)
+    lowered.insert(insert_at, "introduction")
     # #478. Methods sits right after Introduction, the frozen heading
     # order's own position for it. Conclusion sits right before Next step,
     # the paper's own last prose heading (P4): second to last, never last.
