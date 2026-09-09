@@ -13,6 +13,18 @@ and concatenating every event is how Grep output became a candidate.
 not a turn that failed and can be retried. It is the ceiling, and a driver
 escalates on it instead of spending the rest of the budget rediscovering it.
 
+#568. `collect()` returns the moment a `ResultMessage` names a controlled
+stop (max turns or cost budget), instead of continuing to ask the generator
+for whatever comes next. The round-4 raw logs show a query that ended on
+`error_max_budget_usd` in under a minute and then sat open, quiet, until the
+900 second ceiling: the terminal record was already in hand, and the only
+thing `collect()` was still waiting on was the stream closing itself, which
+this port has no control over. Waiting past a controlled stop turns a
+one-minute, evidenced "cost budget spent" into a 900-second "query timeout",
+discarding the real reason. A stream with no terminal result at all is
+unaffected: nothing here short-circuits the wait for that case, and
+`asyncio.wait_for`'s own ceiling is still what ends it.
+
 Write tracking unions the untracked listing into the diff. `git diff
 --name-only` sees tracked changes only, and this loop's whole job is creating
 files that git has never heard of. A brand new `tests/test_due_date.py` was
@@ -193,8 +205,15 @@ class AgentSdkBackend(Backend):
                         if error is True:
                             ok = False
                         if stop:
+                            # #568. This is the terminal ResultMessage: the
+                            # SDK named a controlled ceiling (max turns or
+                            # cost budget). Stop asking the generator for
+                            # anything past it rather than trust it to close
+                            # on its own, which round 4 shows can take the
+                            # rest of the timeout window.
                             reason = stop
                             ok = False
+                            break
                 except ResultError:
                     # The SDK yields its terminal ResultMessage and then raises
                     # ResultError for the CLI's non-zero exit. Keep the terminal

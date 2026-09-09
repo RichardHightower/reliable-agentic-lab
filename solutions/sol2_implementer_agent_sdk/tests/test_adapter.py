@@ -3,6 +3,7 @@ report what a turn cost."""
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from pathlib import Path
 
@@ -11,8 +12,127 @@ import contract as contract_mod
 import harness
 import implementer
 import pytest
+import roles
 import steps
 from conftest import FakeResultMessage
+from contract import CoverageReport, RunResult, SuiteReport
+
+# -- a full ticket repo, for the #567 end-to-end test below ------------------
+#
+# Copied from tests/test_implementer.py rather than imported, the same way
+# tests/test_parity.py copies its own fixture helpers: a worker who edits one
+# file should see a failure here, by name, rather than a silent import.
+
+TICKET_TASKFILE = """\
+version: '3'
+tasks:
+  setup:
+    cmds: [echo setup]
+  test:
+    cmds: [echo test]
+  e2e:
+    cmds: [echo e2e]
+  lint:
+    cmds: [echo lint]
+  format-check:
+    cmds: [echo format-check]
+"""
+
+TICKET_LOOP_YML = """\
+version: 1
+roles:
+  planner:
+    write_allow: ["steps.jsonl"]
+  test_implementer:
+    write_allow: ["tests/**"]
+    write_deny: ["app/**"]
+  code_implementer:
+    write_allow: ["app/**"]
+    write_deny: ["tests/**"]
+  judge:
+    write_allow: []
+rubric:
+  coverage_floor: 80
+  require_red: true
+tickets:
+  source: local
+  path: tickets
+budget:
+  iterations: 3
+  usd: 2.00
+"""
+
+TICKET_BODY = """\
+---
+id: T001
+title: greet
+state: ready
+---
+
+# T001 greet
+
+## Acceptance criteria
+
+- (AC-1) greet() returns hello
+"""
+
+
+def _ticket_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "lab@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "lab"], cwd=path, check=True)
+    (path / "Taskfile.yml").write_text(TICKET_TASKFILE, encoding="utf-8")
+    (path / ".loop.yml").write_text(TICKET_LOOP_YML, encoding="utf-8")
+    (path / "tickets").mkdir()
+    (path / "app").mkdir()
+    (path / "tests").mkdir()
+    (path / "tickets" / "T001.md").write_text(TICKET_BODY, encoding="utf-8")
+    (path / "app" / "health.py").write_text("ok = True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=path, check=True, capture_output=True)
+    return path
+
+
+def _suite(*, passed=(), failed=()) -> SuiteReport:
+    passed_ids, failed_ids = set(passed), set(failed)
+    return SuiteReport(
+        exists=True,
+        tests=len(passed_ids) + len(failed_ids),
+        failures=len(failed_ids),
+        passed_ids=passed_ids,
+        failed_ids=failed_ids,
+    )
+
+
+def _run(*, passed=(), failed=()) -> RunResult:
+    return RunResult(
+        task="test",
+        exit_code=0 if not failed else 1,
+        output="",
+        junit=_suite(passed=passed, failed=failed),
+        coverage=CoverageReport(exists=True, line_rate=100.0),
+    )
+
+
+def _patch_runs(monkeypatch, runs: list[RunResult]):
+    leftover = list(runs)
+
+    def fake_run(self, task: str, timeout: int = 900) -> RunResult:
+        if task != "test":
+            return RunResult(
+                task=task,
+                exit_code=0,
+                output="",
+                junit=_suite(passed=("e2e::ok",)) if task == "e2e" else SuiteReport(),
+                coverage=CoverageReport(),
+            )
+        if leftover:
+            return leftover.pop(0)
+        return _run(passed=("tests/test_health.py::test_health",))
+
+    monkeypatch.setattr(contract_mod.Contract, "run", fake_run)
+    monkeypatch.setattr(implementer.Contract, "run", fake_run)
 
 
 @pytest.fixture
@@ -348,6 +468,154 @@ def test_planner_sdk_with_doer_sdk_invokes_the_planner_graph(fake_sdk, contract,
 
     assert result.ok
     assert list(module.last_options.agents) == ["implementer-planner"]
+
+
+# -- #567: the scope hook, not a fixture's project settings, is the judge ---
+
+
+def test_a_test_implementer_write_lands_through_the_real_hook_and_red_ids_populate(
+    tmp_path, fake_sdk, monkeypatch
+):
+    """#567. The northwind-field-crm fixture's own `.claude/settings.json`
+    denies `Write(./tests/**)`, and that used to reach the test implementer
+    through `setting_sources=["project"]` before the scope hook this port
+    writes ever got a say. This drives the real `harness.backend` (real
+    `options_for`, real scope hook per role) end to end through
+    `implementer.run`: the only thing a live model call would add is the CLI
+    itself asking the hook before a `Write` lands, which this fake `query`
+    does by calling the exact hook object `options_for` built. The write
+    must land in the worktree and the red gate must see it in `red_ids`."""
+    repo = _ticket_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+
+    module = fake_sdk()
+
+    async def query(*, prompt, options):
+        agent = next(iter(options.agents))
+        hook = options.hooks["PreToolUse"][0].hooks[0]
+        if agent == "implementer-test-implementer":
+            path = f"{options.cwd}/tests/test_greet.py"
+            decision = await hook(
+                {"tool_name": "Write", "tool_input": {"file_path": path}, "agent_type": agent},
+                "id",
+                None,
+            )
+            assert decision == {}, f"the test implementer's own write was denied: {decision}"
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text("def test_ac1():\n    assert False\n", encoding="utf-8")
+            yield FakeResultMessage(result="wrote the failing test", total_cost_usd=0.01)
+        elif agent == "implementer-code-implementer":
+            path = f"{options.cwd}/app/greet.py"
+            decision = await hook(
+                {"tool_name": "Write", "tool_input": {"file_path": path}, "agent_type": agent},
+                "id",
+                None,
+            )
+            assert decision == {}
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text("def greet():\n    return 'hello'\n", encoding="utf-8")
+            yield FakeResultMessage(result="wrote greet()", total_cost_usd=0.01)
+        else:
+            yield FakeResultMessage(result='{"done": true, "why": "looks right"}')
+
+    module.query = query
+    contract_obj = contract_mod.Contract(repo)
+    backend = harness.backend(contract_obj, "T001")
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=1, write_trace=True)
+
+    written = Path(trace["repo"])
+    assert (written / "tests" / "test_greet.py").exists()
+    assert trace["red_ids"], "the test implementer's write never reached the red gate"
+    assert trace["gate"] == "pass", trace.get("reason")
+
+
+def test_the_code_implementer_hook_still_refuses_a_write_under_tests(fake_sdk, contract, repo):
+    """#567. Project settings are gone for both write roles now (see
+    tests/test_roles.py), so the code implementer's own scope hook, built by
+    the same `options_for` that just refused it project settings, is the
+    only thing standing between it and `tests/**`. It still says no."""
+    fake_sdk()
+    options = roles.options_for(contract, role_names=frozenset({"code_implementer"}))
+    assert options.setting_sources == []
+    hook = options.hooks["PreToolUse"][0].hooks[0]
+
+    decision = asyncio.run(
+        hook(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": f"{repo}/tests/test_x.py"},
+                "agent_type": "implementer-code-implementer",
+            },
+            "id",
+            None,
+        )
+    )
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# -- #568: `collect()` returns on the terminal ResultMessage -----------------
+
+
+def test_a_budget_stop_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    fake_sdk, target
+):
+    """#568. Both terminal `ResultMessage`s in the round-4 raw logs read
+    `subtype='error_max_budget_usd'` and the query ended in under a minute,
+    but the stream itself sat open after that, quiet, until the 900 second
+    ceiling: `collect()` had no break on the terminal result and kept asking
+    the generator for more. Once a `ResultMessage` names a controlled stop,
+    `collect()` must return right there, well inside this test's own
+    generous timeout, not because that timeout finally fired."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(
+            result="", total_cost_usd=0.3914, subtype="error_max_budget_usd"
+        )
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeResultMessage(result="never reached", total_cost_usd=99.0)
+
+    module.query = query
+    started = adapter.time.monotonic()
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=5).run(
+        repo=target, prompt="p", allow=[]
+    )
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.stop_reason == "cost budget spent"
+    assert result.usd == 0.3914
+    assert not result.ok
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_stream_with_no_terminal_result_still_times_out(fake_sdk, target):
+    """#568, the other half. A query that never produces a `ResultMessage` at
+    all (a hung tool call, a dropped connection) must still hit the outer
+    ceiling and report a timeout, not hang forever waiting for a terminal
+    record that is never coming."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield "still working"
+        await adapter.asyncio.sleep(30)
+        yield "unreachable"
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object(), timeout_seconds=0.05).run(
+        repo=target, prompt="p", allow=[]
+    )
+    assert result.stop_reason == "query timeout"
+    assert not result.ok
 
 
 # -- #543: the live doer works where implementer.run reads its writes back --

@@ -26,6 +26,18 @@ parent has no business writing anything.
 
 Nothing here calls a model. `options_for` returns configuration, and a driver
 is what runs it.
+
+#567. `setting_sources=["project"]` used to load a target repo's own
+`.claude/settings.json` for every role alike, so the northwind-field-crm
+fixture's tracked deny of `Write(./tests/**)` and `Edit(./tests/**)` reached
+the test implementer, whose entire allow list is `tests/**`, before the
+scope hook above ever ran. That deny was never written for a role whose job
+is to write tests; it serves the roles that should never touch `tests/**`
+in the first place, and those roles hold no write tool at all in this cast
+(the judge). The scope hook stays the single source of the write-scope
+rule: `options_for` now loads project settings only for a build with no
+write-capable role in it, so a writer's own settings session can never
+carry a deny that outranks the hook meant to be its only judge.
 """
 
 from __future__ import annotations
@@ -200,6 +212,15 @@ def options_for(
     # kept from writing by the hook rather than by this list.
     allowed = sorted({tool for role in roles.values() for tool in role.tools} | set(SPAWN_TOOLS))
 
+    # #567. A target repo's `.claude/settings.json` is written for the roles
+    # that never touch the paths it denies, not for the writer this build is
+    # actually for. Loading it for a write-capable role lets its deny list
+    # outrank the scope hook above, which is supposed to be the only judge of
+    # where that role may write. Every real caller builds one role at a time
+    # (`role_names={"test_implementer"}`, and so on), so "no write-capable
+    # role in this build" is exactly "this build is a reader's".
+    settings = [] if any(role.can_write for role in roles.values()) else ["project"]
+
     return ClaudeAgentOptions(
         cwd=str(repo),
         agents=agent_definitions(roles, max_turns=max_turns),
@@ -207,8 +228,9 @@ def options_for(
         disallowed_tools=GLOBAL_DENY,
         permission_mode="dontAsk",
         hooks={"PreToolUse": hooks},
-        # A subagent inherits the project's MCP servers only with this set.
-        setting_sources=["project"],
+        # A subagent inherits the project's MCP servers only with this set,
+        # and only when no role in this build can write (#567 above).
+        setting_sources=settings,
         plugins=[{"type": "local", "path": str(PLUGIN)}],
         system_prompt=PARENT_PROMPT,
         max_turns=max_turns,
