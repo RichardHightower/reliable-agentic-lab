@@ -254,6 +254,21 @@ def _describe_exc(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def _exception_raw_log(exc: Exception, usage) -> str:
+    """#562, judge of PR #565. `agent.invoke()` returns no state on a raise,
+    so `_raw_messages(result)` has nothing to read and a raising call wrote
+    no raw log at all -- the run most in need of evidence (the one that
+    dies) is the one that left none. The usage callback still saw whatever
+    turns completed before the raise (#543); this is that much of the
+    message sequence, not the full one, but it is not nothing."""
+    saw_usage = usage is not None and usage.saw_usage
+    return (
+        f"exception: {_describe_exc(exc)}\n"
+        f"usage_metadata seen before the raise: {saw_usage}\n"
+        f"total_usd before the raise: {usage.total_usd if usage is not None else 0.0}\n"
+    )
+
+
 class DeepAgentsBudgetExceeded(RuntimeError):
     """#549. Raised by the usage callback when a call's running cost passes
     its own per-call cap. This is the Deep Agents twin of the SDK port's
@@ -439,6 +454,12 @@ class DeepAgentsBackend(Backend):
             # its own cost stop, so e2e_t001.CONTROLLED_STOPS reads a
             # deliberate cutoff as one, not as a crashed query.
             stop_reason = "cost budget spent" if isinstance(exc, DeepAgentsBudgetExceeded) else None
+            # #562, judge of PR #565. The run most in need of evidence -- the
+            # one that just died -- is the one `_log_raw` on the success path
+            # above never reaches. Not the full message sequence (`invoke()`
+            # returned none), but the exception and whatever the callback
+            # already saw.
+            self._log_raw(_exception_raw_log(exc, usage), role=_phase_of(allow))
             return DoerResult(
                 ok=False,
                 usd=spend,
@@ -464,6 +485,7 @@ class DeepAgentsBackend(Backend):
         except Exception as exc:
             spend = usage.total_usd if usage is not None and usage.saw_usage else None
             stop_reason = "cost budget spent" if isinstance(exc, DeepAgentsBudgetExceeded) else None
+            self._log_raw(_exception_raw_log(exc, usage), role="judge")
             return DoerResult(
                 ok=False,
                 usd=spend,

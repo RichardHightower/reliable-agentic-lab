@@ -1681,6 +1681,47 @@ def test_a_code_turn_overwrite_of_steps_jsonl_stays_a_scope_violation(tmp_path, 
     assert all("write_scope" in it["failed"] for it in trace["iterations"])
 
 
+def test_a_code_turn_overwrite_of_turns_jsonl_stays_a_scope_violation(tmp_path, monkeypatch):
+    """#562, judge of PR #565. `_checkpoint_spend` checks `.harness/turns.jsonl`
+    against this run's own last legitimate append *before* it writes
+    anything, the same instant `state.json` is checked -- catching a doer's
+    overwrite here, not laundering it the way folding `turns.jsonl` into
+    `_HASHED_OUTPUTS` and refreshing the baseline right after the append
+    would (the judge's finding: that shape swallows the forgery instead of
+    catching it). `code_scope_violations` keeps the violation flagged for
+    the rest of the run, the same way the `steps.jsonl` case just above
+    does, at the shipped `.loop.yml` budget of 3 iterations."""
+    repo = _git_repo(tmp_path / "repo")
+    health = "tests/test_health.py::test_health"
+    new_test = "tests/test_greet.py::test_AC-1"
+    _patch_runs(
+        monkeypatch,
+        [
+            _run(passed=(health,)),
+            _run(passed=(health,), failed=(new_test,)),
+            _run(passed=(health, new_test)),
+            _run(passed=(health, new_test)),
+        ],
+    )
+    backend = ScriptedBackend(
+        [
+            [("tests/test_greet.py", "def test_ac1():\n    assert False\n")],
+            [
+                ("app/greet.py", "def greet():\n    return 'hello'\n"),
+                (".harness/turns.jsonl", '{"turn": "evil"}\n'),
+            ],
+            [],
+        ]
+    )
+
+    trace = implementer.run(repo=repo, ticket_id="T001", doer=backend, budget=3, write_trace=True)
+
+    assert trace["gate"] != "pass"
+    assert ".harness/turns.jsonl" in trace["scope_violations"]
+    assert trace["iterations"], "the code loop never recorded an iteration"
+    assert all("write_scope" in it["failed"] for it in trace["iterations"])
+
+
 class DeletingBackend(doers.Backend):
     """Deletes one path instead of writing to it, on its one scripted call."""
 

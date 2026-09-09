@@ -92,7 +92,7 @@ _HASHED_OUTPUTS = frozenset({steps.STEPS_FILE, _LAST_TRACE_FILE, receipt.RECEIPT
 
 
 def _is_loop_bookkeeping(path: str) -> bool:
-    """`steps.jsonl` and this loop's own three `.harness/` files are its own
+    """`steps.jsonl` and this loop's own four `.harness/` files are its own
     output, never a role's. Excluded everywhere `rubric.changed_files` feeds
     `preexisting`, `after_test_phase`, or the code phase's own `changed`
     list.
@@ -104,20 +104,29 @@ def _is_loop_bookkeeping(path: str) -> bool:
     covering it, and `write_scope` would fail every run that reaches the
     code loop. A5's own `.harness` writes never hit this, because they only
     ever ran once, at the very end, after the last scan had already
-    happened.
+    happened. `turns.jsonl` (#562) needs the same exclusion for the same
+    reason: it changes every turn, the same as `state.json` does.
 
-    The set is exactly these four names, not the whole directory: anything
-    else under `.harness/` -- a doer planting a file, or overwriting one of
-    these four itself -- is still a write this loop did not make, and stays
-    visible to `write_scope` and the checkpoint's own read-then-merge.
+    The set is exactly these five names, not the whole directory: anything
+    else under `.harness/` -- a doer planting a file -- is still a write
+    this loop did not make, and stays visible to `write_scope`.
 
     This blanket exclusion always holds, even for a tampered `steps.jsonl`,
-    `last-implementer.json`, or `receipt.json`: tampering with those three is
-    caught separately, by `_tampered_outputs`, called directly against each
-    known path rather than filtered out of `rubric.changed_files`. A doer
-    that deletes a never-tracked file leaves nothing for `git status` to
-    report (judge of PR #527, follow-up 1), so a filter over that list can
-    never see a deletion, only a change to a path that still exists.
+    `last-implementer.json`, `receipt.json`, `state.json`, or `turns.jsonl`:
+    tampering with the first three is caught separately, by
+    `_tampered_outputs`, called directly against each known path rather than
+    filtered out of `rubric.changed_files`. A doer that deletes a
+    never-tracked file leaves nothing for `git status` to report (judge of
+    PR #527, follow-up 1), so a filter over that list can never see a
+    deletion, only a change to a path that still exists. `state.json` and
+    `turns.jsonl` keep their own dedicated mechanism instead
+    (`_checkpoint_spend`, `_write_checkpoint`, `_finish`'s own terminal
+    check): judge of PR #565 found that folding `turns.jsonl` into
+    `_HASHED_OUTPUTS` and refreshing its baseline right after this loop's own
+    append (the same way `steps.jsonl`'s baseline refreshes after
+    `_mark_proven`) swallows a doer's forgery instead of catching it, because
+    both the refresh and the scan that would need the pre-append baseline
+    run inside the same turn, after the append.
     """
     return path in _LOOP_OUTPUTS
 
@@ -648,6 +657,17 @@ def run(  # noqa: PLR0915
         _LAST_TRACE_FILE: last_trace_path.read_bytes() if last_trace_path.is_file() else None,
         receipt.RECEIPT: last_receipt_path.read_bytes() if last_receipt_path.is_file() else None,
     }
+    # #562, judge of PR #565. `turns.jsonl` is append-only, so a fresh run's
+    # own first append cannot be told apart from a doer's forgery by content
+    # alone -- the same reason `_LAST_TRACE_FILE`/`receipt.RECEIPT` are seeded
+    # from disk above rather than from `None` unconditionally: a `--resume`
+    # finds the previous run's own turns.jsonl already there, and seeding
+    # `None` (or `b""`) would read that legitimate history as a forgery on
+    # this run's first turn. Kept out of `last_output_bytes`/`_HASHED_OUTPUTS`
+    # on purpose: `_checkpoint_spend` is this file's own dedicated mechanism,
+    # the same way `state.json` has one, not a `_tampered_outputs` entry
+    # whose baseline would refresh in the same iteration the tamper happened.
+    last_turns_bytes = (target / _TURNS_FILE).read_bytes() if (target / _TURNS_FILE).is_file() else None
 
     # A6 (#433). Nothing to resume is fail-closed for the same reason, and
     # checked at the same point. `_worktree` above already refused a resume
@@ -779,11 +799,13 @@ def run(  # noqa: PLR0915
             # -- which never runs on a killed run -- wrote it out before.
             # Checked for tampering the same way `_write_checkpoint` just
             # below is, and for the same reason: a doer that reached
-            # `.harness/state.json` during this very `backend.run()` call is
-            # caught here, on the first write after it, not trusted.
-            last_state_bytes, spend_tampered = _checkpoint_spend(
+            # `.harness/state.json` or `.harness/turns.jsonl` during this
+            # very `backend.run()` call is caught here, on the first write
+            # after it, not trusted.
+            last_state_bytes, last_turns_bytes, spend_tampered = _checkpoint_spend(
                 harness_dir, boss, phase="test", role="test_implementer",
                 usd=test_result.usd, last_written=last_state_bytes,
+                last_turns_written=last_turns_bytes,
             )
             after_tests = contract.run("test")
             red_ids = _new_test_ids(known_ids, after_tests.junit.failed_ids)
@@ -805,7 +827,7 @@ def run(  # noqa: PLR0915
             scope_violations = sorted(
                 set(tester.violations(sorted(after_test_phase)))
                 | _tampered_outputs(target, last_output_bytes)
-                | ({_STATE_FILE} if spend_tampered else set())
+                | spend_tampered
             )
             trace["test_phase"] = {
                 "attempts": attempt,
@@ -836,7 +858,10 @@ def run(  # noqa: PLR0915
                 test_phase_attempts=attempt,
                 last_written=last_state_bytes,
             )
-            if tampered or spend_tampered:
+            # `spend_tampered` is already folded into `scope_violations`
+            # above; only `_write_checkpoint`'s own state.json check can add
+            # anything new here.
+            if tampered:
                 scope_violations = sorted(set(scope_violations) | {_STATE_FILE})
                 trace["test_phase"]["violations"] = list(scope_violations)
 
@@ -992,11 +1017,13 @@ def run(  # noqa: PLR0915
         # the only thing standing between a completed iteration and a killed
         # one losing it. Checked for tampering the same way `_tampered_outputs`
         # below covers the other three named outputs: a doer that reached
-        # `.harness/state.json` during this iteration's own `backend.run()`
-        # is caught here, the code loop's only checkpoint of any kind.
-        last_state_bytes, spend_tampered = _checkpoint_spend(
+        # `.harness/state.json` or `.harness/turns.jsonl` during this
+        # iteration's own `backend.run()` is caught here, the code loop's
+        # only checkpoint of any kind.
+        last_state_bytes, last_turns_bytes, spend_tampered = _checkpoint_spend(
             harness_dir, boss, phase="code", role="code_implementer",
             usd=code_result.usd, last_written=last_state_bytes,
+            last_turns_written=last_turns_bytes,
         )
 
         test_run = contract.run("test")
@@ -1015,11 +1042,11 @@ def run(  # noqa: PLR0915
         # Checked before `_mark_proven`'s refresh below, using this
         # iteration's still-stale `last_output_bytes`, so this turn's own
         # tamper is what gets caught, never next turn's clean scan.
-        code_scope_violations |= set(coder.violations(code_phase)) | _tampered_outputs(
-            target, last_output_bytes
+        code_scope_violations |= (
+            set(coder.violations(code_phase))
+            | _tampered_outputs(target, last_output_bytes)
+            | spend_tampered
         )
-        if spend_tampered:
-            code_scope_violations |= {_STATE_FILE}
         violations = sorted(set(scope_violations) | code_scope_violations)
 
         # `_mark_proven` is this loop's own rewrite of steps.jsonl, the same
@@ -1051,12 +1078,12 @@ def run(  # noqa: PLR0915
                 changed=code_phase, plan=plan,
             )
             boss.spend(judge_usd)
-            last_state_bytes, judge_spend_tampered = _checkpoint_spend(
+            last_state_bytes, last_turns_bytes, judge_spend_tampered = _checkpoint_spend(
                 harness_dir, boss, phase="judge", role="judge",
                 usd=judge_usd, last_written=last_state_bytes,
+                last_turns_written=last_turns_bytes,
             )
-            if judge_spend_tampered:
-                code_scope_violations |= {_STATE_FILE}
+            code_scope_violations |= judge_spend_tampered
             trace["judge"] = judge_payload
         decision = gates.decide(
             passed=score.passed,
@@ -1252,7 +1279,8 @@ def _checkpoint_spend(
     role: str,
     usd: float | None,
     last_written: bytes | None,
-) -> tuple[bytes, bool]:
+    last_turns_written: bytes | None,
+) -> tuple[bytes, bytes, frozenset[str]]:
     """The spend funnel every turn passes through (#562).
 
     Appends one `.harness/turns.jsonl` row and merges the running total into
@@ -1270,28 +1298,42 @@ def _checkpoint_spend(
     replaced, so this never erases `_write_checkpoint`'s phase/red_ids
     fields, or vice versa, regardless of call order within one turn.
 
-    Checked for tampering the same way `_write_checkpoint` is, and for the
-    same reason: the code loop has no other checkpoint of its own, so this
-    call is the first (and, until the next one, the only) chance to notice
-    a doer that overwrote `state.json` on a code turn. This always still
-    writes the true numbers from `boss` -- a tampered read never survives
-    into the trace or a resume -- but reports the tamper back to the caller
-    to escalate, the same as `_write_checkpoint`'s own forged-overwrite
-    story.
+    Both `state.json` and `turns.jsonl` are checked for tampering *before*
+    this call's own write touches either -- the same instant `_write_checkpoint`
+    checks `state.json`, and for the same reason `_HASHED_OUTPUTS` never
+    covers `turns.jsonl`: judge of PR #565 found that folding it into that
+    set and refreshing the baseline right after this call's own append
+    swallows a doer's forgery instead of catching it, because the refresh
+    and the later `_tampered_outputs` scan both run inside the same
+    iteration, after the append. Checking here, before the append, is what
+    catches a doer that reached either file during this turn's own
+    `backend.run()`. This always still writes the true numbers from `boss`
+    -- a tampered read of `state.json` never survives into the trace or a
+    resume, and `turns.jsonl` always gets this turn's own honest row
+    appended -- but reports the tamper back to the caller to escalate, the
+    same as `_write_checkpoint`'s own forged-overwrite story.
 
-    Returns the bytes just written, so the caller can carry them forward as
-    the next `last_written` a tamper check compares against -- otherwise
-    this function's own legitimate write would read as a doer's.
+    Returns the `state.json` bytes and the `turns.jsonl` bytes just written,
+    so the caller can carry them forward as the next `last_written` /
+    `last_turns_written` a tamper check compares against -- otherwise this
+    function's own legitimate writes would read as a doer's -- and the set
+    of loop-output names (`_STATE_FILE`, `_TURNS_FILE`) found tampered.
     """
     harness_dir.mkdir(parents=True, exist_ok=True)
     state_path = harness_dir / "state.json"
-    tampered = _state_tampered(state_path, last_written)
+    turns_path = harness_dir / "turns.jsonl"
+    tampered: set[str] = set()
+    if _state_tampered(state_path, last_written):
+        tampered.add(_STATE_FILE)
+    if _loop_output_tampered(turns_path, last_turns_written):
+        tampered.add(_TURNS_FILE)
+
     state = _read_state(state_path) or {}
     state["spent_usd"] = boss.spent_usd
     state["unknown_spend_turns"] = boss.unknown_spend_turns
     state["turns"] = boss.turns
-    payload = json.dumps(state, indent=2).encode("utf-8")
-    state_path.write_bytes(payload)
+    state_payload = json.dumps(state, indent=2).encode("utf-8")
+    state_path.write_bytes(state_payload)
 
     row = {
         "turn": boss.turns,
@@ -1303,9 +1345,11 @@ def _checkpoint_spend(
         "usd": usd,
         "spent_usd": round(boss.spent_usd, 6),
     }
-    with (harness_dir / "turns.jsonl").open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row) + "\n")
-    return payload, tampered
+    row_bytes = (json.dumps(row) + "\n").encode("utf-8")
+    with turns_path.open("ab") as handle:
+        handle.write(row_bytes)
+    turns_payload = turns_path.read_bytes()
+    return state_payload, turns_payload, frozenset(tampered)
 
 
 def _finish(
