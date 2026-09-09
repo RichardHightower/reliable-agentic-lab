@@ -217,6 +217,54 @@ def test_the_cost_ceiling_comes_off_the_contract(fake_sdk, contract):
     assert roles.options_for(contract, max_usd=0.5).max_budget_usd == 0.5
 
 
+def test_no_role_build_requests_project_settings(fake_sdk, contract):
+    """#567, widened by follow-up 3 (judge of PR #570). A write-capable
+    role's build must never request project settings, so a target repo's
+    own `.claude/settings.json` deny can never outrank the scope hook. The
+    judge is no exception: this port declares no MCP server, so the one
+    stated reason for `setting_sources=["project"]` never applied to it
+    either, and leaving it exposed made it the one role a target repo's
+    deny list could still silently starve."""
+    fake_sdk()
+    for name in ("planner", "test_implementer", "code_implementer", "judge"):
+        options = roles.options_for(contract, role_names=frozenset({name}))
+        assert options.setting_sources == [], name
+
+
+def test_the_judge_can_still_read_without_project_settings(fake_sdk, contract):
+    """#567 follow-up 3. Dropping project settings for the judge must not
+    cost it the tools its verdict depends on: `Read`, `Glob`, and `Grep` are
+    granted through `tools=[...]`/`allowed_tools`, never through
+    `setting_sources`, so the judge still reads."""
+    fake_sdk()
+    options = roles.options_for(contract, role_names=frozenset({"judge"}))
+    judge_agent = options.agents["implementer-judge"]
+    for tool in ("Read", "Glob", "Grep"):
+        assert tool in judge_agent.tools, tool
+        assert tool in options.allowed_tools, tool
+
+
+def test_the_real_options_for_hook_permits_the_test_implementer_and_denies_the_code_implementer(
+    fake_sdk, contract, repo
+):
+    """#567. Not `roles.scope_hook()` called by hand, the hook that
+    `options_for` itself wires onto the options it returns for each
+    single-role build. Project settings are gone for both of these builds
+    now (the test above), so this hook is the only opinion either agent
+    gets, and it must still keep the two roles apart."""
+    fake_sdk()
+    test_hook = roles.options_for(
+        contract, role_names=frozenset({"test_implementer"})
+    ).hooks["PreToolUse"][0].hooks[0]
+    code_hook = roles.options_for(
+        contract, role_names=frozenset({"code_implementer"})
+    ).hooks["PreToolUse"][0].hooks[0]
+
+    assert call(test_hook, agent="implementer-test-implementer", path=f"{repo}/tests/test_x.py") == {}
+    denied = call(code_hook, agent="implementer-code-implementer", path=f"{repo}/tests/test_x.py")
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
 def test_options_can_expose_only_one_phase_role(fake_sdk, contract):
     fake_sdk()
     options = roles.options_for(
