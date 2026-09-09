@@ -26,6 +26,7 @@ import asyncio
 import dataclasses
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -36,11 +37,39 @@ from write_scope import WriteScope
 _TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
 _COST_STOP = {"error_max_budget_usd", "error_max_budget"}
 
+
+def _timeout_env(name: str, default: int) -> int:
+    """Read a positive-integer timeout from the environment, never raising
+    at import.
+
+    #553, matching the `_timeout_env()` shape sol1 and sol4 landed for
+    #541. A bad value here used to raise `ValueError` at import time and
+    take the whole module down with it. A logged fallback keeps the process
+    alive, the same way a missing dependency reports as a result, not a
+    traceback.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = None
+    if value is None or value <= 0:
+        print(
+            f"[sol2] {name}={raw!r} is not a positive integer; using the default {default}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        return default
+    return value
+
+
 # #539. A live T001 test-implementer turn ran past 180 seconds and the SDK
 # never got the chance to say what it had spent. sol3 hit the identical
 # defect (#301): a ceiling nobody can reach is the bug, not a safety net.
 # Read at import so a test can still patch the module attribute directly.
-QUERY_TIMEOUT_SECONDS = int(os.environ.get("SOL2_QUERY_TIMEOUT_SECONDS", "900"))
+QUERY_TIMEOUT_SECONDS = _timeout_env("SOL2_QUERY_TIMEOUT_SECONDS", 900)
 
 
 def _changed_files(repo: Path) -> set[str]:

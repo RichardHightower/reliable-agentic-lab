@@ -179,6 +179,38 @@ def test_a_hung_query_times_out(fake_sdk, target, monkeypatch):
     assert "never reached" not in result.output
 
 
+def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """#553. A non-integer (or non-positive) value must not raise at import
+    and take the whole module down with it. Covers `_timeout_env`'s own
+    branches (unset, non-integer); the real variable is driven through a
+    reload by the test below."""
+    assert adapter._timeout_env("SOL2_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
+    monkeypatch.setenv("SOL2_QUERY_TIMEOUT_SECONDS_TEST", "abc")
+    assert adapter._timeout_env("SOL2_QUERY_TIMEOUT_SECONDS_TEST", 900) == 900
+    assert "abc" in capsys.readouterr().err
+
+
+def test_the_real_timeout_variable_set_to_abc_leaves_the_default_and_imports(
+    monkeypatch, capsys
+):
+    """#553, judge of PR #556. The test above proves `_timeout_env`'s
+    branches but never touches `SOL2_QUERY_TIMEOUT_SECONDS` itself, so
+    reverting `QUERY_TIMEOUT_SECONDS` to the unguarded
+    `int(os.environ.get(...))` left it green while
+    `SOL2_QUERY_TIMEOUT_SECONDS=abc python -c "import adapter"` still
+    raised. Drive the real variable through a reload instead."""
+    import importlib  # noqa: PLC0415
+
+    monkeypatch.setenv("SOL2_QUERY_TIMEOUT_SECONDS", "abc")
+    reloaded = importlib.reload(adapter)
+    try:
+        assert reloaded.QUERY_TIMEOUT_SECONDS == 900
+        assert "abc" in capsys.readouterr().err
+    finally:
+        monkeypatch.delenv("SOL2_QUERY_TIMEOUT_SECONDS")
+        importlib.reload(adapter)
+
+
 # -- #539: a failure path never claims a silent 0.0 -------------------------
 
 
