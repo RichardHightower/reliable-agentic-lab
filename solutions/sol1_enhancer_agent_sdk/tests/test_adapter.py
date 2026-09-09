@@ -83,12 +83,22 @@ def test_changed_files_on_a_clean_tree_is_empty(tmp_path, monkeypatch):
 # -- the success path ------------------------------------------------------
 
 
-def test_run_returns_only_the_last_result_message(tmp_path, monkeypatch, changed):
-    monkeypatch.setitem(sys.modules, "claude_agent_sdk", make_sdk_module(["first", "second"]))
+def test_run_returns_the_terminal_result_message(tmp_path, monkeypatch, changed):
+    """#571. A `ResultMessage` is the SDK's one terminal record for a query.
+    A non-terminal event ahead of it must not be confused for the answer,
+    and `collect()` must not wait past the terminal message for a second
+    one that will never come."""
+
+    class StreamEvent:
+        pass
+
+    monkeypatch.setitem(
+        sys.modules, "claude_agent_sdk", make_sdk_module([StreamEvent(), "final"])
+    )
     changed.extend([set(), set()])
     result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="do it", allow=["tickets/**"])
     assert result.ok is True
-    assert result.output == "second"
+    assert result.output == "final"
 
 
 def test_run_returns_the_last_ticket_shaped_subagent_block_for_a_doer(tmp_path, monkeypatch, changed):
@@ -335,13 +345,22 @@ def test_run_times_out_a_hung_query(tmp_path, monkeypatch, changed):
 # -- #541: a failure path never claims a silent 0.0 -------------------------
 
 
-def test_a_timed_out_query_reports_elapsed_events_and_spend_so_far(tmp_path, monkeypatch, changed):
-    """A query that already told us it had spent something before it hung
-    must not lose that number just because the ceiling then cut it off."""
+def test_a_timed_out_query_reports_elapsed_and_the_event_count(tmp_path, monkeypatch, changed):
+    """#571. Since #571, a `ResultMessage` (even a "partial"-looking one)
+    is a terminal record and ends the turn immediately, so it can no longer
+    stand in for progress that arrives before a genuine hang. A non-terminal
+    stream event ahead of the hang still counts toward `events`, and the
+    timeout diagnostics still name the elapsed time; the cost stays unknown
+    because no `ResultMessage` ever answered (see the "no cost message"
+    test below for that assertion in full)."""
+
+    class StreamEvent:
+        pass
+
     module = make_sdk_module([])
 
     async def query(*, prompt, options):
-        yield FakeResultMessage(result="progress", total_cost_usd=0.33, subtype="partial")
+        yield StreamEvent()
         await adapter.asyncio.sleep(1)
         yield FakeResultMessage(result="never reached", total_cost_usd=0.99)
 
@@ -352,10 +371,10 @@ def test_a_timed_out_query_reports_elapsed_events_and_spend_so_far(tmp_path, mon
     result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="p", allow=[])
     assert not result.ok
     assert result.stop_reason == "query timeout"
-    assert result.usd == 0.33
+    assert result.usd is None
     assert "elapsed=" in result.output
     assert "events=1" in result.output
-    assert "usd=0.3300" in result.output
+    assert "usd=unknown" in result.output
 
 
 def test_a_timed_out_query_with_no_cost_message_reports_usd_as_none(tmp_path, monkeypatch, changed):
@@ -440,6 +459,34 @@ def test_a_budget_stop_returns_immediately_instead_of_waiting_for_the_stream_to_
     assert result.stop_reason == "cost budget spent"
     assert result.usd == 0.3914
     assert not result.ok
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
+def test_a_successful_result_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    tmp_path, monkeypatch, changed
+):
+    """#571. Not only a controlled stop: a plain, successful terminal
+    `ResultMessage` followed by a quiet stream must also end the turn right
+    there, with the answer, rather than wait out the ceiling and lose it."""
+    module = make_sdk_module([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(result="the answer", total_cost_usd=0.05)
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+
+    module.query = query
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+    changed.extend([set(), set()])
+
+    started = adapter.time.monotonic()
+    result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="p", allow=[])
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.ok
+    assert result.output == "the answer"
+    assert result.usd == 0.05
+    assert result.stop_reason is None
     assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
 
 
