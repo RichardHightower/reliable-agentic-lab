@@ -433,6 +433,70 @@ def test_assemble_moves_an_out_of_order_introduction_to_the_front(work, turns, n
     assert "Written introduction text" in introduction, introduction
 
 
+def test_assemble_collapses_a_duplicate_introduction(work, turns, no_renderer):
+    """#559. PR #558's judge found the same gap reopened here: Deep Agents'
+    `stages.normalize_plan` collapses a duplicate `## Introduction`, but the
+    SDK's move rule from PR #554 only popped the first match, leaving a
+    second Introduction to ride through the body-section loop untouched.
+    An outline carrying two now assembles with exactly one, the first in
+    body order, in the frozen position. Copied from Deep Agents'
+    `test_stages.test_normalize_collapses_a_duplicate_introduction`."""
+
+    class TwoIntros(turns):
+        def outline(self, topic, prior_art, budget=None, note="", brief=""):
+            drafted = super().outline(topic, prior_art, budget, note, brief)
+            third = drafted["sections"][0]["word_target"] // 3
+            drafted["sections"][0]["word_target"] -= 2 * third
+            drafted["sections"].insert(
+                0,
+                {
+                    "id": "intro-first",
+                    "heading": "Introduction",
+                    "objective": "Name the problem.",
+                    "abstract": "The introduction names the problem.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            drafted["sections"].append(
+                {
+                    "id": "intro-second",
+                    "heading": "Introduction",
+                    "objective": "Name the problem, again.",
+                    "abstract": "A second introduction section.",
+                    "key_questions": ["what is the problem", "who is affected"],
+                    "claims_to_support": [],
+                    "required_evidence": [],
+                    "word_target": third,
+                    "figures": [],
+                    "depends_on": [],
+                },
+            )
+            return drafted
+
+    run = prepared(work, TwoIntros())
+    paper.verify(run)
+    paper.diagram(run)
+    paper.write_sections(run)
+    (Path(work) / "sections" / "intro-first.md").write_text(
+        "First written introduction text [1].\n", encoding="utf-8"
+    )
+    (Path(work) / "sections" / "intro-second.md").write_text(
+        "Second written introduction text [1].\n", encoding="utf-8"
+    )
+    paper.assemble(run)
+    body = (Path(work) / "paper.md").read_text()
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "First written introduction text" in introduction, introduction
+    assert "Second written introduction text" not in body, body
+
+
 def test_assemble_repairs_a_resumed_outline_with_no_introduction(work, turns, no_renderer):
     """#538, PR #554 judge finding F2. A resume whose `outline.approved.json`
     was stamped before this rule landed carries no Introduction section at

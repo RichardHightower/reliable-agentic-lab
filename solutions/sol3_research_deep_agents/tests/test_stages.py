@@ -2129,6 +2129,45 @@ def test_abstract_and_references_need_no_binding():
     assert stages.UNBOUND_SECTIONS == ("abstract", "conclusion", "methods", "references")
 
 
+def test_outline_gate_rejects_an_out_of_order_introduction():
+    """#560. Presence alone missed this: a writer outline turn that placed
+    Introduction after Methods passed `outline_gate` unchanged, and the
+    judge measured the same disorder in the assembled paper. The order row
+    now names it, comparing only the structural headings against each
+    other; a body section between two of them names no defect this row
+    exists to catch, `assemble`'s own move rule handles that."""
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    with pytest.raises(GateFailed) as exc:
+        stages.outline_gate(out, led, plan())
+    assert "not the frozen order" in str(exc.value)
+
+
+def test_outline_gate_rejects_a_duplicate_introduction():
+    """#560. A duplicate can never match the order row's de-duplicated
+    `expected` list, so the same row catches this with no separate check."""
+    led, claims = ledger_with(n=2)
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "Body", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    with pytest.raises(GateFailed) as exc:
+        stages.outline_gate(out, led, plan())
+    assert "not the frozen order" in str(exc.value)
+
+
 # -- 5. diagram ------------------------------------------------------------
 
 
@@ -2370,6 +2409,83 @@ def test_a_rendered_figure_the_outline_forgot_becomes_a_named_skip():
     assert not paper_check.placed_figures(body)
 
 
+def test_assemble_moves_an_out_of_order_introduction_to_the_front():
+    """#560. `outline_gate` now rejects this for a fresh outline turn, but
+    `assemble` still self-heals it, the same defence `stages.normalize_plan`
+    gives the plan (#557) and the Agent SDK's own `assemble` gives the
+    paper (#554, #559): a resumed run's `outline.json` can predate the
+    gate."""
+    led, claims = ledger_with(n=2)
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[0].id]},
+            {"heading": "Introduction", "claim_ids": [claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(
+        plan(title="T"),
+        out,
+        {"Body": "Body text. [1]", "Introduction": "Introduction text. [1]"},
+        [],
+        led,
+    )
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Body")
+    introduction = body.split("## Introduction", 1)[1].split("##", 1)[0]
+    assert "Introduction text" in introduction, introduction
+
+
+def test_assemble_collapses_a_duplicate_introduction():
+    """#560. Two outline sections named Introduction collapse to the one
+    heading in the frozen slot, mirroring `stages.normalize_plan`'s own
+    collapse (#557) and the Agent SDK's `assemble` (#559)."""
+    led, claims = ledger_with(n=2)
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "Body", "claim_ids": []},
+            {"heading": "Introduction", "claim_ids": [claims[1].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(
+        plan(title="T"),
+        out,
+        {"Introduction": "The one introduction. [1]", "Body": "Body text. [1]"},
+        [],
+        led,
+    )
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Body")
+
+
+def test_assemble_inserts_a_python_written_introduction_when_missing():
+    """#560. An outline that never names an Introduction at all: the
+    outliner turn dropped it, or the outline predates `outline_gate`'s new
+    order row. `assemble` still inserts one, the same backstop the Agent
+    SDK's own `assemble` writes (`paper.py`'s `_introduction_stub`, copied
+    not imported): no model turn, right after Abstract and before Methods,
+    and long enough on its own to clear `has_body`'s floor."""
+    led, claims = ledger_with()
+    out = {
+        "sections": [
+            {"heading": "Abstract", "claim_ids": []},
+            {"heading": "Methods", "claim_ids": []},
+            {"heading": "Body", "claim_ids": [claims[0].id]},
+            {"heading": "References", "claim_ids": []},
+        ]
+    }
+    body = stages.assemble(plan(title="T"), out, {"Body": "Body text. [1]"}, [], led)
+    assert body.count("## Introduction") == 1, body
+    assert body.index("## Abstract") < body.index("## Introduction") < body.index("## Methods")
+    thin = paper_check.sections_without_prose(body, paper_check.MIN_SECTION_WORDS)
+    assert not any(row.startswith("Introduction") for row in thin), thin
+    assert not paper_check.brief.uncited_claims(body), paper_check.brief.uncited_claims(body)
+
+
 # -- P11, methods, conclusion, and the study table --------------------------
 
 
@@ -2473,17 +2589,21 @@ def test_a_study_claim_never_cited_in_the_written_body_is_dropped():
     assert "postmenopausal" not in table
 
 def test_the_table_sits_after_methods_and_before_the_first_evidence_section():
+    """#560. A body section, not Introduction: `assemble` now moves
+    Introduction into the frozen slot right after Abstract regardless of
+    where the outline placed it, so it can no longer stand in here for "the
+    section right after Methods"."""
     led, claims = _study_ledger()
     out = {
         "sections": [
             {"heading": "Abstract", "claim_ids": []},
             {"heading": "Methods", "claim_ids": []},
-            {"heading": "Introduction", "claim_ids": [claims[0].id, claims[1].id]},
+            {"heading": "Body", "claim_ids": [claims[0].id, claims[1].id]},
             {"heading": "References", "claim_ids": []},
         ]
     }
-    body = stages.assemble(plan(title="T"), out, {"Introduction": "A fact. [1][2]"}, [], led)
-    assert body.index("## Methods") < body.index("## Evidence summary") < body.index("## Introduction")
+    body = stages.assemble(plan(title="T"), out, {"Body": "A fact. [1][2]"}, [], led)
+    assert body.index("## Methods") < body.index("## Evidence summary") < body.index("## Body")
 
 
 def test_no_human_study_claim_renders_no_table():

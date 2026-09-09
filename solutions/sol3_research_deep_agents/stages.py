@@ -297,6 +297,17 @@ STRUCTURAL = {
     "references": "List every source the body cites, in citation order.",
 }
 
+# #560. The frozen heading order, restricted to the structural headings a
+# writer outline turn actually drafts (Methods and Conclusion are named here
+# too, since `outline_gate`, below, still requires them by name even though
+# `stage_assemble` overwrites Methods with Python's own text). Front matter,
+# Evidence summary, and Glossary are never an outline section in this port,
+# so they carry no slot here. `outline_gate` grades a drafted outline's own
+# order against this; `assemble` uses only the "introduction" entry, to find
+# and move that one heading the same way `normalize_plan` already does for
+# the plan.
+FROZEN_ORDER = ("abstract", "introduction", "methods", "conclusion", "next step", "references")
+
 
 def plan_heading(item) -> str:
     """A plan section is an object with a heading. An older plan is a string."""
@@ -1137,6 +1148,22 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
         if name in required and not any(name in heading for heading in present):
             misses.append(f"the outline is missing the {name} section.")
 
+    # #560. Presence alone let a writer outline turn place its Introduction
+    # after a body section, or draft it twice, and neither showed up here:
+    # the two problems PR #558's judge measured downstream, in the
+    # assembled paper. A duplicate and an out-of-order heading are the same
+    # defect from this row's point of view, so one comparison catches both:
+    # a repeated entry can never match a `set`-deduplicated `expected`, no
+    # separate duplicate check needed.
+    heading_order = [str(section.get("heading", "")).strip().lower() for section in sections]
+    frozen_present = [heading for heading in heading_order if heading in FROZEN_ORDER]
+    expected = sorted(set(frozen_present), key=FROZEN_ORDER.index)
+    if frozen_present != expected:
+        misses.append(
+            f"the outline's structural headings are ordered {frozen_present}, "
+            f"not the frozen order {expected}."
+        )
+
     for section in sections:
         heading = section.get("heading", "?")
         ids = section.get("claim_ids") or []
@@ -1585,6 +1612,36 @@ def study_table(
     return "\n".join(lines)
 
 
+def _introduction_stub(plan: dict) -> str:
+    """A short Python-written Introduction, for the run whose outline
+    carried none. #560, copied from the Agent SDK's own `paper.
+    _introduction_stub` (`paper.py` near line 2000), not imported: this
+    port's `assemble` hits the identical missing-section case once a writer
+    outline turn lands with no Introduction bound, and the same text answers
+    it.
+
+    A blockquote, not a paragraph: `brief.uncited_claims` already skips a
+    line starting with `>`, so this carries no citation of its own to
+    demand. Long enough to clear `paper_check.MIN_SECTION_WORDS` on its own,
+    the same way the SDK's copy is sized, so `has_body` never has to take
+    this heading's word on faith.
+    """
+    title = str(plan.get("title") or "This paper").strip()
+    return (
+        f"> {title}. This paper's outline carried no Introduction, so no key "
+        "question named it and no writer turn drafted it. Assembly writes "
+        "this paragraph in its place, the same way it writes Methods below: "
+        "from the run's own record, not from a retrieved source, and it "
+        "states no claim beyond the paper's own title. Methods names every "
+        "host this run searched and every source it admitted to the "
+        "reference list, and the Evidence summary, when the run cites a "
+        "human study, sits beside it. A later run whose outline drafts a "
+        "real Introduction replaces this paragraph with the outliner's own "
+        "opening, checked through the same research and review pipeline as "
+        "every other section on the page."
+    )
+
+
 def assemble(
     plan: dict,
     outline: dict,
@@ -1603,6 +1660,39 @@ def assemble(
     retrieved, and a generated glossary cannot list a term the body never
     marked.
     """
+    # #560. `normalize_plan` fixes the plan's own section order before the
+    # writer drafts an outline from it, but the outline is the writer's own
+    # JSON, and a writer turn can still place its Introduction after a body
+    # section, draft it twice, or drop it. `outline_gate` now rejects the
+    # first two for a fresh outline turn, but a resumed run's persisted
+    # `outline.json` can predate that gate, so this pass runs unconditionally
+    # here too, the same defence `stages.normalize_plan`'s own duplicate
+    # collapse (near line 355 above) gives the plan. Local copies: neither
+    # the caller's `outline` nor its `written` dict is mutated.
+    sections = list(outline.get("sections", []))
+    written = dict(written)
+    lowered = [str(section.get("heading", "")).strip().lower() for section in sections]
+    intro_at = [index for index, heading in enumerate(lowered) if heading == "introduction"]
+    if intro_at:
+        intro_section = sections[intro_at[0]]
+        sections = [entry for index, entry in enumerate(sections) if index not in intro_at]
+        lowered = [heading for index, heading in enumerate(lowered) if index not in intro_at]
+    else:
+        # #560. The same backstop the Agent SDK's `assemble` inserts for the
+        # identical case (`paper.py`'s `_introduction_stub`), copied rather
+        # than imported: no model turn, so it goes straight into `written`
+        # instead of a section the writer never drafted.
+        intro_section = {
+            "heading": "Introduction",
+            "purpose": STRUCTURAL["introduction"],
+            "claim_ids": [],
+            "figures": [],
+        }
+        written.setdefault("Introduction", _introduction_stub(plan))
+    insert_at = lowered.index("abstract") + 1 if "abstract" in lowered else 0
+    sections.insert(insert_at, intro_section)
+    outline = {**outline, "sections": sections}
+
     index, urls = numbering(ledger)
     # #478. Python, from the ledger: one row per human-study claim, spliced
     # in right after Methods, below. "" when the ledger holds none, and the
