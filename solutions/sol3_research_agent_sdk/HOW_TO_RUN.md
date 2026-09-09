@@ -64,7 +64,7 @@ deterministic; set `SOL3_LIVE_TESTS=1` and a real image backend key first.
 `task table`
 prints the role table. The writer is the only role that prints `yes` in the
 writes column. A paper run is supposed to produce a document a colleague can
-use, not a cited brief: 2000 words, with each body section unpacked from its
+use, not a cited brief: 2800 words, with each body section unpacked from its
 claims. Saturday Lab 3 is still the short brief.
 
 ## White-paper acceptance runs
@@ -163,7 +163,7 @@ task publish --
 ```
 
 `task run` refuses if you skipped `task setup`. It defaults to `--profile demo`
-(2000 words, 12 questions, 40 verified claims, $12). A paper run is supposed
+(2800 words, 12 questions, 40 verified claims, $12). A paper run is supposed
 to produce a document a colleague can use, not a cited brief. Saturday Lab 3
 is still the short brief.
 

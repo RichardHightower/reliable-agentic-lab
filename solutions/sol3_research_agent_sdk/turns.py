@@ -51,7 +51,8 @@ from load_agents import (
 MAX_QUESTIONS = 12
 MAX_DIAGRAMS = 4
 MAX_CLAIMS = 40
-MAX_WORDS = 2000
+# #538, PR #554 judge finding F4. Matches `paper.MAX_WORDS`.
+MAX_WORDS = 2800
 EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, and in what order?"
 
 SCOUT_SCHEMA = {
@@ -1152,23 +1153,26 @@ class OfflineTurns(Turns):
         words = int(budget.get("words") or MAX_WORDS)
         # Five sections: Introduction first (#538, the frozen heading order's
         # own structural position), three body sections, and the next step
-        # last. The CTA is a fixed-size close regardless of topic, and the
-        # three body sections split what remains of `words`, exactly as
-        # before #538. Introduction's own target is additional, not carved
-        # out of that split: shrinking every body section by a fixed amount
-        # to make room for it once pushed the assembled paper's total prose
-        # under the 2000-word floor. `word_target_total` below reports what
-        # the five sections actually sum to, so `validate`'s own sum check
-        # (against the outline's own field, which wins over any caller
-        # value) still passes exactly, by construction, however the split
-        # is done.
+        # last. Introduction's target is carved out of `words` the same way
+        # `next_step_target` already is: PR #554 judge finding F4, a live
+        # outline is still told `word_target_total={words}` (the prompt this
+        # class's own `SdkTurns` sibling sends, unchanged by #538) and has to
+        # sum its five sections within ten percent of that same number, so
+        # this offline twin reporting a bigger total here would test an
+        # arithmetic no live run is ever asked to hit. `PROFILES["demo"]` in
+        # `loop.py` carries the make-up margin instead: five sections now
+        # share one word budget that four used to, and this fixture's own
+        # canned research (`fixtures/research.json`, four recorded answers
+        # for what is now ten key questions) triggers more of the
+        # whole-paper trim pass's own repeat-collapse the more sections
+        # share one finding, so the same nominal total renders fewer words
+        # than it did at four sections.
         next_step_target = max(100, words // 20)
-        remaining = max(words - next_step_target, 0)
+        introduction_target = max(100, words // 8)
+        remaining = max(words - next_step_target - introduction_target, 0)
         first = remaining // 3
         second = remaining // 3
         third = remaining - first - second
-        introduction_target = max(150, words // 4)
-        word_target_total = introduction_target + first + second + third + next_step_target
         sections = [
             {
                 "id": "introduction",
@@ -1305,7 +1309,7 @@ class OfflineTurns(Turns):
             "title": topic[:1].upper() + topic[1:],
             "audience": "engineers writing production agent loops",
             "thesis": f"A technical review of {topic}, assembled from recorded sources.",
-            "word_target_total": word_target_total,
+            "word_target_total": words,
             "sections": sections,
         }
 

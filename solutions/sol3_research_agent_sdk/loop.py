@@ -44,7 +44,15 @@ PROFILES = {
         "max_claims": 40,
         "max_usd": 12.0,
         "max_iterations": 3,
-        "word_target_total": 2000,
+        # #538, PR #554 judge finding F4. Five sections now share this
+        # budget, Introduction included, where four did before #538. Raised
+        # from 2000 so the split still clears `checks.MIN_WORDS` (2000):
+        # this is the same fixed floor either way, and five sections
+        # dividing the old total, plus the fixture's own four-answer
+        # research.json feeding ten key questions instead of eight, gave
+        # `checks.py`'s repeat-collapse pass more to trim than four
+        # sections sharing it did.
+        "word_target_total": 2800,
     },
     "paper": {
         "max_questions": 20,

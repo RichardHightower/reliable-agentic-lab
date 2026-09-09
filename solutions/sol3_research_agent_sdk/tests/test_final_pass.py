@@ -131,10 +131,14 @@ def test_edit_paper_reverts_a_specific_the_evidence_does_not_contain(work, turns
     assert receipt["reverted"]
 
 
-def test_demo_profile_targets_two_thousand_words():
+def test_demo_profile_targets_comfortably_over_the_word_floor():
+    """#538, PR #554 judge finding F4. Five sections, Introduction included,
+    now share the demo profile's own budget, so it is raised from 2000 to
+    keep the assembled paper over `checks.MIN_WORDS` (still 2000)."""
+    import checks  # noqa: PLC0415
     import loop as loop_mod  # noqa: PLC0415
 
-    assert loop_mod.PROFILES["demo"]["word_target_total"] == 2000
+    assert loop_mod.PROFILES["demo"]["word_target_total"] > checks.MIN_WORDS
     assert loop_mod.PROFILES["paper"]["word_target_total"] == 4000
     assert loop_mod.PROFILES["whitepaper"]["word_target_total"] == 6000
 
