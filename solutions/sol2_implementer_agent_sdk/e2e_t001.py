@@ -81,9 +81,24 @@ class AgentSdkE2EBackend(doers.Backend):
 
     name = "agent_sdk"
 
-    def __init__(self, backend: Any, *, max_total_usd: float = MAX_TOTAL_USD):
+    def __init__(
+        self,
+        backend: Any,
+        *,
+        max_total_usd: float = MAX_TOTAL_USD,
+        loop_budget_usd: float | None = None,
+        per_query_usd: float | None = None,
+    ):
         self.backend = backend
         self.max_total_usd = max_total_usd
+        # #577. The target repo's own `.loop.yml` `budget.usd`, tighter than
+        # this wrapper's own `max_total_usd` on purpose (room for the judge's
+        # own call on top of the sliced iterations). Checked separately below:
+        # `max_total_usd` alone never caught a single call carrying the
+        # *loop's* own number past its ceiling, which is what round 5 spent
+        # $2.0880 against a $2.00 loop budget doing.
+        self.loop_budget_usd = loop_budget_usd
+        self.per_query_usd = per_query_usd
         self.calls: list[Call] = []
         self.spent_usd = 0.0
         # #546. A count of turns whose cost came back `None`, so a reader of
@@ -142,6 +157,28 @@ class AgentSdkE2EBackend(doers.Backend):
                 ok=False,
                 usd=0.0,
                 output=f"Agent SDK E2E budget exhausted at ${self.spent_usd:.2f}",
+            )
+            self.calls.append(Call(phase, agent, [], 0.0, False, "cost budget spent"))
+            return result
+        if (
+            self.loop_budget_usd is not None
+            and self.per_query_usd is not None
+            and self.loop_budget_usd - self.spent_usd < self.per_query_usd
+        ):
+            # #577. The wrapper cap above is deliberately looser than the
+            # loop's own `.loop.yml` budget; a single call that spends up to
+            # the per-query slice can still carry the tighter number past
+            # its ceiling, the exact 4.4% overrun a round-5 trace measured.
+            # Stop before that call instead of after it.
+            remaining = max(self.loop_budget_usd - self.spent_usd, 0.0)
+            result = doers.DoerResult(
+                ok=False,
+                usd=0.0,
+                output=(
+                    f"loop budget of ${self.loop_budget_usd:.2f} has ${remaining:.2f} left, "
+                    f"under the ${self.per_query_usd:.2f} per-query cap; "
+                    f"${self.spent_usd:.2f} spent so far"
+                ),
             )
             self.calls.append(Call(phase, agent, [], 0.0, False, "cost budget spent"))
             return result
@@ -232,7 +269,16 @@ def _build_backend(
     inner = adapter.AgentSdkPhaseBackend(
         test=phases["test"], code=phases["code"], judge=phases["judge"]
     )
-    return AgentSdkE2EBackend(inner), audit
+    # #577. `target.budget.get("usd")` is the loop's own tighter number;
+    # `per_query_usd` is the same slice already handed to every phase's
+    # options above, so the wrapper can stop before a call that would carry
+    # the loop past it, not only after.
+    loop_budget = target.budget.get("usd")
+    loop_budget_usd = float(loop_budget) if loop_budget is not None else None
+    return (
+        AgentSdkE2EBackend(inner, loop_budget_usd=loop_budget_usd, per_query_usd=per_query_usd),
+        audit,
+    )
 
 
 def sdk_options_with_budget(target, role_name: str, per_query_usd: float, cwd: Path):
@@ -309,6 +355,12 @@ def _write_extras(
         # #539(e). The cap this run actually applied, not a number a status
         # note has to guess or invent after the fact.
         f"cap_usd: {backend.max_total_usd:.2f}",
+        # #577. Named beside the wrapper cap above, not only inside
+        # `last-implementer.json`'s own `budget_usd`: this is the file a
+        # status note actually points at, and the two numbers are what
+        # explains why a run can spend under `cap_usd` and still overrun
+        # `.loop.yml`'s own, tighter figure.
+        f"loop_budget_usd: {'unset' if backend.loop_budget_usd is None else format(backend.loop_budget_usd, '.2f')}",
         f"query_failed: {backend.query_failed}",
         "",
         "## Phases",

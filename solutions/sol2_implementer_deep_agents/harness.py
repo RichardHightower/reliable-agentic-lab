@@ -79,6 +79,11 @@ def backend(contract, ticket_id: str, *, raw_log_dir: Path | None = None):
         # receipt instead of letting the outer 420-second watchdog kill it.
         recursion_limit=LIVE_RECURSION_LIMIT,
         max_call_usd=max_call_usd,
+        # #577. `total_usd` is the same `.loop.yml` `budget.usd` `max_call_usd`
+        # was already sliced from; `DeepAgentsBackend` now checks the two
+        # against each other before a call, not only the per-call slice
+        # against itself after one.
+        loop_budget_usd=total_usd,
         raw_log_dir=raw_log_dir,
     )
 

@@ -240,6 +240,58 @@ def test_a_controlled_sdk_budget_stop_is_not_a_failed_query(tmp_path):
     assert not wrapper.query_failed
 
 
+def test_the_loop_budget_stops_a_call_that_would_overrun_it(tmp_path):
+    """#577. A round-5 trace spent $2.0880 against the loop's own `.loop.yml`
+    `budget.usd: 2.00`, a 4.4% overrun, because the only check in place was
+    the wrapper's own looser `max_total_usd`, applied between calls. With
+    $0.50 left against a $0.66 per-query cap, the next call would carry the
+    loop past its own number; it must not even reach the delegate."""
+    delegate = FakeAgentSdkBackend()
+    wrapper = e2e_t001.AgentSdkE2EBackend(
+        delegate, max_total_usd=3.96, loop_budget_usd=2.00, per_query_usd=0.66
+    )
+    wrapper.spent_usd = 1.50
+
+    result = wrapper.run(repo=tmp_path, prompt="p", allow=["app/**"])
+
+    assert not result.ok
+    assert result.usd == 0.0
+    assert delegate.calls == 0
+    assert wrapper.calls[-1].stop_reason == "cost budget spent"
+    assert "1.50" in result.output  # spend so far, named in the reason
+    assert not wrapper.query_failed  # a controlled stop, not a crashed query
+
+
+def test_a_call_that_fits_the_remaining_loop_budget_still_runs(tmp_path):
+    """The cutoff must not fire early: room enough for one more per-query
+    slice must still reach the delegate."""
+    delegate = FakeAgentSdkBackend()
+    wrapper = e2e_t001.AgentSdkE2EBackend(
+        delegate, max_total_usd=3.96, loop_budget_usd=2.00, per_query_usd=0.66
+    )
+    wrapper.spent_usd = 1.00  # $1.00 left, at least the $0.66 per-query cap
+
+    result = wrapper.run(repo=tmp_path, prompt="p", allow=["app/**"])
+
+    assert result.ok
+    assert delegate.calls == 1
+
+
+def test_build_backend_threads_the_loop_budget_beside_the_wrapper_cap(tmp_path, fake_sdk):
+    """#577. `_build_backend` already computes `per_query_usd` from
+    `.loop.yml`'s own `budget.usd`; the wrapper it returns must carry both
+    that per-query slice and the loop's own total, not only the wrapper's
+    own looser `SOL2_E2E_MAX_USD`, or the pre-call check above has nothing
+    to compare against on a real run."""
+    fake_sdk()
+    repo = _git_repo(tmp_path / "repo")
+
+    wrapper, _ = e2e_t001._build_backend(repo, budget=3, ticket_id="T001")
+
+    assert wrapper.loop_budget_usd == 2.00  # LOOP_YML's own budget.usd
+    assert wrapper.per_query_usd == e2e_t001.MAX_TOTAL_USD / (3 + 2)
+
+
 def test_the_e2e_command_refuses_before_querying_without_a_credential(tmp_path, monkeypatch, capsys):
     """A missing key is a preflight failure, not a live Agent SDK attempt."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -419,6 +471,11 @@ def test_the_summary_reports_the_cap_it_applied_and_keeps_the_raw_event_log(
     summary = (worktree / ".harness" / "last-sdk-e2e.md").read_text(encoding="utf-8")
     assert "cap_usd: 2.00" in summary
     assert "usd=unknown" in summary
+    # #577. `loop_budget_usd` unset here: this backend was built by hand,
+    # not through `_build_backend`, so there is no `.loop.yml` figure to
+    # report. `test_build_backend_threads_the_loop_budget_beside_the_wrapper_cap`
+    # below pins the wired case.
+    assert "loop_budget_usd: unset" in summary
     # #546. `TimedOutBackend` answers `usd=None` on its one call, so the
     # summary has to say `spent_usd` is a floor, not a total.
     assert "unknown_spend_turns: 1" in summary

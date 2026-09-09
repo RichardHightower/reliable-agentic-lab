@@ -673,6 +673,60 @@ def test_a_result_with_a_task_in_flight_does_not_end_the_run(fake_sdk, target):
     assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
 
 
+def test_a_backgrounded_subagents_write_still_belongs_to_the_turn_that_spawned_it(
+    fake_sdk, target
+):
+    """#577, on top of #578's `_track_task_lifecycle`/`_is_run_boundary`. A
+    round-5 raw log shows the parent resume its subagent in the background
+    ("has been resumed to finish. Waiting for it to complete."), and the
+    terminal `ResultMessage` for the parent's own turn arrives right after,
+    with the subagent it just resumed still in flight. `run()`'s own
+    `_changed_files` diff is taken the instant `collect()` returns; sampling
+    it there would have missed a write the subagent makes a moment later --
+    not attributed to this call (already sampled), and not to the next one
+    either (already present in its own `before` snapshot, since it landed
+    before that call ever started). `#578`'s own boundary check keeps
+    `collect()` draining past the terminal message while the task it started
+    is still in flight, so the write is still this call's own."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeResultMessage(result="Waiting for it to complete.", total_cost_usd=0.49)
+        # The subagent's own write lands only once it drains, strictly
+        # after the parent's own mid-flight result.
+        (target / "app" / "late.py").write_text("y = 2\n", encoding="utf-8")
+        yield FakeTaskNotification(task_id="bg-1")
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=["app/**"])
+
+    assert result.wrote == ["app/late.py"]
+    assert result.usd == 0.49
+    assert result.ok
+
+
+def test_a_subagent_that_never_reports_done_still_returns_when_the_stream_ends(
+    fake_sdk, target
+):
+    """The other half. A backgrounded subagent that never posts a completion
+    event before the stream itself closes must not hang `collect()` forever
+    -- there is nothing left to wait on once the generator is exhausted."""
+    module = fake_sdk([])
+
+    async def query(*, prompt, options):
+        yield FakeTaskStarted(task_id="bg-1")
+        yield FakeResultMessage(result="done enough", total_cost_usd=0.10)
+        # No task_notification / terminal task_updated ever arrives for "bg-1".
+
+    module.query = query
+    result = adapter.AgentSdkBackend(object()).run(repo=target, prompt="p", allow=[])
+
+    assert result.ok
+    assert result.output == "done enough"
+    assert result.usd == 0.10
+
+
 def test_a_stream_with_no_terminal_result_still_times_out(fake_sdk, target):
     """#568, the other half. A query that never produces a `ResultMessage` at
     all (a hung tool call, a dropped connection) must still hit the outer
