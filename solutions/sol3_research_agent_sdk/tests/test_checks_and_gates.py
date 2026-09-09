@@ -1735,7 +1735,13 @@ def test_the_heading_order_is_frozen(tmp_path, no_renderer):
     next_step_at = order.index("Next step")
     references_at = order.index("References")
     assert order[0] == "Abstract"
-    assert order[1] == "Methods"
+    # #538. A real outline, not only an assembled fixture: `loop.py`'s real
+    # CLI run sets `require_introduction=True`, and `OfflineTurns.outline`
+    # drafts Introduction as its own first section, so this is the
+    # section-writing loop's own written prose, the same as any other body
+    # section, not `assemble`'s Python-written backstop.
+    assert order[1] == "Introduction"
+    assert order[2] == "Methods"
     assert methods_at < conclusion_at < next_step_at < references_at
     assert "Evidence summary" not in order, "no human-study claim in this topic, no table"
 
