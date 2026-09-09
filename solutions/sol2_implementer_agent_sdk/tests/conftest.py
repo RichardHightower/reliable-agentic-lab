@@ -101,6 +101,26 @@ class FakeResultMessage:
     structured_output: dict | None = None
     is_error: bool = False
     subtype: str = "success"
+    terminal_reason: str | None = None
+
+
+@dataclass
+class FakeTaskStarted:
+    """#578. Stands in for the SDK's `TaskStartedMessage`: a delegated `Task`
+    of one of `_DEFERRING_TASK_TYPES` marks itself in flight with this."""
+
+    task_id: str = "t1"
+    task_type: str = "local_agent"
+    subtype: str = "task_started"
+
+
+@dataclass
+class FakeTaskNotification:
+    """#578. Stands in for `TaskNotificationMessage`: the task named by
+    `task_id` has drained."""
+
+    task_id: str = "t1"
+    subtype: str = "task_notification"
 
 
 class FakeResultError(Exception):
