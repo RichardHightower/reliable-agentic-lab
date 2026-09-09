@@ -26,6 +26,21 @@ parent has no business writing anything.
 
 Nothing here calls a model. `options_for` returns configuration, and a driver
 is what runs it.
+
+#567. `setting_sources=["project"]` used to load a target repo's own
+`.claude/settings.json` for every role alike, so the northwind-field-crm
+fixture's tracked deny of `Write(./tests/**)` and `Edit(./tests/**)` reached
+the test implementer, whose entire allow list is `tests/**`, before the
+scope hook above ever ran. That deny was never written for a role whose job
+is to write tests; it serves the roles that should never touch `tests/**`
+in the first place. The scope hook stays the single source of the
+write-scope rule: `options_for` no longer requests project settings for any
+role, judge included (judge of PR #570, follow-up 3). The only stated reason
+for `setting_sources=["project"]` was MCP server inheritance, this port
+declares no MCP server, and leaving the judge as the one role still exposed
+to an arbitrary target repo's deny list bought nothing: a deny on a path the
+judge needs to `Read` would silently starve the verdict that gates the run,
+for a setting this port never used.
 """
 
 from __future__ import annotations
@@ -207,8 +222,12 @@ def options_for(
         disallowed_tools=GLOBAL_DENY,
         permission_mode="dontAsk",
         hooks={"PreToolUse": hooks},
-        # A subagent inherits the project's MCP servers only with this set.
-        setting_sources=["project"],
+        # #567, widened by follow-up 3. A target repo's `.claude/settings.json`
+        # is not this cast's to load: this port declares no MCP server (the
+        # only reason the setting ever existed), and every role's write scope
+        # is already the scope hook's call, not a project deny's. No role,
+        # judge included, gets project settings.
+        setting_sources=[],
         plugins=[{"type": "local", "path": str(PLUGIN)}],
         system_prompt=PARENT_PROMPT,
         max_turns=max_turns,

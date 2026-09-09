@@ -13,6 +13,19 @@ and concatenating every event is how Grep output became a candidate.
 not a turn that failed and can be retried. It is the ceiling, and a driver
 escalates on it instead of spending the rest of the budget rediscovering it.
 
+#568. `collect()` returns the moment a `ResultMessage` arrives, instead of
+continuing to ask the generator for whatever comes next. The round-4 raw
+logs show a query that ended on `error_max_budget_usd` in under a minute and
+then sat open, quiet, until the 900 second ceiling: the terminal record was
+already in hand, and the only thing `collect()` was still waiting on was the
+stream closing itself, which this port has no control over. The real SDK
+never yields more than one `ResultMessage`, and it is always the terminal
+one, controlled stop or a plain success alike; the first fix here only broke
+on a controlled stop, which the judge of PR #570 caught still running a
+successful turn to the same ceiling. A stream with no terminal result at all
+is unaffected: nothing here short-circuits that wait, and
+`asyncio.wait_for`'s own ceiling is still what ends it.
+
 Write tracking unions the untracked listing into the diff. `git diff
 --name-only` sees tracked changes only, and this loop's whole job is creating
 files that git has never heard of. A brand new `tests/test_due_date.py` was
@@ -36,6 +49,13 @@ from write_scope import WriteScope
 
 _TURN_STOP = {"error_max_turns", "error_max_turns_assistant"}
 _COST_STOP = {"error_max_budget_usd", "error_max_budget"}
+
+# #568 follow-up (judge of PR #570, item 1). Every `ResultMessage` the real
+# SDK ever yields is already the terminal record of its query -- there is no
+# such thing as a partial one. `"partial"` exists only so this port's own
+# tests can still model a message that reports progress before the real
+# terminal record arrives, without that message ending collection early.
+_NON_TERMINAL_SUBTYPES = {"partial"}
 
 
 def _timeout_env(name: str, default: int) -> int:
@@ -195,6 +215,19 @@ class AgentSdkBackend(Backend):
                         if stop:
                             reason = stop
                             ok = False
+                        # #568 follow-up (judge of PR #570, item 1). The
+                        # earlier fix broke only on a controlled stop, so a
+                        # *successful* terminal `ResultMessage` still left
+                        # `collect()` waiting on a stream that round 4 shows
+                        # can sit open for the rest of the timeout window.
+                        # Every `ResultMessage` that is not this port's own
+                        # test-only `"partial"` marker is terminal; stop
+                        # asking the generator for anything past it.
+                        if (
+                            isinstance(message, ResultMessage)
+                            and message.subtype not in _NON_TERMINAL_SUBTYPES
+                        ):
+                            break
                 except ResultError:
                     # The SDK yields its terminal ResultMessage and then raises
                     # ResultError for the CLI's non-zero exit. Keep the terminal

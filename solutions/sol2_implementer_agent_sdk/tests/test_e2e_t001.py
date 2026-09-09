@@ -217,6 +217,29 @@ def test_a_controlled_sdk_turn_ceiling_is_not_a_failed_query(tmp_path):
     assert not wrapper.query_failed
 
 
+def test_a_controlled_sdk_budget_stop_is_not_a_failed_query(tmp_path):
+    """#568 follow-up (judge of PR #570, item 2). Removing "cost budget
+    spent" from `CONTROLLED_STOPS` left every test in this file green; this
+    is the test whose absence that was. Mirrors
+    `test_a_controlled_sdk_turn_ceiling_is_not_a_failed_query` above, the
+    same shape for the other named ceiling."""
+    delegate = FakeAgentSdkBackend()
+    original_run = delegate.run
+
+    def stopped(**kwargs):
+        result = original_run(**kwargs)
+        result.ok = False
+        result.stop_reason = "cost budget spent"
+        return result
+
+    delegate.run = stopped
+    wrapper = e2e_t001.AgentSdkE2EBackend(delegate)
+
+    wrapper.run(repo=tmp_path, prompt="test", allow=["tests/**"])
+
+    assert not wrapper.query_failed
+
+
 def test_the_e2e_command_refuses_before_querying_without_a_credential(tmp_path, monkeypatch, capsys):
     """A missing key is a preflight failure, not a live Agent SDK attempt."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
