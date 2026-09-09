@@ -19,6 +19,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from write_scope import WriteScope
+
 REQUIRED_TASKS = ("setup", "test", "e2e", "lint", "format-check")
 
 # pytest exits 5 when it collects nothing. Task wraps that as 201.
@@ -26,10 +28,21 @@ REQUIRED_TASKS = ("setup", "test", "e2e", "lint", "format-check")
 # required; the contract only reports what it found.
 NO_TESTS_COLLECTED = (5, 201)
 
+# #576. Where `rubric.ui_has_e2e` reads its green suite from: the Taskfile
+# convention this loop ships (`task e2e` runs `pytest tests/e2e`, see
+# `HOW_TO_RUN.md`). `Contract.validate` reads this same constant, so the
+# scope a role is given and the path the row demands never drift apart.
+UI_E2E_PATH = "tests/e2e/**"
+
 DEFAULTS: dict = {
     "roles": {
         "planner": {"write_allow": ["steps.jsonl"], "write_deny": []},
-        "test_implementer": {"write_allow": ["tests/**"], "write_deny": []},
+        # #576. `tests/**` already covers `tests/e2e/**` (fnmatch's `*` has no
+        # notion of a path separator), so this is belt over suspenders: naming
+        # the path explicitly is what `Contract.validate` below can point at,
+        # rather than trusting every future edit to keep noticing the
+        # subsumption is there.
+        "test_implementer": {"write_allow": ["tests/**", UI_E2E_PATH], "write_deny": []},
         "code_implementer": {"write_allow": ["app/**", "src/**"], "write_deny": ["tests/**"]},
         "judge": {"write_allow": [], "write_deny": ["**"]},
     },
@@ -279,6 +292,34 @@ class Contract:
         if missing:
             raise ContractError(
                 f"{self.repo}/Taskfile.yml is missing required tasks: {', '.join(missing)}"
+            )
+        self._validate_rubric_scope()
+
+    def _validate_rubric_scope(self) -> None:
+        """#576. A rubric row that demands a file no role may write can never
+        pass, no matter how many retries the budget allows: `ui_has_e2e`
+        (`rubric.py`) requires a green `tests/e2e` suite whenever a changed
+        file matches `ui_paths`, and a `.loop.yml` that declares `ui_paths`
+        with every role's scope closed to `UI_E2E_PATH` is asking for a suite
+        nothing in the cast may create. Raise here, at validation time, with
+        the row and the path named, instead of discovering it three spent
+        turns into an escalate the way PR #575's round 5 did.
+        """
+        if not self.rubric.get("ui_paths"):
+            return
+        can_write = any(
+            WriteScope(
+                allow=list(role.get("write_allow") or []),
+                deny=list(role.get("write_deny") or []),
+            ).permits(UI_E2E_PATH)
+            for role in self.config["roles"].values()
+        )
+        if not can_write:
+            raise ContractError(
+                f"{self.repo}/.loop.yml declares rubric.ui_paths, so rubric row "
+                f"'ui_has_e2e' can demand a green {UI_E2E_PATH} suite, but no role "
+                f"declared in roles may write {UI_E2E_PATH}. Widen one role's "
+                "write_allow or drop ui_paths."
             )
 
     # -- config -------------------------------------------------------------
