@@ -409,6 +409,40 @@ def test_a_backend_that_raises_after_spending_reports_the_spend(tmp_path, monkey
     assert "boom after spend" in result.output
 
 
+# -- #571: `collect()` returns on the terminal ResultMessage ----------------
+
+
+def test_a_budget_stop_returns_immediately_instead_of_waiting_for_the_stream_to_close(
+    tmp_path, monkeypatch, changed
+):
+    """#571, copying sol2's #568 fix. A terminal `ResultMessage` naming a
+    controlled cost stop must end the turn right there, well inside this
+    test's own generous timeout, not because the stream finally closed or
+    the timeout ceiling finally fired."""
+    module = make_sdk_module([])
+
+    async def query(*, prompt, options):
+        yield FakeResultMessage(
+            result="", total_cost_usd=0.3914, subtype="error_max_budget_usd"
+        )
+        await adapter.asyncio.sleep(30)  # the stream that never closes
+        yield FakeResultMessage(result="never reached", total_cost_usd=99.0)
+
+    module.query = query
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", module)
+    monkeypatch.setattr(adapter, "QUERY_TIMEOUT_SECONDS", 5)
+    changed.extend([set(), set()])
+
+    started = adapter.time.monotonic()
+    result = AgentSdkBackend(options=None).run(repo=tmp_path, prompt="p", allow=[])
+    elapsed = adapter.time.monotonic() - started
+
+    assert result.stop_reason == "cost budget spent"
+    assert result.usd == 0.3914
+    assert not result.ok
+    assert elapsed < 2, f"collect() waited {elapsed:.2f}s past the terminal result"
+
+
 def test_a_bad_timeout_env_var_falls_back_to_the_default(monkeypatch, capsys):
     """#541. A non-integer value must not raise at import and kill the run."""
     assert adapter._timeout_env("SOL1_QUERY_TIMEOUT_SECONDS_UNSET", 900) == 900
