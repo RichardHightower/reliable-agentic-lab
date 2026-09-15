@@ -229,6 +229,8 @@ def enrich_source_metadata(findings: list[dict], run) -> None:
         # The abstract or page text the fetch carried. #471's `attributed()`
         # reads this, never the researcher's own quote.
         source["text"] = fetched.get("text") or ""
+        if fetched.get("full_text"):
+            _FULL_TEXT[url] = str(fetched["full_text"])
         # A dict lookup on the record's own publication type, never the
         # model's opinion. Named `evidence_tier`, not `tier`: this schema
         # already carries a numeric `tier` (a corpus-vs-web citation weight,
@@ -293,6 +295,11 @@ def _flatten_for_grading(findings: list[dict]) -> list[dict]:
     return flattened
 
 
+# Page bodies by URL, in memory only, for `attribute_findings`. The section
+# JSON keeps the capped abstract in `source["text"]`, never the body.
+_FULL_TEXT: dict[str, str] = {}
+
+
 def attribute_findings(run, findings: list[dict], sid: str) -> list[dict]:
     """Drop a finding whose own cited source does not back it. #471
 
@@ -309,7 +316,8 @@ def attribute_findings(run, findings: list[dict], sid: str) -> list[dict]:
     for finding in findings:
         source = finding.get("source") or {}
         source_text = str(source.get("text") or "")
-        if source_text and not attributed(finding, source_text):
+        body = _FULL_TEXT.get(str(source.get("url_or_path") or ""), "")
+        if source_text and not attributed(finding, body or source_text):
             dropped.append(finding.get("claim") or finding.get("id") or "")
             continue
         if not source_text:
@@ -1420,6 +1428,20 @@ def run_section(run, section: dict) -> dict:
     # 3e–3g write, check, judge, with gates.decide on the section signature
     # Register every source this section will cite before the writer runs, so
     # the number it is told to use is the number the bibliography will give.
+    # ponytail: the follow and counter passes above can add a finding that
+    # cites a cabinet key after the locate pass ran, and `register` refuses
+    # a key. Locate once more; already-located findings pass through.
+    if any(
+        not str((f.get("source") or {}).get("url_or_path") or "").lower().startswith(("http://", "https://"))
+        for f in findings
+    ):
+        findings, late_unlocated = locate_cabinet_findings(run, findings)
+        if late_unlocated:
+            prior = run.read_json(f"knowledge/{sid}/{UNRESOLVED_FILE}") or {}
+            run.write_json(
+                f"knowledge/{sid}/{UNRESOLVED_FILE}",
+                {"unresolved": list(prior.get("unresolved") or []) + late_unlocated},
+            )
     numbers = citations.register(
         run.work_dir,
         [(f.get("source") or {}).get("url_or_path") or "" for f in findings],

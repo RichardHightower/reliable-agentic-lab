@@ -55,7 +55,8 @@ DEFAULT_BRAIN = HERE / ".." / ".." / ".." / "loop_eng_2nd_brain" / "knowledge"
 
 DEFAULT_MAX_USD = 12.0
 DEFAULT_STAGE_ATTEMPTS = 3
-DEFAULT_SEARCH_CALLS = 36
+# SOL3_SEARCH_CALLS raises the cap for a wide topic. 36 stays the default.
+DEFAULT_SEARCH_CALLS = int(os.environ.get("SOL3_SEARCH_CALLS", "36"))
 OUTLINE_JUDGE_ROUNDS = int(os.environ.get("SOL3_OUTLINE_JUDGE_ROUNDS", "14"))
 
 DONE, COST, MAX_TURNS = "done", "cost", "max turns"
@@ -880,14 +881,20 @@ class Paper:
                     if name == "review":
                         revised = self.stage_revise(extra)
                         self.say(f"  revise     {revised.summary}")
-                    elif name == "assemble" and "cited" in signature:
-                        # This gate names a mechanical, local defect.  Send only
+                    elif name == "assemble":
+                        # These gates name mechanical, local defects. Send only
                         # the offending sections back to the maker; a full
-                        # rewrite would risk the reviewer-approved prose just to
-                        # add a traceable source marker.
-                        targets = self._uncited_section_headings()
-                        revised = self.stage_revise(extra, targets=targets or None)
-                        self.say(f"  revise     {revised.summary}")
+                        # rewrite would risk the reviewer-approved prose. A
+                        # missing "Figure N" mention needs no model at all:
+                        # the review's revise pass replaced the trimmed bodies
+                        # and dropped the sentence trim had added, so append
+                        # it again, after the revise, so it survives.
+                        targets = self._assemble_targets(signature, str(failure))
+                        if targets:
+                            revised = self.stage_revise(extra, targets=targets)
+                            self.say(f"  revise     {revised.summary}")
+                        if "figure_referenced" in signature:
+                            self.say(f"  figures    {self._append_figure_mentions()} mention(s) appended")
                 except GateFailed as revise_failure:
                     self.say(
                         f"  revise     failed: "
@@ -2552,7 +2559,7 @@ class Paper:
                 "marker; do not leave an editorial paragraph uncited.",
             )
             usd += reply.usd
-            body = section_body(reply.text, heading)
+            body = _strip_writer_figures(section_body(reply.text, heading))
             # A live subagent can return a parent tool receipt, an empty
             # completion, or malformed prose. Preserve the exact pre-gate body
             # locally so a failed citation gate is diagnosable without another
@@ -2632,74 +2639,110 @@ class Paper:
             targets = [heading for heading in self.written if heading.lower() != "limitations"]
 
         usd = 0.0
+        failures: list[tuple[str, GateFailed]] = []
         for heading in targets:
-            section = next(item for item in self.outline["sections"] if item["heading"] == heading)
-            claim_ids = section.get("claim_ids") or []
-            if heading.lower() in stages.UNBOUND_SECTIONS:
-                claim_ids = [claim.id for claim in self.ledger.claims.values() if claim.usable]
-            allowed = sorted(
-                {
-                    index[source_id]
-                    for claim_id in claim_ids
-                    if self.ledger.claim(claim_id)
-                    for source_id in self.ledger.claim(claim_id).source_ids
-                    if source_id in index
-                }
+            # ponytail: one section's judge failure used to abort the whole pass,
+            # so the sections after it never got their revise turn and the
+            # review re-read the same text. Collect, continue, raise at the end.
+            try:
+                section = next(item for item in self.outline["sections"] if item["heading"] == heading)
+                claim_ids = section.get("claim_ids") or []
+                if heading.lower() in stages.UNBOUND_SECTIONS:
+                    claim_ids = [claim.id for claim in self.ledger.claims.values() if claim.usable]
+                allowed = sorted(
+                    {
+                        index[source_id]
+                        for claim_id in claim_ids
+                        if self.ledger.claim(claim_id)
+                        for source_id in self.ledger.claim(claim_id).source_ids
+                        if source_id in index
+                    }
+                )
+                # #517. Same widening `stage_write` applies, so a revise pass can
+                # still add a ledger guideline's citation without `write_gate`
+                # calling it stray.
+                guideline_note, allowed = sections.guideline_brief(
+                    self.ledger, section, self.topic, index, allowed
+                )
+                briefs = "\n".join(stages.claim_brief(self.ledger, claim_id, index) for claim_id in claim_ids)
+                if guideline_note:
+                    briefs = f"{briefs}\n{guideline_note}" if briefs else guideline_note
+                word_range = _section_word_range(heading, len(claim_ids))
+                earlier = []
+                for prior_heading, prior_body in self.written.items():
+                    if prior_heading == heading:
+                        break
+                    earlier.append(f"## {prior_heading}\n{prior_body}")
+                earlier_context = "\n\n".join(earlier)
+                from outline import starts_with_next_step_verb  # noqa: PLC0415  sibling module
+
+                is_next_step = heading.lower() == "next step" or starts_with_next_step_verb(heading)
+                step_note = ""
+                if is_next_step:
+                    import paper_check  # noqa: PLC0415  sibling module
+
+                    long_steps = paper_check.cta_violations(self.written[heading])
+                    step_note = (
+                        " This is the paper's next-step section. A deterministic gate counts "
+                        "every sentence here as a step and fails the paper when any step "
+                        "runs past 20 words. EVERY sentence, including an opening or closing "
+                        "framing sentence, must be 20 words or fewer. Count the words. Prefer "
+                        "one short sentence per bullet, each with a citation marker, no sales "
+                        "language."
+                        + (
+                            " These sentences currently fail and must be split or cut: "
+                            + " | ".join(f"'{step}'" for step in long_steps[:8])
+                            if long_steps
+                            else ""
+                        )
+                    )
+                reply = self._ask(
+                    "writer",
+                    f"Revise the existing {heading!r} section of {self.plan['title']!r}.\n\n"
+                    f"Reviewer feedback to fix:\n{feedback}\n\n"
+                    f"Current section:\n{self.written[heading]}\n\n"
+                    f"Use only these claims and their citation markers:\n{briefs}\n\n"
+                    f"Earlier sections, supplied only to prevent repetition:\n{earlier_context}\n\n"
+                    f"Return {word_range} words of replacement markdown body. No heading or references. "
+                    "Preserve factual grounding and citation markers. Where the reviewer asks for a "
+                    "tradeoff, name a credible alternative and its cost without inventing evidence. "
+                    "Do not repeat the paper's section list or its abstract in this section. Define every "
+                    "specialized term before its first use; the abstract must avoid or define terms that "
+                    "body sections introduce later. Do not reuse a citation for a distinct claim unless the "
+                    "provided claim brief explicitly supports both claims. Every prose paragraph that makes "
+                    "a factual claim must include one or more of its allowed citation markers. "
+                    "Every sentence must be entailed by a listed claim. Unpack mechanism, alternative, "
+                    "and evidence limit instead of restating the claims. "
+                    "Do not restate a mechanism already explained in an earlier section. Build on it "
+                    "with a new implication supported by this section's claims, or omit it. "
+                    "The gate treats scope, transition, recommendation, and limitation paragraphs "
+                    "as prose claims too, so every prose paragraph must carry at least one allowed "
+                    "marker; do not leave an editorial paragraph uncited."
+                    + step_note,
+                )
+                usd += reply.usd
+                body = _strip_writer_figures(section_body(reply.text, heading))
+                body = stages.drop_uncited_prose(body)
+                # See `stage_write`'s own call: `style` is hard, `assemble` is not
+                # the first reader to see this text any more. This stage replaces
+                # `self.written[heading]` outright from a fresh reply, so a
+                # figure mention `stage_trim` added to the text being replaced is
+                # already gone before this line runs; stripping em dashes from
+                # the new text does not do that, it only means the new text was
+                # never going to carry the old mention either way. #517
+                body = brief.strip_em_dashes(body)
+                stages.write_gate(heading, body, allowed)
+                self.written[heading] = body
+                self._save_sections()
+                usd += sections.close_section(self, section, body, force=True)
+            except GateFailed as failure:
+                failures.append((heading, failure))
+                continue
+        if failures:
+            raise GateFailed(
+                "; ".join(f"{heading}: {failure}" for heading, failure in failures),
+                tuple(sorted({row for _, failure in failures for row in failure.signature})),
             )
-            # #517. Same widening `stage_write` applies, so a revise pass can
-            # still add a ledger guideline's citation without `write_gate`
-            # calling it stray.
-            guideline_note, allowed = sections.guideline_brief(
-                self.ledger, section, self.topic, index, allowed
-            )
-            briefs = "\n".join(stages.claim_brief(self.ledger, claim_id, index) for claim_id in claim_ids)
-            if guideline_note:
-                briefs = f"{briefs}\n{guideline_note}" if briefs else guideline_note
-            word_range = _section_word_range(heading, len(claim_ids))
-            earlier = []
-            for prior_heading, prior_body in self.written.items():
-                if prior_heading == heading:
-                    break
-                earlier.append(f"## {prior_heading}\n{prior_body}")
-            earlier_context = "\n\n".join(earlier)
-            reply = self._ask(
-                "writer",
-                f"Revise the existing {heading!r} section of {self.plan['title']!r}.\n\n"
-                f"Reviewer feedback to fix:\n{feedback}\n\n"
-                f"Current section:\n{self.written[heading]}\n\n"
-                f"Use only these claims and their citation markers:\n{briefs}\n\n"
-                f"Earlier sections, supplied only to prevent repetition:\n{earlier_context}\n\n"
-                f"Return {word_range} words of replacement markdown body. No heading or references. "
-                "Preserve factual grounding and citation markers. Where the reviewer asks for a "
-                "tradeoff, name a credible alternative and its cost without inventing evidence. "
-                "Do not repeat the paper's section list or its abstract in this section. Define every "
-                "specialized term before its first use; the abstract must avoid or define terms that "
-                "body sections introduce later. Do not reuse a citation for a distinct claim unless the "
-                "provided claim brief explicitly supports both claims. Every prose paragraph that makes "
-                "a factual claim must include one or more of its allowed citation markers. "
-                "Every sentence must be entailed by a listed claim. Unpack mechanism, alternative, "
-                "and evidence limit instead of restating the claims. "
-                "Do not restate a mechanism already explained in an earlier section. Build on it "
-                "with a new implication supported by this section's claims, or omit it. "
-                "The gate treats scope, transition, recommendation, and limitation paragraphs "
-                "as prose claims too, so every prose paragraph must carry at least one allowed "
-                "marker; do not leave an editorial paragraph uncited.",
-            )
-            usd += reply.usd
-            body = section_body(reply.text, heading)
-            body = stages.drop_uncited_prose(body)
-            # See `stage_write`'s own call: `style` is hard, `assemble` is not
-            # the first reader to see this text any more. This stage replaces
-            # `self.written[heading]` outright from a fresh reply, so a
-            # figure mention `stage_trim` added to the text being replaced is
-            # already gone before this line runs; stripping em dashes from
-            # the new text does not do that, it only means the new text was
-            # never going to carry the old mention either way. #517
-            body = brief.strip_em_dashes(body)
-            stages.write_gate(heading, body, allowed)
-            self.written[heading] = body
-            self._save_sections()
-            usd += sections.close_section(self, section, body, force=True)
         return StageResult("revise", usd=usd, artifacts={"sections": len(targets)}, summary=f"{len(targets)} sections")
 
     # -- 7. review ---------------------------------------------------------
@@ -2809,7 +2852,8 @@ class Paper:
         # can be stopped between the writer and assembler, so normalizing only
         # in stage_write would leave a persisted duplicate heading untreated.
         normalized = {
-            heading: section_body(body, heading) for heading, body in self.written.items()
+            heading: _strip_writer_figures(section_body(body, heading))
+            for heading, body in self.written.items()
         }
         if normalized != self.written:
             self.written = normalized
@@ -2969,7 +3013,7 @@ class Paper:
                 # "Figure 12" mention already in the prose. #464 F1.
                 if paper_check.mentions_figure(text, number):
                     continue
-                sentence = _figure_mention_sentence(number, figure.get("caption") or "")
+                sentence = _figure_mention_sentence(number, figure.get("caption") or "", heading)
                 self.written[heading] = f"{text.rstrip()} {sentence}"
         else:
             draft = "\n\n".join(f"## {head}\n\n{body}" for head, body in self.written.items())
@@ -3082,6 +3126,52 @@ class Paper:
             if heading.lower() not in ("references", "methods")
             and brief.uncited_claims(section_body(body, heading))
         ]
+
+    def _assemble_targets(self, signature: tuple[str, ...], failure: str) -> list[str]:
+        """The writer bodies an assemble row names, or nothing for a row
+        Python repairs on its own (`figure_referenced`)."""
+        from outline import starts_with_next_step_verb  # noqa: PLC0415  sibling module
+
+        targets: list[str] = []
+        if "cited" in signature:
+            targets += self._uncited_section_headings()
+        lowered = failure.lower()
+        for heading in self.written:
+            if heading.lower() in ("references", "methods") or heading in targets:
+                continue
+            if "abstract_matches_body" in signature and f"{heading.lower()}:" in lowered:
+                targets.append(heading)
+            elif "cta_language" in signature and (
+                heading.lower() == "next step" or starts_with_next_step_verb(heading)
+            ):
+                targets.append(heading)
+        return targets
+
+    def _append_figure_mentions(self) -> int:
+        """Append one plain sentence naming each placed figure its owning
+        section does not mention. The same edit `stage_trim` makes on the
+        fixture runner, with no model turn. Returns how many were added."""
+        self._need_written()
+        by_lower = {heading.lower(): heading for heading in self.written}
+        preview = stages.assemble(
+            self.plan, self.outline, self.written, self.figures, self.ledger,
+            charts=self._loaded_charts(),
+        )
+        added = 0
+        for figure in paper_check.placed_figures(preview):
+            heading = by_lower.get(figure.get("section") or "")
+            number = figure.get("number")
+            if not heading or not number:
+                continue
+            text = self.written[heading]
+            if paper_check.mentions_figure(text, number):
+                continue
+            sentence = _figure_mention_sentence(number, figure.get("caption") or "", heading)
+            self.written[heading] = f"{text.rstrip()} {sentence}"
+            added += 1
+        if added:
+            self._save_sections()
+        return added
 
     # -- 9. publish --------------------------------------------------------
 
@@ -3224,7 +3314,28 @@ def _strip_fence(text: str) -> str:
     return (match.group(1) if match else text).strip() + "\n"
 
 
-def _figure_mention_sentence(number: int, caption: str) -> str:
+_OLD_MENTION = re.compile(r"\s*Figure \d+ shows A [^.]*\.")
+
+
+def _strip_writer_figures(body: str) -> str:
+    """Drop image markdown and `Figure N.` caption lines a writer embedded.
+
+    The assembler places every figure itself; a writer's own image line has
+    no judged asset and no caption, and fails two hard rows. Also drops the
+    older same-caption mention sentence the figure pass used to append, so
+    the pass can append a distinct one.
+    """
+    import brief  # noqa: PLC0415
+
+    kept = [
+        line for line in body.splitlines()
+        if not line.strip().startswith("![") and not brief.FIGURE_CAPTION.match(line.strip())
+    ]
+    text = brief.IMAGE.sub("", "\n".join(kept))
+    return _OLD_MENTION.sub(lambda m: m.group(0) if "in the context of" in m.group(0) else "", text)
+
+
+def _figure_mention_sentence(number: int, caption: str, heading: str = "") -> str:
     """A plain sentence naming a figure, distinct enough from another
     figure's own mention to never itself become a `caveat_once` repeat.
 
@@ -3236,7 +3347,12 @@ def _figure_mention_sentence(number: int, caption: str) -> str:
     Copied from the SDK port's `turns.py`, not imported.
     """
     gist = " ".join((caption or "").split()[:6]).rstrip(",.:;")
-    return f"Figure {number} shows {gist}." if gist else f"Figure {number} illustrates this point."
+    sentence = f"Figure {number} shows {gist}." if gist else f"Figure {number} illustrates this point."
+    # Two figures with the same caption shingle identically once the digit
+    # is dropped, so name the owning section too. Distinct per section.
+    if heading:
+        sentence = sentence.rstrip(".") + f", in the context of {heading.lower()}."
+    return sentence
 
 
 def _sections_sha(written: dict[str, str]) -> str:

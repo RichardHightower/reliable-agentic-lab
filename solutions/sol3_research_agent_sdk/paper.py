@@ -1421,6 +1421,12 @@ def do_sections(run: Run) -> dict:
             verdict = by_id.get(finding.get("id") or "") or {}
             status = verdict.get("state") or "unverified"
             url = (finding.get("source") or {}).get("url_or_path") or ""
+            if url and not url.lower().startswith(("http://", "https://")):
+                # ponytail: an unresolved cabinet finding stays in the
+                # section's findings.json for the record, but the locate
+                # pass dropped it before the writer and the registry saw
+                # it, so it can take no number in the bibliography.
+                continue
             if status != "contradicted":
                 number += 1
                 # `source_note` carries #470's title_mismatch and #471's
@@ -2272,10 +2278,17 @@ def assemble(run: Run) -> dict:
         conclusion_parts = ["## Conclusion", "", conclusion_text.strip(), ""]
     conclusion_placed = False
     for section in body_sections:
+        heading_text = str(section.get("heading") or "").strip()
         if (
             not conclusion_placed
             and conclusion_parts
-            and str(section.get("heading") or "").strip().lower() == "next step"
+            and (
+                heading_text.lower() == "next step"
+                # P4 accepts any verb-led next-step heading, and the outline
+                # names the section `next-step`; splice before either.
+                or str(section.get("id") or "") == "next-step"
+                or outlines.starts_with_next_step_verb(heading_text)
+            )
         ):
             parts += conclusion_parts
             conclusion_placed = True

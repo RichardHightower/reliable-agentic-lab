@@ -50,6 +50,17 @@ SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
+def subject_from_id(record_id: str) -> str:
+    """The subject a record id carries: `<kind>.<subject>.<ulid>`.
+
+    The loader used to rebuild every record with an empty subject, so a
+    resumed run matched no finding to its question, re-asked every one,
+    and spent the whole search budget on answers it already held.
+    """
+    parts = str(record_id or "").split(".")
+    return ".".join(parts[1:-1]) if len(parts) >= 3 else ""
+
+
 def slug(text: str, limit: int = 60) -> str:
     """A filesystem-safe, URL-safe name. Deterministic, so a rerun overwrites."""
     out = SLUG_STRIP.sub("-", text.lower()).strip("-")
@@ -212,6 +223,9 @@ class SourceDocument:
     authors: list[str] = field(default_factory=list)
     year: str = ""
     venue: str = ""
+    # The page body when the fetch could get one (arXiv). In memory only, for
+    # `attributed()`; the front matter keeps the capped `text` abstract.
+    full_text: str = ""
     # `title_mismatch: ...` or a fetch-failure message. The writer never reads
     # a SourceDocument, only `stages.claim_brief`'s numbers, so this is safe
     # to carry all the way to the report without leaking into the paper. #470
@@ -588,7 +602,7 @@ class Ledger:
                     SourceDocument(
                         title=fields.get("title", ""),
                         url=url,
-                        subject="",
+                        subject=subject_from_id(fields["id"]),
                         vendor=fields.get("vendor", ""),
                         body=body,
                         id=fields["id"],
@@ -611,7 +625,7 @@ class Ledger:
                 self.add_claim(
                     Claim(
                         text=body.split("\n\n>")[0],
-                        subject="",
+                        subject=subject_from_id(fields["id"]),
                         source_ids=[ln["target"] for ln in links if ln["rel"] == "sourced_from"],
                         truth_state=fields.get("truth_state", PROPOSED),
                         confidence=float(fields.get("confidence", 0.5)),
@@ -633,7 +647,7 @@ class Ledger:
                 self.add_finding(
                     Finding(
                         question=fields.get("title", ""),
-                        subject="",
+                        subject=subject_from_id(fields["id"]),
                         claim_ids=[ln["target"] for ln in links if ln["rel"] == "asserts"],
                         summary=body,
                         gaps=list(fields.get("gaps") or []),

@@ -544,12 +544,24 @@ def search(
             scored = _score(text, query_terms) if query_terms else 0
             if query_terms and scored == 0:
                 continue
-            hit = _hit_from_claim(root, name, path, query_terms)
-            if hit is None:
-                continue
-            ranked.append((hit.score, hit.confidence, hit))
-    ranked.sort(key=lambda row: (-row[0], -row[1], row[2].key))
-    return [row[2] for row in ranked[: max(0, int(limit))]]
+            # ponytail: score every claim, build a hit only for the top
+            # `limit`. `_hit_from_claim` walks the source tree per call, and
+            # a 24k claim brain spent an hour here building hits it then cut.
+            meta, _ = parse_front_matter(text)
+            try:
+                confidence = float(meta.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            ranked.append((scored, confidence, f"{name}:{path.stem}", root, name, path))
+    ranked.sort(key=lambda row: (-row[0], -row[1], row[2]))
+    hits: list[Hit] = []
+    for row in ranked:
+        if len(hits) >= max(0, int(limit)):
+            break
+        hit = _hit_from_claim(row[3], row[4], row[5], query_terms)
+        if hit is not None:
+            hits.append(hit)
+    return hits
 
 
 def resolve(key: str, roots: list[Path | str]) -> Hit | None:
