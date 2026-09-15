@@ -516,6 +516,7 @@ def record_findings(
                 venue=fetched.get("venue") or "",
                 note=fetched.get("note") or "",
                 text=fetched.get("text") or "",
+                full_text=fetched.get("full_text") or "",
                 # A dict lookup on the record's own publication type, never a
                 # model's opinion. `{}` (no backend) tiers `other`, the same
                 # as a fetch that found nothing. #473
@@ -570,7 +571,7 @@ def record_findings(
             # `source.body` is the researcher's own quote for this specific
             # binding, not a `"..."` substring pulled out of the claim's own
             # text: #471, finding 3.
-            elif evidence.attributed(claim, source.text, quote=source.body):
+            elif evidence.attributed(claim, source.full_text or source.text, quote=source.body):
                 kept_ids.append(sid)
                 attributed_ids.append(sid)
             # else: the source text does not back this claim. The binding is
@@ -1178,6 +1179,16 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
     # no separate duplicate check needed.
     heading_order = [str(section.get("heading", "")).strip().lower() for section in sections]
     labelled = [heading if heading in FROZEN_ORDER else "body" for heading in heading_order]
+    # P4: the validator accepts any next-step heading that starts with a
+    # next-step verb ("Evaluate X on a live ticket"), and places it right
+    # after Conclusion. Label that one section "next step" here too, or the
+    # frozen order reads it as a body section after Conclusion and fails.
+    from outline import starts_with_next_step_verb  # noqa: PLC0415  sibling module, same folder
+
+    for index in range(1, len(labelled)):
+        if labelled[index - 1] == "conclusion" and labelled[index] == "body":
+            if starts_with_next_step_verb(str(sections[index].get("heading", ""))):
+                labelled[index] = "next step"
     collapsed = [
         label for index, label in enumerate(labelled)
         if label != "body" or index == 0 or labelled[index - 1] != "body"

@@ -709,6 +709,10 @@ def ungrounded_identifiers(body: str, corpus: str, *, extended: bool = False) ->
     if not corpus:
         return []
     text = _mask_code(body)
+    # A citation marker is a reference number, not an identifier. Past
+    # source 100 the extended BIG_INT pattern read [101] as a fabricated id
+    # and failed every section that cited it.
+    text = re.sub(r"\[\d+\]", " ", text)
     found: list[str] = []
     patterns = (ARXIV, DOI, AUTHOR_YEAR)
     if extended:

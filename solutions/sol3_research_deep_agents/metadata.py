@@ -56,7 +56,10 @@ _PUBMED = re.compile(r"pubmed\.ncbi\.nlm\.nih\.gov/(\d+)", re.I)
 # The old host (ncbi.nlm.nih.gov/pmc/articles/...) and the canonical one PMC
 # moved to (pmc.ncbi.nlm.nih.gov/articles/...) both still resolve.
 _PMC = re.compile(r"(?:ncbi\.nlm\.nih\.gov/pmc/articles|pmc\.ncbi\.nlm\.nih\.gov/articles)/pmc(\d+)", re.I)
-_ARXIV = re.compile(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5})", re.I)
+_ARXIV = re.compile(r"arxiv\.org/(?:abs|pdf|html)/([0-9]{4}\.[0-9]{4,5})", re.I)
+# The full HTML body of an arXiv paper, kept in memory for `attributed()`
+# only. Never persisted: `TEXT_CAP` still bounds what the ledger writes.
+FULL_TEXT_CAP = 200_000
 _DOI = re.compile(r"doi\.org/(10\.[^\s?#]+)", re.I)
 
 
@@ -168,7 +171,7 @@ def _from_pmc(pmc_id: str) -> dict:
 
 
 def _from_arxiv(arxiv_id: str) -> dict:
-    payload = _get(f"http://export.arxiv.org/api/query?id_list={arxiv_id}")
+    payload = _get(f"https://export.arxiv.org/api/query?id_list={arxiv_id}")
     root = ElementTree.fromstring(payload)
     ns = {"a": "http://www.w3.org/2005/Atom"}
     entry = root.find("a:entry", ns)
@@ -189,8 +192,29 @@ def _from_arxiv(arxiv_id: str) -> dict:
         "year": published[:4],
         "venue": "arXiv",
         "text": summary,
+        "full_text": _arxiv_full_text(arxiv_id),
         "category": category,
     }
+
+
+def _arxiv_full_text(arxiv_id: str) -> str:
+    """The paper body as plain text, from arxiv.org/html then the ar5iv mirror.
+
+    A formula or a constant lives in the body, not the abstract, and the
+    abstract alone made `attributed()` drop every claim that quoted one.
+    Best effort: any failure returns an empty string and the abstract stands.
+    """
+    for base in ("https://arxiv.org/html/", "https://ar5iv.labs.arxiv.org/html/"):
+        try:
+            html = _get(f"{base}{arxiv_id}").decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001  the body is a bonus; the abstract still stands
+            continue
+        # MathML stays: a decay constant or a weight lives inside <math>.
+        html = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
+        text = " ".join(re.sub(r"<[^>]+>", " ", html).split())
+        if len(text) > 2000:
+            return text[:FULL_TEXT_CAP]
+    return ""
 
 
 def _from_crossref(doi: str) -> dict:
@@ -301,6 +325,7 @@ def fetch_record(url: str, backend, *, model_title: str = "") -> dict:
         "venue": "",
         "note": "",
         "text": "",
+        "full_text": "",
         "pubtype": [],
         "category": "",
         "crossref_type": "",
@@ -326,6 +351,7 @@ def fetch_record(url: str, backend, *, model_title: str = "") -> dict:
     record["year"] = str((fetched or {}).get("year") or "")
     record["venue"] = str((fetched or {}).get("venue") or "")
     record["text"] = str((fetched or {}).get("text") or "").strip()[:TEXT_CAP]
+    record["full_text"] = str((fetched or {}).get("full_text") or "").strip()[:FULL_TEXT_CAP]
     record["pubtype"] = list((fetched or {}).get("pubtype") or [])
     record["category"] = str((fetched or {}).get("category") or "")
     record["crossref_type"] = str((fetched or {}).get("crossref_type") or "")
