@@ -420,8 +420,13 @@ def _numbers(text: str) -> set[str]:
     return {token.replace(",", "") for token in _NUMBER.findall(text or "")}
 
 
+# Markdown punctuation a researcher's quote keeps and a rendered page's text
+# drops: a table row's pipes, code-span backticks, emphasis, list bullets.
+_MARKUP = re.compile(r"[`|*_#>]+")
+
+
 def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").lower()).strip()
+    return re.sub(r"\s+", " ", _MARKUP.sub(" ", (text or "").lower())).strip()
 
 
 def attributed(claim: Claim, source_text: str, *, quote: str = "") -> bool:

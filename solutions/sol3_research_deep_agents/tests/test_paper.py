@@ -2456,3 +2456,23 @@ def test_a_retry_gets_a_fresh_request_window(run_dir, stub_renderer, monkeypatch
     finally:
         run.budget.end_request()
     assert calls["n"] == 2, "the retry must actually run its search, not skip straight to BudgetExceeded"
+
+
+def test_assemble_targets_reads_the_quoted_span_on_the_fail_line(tmp_path):
+    """A PASS row's apostrophe must not pair with the fragment's opening
+    quote. The live run mapped no section and stalled on `policy_leak`."""
+    from paper import Paper
+
+    loop = Paper.__new__(Paper)
+    loop.written = {
+        "Retrieval": "A mem0.ai vendor blog lays out a five-mode retrieval ladder, recency first.",
+        "Other": "Nothing here.",
+    }
+    report = (
+        "the paper failed its hard gates.\n"
+        "PASS  glossary_exact         every term's entry is used in prose\n"
+        "FAIL  policy_leak            search host or retrieval narration in: "
+        "'A mem0.ai vendor blog lays out a five-mode retrieval ladder, recency first.'\n"
+        "PASS  person                 third person, no first person tour"
+    )
+    assert loop._assemble_targets(("policy_leak",), report) == ["Retrieval"]
