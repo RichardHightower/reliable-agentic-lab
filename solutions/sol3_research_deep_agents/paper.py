@@ -353,7 +353,15 @@ class DeepAgentsRunner(Runner):
             # parent-only delegation wrapper. That makes the evidence contract
             # visible to the writer and verifier whose output Python gates.
             direct_payload = {"messages": [{"role": "user", "content": prompt}]}
-            result = self._run_direct(role, role_agent, direct_payload) if self.debug else role_agent.invoke(direct_payload)
+            try:
+                result = self._run_direct(role, role_agent, direct_payload) if self.debug else role_agent.invoke(direct_payload)
+            except Exception as exc:  # noqa: BLE001  one truncated JSON reply must not kill the run
+                # A `response_format` reply the model cut off mid-string
+                # raises from inside the graph. An empty reply is what the
+                # JSON gate already retries as `not_json`; a traceback is not.
+                if type(exc).__name__ != "StructuredOutputValidationError":
+                    raise
+                return Reply(text="")
             return _reply_from(adapter, adapter.last_ai_text(result), result)
         parent, delegated = self._run_subgraphs(role, payload, debug=self.debug)
         text = adapter.last_ai_text(delegated) if delegated is not None else adapter.last_agent_ai_text(parent, role)
@@ -3136,14 +3144,31 @@ class Paper:
         if "cited" in signature:
             targets += self._uncited_section_headings()
         lowered = failure.lower()
+        # Every row quotes the offending text. A fragment that sits in one
+        # written body names that body, whatever the row is called.
+        # Each row quotes with `!r`, so the span sits at the end of its FAIL
+        # line, in single quotes, or in double quotes when the sentence
+        # carries an apostrophe. Scanning the whole report for any quoted
+        # run paired an apostrophe in a PASS row with the fragment's opening
+        # quote, and the mapping came back empty.
+        fragments = []
+        for line in failure.splitlines():
+            if not line.startswith("FAIL"):
+                continue
+            match = re.search(r"""(['"])(.{25,})\1\s*$""", line)
+            if match:
+                fragments.append(match.group(2).lower())
         for heading in self.written:
             if heading.lower() in ("references", "methods") or heading in targets:
                 continue
+            body_lower = self.written[heading].lower()
             if "abstract_matches_body" in signature and f"{heading.lower()}:" in lowered:
                 targets.append(heading)
             elif "cta_language" in signature and (
                 heading.lower() == "next step" or starts_with_next_step_verb(heading)
             ):
+                targets.append(heading)
+            elif any(frag[:60] in body_lower for frag in fragments):
                 targets.append(heading)
         return targets
 

@@ -266,12 +266,18 @@ def _from_page(url: str) -> dict:
         # for an abstract, but a weak substitute beats an empty one.
         found = re.search(r"<p[^>]*>(.*?)</p>", html, re.I | re.S)
         text = re.sub(r"<[^>]+>", " ", found.group(1)) if found else ""
+    # The page body, for `attributed()` only. A README or a vendor doc page
+    # carries its claims in the body, and the meta description alone made
+    # the check drop every claim that quoted one. Never persisted.
+    body_html = re.sub(r"(?is)<(script|style|nav|footer)[^>]*>.*?</\1>", " ", html)
+    full_text = " ".join(re.sub(r"<[^>]+>", " ", body_html).split())[:FULL_TEXT_CAP]
     return {
         "title": title,
         "authors": authors,
         "year": dates[0][:4] if dates else "",
         "venue": "",
         "text": " ".join(text.split()),
+        "full_text": full_text,
     }
 
 

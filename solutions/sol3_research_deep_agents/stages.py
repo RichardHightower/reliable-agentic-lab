@@ -495,6 +495,13 @@ def record_findings(
         # cache required.
         existing = ledger.source_for_url(url)
         if existing is not None:
+            # A source reloaded from disk carries no page body, and the
+            # body is what `attributed()` reads. One fetch per url per run.
+            if backend is not None and not existing.full_text and not getattr(existing, "_body_fetched", False):
+                existing._body_fetched = True
+                existing.full_text = (
+                    metadata.fetch_record(url, backend, model_title=existing.title).get("full_text") or ""
+                )
             source_ids.append(existing.id)
             continue
         model_title = item.get("title") or url
@@ -523,6 +530,8 @@ def record_findings(
                 tier=source_policy.tier_for(fetched),
             )
         )
+        # This run already fetched it; the reuse branch above must not again.
+        source._body_fetched = True
         source_ids.append(source.id)
 
     claim_ids = []
@@ -1474,6 +1483,22 @@ def _split_verdict(verdict: dict) -> tuple[list[str], list[str], float | None]:
     return rows, notes, score
 
 
+REVIEW_ROWS = frozenset(
+    {
+        "defines_terms",
+        "states_mechanism",
+        "names_tradeoff",
+        "evidence_matches",
+        "scope_honest",
+        "no_filler",
+        "depth",
+        "voice",
+        "figure_earns_place",
+        "abstract_matches_body",
+    }
+)
+
+
 def review_gate(verdict: dict) -> None:
     """Fail the draft on the reviewer's rows, and never mislabel one.
 
@@ -1489,6 +1514,17 @@ def review_gate(verdict: dict) -> None:
     which sentence belongs to which row.
     """
     rows, notes, score = _split_verdict(verdict)
+    # The rubric names ten rows. A reviewer that invents one ("Consistent
+    # citation format", "Figure references", or a section heading) is
+    # asking for work no writer turn can do, and figures are placed at
+    # assembly, after this gate. Keep the rubric's rows, drop the rest,
+    # and keep each surviving row paired with its own note.
+    kept = [(row, note) for row, note in zip(rows, notes, strict=False) if row in REVIEW_ROWS]
+    if len(notes) == len(rows):
+        rows = [row for row, _ in kept]
+        notes = [note for _, note in kept]
+    else:
+        rows = [row for row in rows if row in REVIEW_ROWS]
     if not rows:
         return
     if len(notes) == len(rows):
@@ -1885,6 +1921,16 @@ def assemble(
 
     # No captured term means no section, not an empty one. Alphabetical, case
     # insensitive, so "Loop" and "loop" do not sort by accident of case.
+    if glossary:
+        # A revise pass can rewrite the sentence that carried a TERM marker
+        # and keep the marker's definition. `glossary_exact` fails an entry
+        # the body never uses, so grade each entry the way that row does.
+        prose_so_far = "\n".join(parts)
+        glossary = {
+            term: definition
+            for term, definition in glossary.items()
+            if paper_check._term_used(term, prose_so_far) or paper_check._term_used(term, definition)
+        }
     if glossary:
         parts.append("## Glossary")
         parts.append("")

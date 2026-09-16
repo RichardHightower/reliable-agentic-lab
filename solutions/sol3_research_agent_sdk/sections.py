@@ -250,8 +250,13 @@ def _numbers(text: str) -> set[str]:
     return {token.replace(",", "") for token in _NUMBER.findall(text or "")}
 
 
+_MARKUP = re.compile(r"[`|*_#>]+")
+
+
 def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").lower()).strip()
+    # Markdown punctuation a quote keeps and a rendered page drops:
+    # table pipes, code-span backticks, emphasis, list bullets.
+    return re.sub(r"\s+", " ", _MARKUP.sub(" ", (text or "").lower())).strip()
 
 
 def attributed(finding: dict, source_text: str) -> bool:

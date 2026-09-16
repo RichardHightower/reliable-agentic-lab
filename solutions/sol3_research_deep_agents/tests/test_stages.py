@@ -2718,7 +2718,7 @@ def test_a_term_marker_is_harvested_and_stripped():
     body = stages.assemble(
         plan(title="T"),
         outline(claims[0].id),
-        {"Introduction": "A fact. [1][2] <!-- TERM: orchestrator: the process that sequences roles -->"},
+        {"Introduction": "The orchestrator records a fact. [1][2] <!-- TERM: orchestrator: the process that sequences roles -->"},
         [],
         led,
     )
@@ -2733,7 +2733,7 @@ def test_assemble_writes_a_glossary_before_references():
     body = stages.assemble(
         plan(title="T"),
         outline(claims[0].id),
-        {"Introduction": "A fact. [1][2] <!-- TERM: orchestrator: the process that sequences roles -->"},
+        {"Introduction": "The orchestrator records a fact. [1][2] <!-- TERM: orchestrator: the process that sequences roles -->"},
         [],
         led,
     )
@@ -3153,3 +3153,17 @@ def test_record_findings_refuses_the_same_url_without_the_tag():
 
 def test_a_located_tag_still_needs_an_openable_url():
     assert _record_one("corpus:knowledge:claim.x", located_from="knowledge:claim.x").sources == {}
+
+
+def test_assemble_drops_a_glossary_term_the_body_never_uses():
+    """A revise pass can rewrite the sentence that carried the marker. The
+    entry then fails `glossary_exact`, so assembly drops it instead."""
+    led, claims = ledger_with()
+    body = stages.assemble(
+        plan(title="T"),
+        outline(claims[0].id),
+        {"Introduction": "A fact. [1][2] <!-- TERM: orchestrator: the process that sequences roles -->"},
+        [],
+        led,
+    )
+    assert "## Glossary" not in body
