@@ -28,6 +28,11 @@ Rows `check()` appends, past the three it reuses from `brief`:
     marketing      no banned marketing verb in body prose
     policy_leak    the body names no search host and narrates no retrieval boundary
     caveat_once    a caveat sentence or a numeric finding repeats across sections
+    sentence_opener no sentence opens with That, So, Thus, Hence, or Here
+    paragraph_length no prose paragraph runs past the word limit
+    caveat_tic     no body section says single source more than once
+    acronym_defined every acronym is defined at first use
+    abstract_length the abstract stays under the word limit
     question_heading a heading pastes a question instead of answering it
     abstract_matches_body the abstract and introduction match the body they summarize
     next_step      the last prose heading is a next-step section, not a bare Conclusion
@@ -77,6 +82,12 @@ RECOMMENDED_SECTIONS = ("limitations",)
 # How a single-source claim announces itself in the prose. The verifier could
 # not corroborate it, and the reader is entitled to know that.
 CAVEAT = re.compile(r"single source|one source|not corroborated|unconfirmed", re.I)
+# The one sentence Methods writes about single-source claims. Read by
+# `uncaveated_single_source`, written by `Paper._methods_lines`.
+BLANKET_CAVEAT = "the citation is the warning"
+# The bold lead of the reader's guide assembly writes after the front
+# matter's four lines.
+READER_GUIDE_LEAD = "**How to read this paper.**"
 
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.M)
 IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
@@ -863,11 +874,28 @@ def glossary_unused(body: str) -> list[str]:
 NON_PROSE_TRAILING = {"glossary", "references", "figures"}
 
 
+def prose_headings(body: str) -> list[str]:
+    """Every top-level (`##`) prose heading, in order, before Glossary and
+    References."""
+    return [
+        match.group(2).strip()
+        for match in _headings(body)
+        if len(match.group(1)) == 2 and match.group(2).strip().lower() not in NON_PROSE_TRAILING
+    ]
+
+
+def next_step_heading(body: str) -> str | None:
+    """The first prose heading that starts with a next-step verb, or None."""
+    import outline as outlines  # noqa: PLC0415  sibling module
+
+    return next((h for h in prose_headings(body) if outlines.starts_with_next_step_verb(h)), None)
+
+
 def last_prose_heading(body: str) -> str | None:
     """The last top-level (`##`) section heading before Glossary and References.
 
     Frozen order: front matter, Abstract, Introduction, Methods, study table,
-    body sections, Conclusion, Next step, Glossary, References. `None` when
+    body sections, Next step, Limitations, Conclusion, Glossary, References. `None` when
     the paper has no top-level heading at all.
     """
     headings = [
@@ -1173,8 +1201,15 @@ def drop_dangling_figure_mentions(body: str, valid_numbers) -> str:
 def visible_source_syntax(body: str) -> list[str]:
     """Diagram source left in the paper. The figure is the artifact, not the code."""
     found = []
-    for _delimiter, language, block in FENCE.findall(body):
-        language = language.strip()
+    for match in FENCE.finditer(body):
+        language = match.group(2).strip()
+        block = match.group(3)
+        # Assembly prints a figure's Mermaid source right under its
+        # `Figure N.` caption so a gist renders it. That fence is the
+        # figure's own source, not a leak.
+        before = body[: match.start()].rstrip("\n").rsplit("\n", 1)[-1]
+        if language.lower() == "mermaid" and FIGURE_CAPTION.match(before.strip()):
+            continue
         if language.lower() in ("mermaid", "plantuml", "puml") or SOURCE_SYNTAX.search(block):
             found.append(language or block.strip().split("\n", 1)[0][:40])
     return found
@@ -1339,6 +1374,11 @@ def uncaveated_single_source(body: str, ledger: evidence.Ledger | None) -> list[
     """
     if ledger is None:
         return []
+    # Methods carries one blanket note for every single-source claim, and
+    # the citation is the warning after that. A per-section caveat still
+    # satisfies this row for a paper written before that note existed.
+    if BLANKET_CAVEAT.lower() in _section_text(body, "methods").lower():
+        return []
     singles = [
         claim
         for claim in ledger.claims.values()
@@ -1481,6 +1521,127 @@ def abstract_matches_body(body: str, ledger: evidence.Ledger | None = None) -> l
                 if f"[{number}]" not in rest_of_body:
                     issues.append(f"{label}: [{number}] does not appear in the body")
     return issues
+
+
+# Rows added after the neuro-symbolic paper review: short paragraphs, one
+# "single source" per section at most, acronyms defined at first use, a
+# bounded abstract, and no sentence that opens with That, So, Thus, Hence,
+# or Here. Each detail starts with the owning heading and a colon, the
+# shape `_assemble_targets` already routes to that section's writer.
+PARAGRAPH_WORD_LIMIT = 130
+ABSTRACT_WORD_LIMIT = 190
+CAVEAT_TIC_EXEMPT = {"abstract", "methods", "limitations"} | PYTHON_WRITTEN_SECTIONS | NON_PROSE_TRAILING
+SENTENCE_OPENER_BAN = re.compile(r"^(?:That|So|Thus|Hence|Here)\b")
+ACRONYM = re.compile(r"\b[A-Z][A-Z0-9]{2,6}\b")
+# Acronyms and names an engineer reads without an expansion, plus the ones
+# a reference list or a benchmark name carries.
+KNOWN_ACRONYMS = {
+    "ACM", "IEEE", "USENIX", "PMLR", "ICML", "NIPS", "AAAI", "ACL", "EMNLP", "NSF",
+    "API", "APIS", "JSON", "HTML", "HTTP", "HTTPS", "URL", "URLS", "PDF", "PNG", "CSV",
+    "XML", "YAML", "SQL", "GPT", "LLM", "LLMS", "NLP", "RAG", "CPU", "GPU", "RAM",
+    "IMO", "W3C", "RFC", "ISO", "USD", "UTC", "PMID", "DOI", "CLI", "SDK", "IDE",
+    "README", "FAQ", "PR", "PRS", "CI", "CD", "SRE", "DENY", "ALLOW", "UNSAT", "INVALID",
+    "TERM", "FAIL", "PASS", "WARN", "OK", "AND", "OR", "NOT", "THE",
+}
+_DEFINED_SHAPES = (
+    "({acr}",  # Expansion (ACR)
+    "{acr} (",  # ACR (expansion)
+    "{acr}, a ",
+    "{acr}, an ",
+    "{acr}, the ",
+    "{acr} is ",
+    "{acr} stands for",
+    "**{acr}.**",
+)
+
+
+def _prose_paragraphs(text: str) -> list[str]:
+    """Blank-line paragraphs of prose: no heading, image, list, table, quote,
+    fence, or `Figure N.` caption."""
+    out = []
+    for block in re.split(r"\n\s*\n", _mask_fences(text)):
+        block = block.strip()
+        if not block or block.startswith(("#", "!", "|", ">", "```", "-", "*")):
+            continue
+        if LIST_ITEM.match(block) or FIGURE_CAPTION.match(block) or re.match(r"^\d+[.)]\s", block):
+            continue
+        out.append(block)
+    return out
+
+
+def _graded_sections(body: str) -> list[tuple[str, str]]:
+    return [
+        (heading, text)
+        for heading, text in top_level_sections(body).items()
+        if heading not in PYTHON_WRITTEN_SECTIONS and heading not in NON_PROSE_TRAILING
+    ]
+
+
+def long_paragraphs(body: str, limit: int | None = None) -> list[str]:
+    """Prose paragraphs over the word limit, as "heading: N words, starts '...'"."""
+    limit = PARAGRAPH_WORD_LIMIT if limit is None else limit
+    out = []
+    for heading, text in _graded_sections(body):
+        for para in _prose_paragraphs(text):
+            count = len(para.split())
+            if count > limit:
+                out.append(f"{heading}: a paragraph of {count} words starts {para[:48]!r}")
+    return out
+
+
+def caveat_tic(body: str) -> list[str]:
+    """Body sections that say "single source" more than once. Methods carries
+    the blanket note, Limitations owns the caveats, the abstract hedges per
+    sentence by its own row; every other section gets one at most."""
+    out = []
+    for heading, text in top_level_sections(body).items():
+        if heading in CAVEAT_TIC_EXEMPT:
+            continue
+        count = len(CAVEAT.findall(_mask_fences(text)))
+        if count > 1:
+            out.append(f"{heading}: says single source {count} times")
+    return out
+
+
+def undefined_acronyms(body: str) -> list[str]:
+    """Acronyms whose first use in prose comes with no definition.
+
+    A definition is the expansion with the acronym in parentheses, the
+    acronym followed by its expansion in parentheses, an appositive after a
+    comma, "ACR is", "ACR stands for", a bold glossary-style lead, or a
+    glossary entry that names it. Names with a hyphen or a digit-led token
+    are skipped; a benchmark name is not an acronym.
+    """
+    glossary = " ".join(glossary_terms(body)).lower()
+    seen: set[str] = set()
+    out = []
+    for heading, text in _graded_sections(body):
+        for sentence in _prose_sentences(_mask_for_ste(text)):
+            for acr in ACRONYM.findall(sentence):
+                if acr in KNOWN_ACRONYMS or acr in seen or acr[0].isdigit():
+                    continue
+                if f"-{acr}" in sentence or f"{acr}-" in sentence:
+                    continue
+                seen.add(acr)
+                defined = any(shape.format(acr=acr) in sentence for shape in _DEFINED_SHAPES)
+                if not defined and acr.lower() not in glossary:
+                    out.append(f"{heading}: {acr} is used before it is defined")
+    return out
+
+
+def abstract_too_long(body: str, limit: int | None = None) -> list[str]:
+    limit = ABSTRACT_WORD_LIMIT if limit is None else limit
+    count = len(_section_text(body, "abstract").split())
+    return [f"abstract: {count} words, the limit is {limit}"] if count > limit else []
+
+
+def banned_sentence_openers(body: str) -> list[str]:
+    out = []
+    for heading, text in _graded_sections(body):
+        for sentence in _prose_sentences(_mask_for_ste(text)):
+            if SENTENCE_OPENER_BAN.match(sentence.strip()):
+                out.append(f"{heading}: a sentence opens with {sentence.split()[0]!r}: {sentence[:60]!r}")
+    return out
 
 
 def top_level_sections(body: str) -> dict[str, str]:
@@ -1735,6 +1896,10 @@ def front_matter_violations(body: str) -> list[str]:
     if not FRONT_MATTER_PROVENANCE.search(zone):
         problems.append("no provenance line with source and verification counts")
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", zone) if p.strip()]
+    # The reader's guide, when assembly wrote one, follows the four lines
+    # and starts with its own bold lead. It is not a fifth required line.
+    guide_at = next((i for i, p in enumerate(paragraphs) if p.startswith(READER_GUIDE_LEAD)), None)
+    paragraphs = paragraphs if guide_at is None else paragraphs[:guide_at]
     if len(paragraphs) != 4:
         # PR #542 judge F3. `< 4` let a fifth paragraph slip into the
         # exempt zone and still pass this row; the byline, the date, the
@@ -1770,6 +1935,10 @@ def _mask_front_matter(body: str) -> str:
     # counts toward the four-paragraph cap.
     content_start = len(zone) - len(zone.lstrip("\n"))
     breaks = list(re.finditer(r"\n\s*\n", zone[content_start:]))
+    if READER_GUIDE_LEAD in zone:
+        # The reader's guide follows the four lines and cites nothing on
+        # purpose. Mask the whole zone.
+        return body[:after_title] + " " * (zone_end - after_title) + body[zone_end:]
     if len(breaks) < 4:
         # Fewer than four paragraphs above the first heading: not the shape
         # `front_matter_block` writes, so there is nothing to exempt. A
@@ -1810,7 +1979,9 @@ def check(
     # matter block above the Abstract gets the same treatment: it carries no
     # `## ` heading `_mask_sections` could key on, so it is masked on its
     # own span. #479
-    inner = brief.check(_mask_front_matter(_mask_sections(body, PYTHON_WRITTEN_SECTIONS)), sources)
+    # A fenced block is never a claim paragraph: the Mermaid source under
+    # a figure carries blank lines that read as uncited paragraphs otherwise.
+    inner = brief.check(_mask_front_matter(_mask_sections(_mask_fences(body), PYTHON_WRITTEN_SECTIONS)), sources)
     checks.extend(Check(c.name, c.passed, c.detail) for c in inner.checks)
 
     absent = missing_sections(body, required)
@@ -1912,6 +2083,51 @@ def check(
             "no contractions or Latin abbreviations in body prose"
             if not ste_hits
             else f"contraction or e.g./i.e./etc. in: {ste_hits[0]!r}",
+        )
+    )
+
+    openers = banned_sentence_openers(body)
+    checks.append(
+        Check(
+            "sentence_opener",
+            not openers,
+            "no sentence opens with That, So, Thus, Hence, or Here"
+            if not openers
+            else "; ".join(openers[:6]),
+        )
+    )
+    long_paras = long_paragraphs(body)
+    checks.append(
+        Check(
+            "paragraph_length",
+            not long_paras,
+            f"every prose paragraph is {PARAGRAPH_WORD_LIMIT} words or fewer"
+            if not long_paras
+            else "; ".join(long_paras[:6]),
+        )
+    )
+    tics = caveat_tic(body)
+    checks.append(
+        Check(
+            "caveat_tic",
+            not tics,
+            "no body section says single source more than once" if not tics else "; ".join(tics[:6]),
+        )
+    )
+    acronyms = undefined_acronyms(body)
+    checks.append(
+        Check(
+            "acronym_defined",
+            not acronyms,
+            "every acronym is defined at first use" if not acronyms else "; ".join(acronyms[:6]),
+        )
+    )
+    abstract_long = abstract_too_long(body)
+    checks.append(
+        Check(
+            "abstract_length",
+            not abstract_long,
+            f"the abstract is {ABSTRACT_WORD_LIMIT} words or fewer" if not abstract_long else abstract_long[0],
         )
     )
 
@@ -2028,20 +2244,31 @@ def check(
             )
         )
 
+        # The next-step section sits before Limitations, and Conclusion
+        # closes the prose. Earlier the next step closed the paper; a reader
+        # who stopped at the checklist then missed the caveats.
+        step_heading = next_step_heading(body)
+        prose = prose_headings(body)
+        lowered_prose = [h.lower() for h in prose]
         if last_heading is None:
             next_step_ok, next_step_detail = True, "no prose section to grade"
-        elif outlines.is_bare_conclusion(last_heading):
-            next_step_ok, next_step_detail = False, f"last prose heading is a bare Conclusion: {last_heading!r}"
-        elif not outlines.starts_with_next_step_verb(last_heading):
+        elif step_heading is None:
+            next_step_ok, next_step_detail = False, "no prose heading starts with a next-step verb"
+        elif "limitations" in lowered_prose and lowered_prose.index("limitations") < prose.index(step_heading):
             next_step_ok, next_step_detail = (
                 False,
-                f"last prose heading has no next-step verb: {last_heading!r}",
+                f"the next-step section {step_heading!r} comes after Limitations",
+            )
+        elif last_heading.strip().lower() != "conclusion":
+            next_step_ok, next_step_detail = (
+                False,
+                f"last prose heading is {last_heading!r}, not Conclusion",
             )
         else:
-            next_step_ok, next_step_detail = True, f"last prose heading is a next step: {last_heading!r}"
+            next_step_ok, next_step_detail = True, f"next step {step_heading!r} precedes Limitations and Conclusion"
         checks.append(Check("next_step", next_step_ok, next_step_detail))
 
-        cta_text = _section_text(body, last_heading.strip().lower()) if last_heading else ""
+        cta_text = _section_text(body, step_heading.strip().lower()) if step_heading else ""
         cta_bad = cta_violations(cta_text)
         checks.append(
             Check(

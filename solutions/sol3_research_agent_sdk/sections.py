@@ -250,13 +250,16 @@ def _numbers(text: str) -> set[str]:
     return {token.replace(",", "") for token in _NUMBER.findall(text or "")}
 
 
-_MARKUP = re.compile(r"[`|*_#>]+")
+# Anything that is not a word character or a digit. A quote and the page
+# it came from differ in punctuation spacing as soon as the page wraps a
+# curly quote or a dash in its own element: the Cedar reference guide
+# renders "asks the question “Can this principal" as `“ can this`, and an
+# exact match dropped every claim from that page. Words are the evidence.
+_NON_WORD = re.compile(r"[^\w\s]+", re.UNICODE)
 
 
 def _normalize(text: str) -> str:
-    # Markdown punctuation a quote keeps and a rendered page drops:
-    # table pipes, code-span backticks, emphasis, list bullets.
-    return re.sub(r"\s+", " ", _MARKUP.sub(" ", (text or "").lower())).strip()
+    return re.sub(r"\s+", " ", _NON_WORD.sub(" ", (text or "").lower())).strip()
 
 
 def attributed(finding: dict, source_text: str) -> bool:

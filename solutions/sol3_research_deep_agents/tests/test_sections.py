@@ -623,3 +623,14 @@ def test_the_judge_and_the_ledger_both_receive_the_whole_section(run_dir, stub_r
     for role in ("section_judge", "ledger"):
         prompt = next(p for name, p in seen if name == role)
         assert tail in prompt, f"{role} lost the end of the section"
+
+
+def test_a_numbered_procedure_is_not_an_uncited_paragraph():
+    """The nine-step loop is the paper's own design. Its item numbers are
+    digits with no marker, and the row read them as an uncited claim."""
+    import sections
+
+    body = "The loop has nine steps [1].\n\n1. **Perception**: accepts raw input.\n2. **Typed Extraction**: rejects malformed output.\n\nThe gate is step six [1]."
+    score = sections.section_check(body)
+    cited = next(c for c in score.checks if c.name == "cited")
+    assert cited.passed, cited.detail

@@ -45,6 +45,7 @@ import paper_check
 import research
 import sections
 import source_policy
+import roleplan
 import stages
 import state as pstate
 from stages import GateFailed, StageResult
@@ -105,6 +106,32 @@ def _transient_provider_errors() -> tuple[type[BaseException], ...]:
     )
 
 
+# The house rules a reviewer of the neuro-symbolic paper asked for, handed
+# to every writer and revise turn. Each has a deterministic row behind it
+# in `paper_check.check`, so the writer hears the rule before the gate does.
+HOUSE_RULES = (
+    " House rules. Keep every paragraph under 100 words. Define every acronym "
+    "at first use: the expansion followed by the acronym in parentheses, or the "
+    "acronym followed by a comma and a short appositive. Do not write 'single "
+    "source' or 'one source' in a body section; the citation marks a single-source "
+    "claim, and Methods says so once for the paper. The Abstract is the one "
+    "exception: write it as two or three short paragraphs, and hedge each sentence "
+    "that cites a single-source claim with 'preliminary' or 'one study'. State a "
+    "naming caveat once, "
+    "in the section that introduces the term, and use the term plainly after "
+    "that. Explain a mechanism once; a later section refers back to it by name "
+    "in one clause. Do not coin a new metric, law, or score; map the argument "
+    "onto constructs the claims already name. When the purpose names a "
+    "procedure, loop, or list of steps, enumerate the steps as a numbered list; "
+    "a list item needs no citation marker. Never start a sentence with That, "
+    "So, Thus, Hence, or Here."
+)
+
+
+# Claims per verifier reply. See `Paper.stage_verify`.
+VERIFY_CHUNK = 8
+
+
 def _section_word_range(heading: str, claim_count: int) -> str:
     """How long a section should be. The Saturday brief is already short."""
     name = heading.strip().lower()
@@ -147,8 +174,24 @@ def section_body(text: str, heading: str) -> str:
     This is a boundary normalization, not an attempt to edit the writer's
     argument.
     """
+    text = _unwrap_fence(text or "")
     pattern = rf"\A\s*(?:#{{1,6}}\s*)?{re.escape(heading)}\s*(?:\n+|\Z)"
     return re.sub(pattern, "", text, count=1, flags=re.IGNORECASE).strip()
+
+
+def _unwrap_fence(text: str) -> str:
+    """Drop a code fence that wraps a whole reply.
+
+    A revise turn returned its Introduction inside a bare ``` fence. Every
+    gate that masks fences then read the section as a code block: zero
+    words, no citations, no prose. The fence is the writer's packaging, not
+    its argument.
+    """
+    stripped = text.strip()
+    match = re.match(r"\A```[a-zA-Z]*[ \t]*\n(.*?)(?:\n```[ \t]*)?\Z", stripped, re.S)
+    if match and stripped.count("```") <= 2:
+        return match.group(1).strip()
+    return text
 
 
 class AwaitingApproval(RuntimeError):
@@ -353,9 +396,17 @@ class DeepAgentsRunner(Runner):
             # parent-only delegation wrapper. That makes the evidence contract
             # visible to the writer and verifier whose output Python gates.
             direct_payload = {"messages": [{"role": "user", "content": prompt}]}
-            try:
+            # A structured reply that fails its own schema once passed on
+            # the next turn in every live run: the verifier lost a full
+            # attempt to an empty reply each time. One retry here, then
+            # the empty reply the stage already knows how to fail.
+            for attempt in range(2):
+              try:
                 result = self._run_direct(role, role_agent, direct_payload) if self.debug else role_agent.invoke(direct_payload)
-            except Exception as exc:  # noqa: BLE001  one truncated JSON reply must not kill the run
+                break
+              except Exception as exc:  # noqa: BLE001  one truncated JSON reply must not kill the run
+                if type(exc).__name__ == "StructuredOutputValidationError" and attempt == 0:
+                    continue
                 # A `response_format` reply the model cut off mid-string
                 # raises from inside the graph. An empty reply is what the
                 # JSON gate already retries as `not_json`; a traceback is not.
@@ -898,11 +949,26 @@ class Paper:
                         # and dropped the sentence trim had added, so append
                         # it again, after the revise, so it survives.
                         targets = self._assemble_targets(signature, str(failure))
-                        if targets:
-                            revised = self.stage_revise(extra, targets=targets)
-                            self.say(f"  revise     {revised.summary}")
-                        if "figure_referenced" in signature:
-                            self.say(f"  figures    {self._append_figure_mentions()} mention(s) appended")
+                        try:
+                            if targets:
+                                revised = self.stage_revise(extra, targets=targets)
+                                self.say(f"  revise     {revised.summary}")
+                        finally:
+                            # The revise pass raises after it collects its
+                            # section failures. Sitting after it, this append
+                            # never ran on a live run where one section
+                            # failed its judge every pass, and
+                            # `figure_referenced` stayed red for eight
+                            # attempts. The append needs no model turn, so
+                            # it runs whatever the revise did.
+                            if "figure_referenced" in signature:
+                                self.say(
+                                    f"  figures    {self._append_figure_mentions()} mention(s) appended"
+                                )
+                            if "caveat_once" in signature:
+                                self.say(f"  caveats    {self._drop_repeated_caveats()} repeat(s) dropped")
+                            if "paragraph_length" in signature:
+                                self.say(f"  paragraphs {self._split_long_paragraphs()} split")
                 except GateFailed as revise_failure:
                     self.say(
                         f"  revise     failed: "
@@ -1228,7 +1294,9 @@ class Paper:
                 reply = self._ask(
                     "outline_judge",
                     "Grade this outline against logical flow, completeness, titles, "
-                    "and corpus_fit. Do not re-litigate Python's validator."
+                    "and corpus_fit. Do not re-litigate Python's validator. The last "
+                    "prose section is headed with a next-step verb (Evaluate, Run, "
+                    "Compare) by that validator's rule; do not fail titles for it."
                     + (
                         " The corpus pack is empty for this topic, so corpus_fit "
                         "passes by definition; do not fail it for that."
@@ -1240,6 +1308,9 @@ class Paper:
                 )
                 usd += reply.usd
                 verdict = self._json_reply("outline_judge", reply)
+                verdict, exempted = outlines.exempt_next_step_title(verdict, drafted)
+                if exempted:
+                    self.say("    outline judge: titles issue on the next-step heading dropped")
                 if pack_empty:
                     verdict, refiled = outlines.refile_corpus_fit(verdict)
                     if refiled:
@@ -1322,10 +1393,15 @@ class Paper:
 
         proposal: dict = {"domains": []}
         usd = 0.0
-        try:
+        # One retry with a JSON-only nudge. A reply with no JSON object
+        # used to fall straight back to the seed list, and a companion
+        # paper on policy engines then searched no policy-engine host.
+        for attempt in range(2):
+          try:
             reply = self._ask(
                 "source_librarian",
-                "Name the domains this paper should search.\n\n"
+                ("Return only the JSON object, no prose. " if attempt else "")
+                + "Name the domains this paper should search.\n\n"
                 f"Topic: {self.topic}\n\n"
                 "Sections:\n"
                 + "\n".join(f"- {heading}" for heading in headings if heading)
@@ -1340,13 +1416,17 @@ class Paper:
                 + (f"\n\nHosts the curated corpus already cites:\n{prior[:3000]}" if prior else "")
                 + extra,
             )
-            usd = reply.usd
+            usd += reply.usd
             parsed = self._json_reply("source_librarian", reply)
             if isinstance(parsed, dict):
                 proposal = parsed
-        except BudgetSpent:
+            break
+          except BudgetSpent:
             raise
-        except Exception as exc:
+          except Exception as exc:
+            if attempt == 0:
+                self.say(f"  source librarian failed: {exc}; asking once more for JSON")
+                continue
             self.say(f"  source librarian failed: {exc}; keeping the seed")
 
         decided = source_policy.admit(proposal.get("domains") or [])
@@ -1719,8 +1799,12 @@ class Paper:
         # `state.total_cost_usd == sum(stage.cost_usd for every stage)`
         # silently broke the moment any of them spent a real turn.
         usd += self._follow_primaries()
-        usd += self._counter_evidence()
         usd += self._research_shortfalls()
+        # Last, on purpose: the shortfall pass adds claims, and a
+        # generalizing claim it adds after the counter pass has run carries
+        # no counter state. `counterweighed` then fails every write attempt
+        # of the section that binds it, and no writer turn can repair it.
+        usd += self._counter_evidence()
         self._record_scout_title_status()
         stages.search_gate(self.ledger, self.plan, unmet=self.evidence_shortfall_unmet)
         self.ledger.write()
@@ -1974,26 +2058,44 @@ class Paper:
             self.state.mark_skipped("verify", "no claim needed a second look")
             return StageResult("verify", summary="no important claims to check")
 
-        listing = "\n".join(f"- {claim.id}: {claim.text}" for claim in pending)
-        reply = self._ask(
-            "verifier",
-            f"Cross-check each claim below against a second, independent source.\n{extra}\n\n"
-            f"{listing}\n\n"
-            'Return JSON: {"checked": [{"claim_id": "...", "second_source_url": "...", '
-            '"corroborate_status": "agreed|disagreed|not_found", "quote": "...", '
-            '"queries_used": ["..."]}]}. On `not_found`, report every query you tried; '
-            "silence is not a result.",
-        )
-        counts = stages.apply_verification(
-            self.ledger,
-            stages.resolve_placeholders(self._json_reply("verifier", reply), self.ledger),
-            backend=self.backend,
-        )
+        # Batches of `VERIFY_CHUNK`, each its own reply. One reply for two
+        # dozen claims, each with a quote and its queries, ran past what a
+        # structured reply can carry and failed its schema twice in a row.
+        # A batch whose reply is not JSON is asked once more before the
+        # stage fails; the batches already folded in stay folded in.
+        counts: dict = {}
+        usd = 0.0
+        chunks = [pending[i : i + VERIFY_CHUNK] for i in range(0, len(pending), VERIFY_CHUNK)]
+        for chunk in chunks:
+            listing = "\n".join(f"- {claim.id}: {claim.text}" for claim in chunk)
+            for attempt in range(2):
+                reply = self._ask(
+                    "verifier",
+                    f"Cross-check each claim below against a second, independent source.\n{extra}\n\n"
+                    f"{listing}\n\n"
+                    'Return JSON: {"checked": [{"claim_id": "...", "second_source_url": "...", '
+                    '"corroborate_status": "agreed|disagreed|not_found", "quote": "...", '
+                    '"queries_used": ["..."]}]}. On `not_found`, report every query you tried; '
+                    "silence is not a result.",
+                )
+                usd += reply.usd
+                try:
+                    report = self._json_reply("verifier", reply)
+                    break
+                except GateFailed:
+                    if attempt:
+                        raise
+                    self.say("  verify     one batch came back without JSON; asking once more")
+            batch_counts = stages.apply_verification(
+                self.ledger, stages.resolve_placeholders(report, self.ledger), backend=self.backend
+            )
+            for key, value in batch_counts.items():
+                counts[key] = counts.get(key, 0) + value if isinstance(value, int) else value
         stages.verify_gate(self.ledger)
         self.ledger.write()
         return StageResult(
             "verify",
-            usd=reply.usd,
+            usd=usd,
             artifacts=counts,
             summary=f"{counts.get('corroborated', 0)} corroborated, "
             f"{counts.get('single_source', 0)} single source, "
@@ -2025,6 +2127,14 @@ class Paper:
         self.outline = stages.resolve_placeholders(
             self._json_reply("writer-outline", reply), self.ledger
         )
+        # The writer echoes the body sections and drops the structural
+        # ones it was told about, some turns. Those four need no binding
+        # (`UNBOUND_SECTIONS`, and `stage_write` hands them every usable
+        # claim), so Python fills them in their frozen slots the same way
+        # it does for the plan, instead of failing the turn twice.
+        self.outline["sections"] = stages.normalize_plan(
+            {"sections": self.outline.get("sections") or []}
+        )["sections"]
         stages.outline_gate(self.outline, self.ledger, self.plan)
         path = self.work_dir / "outline.json"
         path.write_text(json.dumps(self.outline, indent=2), encoding="utf-8")
@@ -2512,14 +2622,15 @@ class Paper:
                 )
                 lead = (
                     f"Write the {heading!r} section of {self.plan['title']!r}, last, "
-                    "from the body already written below. State only what that body "
+                    "from the body already written below, in two or three short "
+                    "paragraphs of at most 180 words together. State only what that body "
                     "states, and carry the same hedge it carries for a single-source "
-                    "claim: say \"single source\", \"one study\", \"one trial\", or "
-                    "\"preliminary\" in the same sentence that cites it. Never write "
+                    "claim: say \"preliminary\" or \"one study\" in the same sentence "
+                    "that cites it. Never write "
                     "\"proves\", \"definitively\", \"conclusively\", or \"establishes "
                     "that\" for a claim the body hedges.\n"
                     f"Purpose: {section.get('purpose', '')}\n"
-                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n{self._brief_note()}\n"
                     f"The paper body, already written:\n{written_body}\n\n"
                 )
             elif heading.strip().lower() == "conclusion":
@@ -2541,14 +2652,14 @@ class Paper:
                     "Never write \"proves\", \"definitively\", \"conclusively\", or "
                     "\"establishes that\" for a claim the body hedges.\n"
                     f"Purpose: {section.get('purpose', '')}\n"
-                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n{self._brief_note()}\n"
                     f"The paper body, already written:\n{written_body}\n\n"
                 )
             else:
                 lead = (
                     f"Write the {heading!r} section of {self.plan['title']!r}.\n"
                     f"Purpose: {section.get('purpose', '')}\n"
-                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n"
+                    f"Audience: {self.plan['audience']}\n{extra}\n{hedge}\n{self._brief_note()}\n"
                 )
             reply = self._ask(
                 "writer",
@@ -2564,7 +2675,7 @@ class Paper:
                 "background, framing, forecasts, and generalizations. "
                 "The gate treats scope, transition, recommendation, and limitation paragraphs "
                 "as prose claims too, so every prose paragraph must carry at least one allowed "
-                "marker; do not leave an editorial paragraph uncited.",
+                "marker; do not leave an editorial paragraph uncited." + HOUSE_RULES,
             )
             usd += reply.usd
             body = _strip_writer_figures(section_body(reply.text, heading))
@@ -2707,7 +2818,7 @@ class Paper:
                 reply = self._ask(
                     "writer",
                     f"Revise the existing {heading!r} section of {self.plan['title']!r}.\n\n"
-                    f"Reviewer feedback to fix:\n{feedback}\n\n"
+                    f"Reviewer feedback to fix:\n{feedback}\n\n{self._brief_note()}\n"
                     f"Current section:\n{self.written[heading]}\n\n"
                     f"Use only these claims and their citation markers:\n{briefs}\n\n"
                     f"Earlier sections, supplied only to prevent repetition:\n{earlier_context}\n\n"
@@ -2725,7 +2836,7 @@ class Paper:
                     "with a new implication supported by this section's claims, or omit it. "
                     "The gate treats scope, transition, recommendation, and limitation paragraphs "
                     "as prose claims too, so every prose paragraph must carry at least one allowed "
-                    "marker; do not leave an editorial paragraph uncited."
+                    "marker; do not leave an editorial paragraph uncited." + HOUSE_RULES
                     + step_note,
                 )
                 usd += reply.usd
@@ -2762,6 +2873,16 @@ class Paper:
         )
         self._save_sections()
         draft = "\n\n".join(f"## {head}\n\n{body}" for head, body in self.written.items())
+        # `extra` on a retry is the retry instruction plus the reviewer's own
+        # last verdict. Handed back, the reviewer repeated that verdict word
+        # for word against a draft the revise pass had already changed: its
+        # second note quoted a sentence the draft no longer contained. The
+        # reviewer grades the text below, and only that.
+        if stages.REVIEW_FAILED_PREFIX in extra:
+            extra = (
+                "This draft was revised after an earlier review. Grade only the "
+                "text below, on its own merits."
+            )
         reply = self._ask(
             "reviewer",
             f"Grade this draft against the rubric.\n{extra}\n\n{draft}\n\n"
@@ -2813,43 +2934,26 @@ class Paper:
         admitted_sources = len(self.ledger.bibliography())
         started = (self.state.started_at or "")[:10] or "an unrecorded date"
 
+        checked = sum(1 for claim in self.ledger.claims.values() if claim.cross_checked)
+        roles = roleplan.plan(None, "paper")
+        models = ", ".join(sorted({role.model for role in roles.values() if role.model}))
+        hosts = ", ".join(admitted) if admitted else "the vendor documentation seed"
         lines = [
-            f"This paper searched the {field} field for evidence, starting {started}."
-            if field
-            else f"This paper searched the topic for evidence, starting {started}, "
-            "before a field was classified.",
-            f"Admitted search hosts, decided once before any paid search ran: "
-            f"{', '.join(admitted)}. A host outside this list was not searched, and "
-            "a source from it never reached a claim."
-            if admitted
-            else "Admitted search hosts, decided once before any paid search ran: "
-            "the vendor documentation seed. No topic-specific host was proposed.",
-            f"Sources retrieved during research: {retrieved}. Sources admitted to "
-            "the reference list, after the same host and claim checks every finding "
-            f"in this paper passed: {admitted_sources}.",
-            # PR #535 judge revision F4: "this run spent N", not "of which N
-            # were spent", so the sentence never has to agree a verb with a
-            # count that might be exactly one.
-            f"The verification cap for this run allows a second opinion on up to "
-            f"{self.max_verify} claims. The follow-turn cap allows {self.max_follow} "
-            f"secondary claims a look at their own primary study; this run spent "
-            f"{self.follow_used}. The counter-evidence cap allows {self.max_counter} "
-            f"generalizing claims a search for a contrary finding; this run spent "
-            f"{self.counter_used}.",
+            (
+                f"Research for this draft ran on {started} in the {field} field, against a "
+                if field
+                else f"Research for this draft ran on {started}, against a "
+            )
+            + f"pre-declared host list: {hosts}. A host outside that list did not feed a claim.",
+            f"Sources retrieved: {retrieved}. Sources cited: {admitted_sources}. Claims given a "
+            f"second, independent look: {checked}. Counter-evidence was searched for "
+            f"{self.counter_used} generalizing claims.",
+            "Most findings rest on one paper or one specification. Where a claim has no "
+            f"second study behind it, {paper_check.BLANKET_CAVEAT}.",
+            f"The draft was generated by {stages.HARNESS_NAME}"
+            + (f" with {models}" if models else "")
+            + " and reviewed by the author.",
         ]
-        if dropped:
-            reasons = "; ".join(
-                f"{item.get('host')} ({item.get('why')})" for item in dropped[:5] if item.get("host")
-            )
-            lines.append(
-                f"Hosts excluded during admission, with the reason each was dropped: {reasons}."
-                if reasons
-                else "No proposed host was excluded during admission; every host cleared the wall."
-            )
-        else:
-            lines.append(
-                "No proposed host was excluded during admission; every host cleared the wall."
-            )
         if not any(claim.usable and claim.study for claim in self.ledger.claims.values()):
             lines.append("No claim in this run carries a recorded human study.")
         return lines
@@ -2876,6 +2980,9 @@ class Paper:
         # byline states when this paper was prepared, and a multi-day run
         # may assemble on a later date than the one Methods states it began.
         front_matter = stages.front_matter_block(self.ledger, prepared_at=pstate.now()[:10])
+        guide = self._reader_guide()
+        if guide:
+            front_matter = f"{front_matter}\n\n{paper_check.READER_GUIDE_LEAD} {guide}"
         body = stages.assemble(
             self.plan,
             self.outline,
@@ -3162,7 +3269,13 @@ class Paper:
             if heading.lower() in ("references", "methods") or heading in targets:
                 continue
             body_lower = self.written[heading].lower()
-            if "abstract_matches_body" in signature and f"{heading.lower()}:" in lowered:
+            if f"{heading.lower()}:" in lowered and any(
+                row in signature
+                for row in (
+                    "abstract_matches_body", "abstract_length", "paragraph_length",
+                    "caveat_tic", "acronym_defined", "sentence_opener",
+                )
+            ):
                 targets.append(heading)
             elif "cta_language" in signature and (
                 heading.lower() == "next step" or starts_with_next_step_verb(heading)
@@ -3197,6 +3310,96 @@ class Paper:
         if added:
             self._save_sections()
         return added
+
+    def _reader_guide(self) -> str:
+        """A short guide above the Abstract: who the paper is for, the few
+        terms it leans on, and what a reader can skip. One writer turn,
+        cached in `reader-guide.md`; empty on the fixture runner, which
+        records no such turn."""
+        if self.runner.name != "deep_agents":
+            return ""
+        path = self.work_dir / "reader-guide.md"
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+        terms = ", ".join(sorted(self._glossary_terms())[:8]) or "the paper's own terms"
+        reply = self._ask(
+            "writer",
+            f"Write a reader's guide for {self.plan.get('title', self.topic)!r}, for "
+            f"{self.plan.get('audience', 'practicing engineers')}. At most 150 words, in "
+            "two to four short paragraphs. No heading, no citation markers, no second "
+            "person, no marketing. Say who the paper is for, define in one line each of "
+            f"the terms the paper leans on ({terms}), and say which sections a reader in "
+            "a hurry can skip. Plain sentences. Return only the guide text.",
+        )
+        import brief  # noqa: PLC0415
+
+        guide = brief.strip_em_dashes(" ".join(reply.text.split()) if reply.text else "")
+        guide = _strip_policy_leak(guide, self.allowed_domains)
+        path.write_text(guide, encoding="utf-8")
+        return guide
+
+    def _brief_note(self) -> str:
+        """The run's topic statement, handed to every writer turn. A design
+        the brief names, such as a nine-step loop, is the paper's own
+        proposal; without this note the writer only ever saw the claims and
+        invented its own steps."""
+        return (
+            "Topic brief, the paper's own design statement. A procedure or a set of "
+            "named steps it lists is the paper's proposal and may be enumerated "
+            f"without a citation marker:\n{self.topic}"
+        )
+
+    def _glossary_terms(self) -> list[str]:
+        """Terms the written sections marked with a TERM comment."""
+        terms = []
+        for body in self.written.values():
+            _, hits = paper_check.take_terms(body)
+            terms += [term for term, _ in hits]
+        return terms
+
+    def _split_long_paragraphs(self) -> int:
+        """Split each prose paragraph over the word limit at the sentence
+        boundary nearest its middle, when both halves keep a citation
+        marker. No model turn: a writer told to keep paragraphs short
+        returned 140 to 250 word paragraphs in every section, and one
+        revise turn per section could not catch up. Returns how many
+        paragraphs were split."""
+        self._need_written()
+        split = 0
+        for heading, text in list(self.written.items()):
+            if heading.lower() in stages.UNBOUND_SECTIONS and heading.lower() != "introduction":
+                if heading.lower() != "conclusion":
+                    continue
+            blocks = re.split(r"\n\s*\n", text)
+            out = []
+            for block in blocks:
+                pieces = _split_paragraph(block, paper_check.PARAGRAPH_WORD_LIMIT)
+                split += len(pieces) - 1
+                out.extend(pieces)
+            new_text = "\n\n".join(out)
+            if new_text != text:
+                self.written[heading] = new_text
+        if split:
+            self._save_sections()
+        return split
+
+    def _drop_repeated_caveats(self) -> int:
+        """Drop each sentence `caveat_once` names as a repeat, from Limitations
+        when it sits there, else from the later section. No model turn: two
+        sections bound to the same claim both restate its caveat, and a
+        writer turn asked to fix one section restates it again. A sentence
+        whose paragraph would lose its last citation marker stays, since
+        `cited` would then fail instead. Returns how many were dropped."""
+        self._need_written()
+        preview = stages.assemble(
+            self.plan, self.outline, self.written, self.figures, self.ledger,
+            charts=self._loaded_charts(),
+        )
+        repeats = paper_check.repeat_shingles(paper_check.top_level_sections(preview))
+        dropped = _drop_repeats(self.written, repeats)
+        if dropped:
+            self._save_sections()
+        return dropped
 
     # -- 9. publish --------------------------------------------------------
 
@@ -3358,6 +3561,86 @@ def _strip_writer_figures(body: str) -> str:
     ]
     text = brief.IMAGE.sub("", "\n".join(kept))
     return _OLD_MENTION.sub(lambda m: m.group(0) if "in the context of" in m.group(0) else "", text)
+
+
+def _split_paragraph(block: str, limit: int) -> list[str]:
+    """One prose paragraph, split into pieces of at most `limit` words at
+    sentence boundaries, each piece keeping a `[n]` marker. A block that is
+    not prose, or that cannot be split that way, comes back whole."""
+    stripped = block.strip()
+    if not stripped or len(stripped.split()) <= limit:
+        return [block]
+    if stripped.startswith(("#", "!", "|", ">", "```", "-", "*")) or re.match(r"^\d+[.)]\s", stripped):
+        return [block]
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+(?=[A-Z\[(\"'])", stripped) if s.strip()]
+    if len(sentences) < 2:
+        return [block]
+    marker = re.compile(r"\[\d+\]")
+    words = [len(s.split()) for s in sentences]
+    total = sum(words)
+    best, best_gap = None, None
+    running = 0
+    for index in range(1, len(sentences)):
+        running += words[index - 1]
+        left, right = " ".join(sentences[:index]), " ".join(sentences[index:])
+        if not (marker.search(left) and marker.search(right)):
+            continue
+        gap = abs(running - total / 2)
+        if best_gap is None or gap < best_gap:
+            best, best_gap = index, gap
+    if best is None:
+        # No boundary keeps a marker on both sides. The paragraph's own
+        # markers cover every sentence in it, so the half that lacks one
+        # carries the paragraph's markers on its last sentence.
+        markers = "".join(dict.fromkeys(marker.findall(stripped)))
+        if not markers:
+            return [block]
+        running, best, best_gap = 0, None, None
+        for index in range(1, len(sentences)):
+            running += words[index - 1]
+            gap = abs(running - total / 2)
+            if best_gap is None or gap < best_gap:
+                best, best_gap = index, gap
+        halves = [" ".join(sentences[:best]), " ".join(sentences[best:])]
+        halves = [
+            half if marker.search(half) else re.sub(r"([.!?])\s*$", rf" {markers}\1", half, count=1)
+            for half in halves
+        ]
+        return _split_paragraph(halves[0], limit) + _split_paragraph(halves[1], limit)
+    left, right = " ".join(sentences[:best]), " ".join(sentences[best:])
+    return _split_paragraph(left, limit) + _split_paragraph(right, limit)
+
+
+def _drop_repeats(written: dict[str, str], repeats: list[dict]) -> int:
+    """Remove one copy of each repeated sentence from `written`, in place.
+    See `Paper._drop_repeated_caveats`."""
+    by_lower = {heading.lower(): heading for heading in written}
+    dropped = 0
+    for item in repeats:
+        # The later copies first, then the sentence that first stated it.
+        places = [(match["section"], match["sentence"]) for match in item["matches"]]
+        places.append((item["section"], item["sentence"]))
+        # Limitations restates the body's caveats, so its copy goes first.
+        places.sort(key=lambda place: place[0] != "limitations")
+        for section, sentence in places:
+            heading = by_lower.get(section)
+            if heading is None:
+                continue
+            text = written[heading]
+            start = text.find(sentence)
+            if start < 0:
+                continue
+            end = start + len(sentence)
+            para_start = text.rfind("\n\n", 0, start) + 1
+            para_end = text.find("\n\n", end)
+            para_end = len(text) if para_end < 0 else para_end
+            rest = text[para_start:start] + text[end:para_end]
+            if not re.search(r"\[\d+\]", rest):
+                continue
+            written[heading] = re.sub(r"[ \t]{2,}", " ", (text[:start] + text[end:]).replace("\n \n", "\n\n")).strip()
+            dropped += 1
+            break
+    return dropped
 
 
 def _figure_mention_sentence(number: int, caption: str, heading: str = "") -> str:
