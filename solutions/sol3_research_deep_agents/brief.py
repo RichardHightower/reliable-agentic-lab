@@ -99,6 +99,10 @@ def uncited_claims(body: str) -> list[str]:
         text = IMAGE.sub("", block).strip()
         if not text or text.startswith(("#", "-", "*", ">", "|", "```")):
             continue
+        # A numbered list is a procedure the paper proposes, not a claim
+        # about the world. The nine-step loop was dropped here once.
+        if re.match(r"^\d+[.)]\s", text):
+            continue
         # A figure's own `Figure N.` caption names the figure, not a claim
         # the body has to source separately. #464.
         if FIGURE_CAPTION.match(text):

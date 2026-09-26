@@ -373,6 +373,10 @@ def section_check(
     for para in _paragraphs(body):
         if para.startswith(("#", "!", ">", "|", "-", "*")):
             continue
+        # A numbered list is a procedure the paper proposes; its item
+        # numbers are not figures that need a source.
+        if re.match(r"^\d+[.)]\s", para):
+            continue
         if re.search(r"\d", para) and not CITATION.search(para):
             uncited.append(para.splitlines()[0][:80])
     checks.append(
@@ -531,7 +535,7 @@ def findings_from_claims(paper, section: dict, index: dict) -> list[dict]:
     heading = (section.get("heading") or "").lower()
     # #478. The conclusion restates the body the same way the abstract
     # does, so it gets the same all-usable-claims binding.
-    if heading in ("abstract", "conclusion", "references"):
+    if heading in ("abstract", "introduction", "conclusion", "references"):
         claim_ids = [c.id for c in paper.ledger.claims.values() if c.usable]
     out = []
     number = 1
@@ -657,8 +661,11 @@ def close_section(paper, section: dict, body: str, *, force: bool = False) -> fl
         json.dumps(verdict, indent=2) + "\n", encoding="utf-8"
     )
     if not verdict.get("passed", True):
+        # The notes are the retry prompt. Without them the writer rewrote
+        # the same section blind, twice, and the stage escalated.
+        notes = [str(note) for note in (verdict.get("notes") or []) if str(note).strip()]
         raise GateFailed(
-            "section judge rejected " + heading,
+            "section judge rejected " + heading + (": " + " ".join(notes) if notes else ""),
             tuple(verdict.get("failed_rows") or ("section_judge",)),
         )
 

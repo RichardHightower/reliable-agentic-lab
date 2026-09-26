@@ -420,9 +420,9 @@ def test_a_missing_introduction_lands_after_the_abstract():
 
 
 def test_normalize_plan_inserts_methods_and_conclusion_in_position():
-    """#478. Methods lands right after Introduction. Conclusion lands right
-    before Next step when one exists, second to last so `next_step` still
-    grades Next step, not Conclusion.
+    """#478. Methods lands right after Introduction. Conclusion lands last
+    before References, after the next-step section, so Conclusion closes
+    the prose.
     """
     out = stages.normalize_plan(
         {"questions": [], "sections": ["Abstract", "Introduction", "Body", "Next step", "References"]}
@@ -432,8 +432,8 @@ def test_normalize_plan_inserts_methods_and_conclusion_in_position():
         "Introduction",
         "Methods",
         "Body",
-        "Conclusion",
         "Next step",
+        "Conclusion",
         "References",
     ]
 
@@ -2105,6 +2105,7 @@ def test_a_body_section_must_bind_something():
         "sections": [
             {"heading": "Abstract", "claim_ids": []},
             {"heading": "Introduction", "claim_ids": []},
+            {"heading": "Body", "claim_ids": []},
             {"heading": "References", "claim_ids": []},
         ]
     }
@@ -2126,7 +2127,7 @@ def test_outline_gate_requires_methods_and_conclusion_when_the_plan_named_them()
 
 
 def test_abstract_and_references_need_no_binding():
-    assert stages.UNBOUND_SECTIONS == ("abstract", "conclusion", "methods", "references")
+    assert stages.UNBOUND_SECTIONS == ("abstract", "introduction", "conclusion", "methods", "references")
 
 
 def test_outline_gate_rejects_an_out_of_order_introduction():
@@ -2234,7 +2235,7 @@ def test_a_single_source_claim_tells_the_writer_to_say_so():
     led, claims = ledger_with()
     claims[0].truth_state = evidence.SINGLE_SOURCE
     index, _ = stages.numbering(led)
-    assert "SINGLE SOURCE" in stages.claim_brief(led, claims[0].id, index)
+    assert "single source" in stages.claim_brief(led, claims[0].id, index)
 
 
 def test_write_gate_rejects_a_citation_the_claims_do_not_support():
@@ -2827,13 +2828,13 @@ def test_assemble_gate_fails_a_heading_that_pastes_a_key_question(monkeypatch):
         "generalizing claims a search for a contrary finding, of which 0 were spent.\n"
         "- No proposed host was excluded during admission; every host cleared the wall.\n"
         "- No claim in this run carries a recorded human study.\n\n"
-        "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
-        "## Conclusion\n\nThe evidence above supports the three exits, with the runtime scope "
-        "noted as a limit. [1][2]\n\n"
         "## Next step\n\n"
         "- Evaluate the three exits on a live ticket before adopting them.\n"
         "- Run the fixture with --backend fixture, then again with a live backend.\n"
         "- Compare this port against the sibling runtime on the same topic.\n\n"
+        "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
+        "## Conclusion\n\nThe evidence above supports the three exits, with the runtime scope "
+        "noted as a limit. [1][2]\n\n"
         "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
     )
     outline = {
@@ -3167,3 +3168,197 @@ def test_assemble_drops_a_glossary_term_the_body_never_uses():
         led,
     )
     assert "## Glossary" not in body
+
+
+def test_normalize_keeps_a_prefixed_introduction_as_the_introduction():
+    """A planner wrote "Introduction: Why X" with its abstract and key
+    questions. The live run inserted an empty stub beside it and the
+    outline gate failed the stub three times."""
+    plan = stages.normalize_plan(
+        {
+            "sections": [
+                {"heading": "Abstract", "objective": "a"},
+                {
+                    "heading": "Introduction: Why Audit AI Is Not Generic",
+                    "objective": "o",
+                    "abstract": "Two sentences.",
+                    "key_questions": ["q1", "q2"],
+                },
+                {"heading": "Body", "objective": "b"},
+            ]
+        }
+    )
+    headings = [entry["heading"] for entry in plan["sections"]]
+    assert headings.count("Introduction") == 1
+    assert not any(heading.startswith("Introduction:") for heading in headings)
+    intro = next(entry for entry in plan["sections"] if entry["heading"] == "Introduction")
+    assert intro["key_questions"] == ["q1", "q2"]
+
+
+def test_normalize_fills_a_writer_outline_that_dropped_its_structural_sections():
+    """The binding writer echoed only the body sections and the verb-led
+    next step. The live run failed `outline_binding` twice on the four
+    missing headings. Filled the plan's way, the gate accepts it, with
+    Conclusion ahead of the next-step heading."""
+    led, claims = ledger_with()
+    drafted = {
+        "sections": [
+            {"heading": "Introduction", "claim_ids": [claims[0].id]},
+            {"heading": "Body", "claim_ids": [claims[0].id]},
+            {"heading": "Evaluate the Architecture on a Pilot", "claim_ids": [claims[0].id]},
+        ]
+    }
+    drafted["sections"] = stages.normalize_plan({"sections": drafted["sections"]})["sections"]
+    headings = [entry["heading"] for entry in drafted["sections"]]
+    assert headings == [
+        "Abstract", "Introduction", "Methods", "Body",
+        "Evaluate the Architecture on a Pilot", "Conclusion", "References",
+    ]
+    stages.outline_gate(
+        drafted, led,
+        plan(sections=["Abstract", "Introduction", "Methods", "Body",
+                       "Evaluate the Architecture on a Pilot", "Conclusion", "References"]),
+    )
+
+
+def test_a_claim_the_shortfall_pass_adds_still_gets_a_counter_state(run_dir):
+    """The shortfall pass ran after the counter pass, so a generalizing
+    claim it added carried no counter state, and `counterweighed` failed
+    every write attempt of the section that bound it. The counter pass
+    now runs last."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    run.plan = {"questions": []}
+    late = evidence.Claim(text="AS 1201 does not name software as an assistant.", subject="audit")
+
+    def add_late_claim():
+        run.ledger.add_claim(late)
+        return 0.0
+
+    run._research_shortfalls = add_late_claim
+    with pytest.raises(GateFailed):
+        run.stage_search()
+    assert run.ledger.claim(late.id).counter in ("hit", "miss", "capped")
+
+
+def test_a_review_retry_does_not_hand_the_reviewer_its_last_verdict(run_dir):
+    """The live run's second verdict quoted a sentence the revise pass had
+    already removed: the retry prompt carried the first verdict, and the
+    reviewer repeated it. Only the draft reaches the reviewer."""
+    run = build_run(run_dir, runner=_CountingRunner())
+    run.plan = {"title": "T", "audience": "a", "sections": [], "diagrams": [], "questions": []}
+    run.outline = {"sections": [{"heading": "Introduction", "claim_ids": []}]}
+    run.ledger.add_claim(evidence.Claim(text="A fact.", subject="t"))
+    run.written = {"Introduction": "A revised paragraph."}
+    stale = "voice: The phrase 'could an experienced auditor' is a rhetorical question."
+    try:
+        run.stage_review(extra="These rubric rows failed: voice. Fix them.\n" + stages.REVIEW_FAILED_PREFIX + " " + stale)
+    except GateFailed:
+        pass
+    prompt = run.runner.prompts[-1]
+    assert "could an experienced auditor" not in prompt
+    assert "A revised paragraph." in prompt
+
+
+def test_a_titles_issue_on_the_next_step_heading_is_exempt():
+    """The validator demands a verb-led last heading and the judge failed
+    it as a slogan. The editor's noun-phrase rename then failed the
+    validator, round after round. The judge's objection is dropped and a
+    verdict with nothing else blocking passes."""
+    import outline as outlines
+
+    drafted = {"sections": [{"heading": "Introduction"}, {"heading": "Evaluate the Loop on a Live Workload"}]}
+    verdict = {
+        "passed": False,
+        "blocking_issues": [
+            {"rule": "titles", "detail": "'Evaluate the Loop on a Live Workload' is an imperative verb phrase."}
+        ],
+    }
+    exempted, changed = outlines.exempt_next_step_title(verdict, drafted)
+    assert changed and exempted["passed"] and exempted["blocking_issues"] == []
+    other = {"passed": False, "blocking_issues": [{"rule": "titles", "detail": "'Introduction' is vague."}]}
+    assert outlines.exempt_next_step_title(other, drafted) == (other, False)
+
+
+def test_a_section_judge_rejection_carries_the_judge_notes():
+    """The retry prompt is the failure text. A bare "section judge
+    rejected X" sent the writer back blind, and the live run escalated
+    after two identical rewrites."""
+    from pathlib import Path
+    import sections as sections_mod
+
+    src = Path(sections_mod.__file__).read_text(encoding="utf-8")
+    raise_site = src[src.index('"section judge rejected "') :][:400]
+    assert "notes" in raise_site
+
+
+def test_figure_block_uses_the_plan_caption_and_emits_the_mermaid_source(tmp_path):
+    """The caption is the plan's `shows` claim, not the renderer's node
+    inventory, and the Mermaid source follows the PNG in a fence so a gist
+    renders it."""
+    import diagrams as diagrams_mod
+
+    src = tmp_path / "loop.mmd"
+    src.write_text("flowchart LR\n  A --> B\n", encoding="utf-8")
+    png = tmp_path / "loop_imagen.png"
+    png.write_bytes(b"png")
+    figure = diagrams_mod.Figure(name="loop", source=src, png=png, alt="A flowchart diagram of x, showing A, B", polished=True)
+    block = stages.figure_block(figure, 2, caption="the gate sits between plan and execution.")
+    assert "Figure 2. The gate sits between plan and execution." in block
+    assert "![A flowchart diagram of x, showing A, B](figures/loop_imagen.png)" in block
+    assert "```mermaid\nflowchart LR\n  A --> B\n```" in block
+    assert stages.figure_captions({"diagrams": [{"name": "Nine Step Loop", "shows": "The loop."}]}) == {"nine-step-loop": "The loop."}
+
+
+def test_dedupe_glossary_collapses_an_acronym_defined_twice():
+    glossary = {
+        "CVR": "Constraint violation rate.",
+        "constraint violation rate (CVR)": "Share of plan-stage actions that violate a constraint.",
+        "DCR": "Decision coverage rate.",
+        "decision coverage rate (DCR)": "Share of reflect-stage decisions exercised.",
+        "policy gate": "The check before execution.",
+    }
+    kept = stages.dedupe_glossary(glossary)
+    assert set(kept) == {"constraint violation rate (CVR)", "decision coverage rate (DCR)", "policy gate"}
+
+
+def test_a_second_url_for_one_arxiv_paper_folds_into_the_first_source():
+    """An abs page and its html version are one document. The ledger keeps
+    one source, the second id becomes an alias, and a claim that named the
+    alias cites the surviving number."""
+    led = evidence.Ledger("/nonexistent")
+    a = led.add_source(evidence.SourceDocument(title="RAIL", url="https://arxiv.org/abs/2608.04285", subject="t"))
+    dup = evidence.SourceDocument(title="RAIL html", url="https://arxiv.org/html/2608.04285v2", subject="t")
+    b = led.add_source(dup)
+    c = led.add_source(evidence.SourceDocument(title="Other", url="https://example.org/paper", subject="t"))
+    assert b is a and led.aliases == {dup.id: a.id}
+    led.add_claim(evidence.Claim(text="A fact.", subject="t", source_ids=[dup.id, c.id]))
+    index, urls = stages.numbering(led)
+    assert index[dup.id] == index[a.id] == 1 and index[c.id] == 2
+    assert urls == ["https://arxiv.org/abs/2608.04285", "https://example.org/paper"]
+    assert [s.id for s in led.bibliography()] == [a.id, c.id]
+
+
+def test_render_reference_drops_a_slug_count_and_a_trailing_ellipsis():
+    source = evidence.SourceDocument(title="4 A Collection Of Solvers…", url="https://a.example", subject="t")
+    assert stages.render_reference(source) == "A Collection Of Solvers. https://a.example"
+
+
+def test_an_inserted_introduction_carries_an_abstract_and_key_questions():
+    """A brief that starts at section 1 leaves the planner no Introduction.
+    The stub Python inserts must pass the outline validator on its own."""
+    out = stages.normalize_plan(
+        {
+            "questions": [{"id": "q1", "question": "a"}, {"id": "q2", "question": "b", "important": True}, {"id": "q3", "question": "c"}],
+            "sections": [{"heading": "Abstract", "objective": "o"}, {"heading": "Body", "objective": "o"}],
+        }
+    )
+    intro = next(entry for entry in out["sections"] if entry["heading"] == "Introduction")
+    assert intro["abstract"] and intro["key_questions"] == ["q2", "q1"]
+    bare = stages.normalize_plan(
+        {
+            "questions": [{"id": "q1", "question": "a"}, {"id": "q2", "question": "b"}],
+            "sections": [{"heading": "Abstract", "objective": "o"}, {"heading": "Introduction", "objective": "o"}],
+        }
+    )
+    intro = next(entry for entry in bare["sections"] if entry["heading"] == "Introduction")
+    assert intro["abstract"] and intro["key_questions"] == ["q1", "q2"]

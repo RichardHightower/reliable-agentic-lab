@@ -422,11 +422,16 @@ def _numbers(text: str) -> set[str]:
 
 # Markdown punctuation a researcher's quote keeps and a rendered page's text
 # drops: a table row's pipes, code-span backticks, emphasis, list bullets.
-_MARKUP = re.compile(r"[`|*_#>]+")
+# Anything that is not a word character or a digit. A quote and the page
+# it came from differ in punctuation spacing as soon as the page wraps a
+# curly quote or a dash in its own element: the Cedar reference guide
+# renders "asks the question “Can this principal" as `“ can this`, and an
+# exact match dropped every claim from that page. Words are the evidence.
+_NON_WORD = re.compile(r"[^\w\s]+", re.UNICODE)
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", _MARKUP.sub(" ", (text or "").lower())).strip()
+    return re.sub(r"\s+", " ", _NON_WORD.sub(" ", (text or "").lower())).strip()
 
 
 def attributed(claim: Claim, source_text: str, *, quote: str = "") -> bool:
@@ -484,6 +489,20 @@ def corroborate(claim: Claim, *, contradicted: bool = False) -> Claim:
     return claim
 
 
+ARXIV_ID = re.compile(r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})", re.I)
+
+
+def canonical_source_key(url: str) -> str:
+    """One key for every URL that names the same document: an arXiv id
+    across abs, pdf, html, and version suffixes, else the URL without
+    scheme, www, fragment, or trailing slash."""
+    match = ARXIV_ID.search(url or "")
+    if match:
+        return f"arxiv:{match.group(1)}"
+    key = re.sub(r"^https?://(www\.)?", "", (url or "").strip().lower())
+    return key.split("#", 1)[0].rstrip("/")
+
+
 class Ledger:
     """Every record from one run, on disk under `evidence/`."""
 
@@ -493,6 +512,9 @@ class Ledger:
         self.claims: dict[str, Claim] = {}
         self.findings: dict[str, Finding] = {}
         self._by_url: dict[str, SourceDocument] = {}
+        self._by_key: dict[str, SourceDocument] = {}
+        # Duplicate source id -> the id that stands for it. See `add_source`.
+        self.aliases: dict[str, str] = {}
 
     def add_source(self, source: SourceDocument) -> SourceDocument:
         """Record a source, or return the one already held for that URL.
@@ -508,11 +530,20 @@ class Ledger:
         already committed to.
         """
         existing = self._by_url.get(source.url)
+        if existing is None:
+            # The same document under a second URL: an arXiv abs page and
+            # its html or pdf, or a www and a bare host. One reference,
+            # one number. The second id becomes an alias of the first so
+            # a claim that named it still resolves.
+            existing = self._by_key.get(canonical_source_key(source.url))
         if existing is not None:
+            if source.id != existing.id:
+                self.aliases[source.id] = existing.id
             return existing
         if not source.seq:
             source.seq = len(self.sources) + 1
         self.sources[source.id] = source
+        self._by_key[canonical_source_key(source.url)] = source
         if source.url:
             self._by_url[source.url] = source
         return source
@@ -564,7 +595,7 @@ class Ledger:
         would number the same bibliography differently on every run, and `[3]`
         would point somewhere new each time the paper was rebuilt.
         """
-        used = {sid for claim in self.claims.values() for sid in claim.source_ids}
+        used = {self.aliases.get(sid, sid) for claim in self.claims.values() for sid in claim.source_ids}
         return [src for sid, src in self.sources.items() if sid in used]
 
     def write(self) -> list[Path]:

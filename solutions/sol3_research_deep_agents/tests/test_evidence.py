@@ -362,3 +362,16 @@ def test_via_source_ids_round_trips_through_evidence_md(tmp_path):
 
     reloaded = evidence.Ledger(tmp_path / "evidence").load().claim(claim.id)
     assert reloaded.via_source_ids == ["review"]
+
+
+def test_a_quote_matches_a_page_that_spaces_its_curly_quotes():
+    """The Cedar reference guide wraps its curly quotes in their own
+    elements, so the fetched text reads `“ can this principal`. The
+    researcher's quote has no such spaces. Words decide, not punctuation."""
+    import evidence
+
+    page = "a cedar authorization request asks the question “ can this principal take this action on this resource in this context? ”. more formally"
+    quote = "A Cedar authorization request asks the question “Can this principal take this action on this resource in this context?”."
+    claim = evidence.Claim(text="Cedar formalizes a request as principal, action, resource, and context.", subject="t")
+    assert evidence.attributed(claim, page, quote=quote)
+    assert not evidence.attributed(claim, "an unrelated page about shapes", quote=quote)

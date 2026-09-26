@@ -189,91 +189,71 @@ def test_the_live_planner_file_is_the_plan_not_its_tool_receipt(offline, run_dir
     assert offline.plan["title"] == expected["title"]
 
 
-CREATINE_PLAN = {
-    "title": "Creatine supplementation for preventing muscle loss during a calorie deficit",
-    "audience": "sports nutrition researchers",
-    "questions": [
-        {
-            "id": "q1",
-            "subject": "mechanism",
-            "question": "What dosing protocol saturates intramuscular phosphocreatine?",
-            "check": "a loading and maintenance dose with a citation",
-            "important": True,
-        },
-        {
-            "id": "q2",
-            "subject": "baseline-loss",
-            "question": "What percentage of lean mass is typically lost during a calorie deficit?",
-            "check": "a named study",
-            "important": True,
-        },
-        {
-            "id": "q3",
-            "subject": "trials",
-            "question": "What RCTs measured lean mass retention with creatine during a deficit?",
-            "check": "a named RCT",
-            "important": False,
-        },
-    ],
-    "sections": [
-        {
-            "heading": "Abstract",
-            "objective": "State the thesis, the evidence behind it, and the limit, in one paragraph.",
-            "abstract": "Creatine plausibly protects lean mass during a deficit; this reviews the evidence.",
-            "key_questions": ["what does this paper claim", "what evidence supports it"],
-        },
-        {
-            "heading": "Introduction",
-            "objective": "Name the problem, who has it, and what this paper settles about it.",
-            "abstract": "Resistance-trained people cutting calories risk losing muscle alongside fat.",
-            "key_questions": ["who faces this problem", "what does this paper settle"],
-        },
-        {
-            "heading": "Mechanism of Creatine Action",
-            "objective": "Explain phosphocreatine buffering and its dosing protocol.",
-            "abstract": "Creatine raises intramuscular phosphocreatine, supporting training volume.",
-            "key_questions": [
-                "What dosing protocol saturates intramuscular phosphocreatine?",
-                "how does phosphocreatine buffering work",
-            ],
-        },
-        {
-            "heading": "Trial Evidence",
-            "objective": "Present named RCTs and their effect sizes.",
-            "abstract": "A small set of controlled trials directly test creatine during a deficit.",
-            "key_questions": [
-                "What RCTs measured lean mass retention with creatine during a deficit?",
-                "What percentage of lean mass is typically lost during a calorie deficit?",
-            ],
-        },
-        {
-            "heading": "Limitations",
-            "objective": "Name what this review does not settle.",
-            "abstract": "Trial evidence directly on a deficit is thin.",
-            "key_questions": ["where does the evidence run out", "what is understudied"],
-        },
-        {
-            "heading": "Next step",
-            "objective": "Tell a colleague what to do with this review before adopting it.",
-            "abstract": "A colleague evaluates the dosing protocol against a live cutting cycle.",
-            "key_questions": ["what should a colleague do with these findings", "how is the protocol tried"],
-        },
-        {
-            "heading": "References",
-            "objective": "List every source the body cites, in citation order.",
-            "abstract": "Generated from the evidence ledger.",
-            "key_questions": ["which sources does the body cite", "which of them are primary"],
-        },
-    ],
-    "diagrams": [
-        {
-            "name": "phosphocreatine-pathway",
-            "kind": "mermaid",
-            "shows": "the pathway from creatine ingestion to phosphocreatine saturation",
-        }
-    ],
-    "notes": ["no prior research found on this topic"],
-}
+CREATINE_PLAN = {'title': 'Creatine supplementation for preventing muscle loss during a calorie deficit',
+ 'audience': 'sports nutrition researchers',
+ 'questions': [{'id': 'q1',
+                'subject': 'mechanism',
+                'question': 'What dosing protocol saturates intramuscular phosphocreatine?',
+                'check': 'a loading and maintenance dose with a citation',
+                'important': True},
+               {'id': 'q2',
+                'subject': 'baseline-loss',
+                'question': 'What percentage of lean mass is typically lost during a calorie '
+                            'deficit?',
+                'check': 'a named study',
+                'important': True},
+               {'id': 'q3',
+                'subject': 'trials',
+                'question': 'What RCTs measured lean mass retention with creatine during a '
+                            'deficit?',
+                'check': 'a named RCT',
+                'important': False}],
+ 'sections': [{'heading': 'Abstract',
+               'objective': 'State the thesis, the evidence behind it, and the limit, in one '
+                            'paragraph.',
+               'abstract': 'Creatine plausibly protects lean mass during a deficit; this '
+                           'reviews the evidence.',
+               'key_questions': ['what does this paper claim', 'what evidence supports it']},
+              {'heading': 'Introduction',
+               'objective': 'Name the problem, who has it, and what this paper settles about '
+                            'it.',
+               'abstract': 'Resistance-trained people cutting calories risk losing muscle '
+                           'alongside fat.',
+               'key_questions': ['who faces this problem', 'what does this paper settle']},
+              {'heading': 'Mechanism of Creatine Action',
+               'objective': 'Explain phosphocreatine buffering and its dosing protocol.',
+               'abstract': 'Creatine raises intramuscular phosphocreatine, supporting training '
+                           'volume.',
+               'key_questions': ['What dosing protocol saturates intramuscular '
+                                 'phosphocreatine?',
+                                 'how does phosphocreatine buffering work']},
+              {'heading': 'Trial Evidence',
+               'objective': 'Present named RCTs and their effect sizes.',
+               'abstract': 'A small set of controlled trials directly test creatine during a '
+                           'deficit.',
+               'key_questions': ['What RCTs measured lean mass retention with creatine during '
+                                 'a deficit?',
+                                 'What percentage of lean mass is typically lost during a '
+                                 'calorie deficit?']},
+              {'heading': 'Next step',
+               'objective': 'Tell a colleague what to do with this review before adopting it.',
+               'abstract': 'A colleague evaluates the dosing protocol against a live cutting '
+                           'cycle.',
+               'key_questions': ['what should a colleague do with these findings',
+                                 'how is the protocol tried']},
+              {'heading': 'Limitations',
+               'objective': 'Name what this review does not settle.',
+               'abstract': 'Trial evidence directly on a deficit is thin.',
+               'key_questions': ['where does the evidence run out', 'what is understudied']},
+              {'heading': 'References',
+               'objective': 'List every source the body cites, in citation order.',
+               'abstract': 'Generated from the evidence ledger.',
+               'key_questions': ['which sources does the body cite',
+                                 'which of them are primary']}],
+ 'diagrams': [{'name': 'phosphocreatine-pathway',
+               'kind': 'mermaid',
+               'shows': 'the pathway from creatine ingestion to phosphocreatine saturation'}],
+ 'notes': ['no prior research found on this topic']}
 
 
 def test_stage_assemble_passes_the_doctrine_flag_to_assemble_gate(run_dir, stub_renderer, monkeypatch):
@@ -2476,3 +2456,156 @@ def test_assemble_targets_reads_the_quoted_span_on_the_fail_line(tmp_path):
         "PASS  person                 third person, no first person tour"
     )
     assert loop._assemble_targets(("policy_leak",), report) == ["Retrieval"]
+
+
+def test_figure_mentions_are_appended_even_when_the_revise_pass_raises(offline, monkeypatch):
+    """The revise pass raises after collecting its section failures. The
+    append sat after it in the same try, so a live run never appended a
+    mention and `figure_referenced` stayed red for every attempt."""
+    offline.run()
+    offline.state.mark_failed("assemble", "rerun")
+    calls = {"assemble": 0, "appended": 0}
+
+    def assemble(_extra=""):
+        calls["assemble"] += 1
+        if calls["assemble"] == 1:
+            raise GateFailed(
+                "FAIL  figure_referenced      unreferenced: [\"Figure 1 never named in 'introduction' prose\"]\n"
+                "FAIL  caveat_once            repeated: ['An unsupported transition that repeats' in introduction:2]",
+                ("caveat_once", "figure_referenced"),
+            )
+        return paper.StageResult("assemble", summary="fixed")
+
+    def revise(_feedback, *, targets=None):
+        raise GateFailed("revise failed: voice", ("voice",))
+
+    def append():
+        calls["appended"] += 1
+        return 1
+
+    monkeypatch.setattr(offline, "stage_assemble", assemble)
+    monkeypatch.setattr(offline, "stage_revise", revise)
+    monkeypatch.setattr(offline, "_append_figure_mentions", append)
+
+    assert offline.run() == 0
+    assert calls["appended"] == 1
+
+
+def test_drop_repeats_removes_the_limitations_copy_and_keeps_a_cited_paragraph():
+    """Two sections bound to one claim both restated its caveat, and the
+    revise pass restated it again. Python drops the Limitations copy. A
+    copy whose paragraph would lose its only marker stays."""
+    written = {
+        "Body": "A finding near 2 percent is stated here [3]. More prose [3].",
+        "Limitations": "On a single source, the 2 percent figure was not found [3]. Another gap [4].",
+        "Other": "Only sentence, near 2 percent [5].",
+    }
+    repeats = [
+        {
+            "section": "body",
+            "line": 1,
+            "sentence": "A finding near 2 percent is stated here [3].",
+            "matches": [
+                {"section": "limitations", "line": 1,
+                 "sentence": "On a single source, the 2 percent figure was not found [3]."},
+            ],
+        },
+        {
+            "section": "body",
+            "line": 1,
+            "sentence": "A finding near 2 percent is stated here [3].",
+            "matches": [{"section": "other", "line": 1, "sentence": "Only sentence, near 2 percent [5]."}],
+        },
+    ]
+    assert paper._drop_repeats(written, repeats) == 2
+    assert written["Limitations"] == "Another gap [4]."
+    assert written["Other"] == "Only sentence, near 2 percent [5]."
+    assert written["Body"] == "More prose [3]."
+
+
+def test_every_writer_turn_carries_the_topic_brief(offline, monkeypatch):
+    """A procedure the brief names is the paper's own design. The writer
+    only ever saw the claims and enumerated its own nine steps once."""
+    seen = []
+    original = offline.runner.ask
+
+    def ask(role, prompt):
+        seen.append((role, prompt))
+        return original(role, prompt)
+
+    monkeypatch.setattr(offline.runner, "ask", ask)
+    offline.run()
+    section_turns = [p for role, p in seen if role == "writer" and "Purpose:" in p]
+    assert section_turns, "no section writer turn was recorded"
+    assert all("Topic brief, the paper's own design statement" in p and offline.topic in p for p in section_turns)
+
+
+def test_the_source_librarian_gets_one_retry_before_the_seed(offline, monkeypatch):
+    """A reply with no JSON object fell straight back to the seed list."""
+    offline.run()
+    offline.state.mark_failed("sources", "rerun")
+    replies = iter([paper.Reply(text="Sure, here are some domains."), paper.Reply(text="", data={"domains": [{"host": "openpolicyagent.org", "org_type": "vendor_docs"}]})])
+    prompts = []
+
+    def ask(role, prompt):
+        if role != "source_librarian":
+            return paper.Reply(text="", data={})
+        prompts.append(prompt)
+        return next(replies)
+
+    monkeypatch.setattr(offline, "_ask", ask)
+    offline.stage_sources()
+    assert len(prompts) == 2 and prompts[1].startswith("Return only the JSON object")
+
+
+def test_the_verifier_is_asked_in_batches_and_a_bad_batch_is_asked_once_more(offline, monkeypatch):
+    """Twenty-four claims in one reply overran the schema twice in a row."""
+    import evidence
+    import stages
+
+    offline.run()
+    offline.state.mark_failed("verify", "rerun")
+    claims = [evidence.Claim(text=f"Fact {i} is stated.", subject="t", important=True, confidence=0.5) for i in range(10)]
+    src = offline.ledger.add_source(evidence.SourceDocument(title="s", url="https://docs.langchain.com/one", subject="t"))
+    for claim in claims:
+        claim.source_ids = [src.id]
+        offline.ledger.add_claim(claim)
+    monkeypatch.setattr(paper, "VERIFY_CHUNK", 4)
+    calls = []
+    replies = iter([paper.Reply(text=""), paper.Reply(text="", data={"checked": []}), paper.Reply(text="", data={"checked": []}), paper.Reply(text="", data={"checked": []})])
+
+    def ask(role, prompt):
+        calls.append(prompt)
+        return next(replies)
+
+    monkeypatch.setattr(offline, "_ask", ask)
+    monkeypatch.setattr(stages, "verify_gate", lambda ledger: None)
+    offline.stage_verify()
+    assert len(calls) == 4
+
+
+def test_a_reply_wrapped_in_a_bare_fence_is_unwrapped():
+    """A revise turn fenced its whole Introduction, and every fence-masking
+    gate then read the section as empty."""
+    assert paper.section_body("```\nA fact. [1]\n\nMore. [2]\n```", "Introduction") == "A fact. [1]\n\nMore. [2]"
+    assert paper.section_body("```markdown\n## Introduction\n\nA fact. [1]\n```", "Introduction") == "A fact. [1]"
+    inline = "Prose with a snippet:\n\n```rego\nallow := true\n```\n\nMore prose. [1]"
+    assert paper.section_body(inline, "Policy") == inline
+
+
+def test_a_long_paragraph_splits_at_a_sentence_boundary_and_both_halves_keep_a_marker():
+    """Twenty-three paragraphs over the limit, and one revise turn per
+    section could not catch up. Python splits where both halves cite."""
+    sentence = "The gate checks the plan before the tool runs and records the verdict [3]. "
+    block = (sentence * 12).strip()
+    pieces = paper._split_paragraph(block, 40)
+    assert len(pieces) >= 2
+    assert all(len(piece.split()) <= 40 for piece in pieces)
+    assert all("[3]" in piece for piece in pieces)
+    assert " ".join(pieces) == block
+    uncited = "First sentence with a marker [1]. " + "Second sentence with no marker at all. " * 10
+    pieces = paper._split_paragraph(uncited.strip(), 30)
+    assert len(pieces) >= 2 and all("[1]" in piece for piece in pieces)
+    assert all(len(piece.split()) <= 30 for piece in pieces)
+    assert paper._split_paragraph("No marker anywhere in this text. " * 20, 30) == ["No marker anywhere in this text. " * 20]
+    assert paper._split_paragraph("1. Step one [1]. " * 30, 30) == ["1. Step one [1]. " * 30]

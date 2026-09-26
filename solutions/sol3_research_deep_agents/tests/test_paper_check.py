@@ -47,13 +47,13 @@ GOOD = (
     "Figure 1. A flowchart of the three exits.\n\n"
     "Figure 1 shows the order. [1]\n\n"
     + METHODS_BLOCK
-    + "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
-    + CONCLUSION_BLOCK
     + "## Next step\n\n"
     "- Evaluate the three exits on a live ticket before adopting them.\n"
     "- Run the fixture with --backend fixture, then again with a live backend.\n"
     "- Compare this port against the sibling runtime on the same topic.\n\n"
-    "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
+    "## Limitations\n\nThis paper measures two runtimes only. [2]\n\n"
+    + CONCLUSION_BLOCK
+    + "## References\n\n1. https://docs.langchain.com/one\n2. https://docs.claude.com/two\n"
 )
 
 
@@ -1540,7 +1540,7 @@ def test_a_conclusion_with_a_new_citation_fails():
 
 def test_the_heading_order_is_frozen(run_dir, stub_renderer):
     """Front matter, Abstract, Introduction, Methods, study table, body
-    sections, Conclusion, Next step, Glossary, References. On the assembled
+    sections, Next step, Limitations, Conclusion, Glossary, References. On the assembled
     recorded fixture: no human-study claim in this topic, so no table."""
     import re  # noqa: PLC0415
     from conftest import build_run  # noqa: PLC0415
@@ -1555,8 +1555,9 @@ def test_the_heading_order_is_frozen(run_dir, stub_renderer):
     methods_at = order.index("Methods")
     conclusion_at = order.index("Conclusion")
     next_step_at = order.index("Next step")
+    limitations_at = order.index("Limitations")
     references_at = order.index("References")
-    assert methods_at < conclusion_at < next_step_at < references_at
+    assert methods_at < next_step_at < limitations_at < conclusion_at < references_at
     assert "Evidence summary" not in order, "no human-study claim in this topic, no table"
 
 
@@ -1570,7 +1571,8 @@ def test_next_step_still_grades_the_last_prose_heading(run_dir, stub_renderer):
     run = build_run(run_dir)
     assert run.run() == 0
     body = run.paper_path.read_text(encoding="utf-8")
-    assert paper_check.last_prose_heading(body) == "Next step"
+    assert paper_check.last_prose_heading(body) == "Conclusion"
+    assert paper_check.next_step_heading(body) == "Next step"
     gates_report = json.loads((run.work_dir / "gates.json").read_text(encoding="utf-8"))
     assert "next_step" not in gates_report["failures"]
 
@@ -1653,3 +1655,32 @@ def test_word_count_excludes_exactly_the_methods_section(finished_paper):
     masked = paper_check.word_count(body)
     unmasked = len(re.findall(r"\b[\w'-]+\b", paper_check.FENCE.sub("", stripped)))
     assert unmasked - masked == methods_words
+
+
+def test_front_matter_accepts_a_reader_guide_after_its_four_lines():
+    """The reader's guide sits after the byline, date, provenance, and
+    conflicts lines and is neither a fifth required line nor uncited
+    prose."""
+    guided = GOOD.replace(
+        "No funding. No conflicts declared.\n\n",
+        "No funding. No conflicts declared.\n\n"
+        + paper_check.READER_GUIDE_LEAD
+        + " This paper is for engineers who run agent loops. An exit is a stop rule.\n\n",
+    )
+    assert paper_check.front_matter_violations(guided) == []
+    score = gate(guided, enforce_structure=True)
+    assert "cited" not in score.signature(), score.report()
+    assert "front_matter" not in score.signature(), score.report()
+
+
+def test_a_mermaid_fence_under_a_figure_caption_is_the_figure_source_not_a_leak():
+    figured = GOOD.replace(
+        "Figure 1. A flowchart of the three exits.\n\n",
+        "Figure 1. A flowchart of the three exits.\n\n```mermaid\nflowchart LR\n  A --> B\n\n  B --> C\n```\n\n",
+    )
+    assert paper_check.visible_source_syntax(figured) == []
+    score = gate(figured, enforce_structure=True)
+    assert "no_diagram_source" not in score.signature(), score.report()
+    assert "cited" not in score.signature(), score.report()
+    stray = GOOD.replace("## Limitations", "```mermaid\nflowchart LR\n  A --> B\n```\n\n## Limitations")
+    assert paper_check.visible_source_syntax(stray) == ["mermaid"]

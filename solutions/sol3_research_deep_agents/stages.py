@@ -54,7 +54,11 @@ EXIT_DOCTRINE_QUESTION = "What three exits does this repo's paper loop check, an
 # keeping the two lists in step. References is generated from the ledger.
 # Methods is Python-written from the run record, never bound to a claim at
 # all. The conclusion restates the body the same way the abstract does. #478
-UNBOUND_SECTIONS = ("abstract", "conclusion", "methods", "references")
+# The sections that draw on every usable claim instead of a bound list.
+# Introduction joined: bound to the two claims behind its key questions,
+# it could only write about one artifact, and its judge failed the
+# overview twice.
+UNBOUND_SECTIONS = ("abstract", "introduction", "conclusion", "methods", "references")
 
 FENCED_JSON = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 CITATION = re.compile(r"\[(\d+)\]")
@@ -306,7 +310,11 @@ STRUCTURAL = {
 # order against this; `assemble` uses only the "introduction" entry, to find
 # and move that one heading the same way `normalize_plan` already does for
 # the plan.
-FROZEN_ORDER = ("abstract", "introduction", "methods", "conclusion", "next step", "references")
+# The pilot (next-step) section sits before Limitations, and Conclusion
+# closes the prose. A reader who stops at the checklist has the plan; a
+# reader who goes on gets the caveats and the close. Limitations is
+# optional, next step is not.
+FROZEN_ORDER = ("abstract", "introduction", "methods", "next step", "limitations", "conclusion", "references")
 
 # #566. The frozen order's own "body sections" slot sits between Methods and
 # Conclusion: every heading up to and including Methods must be contiguous,
@@ -320,6 +328,9 @@ FROZEN_ORDER = ("abstract", "introduction", "methods", "conclusion", "next step"
 # Methods) were still in the right order relative to one another.
 FROZEN_PREFIX = FROZEN_ORDER[: FROZEN_ORDER.index("methods") + 1]
 FROZEN_SUFFIX = FROZEN_ORDER[FROZEN_ORDER.index("methods") + 1 :]
+
+
+STRUCTURAL_PREFIX = re.compile(r"^(abstract|introduction|methods|conclusion)\s*[:\-\u2013\u2014]\s*\S", re.I)
 
 
 def plan_heading(item) -> str:
@@ -354,6 +365,15 @@ def normalize_plan(plan: dict) -> dict:
         question.setdefault("subject", evidence.slug(question.get("question", "topic"), 30))
         question.setdefault("important", False)
     sections = [entry for entry in map(as_section, plan.get("sections", [])) if entry["heading"]]
+    # A planner that titles its opening "Introduction: Why X" wrote the
+    # introduction. Left as is, the search below misses it, a stub
+    # Introduction with no abstract and no key questions lands in the
+    # frozen slot, and the outline gate fails the stub on every attempt.
+    # The prefix is the structural name; the tail was decoration.
+    for entry in sections:
+        match = STRUCTURAL_PREFIX.match(entry["heading"])
+        if match:
+            entry["heading"] = match.group(1).capitalize()
     # Every white paper opens with an abstract and an introduction and closes
     # with references. A plan that omits one produces a paper that fails the
     # section gate at stage 8, four stages and several dollars too late.
@@ -383,6 +403,27 @@ def normalize_plan(plan: dict) -> dict:
         lowered = [heading for index, heading in enumerate(lowered) if index not in intro_at]
     else:
         intro_section = as_section("Introduction", STRUCTURAL["introduction"])
+    # A brief that starts at its own section 1 gives the planner no
+    # Introduction to write. The stub inserted here, and a bare heading the
+    # planner adds when told to, both failed the outline validator on every
+    # attempt: no abstract, no key questions. Fill both from the plan.
+    question_ids = [
+        str(question.get("id"))
+        for question in sorted(plan.get("questions", []), key=lambda q: not q.get("important"))
+        if question.get("id")
+    ]
+    if not str(intro_section.get("abstract") or "").strip():
+        intro_section["abstract"] = (
+            "Name the problem this paper settles and who has it, then say what the "
+            "sections that follow establish about it and in what order."
+        )
+    key_questions = list(intro_section.get("key_questions") or [])
+    for question_id in question_ids:
+        if len(key_questions) >= 2:
+            break
+        if question_id not in key_questions:
+            key_questions.append(question_id)
+    intro_section["key_questions"] = key_questions
     insert_at = lowered.index("abstract") + 1
     sections.insert(insert_at, intro_section)
     lowered.insert(insert_at, "introduction")
@@ -398,9 +439,9 @@ def normalize_plan(plan: dict) -> dict:
         )
         lowered.insert(lowered.index("introduction") + 1, "methods")
     if "conclusion" not in lowered:
-        if "next step" in lowered:
-            insert_at = lowered.index("next step")
-        elif "references" in lowered:
+        # Conclusion closes the prose: after the next-step section and after
+        # Limitations, right before References.
+        if "references" in lowered:
             insert_at = lowered.index("references")
         else:
             insert_at = len(sections)
@@ -1194,10 +1235,9 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
     # frozen order reads it as a body section after Conclusion and fails.
     from outline import starts_with_next_step_verb  # noqa: PLC0415  sibling module, same folder
 
-    for index in range(1, len(labelled)):
-        if labelled[index - 1] == "conclusion" and labelled[index] == "body":
-            if starts_with_next_step_verb(str(sections[index].get("heading", ""))):
-                labelled[index] = "next step"
+    for index, label in enumerate(labelled):
+        if label == "body" and starts_with_next_step_verb(str(sections[index].get("heading", ""))):
+            labelled[index] = "next step"
     collapsed = [
         label for index, label in enumerate(labelled)
         if label != "body" or index == 0 or labelled[index - 1] != "body"
@@ -1219,10 +1259,10 @@ def outline_gate(outline: dict, ledger: evidence.Ledger, plan: dict) -> None:
         ids = section.get("claim_ids") or []
         # References is generated from the ledger, and the abstract summarizes
         # claims the body already cites. Neither needs its own binding.
-        if heading.lower() in UNBOUND_SECTIONS:
-            continue
         if not ids:
-            misses.append(f"section {heading!r} names no claim ids.")
+            # An unbound section may name nothing; a body section must.
+            if heading.lower() not in UNBOUND_SECTIONS:
+                misses.append(f"section {heading!r} names no claim ids.")
             continue
         for claim_id in ids:
             claim = ledger.claim(claim_id)
@@ -1327,6 +1367,11 @@ def numbering(ledger: evidence.Ledger) -> tuple[dict[str, int], list[str]]:
     for source in ledger.bibliography():
         urls.append(source.url)
         index[source.id] = len(urls)
+    # A claim may still name a source id the ledger folded into another
+    # (`Ledger.aliases`); it cites the surviving number.
+    for alias, target in getattr(ledger, "aliases", {}).items():
+        if target in index:
+            index[alias] = index[target]
     return index, urls
 
 
@@ -1338,7 +1383,10 @@ def claim_brief(ledger: evidence.Ledger, claim_id: str, index: dict[str, int]) -
     markers = "".join(f"[{index[sid]}]" for sid in claim.source_ids if sid in index)
     caveat = ""
     if claim.truth_state == evidence.SINGLE_SOURCE:
-        caveat = "  (SINGLE SOURCE. Say so in the paragraph that uses this.)"
+        caveat = (
+            "  (single source: keep the sentence's scope modest; do not write "
+            "'single source' in this section, Methods says it once for the paper)"
+        )
     if claim.secondary:
         # #473. A follow turn found no primary, so the writer is told
         # outright: this number is as summarized by the review or preprint
@@ -1499,6 +1547,11 @@ REVIEW_ROWS = frozenset(
 )
 
 
+# The text a review retry carries back. `stage_review` recognizes it and
+# keeps it away from the reviewer.
+REVIEW_FAILED_PREFIX = "the reviewer failed these rows."
+
+
 def review_gate(verdict: dict) -> None:
     """Fail the draft on the reviewer's rows, and never mislabel one.
 
@@ -1537,15 +1590,20 @@ def review_gate(verdict: dict) -> None:
                 f" The reviewer returned {len(notes)} notes for {len(rows)} rows, so"
                 " they are not matched up. All of them: " + " ".join(notes)
             )
-    raise GateFailed(f"the reviewer failed these rows. {detail}", tuple(sorted(rows)), score=score)
+    raise GateFailed(f"{REVIEW_FAILED_PREFIX} {detail}", tuple(sorted(rows)), score=score)
 
 
 # -- 8. assemble ----------------------------------------------------------
 
 
-def figure_block(figure, number: int, figures_dir: str = "figures") -> str:
-    """The image line and its `Figure N.` caption, from the figure's own
-    alt text. #413, #464.
+def figure_block(figure, number: int, figures_dir: str = "figures", caption: str = "") -> str:
+    """The image line, its `Figure N.` caption, and the diagram source in a
+    fence so a gist renders it next to the PNG. #413, #464.
+
+    The caption is the plan's own `shows` sentence when the plan has one:
+    a claim about the figure, not the renderer's inventory of nodes and
+    edges. The alt text stays the inventory, which is what a screen reader
+    wants.
     """
     target = figure.best
     if target is None or not target.name.endswith("_imagen.png"):
@@ -1553,7 +1611,75 @@ def figure_block(figure, number: int, figures_dir: str = "figures") -> str:
             f"figure {figure.name!r} has no judged imagen-diagrams PNG.",
             ("figure_asset",),
         )
-    return f"![{figure.alt}]({figures_dir}/{target.name})\n\nFigure {number}. {figure.alt}"
+    caption = " ".join((caption or "").split()) or figure.alt
+    caption = caption[:1].upper() + caption[1:]
+    block = f"![{figure.alt}]({figures_dir}/{target.name})\n\nFigure {number}. {caption}"
+    source = getattr(figure, "source", None)
+    if source is not None and Path(source).suffix.lower() in diagrams.MERMAID_SUFFIXES:
+        try:
+            text = Path(source).read_text(encoding="utf-8").strip()
+        except OSError:
+            text = ""
+        if text:
+            block += f"\n\n```mermaid\n{text}\n```"
+    return block
+
+
+def figure_captions(plan: dict) -> dict[str, str]:
+    """Figure name (slugged) to the plan's `shows` sentence."""
+    out = {}
+    for entry in plan.get("diagrams") or []:
+        if isinstance(entry, dict) and entry.get("name") and entry.get("shows"):
+            out[evidence.slug(str(entry["name"]))] = str(entry["shows"]).strip()
+    return out
+
+
+def dedupe_glossary(glossary: dict[str, str]) -> dict[str, str]:
+    """One entry per term. Two entries that share an acronym, in
+    parentheses or as the whole term, collapse to the longer term; two
+    entries that differ only by case collapse to the first."""
+    by_key: dict[str, str] = {}
+    for term in glossary:
+        match = re.search(r"\(([A-Za-z0-9-]{2,8})\)", term)
+        if match:
+            key = match.group(1).lower()
+        elif re.fullmatch(r"[A-Z0-9-]{2,8}", term.strip()):
+            key = term.strip().lower()
+        else:
+            key = term.strip().lower()
+        kept = by_key.get(key)
+        if kept is None or len(term) > len(kept):
+            by_key[key] = term
+    keep = set(by_key.values())
+    return {term: definition for term, definition in glossary.items() if term in keep}
+
+
+ARXIV_ID = re.compile(r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})", re.I)
+
+
+def canonical_source_key(url: str) -> str:
+    """One key for every URL that names the same document: an arXiv id
+    across abs, pdf, html, and version suffixes, else the URL without
+    scheme, www, fragment, or trailing slash."""
+    match = ARXIV_ID.search(url or "")
+    if match:
+        return f"arxiv:{match.group(1)}"
+    key = re.sub(r"^https?://(www\.)?", "", (url or "").strip().lower())
+    key = key.split("#", 1)[0].rstrip("/")
+    return key
+
+
+def reference_sources(ledger: evidence.Ledger) -> list:
+    """The bibliography with duplicates of one document merged, first kept."""
+    seen: set[str] = set()
+    out = []
+    for source in ledger.bibliography():
+        key = canonical_source_key(source.url)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(source)
+    return out
 
 
 def render_reference(source: evidence.SourceDocument) -> str:
@@ -1562,7 +1688,11 @@ def render_reference(source: evidence.SourceDocument) -> str:
     Every field is optional and falls back field by field, down to the bare
     URL when `metadata.fetch_record` found nothing at all. #470
     """
-    title = source.title.strip() or ""
+    # A fetched title can be a page slug: "4 A Collection Of…". Drop a
+    # leading count and a trailing ellipsis; the rest is the title.
+    title = re.sub(r"^\d+\s+", "", source.title.strip() or "").rstrip("…. ").rstrip()
+    if title.endswith("..."):
+        title = title[:-3].rstrip()
     authors = [str(a).strip() for a in (source.authors or []) if str(a).strip()]
     year = str(source.year or "").strip()
     venue = str(source.venue or "").strip()
@@ -1611,9 +1741,13 @@ def front_matter_block(
     cited = len(ledger.bibliography())
     checked = sum(1 for claim in ledger.claims.values() if claim.cross_checked)
     conflicts = conflicts if conflicts is not None else (os.environ.get("CONFLICTS") or DEFAULT_CONFLICTS)
+    # The byline is the human author when `AUTHOR` is set; the generator
+    # takes its credit in one Methods sentence. Unset, the old byline stands.
+    author = (os.environ.get("AUTHOR") or "").strip()
+    byline = f"Prepared by: {author}." if author else f"Prepared by: {HARNESS_NAME} ({models})."
     return "\n\n".join(
         [
-            f"Prepared by: {HARNESS_NAME} ({models}).",
+            byline,
             f"Date: {prepared_at}.",
             f"Generated by an automated research loop. Sources: {retrieved} retrieved, "
             f"{cited} cited. Verification: {checked} claims cross-checked. See Methods.",
@@ -1824,6 +1958,7 @@ def assemble(
     # note that says so lives in Methods' own body, `Paper.stage_assemble`.
     table_block = study_table(ledger, index, written)
     by_name = {figure.name: figure for figure in figures}
+    captions = figure_captions(plan)
     used_figures: set[str] = set()
     charts = [item for item in (charts or []) if item.get("path")]
     glossary: dict[str, str] = {}
@@ -1896,7 +2031,7 @@ def assemble(
             figure = by_name.get(name)
             if figure is not None and name not in used_figures:
                 figure_number += 1
-                parts.append(figure_block(figure, figure_number))
+                parts.append(figure_block(figure, figure_number, caption=captions.get(name, "")))
                 parts.append("")
                 used_figures.add(name)
         # #386, #464. A skip is not silence: it is named, with its reason,
@@ -1931,6 +2066,7 @@ def assemble(
             for term, definition in glossary.items()
             if paper_check._term_used(term, prose_so_far) or paper_check._term_used(term, definition)
         }
+    glossary = dedupe_glossary(glossary)
     if glossary:
         parts.append("## Glossary")
         parts.append("")

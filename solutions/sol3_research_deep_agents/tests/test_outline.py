@@ -62,10 +62,24 @@ def test_a_next_step_heading_passes():
     assert outlines.validate(drafted, require_next_step=True) == []
 
 
-def test_a_bare_conclusion_heading_is_named_as_such():
+def test_a_conclusion_alone_still_needs_a_next_step_section():
+    """Conclusion now closes the paper, so a bare Conclusion is not the
+    defect. The missing next-step section is."""
     drafted = sample_outline(sections=[sample_section(heading="Conclusion")])
     errors = outlines.validate(drafted, require_next_step=True)
-    assert any("bare Conclusion" in item for item in errors), errors
+    assert any("next step" in item.lower() for item in errors), errors
+
+
+def test_a_next_step_section_after_limitations_is_rejected():
+    drafted = sample_outline(
+        sections=[sample_section("s1", heading="Limitations", word_target=200), sample_section("s2", heading="Evaluate it on a ticket", word_target=200)]
+    )
+    errors = outlines.validate(drafted, require_next_step=True)
+    assert any("after Limitations" in item for item in errors), errors
+    ordered = sample_outline(
+        sections=[sample_section("s1", heading="Evaluate it on a ticket", word_target=200), sample_section("s2", heading="Limitations", word_target=200)]
+    )
+    assert outlines.validate(ordered, require_next_step=True) == []
 
 
 def test_require_next_step_is_off_by_default():
@@ -717,3 +731,8 @@ def test_the_judge_prompt_names_the_empty_pack_only_when_it_is_empty(run_dir, tm
     thick_run.stage_corpus("")
     thick_run.stage_plan("")
     assert "corpus_fit passes by definition" not in thick_runner.judge_prompts[0]
+
+
+def test_replace_opens_a_next_step_heading():
+    assert outlines.starts_with_next_step_verb("Replace the Python Gates in This Order")
+    assert not outlines.starts_with_next_step_verb("The Gates to Replace")
